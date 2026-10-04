@@ -16,10 +16,10 @@ import { RLS } from '@objectstack/spec/security';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 /**
- * [#16608] What the ENGINE does inside the middleware's `next()` — the part of
+ * [commit a016f08b8] What the ENGINE does inside the middleware's `next()` — the part of
  * `ObjectQL.insert` the doubles in this file stand in for.
  *
- * Since #16608 the insert-side RLS `check` is not evaluated in the middleware:
+ * Since commit a016f08b8 the insert-side RLS `check` is not evaluated in the middleware:
  * it is INSTALLED on the operation context and run by the engine once the
  * `beforeInsert` chain has produced the row that will be stored. A double whose
  * executor is a bare `async () => {}` therefore models an engine that carries a
@@ -146,7 +146,7 @@ describe('SecurityPlugin', () => {
   // The predicate itself is pinned exhaustively next to its producer
   // (bootstrap-platform-admin-walled-owner.test.ts); THIS pin is that the
   // middleware actually consults it. [#11974 / #11663 L4] The trigger set is
-  // NARROWED: the #11343 update arm (email_verified / email) retired with the
+  // NARROWED: commit c0714eb5d's update arm (email_verified / email) retired with the
   // walled elevation it existed to re-attempt — under `single` (this suite's
   // posture) only a sys_user insert/create can change the promotion answer.
   // -------------------------------------------------------------------------
@@ -2183,8 +2183,8 @@ describe('SecurityPlugin', () => {
     it('PASSES an admin update of a package-managed set at THIS gate (ADR-0094: the refusal is the write-through producer\'s, not this gate\'s)', async () => {
       // update/delete on a package row are not refused at this gate — the
       // ADR-0094 write-through downstream translates them into a metadata
-      // write, and that producer decides. Since ADR-0094 D5-R (#6483 /
-      // PR #6608) the answer for a CODE-DECLARED set is 403 NOT_OVERRIDABLE,
+      // write, and that producer decides. Since ADR-0094 D5-R (commit
+      // ee58392e1) the answer for a CODE-DECLARED set is 403 NOT_OVERRIDABLE,
       // so "the write-through turns it into an env overlay" is no longer why
       // this passes; it passes because the gate's job is forging provenance,
       // not overridability. The refusal is covered in
@@ -3794,6 +3794,39 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     const self = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_east_1' }, plain);
     expect(self.principal.userId).toBe('u_east_1');
+  });
+
+  // [#20515] Explaining ANOTHER user resolves that user's grants in the CALLER's
+  // organization — the one the explain right was checked in. A grant scoped to
+  // an organization applies only while that organization is the one resolved
+  // in; with no organization only global grants do, which is what enforcement
+  // answers for that user with none.
+  describe('[#20515] the explained user is resolved in the caller\'s organization', () => {
+    const scopedTarget = async () => {
+      const b = await boot();
+      b.h.tables.sys_user_permission_set.push(
+        { user_id: 'u_west_1', permission_set_id: 'ps_sub', organization_id: 'org_alpha' },
+      );
+      b.h.tables.sys_permission_set.push({ id: 'ps_sub', name: 'sub_admin' });
+      return b;
+    };
+    const hr = (tenantId?: string) => ({
+      userId: 'u_hr', positions: [], permissions: ['hr_admin'], ...(tenantId ? { tenantId } : {}),
+    });
+
+    it('caller in org_alpha: the org_alpha-scoped set is part of the explained principal', async () => {
+      const { plugin } = await scopedTarget();
+      const d = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr('org_alpha'));
+      expect(d.principal.permissionSets).toContain('sub_admin');
+    });
+
+    it('caller in another organization, or in none: it is not', async () => {
+      const { plugin } = await scopedTarget();
+      const inBeta = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr('org_beta'));
+      expect(inBeta.principal.permissionSets).not.toContain('sub_admin');
+      const orgless = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr());
+      expect(orgless.principal.permissionSets).not.toContain('sub_admin');
+    });
   });
 });
 

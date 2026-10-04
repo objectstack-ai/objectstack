@@ -15,7 +15,7 @@
  * notice is indistinguishable from a complete one, so an author who reads it
  * and sees their file is clean has read a list that stopped early. Same shape
  * as the dropped summary rows pinned in `print-metadata-stats-zero-row.test.ts`
- * (#10504, #10952): output that cannot distinguish "none" from "not shown".
+ * (commits ff5733e03, 0d4bd93e7): output that cannot distinguish "none" from "not shown".
  *
  * WHAT THESE PINS ASSERT — the pair, not the cap. A test that only checked
  * "50 entries printed" passes on the silent tree and pins nothing. So the

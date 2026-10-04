@@ -25,7 +25,7 @@ import type {
  *    on the parent; v1 enforces read visibility — strictly better than
  *    nothing, edit-parity is a tracked follow-up.) `uploaded_by` is
  *    server-stamped from the session — a client-supplied value never wins.
- *  - beforeUpdate (#10091): the caller must be the uploader OR hold edit on
+ *  - beforeUpdate (commit da891e0ef): the caller must be the uploader OR hold edit on
  *    the parent record — the delete rule, applied to the verb that could
  *    otherwise rewrite the other two gates away: an ungated update let any
  *    member re-point `parent_id` at a record they cannot see, or rewrite
@@ -124,9 +124,9 @@ function asIdList(id: unknown): Array<string | number> | null {
  * session snapshot lacks `permissions`, which sharing bypasses need.
  *
  * [#7145] Forwarded as the full envelope, which is what `ISharingService`
- * declares for every parameter this value is handed to and what the #6206
+ * declares for every parameter this value is handed to and what the full-envelope
  * ruling requires of every caller: they "MUST NOT rebuild a subset of it"
- * (#6523). The five-field projection this replaced (`userId` / `tenantId` /
+ * (commit aa4b90d9a). The five-field projection this replaced (`userId` / `tenantId` /
  * `positions` / `permissions` / `isSystem`) was doing two jobs at once, and
  * only one of them was correct — same defect, same kit, one package over from
  * `comment-access-hooks.ts` (#7141 / PR #7143), which this mirrors:
@@ -467,7 +467,7 @@ export function installAttachmentAccessHooks(
     // the mechanism was ruled onto `beforeUpdate` as well; the refusal stays
     // PER REGISTRATION. This one carries #4757's delete refusal under its
     // grandfathered `ATTACHMENT_DELETE_DENIED` envelope; the `beforeUpdate`
-    // registration above declares the update-verb refusal (#10091) under the
+    // registration above declares the update-verb refusal (commit da891e0ef) under the
     // standard catalog code — the same both-verbs pairing the derived
     // comment kit ships.
     { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },

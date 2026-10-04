@@ -170,7 +170,7 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   report: 'reports',
   email_template: 'emailTemplates',
   mapping: 'mappings',
-  // [#19143 above, #19370 here] `position` / `app` — the two collections only
+  // [#19143 above, commit a227afa41 here] `position` / `app` — the two collections only
   // `security-role-word` judges. They arrive together with that rule's
   // crossing, never ahead of it: `DEFAULT_METADATA_TYPE_REGISTRY` declares both
   // `allowRuntimeCreate: true`, so Studio's app designer, REST `/meta` and an
@@ -261,7 +261,7 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
  * here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that RESOLVES
  * REFERENCES INTO the collection actually crosses the wall, never in advance.
  *
- * [#19370] `positions` / `apps` are the measured limit of that sentence, and
+ * [commit a227afa41] `positions` / `apps` are the measured limit of that sentence, and
  * the reason it now says RESOLVES rather than reads. `security-role-word`
  * crossed the wall reading both collections, and they are still not carried:
  * the rule judges each identifier and label on its own, so the universe it
@@ -359,7 +359,7 @@ export interface RuntimeStackContext {
  * read — narrows NOTHING. The whole collection is handed over, exactly as
  * before. The fallback direction is deliberate and is the opposite of a size
  * threshold: an unknown provenance buys MORE validation input, never less, so
- * the gate never stops judging (the #9798 / #9261 / ADR-0110 D3 fail-open
+ * the gate never stops judging (the fail-open commit c7655d472 closed, #9261, ADR-0110 D3: the
  * shape this card was explicitly forbidden from re-creating).
  */
 export interface RuntimePackageScope {
@@ -724,7 +724,7 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
 
 /**
  * The collection-resident stack keys whose TOP-LEVEL index the gate rewrites
- * to a name key before findings leave it (#10064) — DERIVED, not listed (#13390).
+ * to a name key before findings leave it (commit def0d3e63) — DERIVED, not listed (#13390).
  *
  * These are the collections a written item lands INSIDE **and** that the
  * context also fills — so a finding's `objects[417]` is an offset into this
@@ -743,7 +743,7 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * clause, which is validity, not completeness, and the compiler held nothing
  * else. Omitting a member here did not fail to build, fail a test, or fail a
  * gate; it emitted findings that LOOK correct whose `path` the caller cannot
- * resolve, which is the #10064 defect re-created silently.
+ * resolve, which is the defect commit def0d3e63 fixed, re-created silently.
  *
  * [#13977] That reading of `CONTEXT_STACK_KEYS` is now history rather than
  * description: it is derived from `RuntimeStackContext` and complete by
@@ -776,8 +776,8 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * had to hand-write. Mapping the `dataset` type moved it IN, in the same one-key
  * edit and with no second spelling to remember: a dataset write's snapshot now
  * holds the tenant's other datasets beside the written one, so `datasets[3]` is
- * again an offset into an array the caller has never seen. That is the #10064
- * defect this constant exists to prevent, and the derivation caught the widening
+ * again an offset into an array the caller has never seen. That is the defect commit def0d3e63 fixed,
+ * the one this constant exists to prevent, and the derivation caught the widening
  * rather than being told about it.
  */
 const NAME_KEYED_STACK_KEYS: readonly string[] = deriveNameKeyedStackKeys(
@@ -796,7 +796,7 @@ const PATH_SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const TOP_LEVEL_INDEX = buildTopLevelIndexPattern(NAME_KEYED_STACK_KEYS);
 
 /**
- * `objects[417].sharingModel` → `objects.acme_invoice.sharingModel` (#10064).
+ * `objects[417].sharingModel` → `objects.acme_invoice.sharingModel` (commit def0d3e63).
  *
  * The maintainer-ruled wire shape for collection-resident findings: the
  * top-level collection index no caller can resolve is replaced by the entry's
@@ -830,6 +830,49 @@ export function nameKeyFindingPath(path: string, candidate: AnyRec): string {
   const name = entry && typeof entry === 'object' ? (entry as AnyRec).name : undefined;
   if (typeof name !== 'string' || !PATH_SAFE_NAME.test(name)) return path;
   return `${stackKey}.${name}${rest}`;
+}
+
+/**
+ * [#20611] The host's restored-credential positions, re-spelled from the
+ * redactor registry's item-relative dotted form (`nodes.1.config.secret`) into
+ * the finding-path form the rules emit and compare against, anchored at the
+ * written item's place in `candidate` (`flows[0].nodes[1].config.secret`).
+ *
+ * The written item is the LAST member of its collection in the candidate —
+ * {@link buildRuntimeWriteSnapshots} appends it — so that index is the anchor.
+ * Each segment is spelled `[n]` exactly where the item holds an array at that
+ * point of the walk and `.key` everywhere else: read off the item, never
+ * guessed from the segment's digits, so a record key that happens to be
+ * numeric keeps its key spelling. A path that walks off the item keeps the key
+ * spelling from there on; it names no position any rule reports, so it
+ * excuses nothing.
+ */
+function restoredCredentialStackPaths(
+  candidate: AnyRec,
+  type: string,
+  dottedPaths: readonly string[],
+): ReadonlySet<string> {
+  const stackKey = stackKeyForType(type);
+  const collection = stackKey ? candidate[stackKey] : undefined;
+  if (!stackKey || !Array.isArray(collection) || collection.length === 0) return new Set();
+  const index = collection.length - 1;
+  const item: unknown = collection[index];
+  const out = new Set<string>();
+  for (const dotted of dottedPaths) {
+    let path = `${stackKey}[${index}]`;
+    let node: unknown = item;
+    for (const segment of dotted.split('.')) {
+      if (Array.isArray(node) && /^(0|[1-9][0-9]*)$/.test(segment)) {
+        path += `[${segment}]`;
+        node = node[Number(segment)];
+      } else {
+        path += `.${segment}`;
+        node = node !== null && typeof node === 'object' ? (node as AnyRec)[segment] : undefined;
+      }
+    }
+    out.add(path);
+  }
+  return out;
 }
 
 function runRules(
@@ -894,6 +937,20 @@ export function runRuntimeAuthoringRules(args: {
    * it skip the engine's judgement and answer as they did without it.
    */
   judgeFilter?: IObjectQLEngine['judgeFilter'];
+  /**
+   * [#20611] The positions in `item` at which the host's write path restores a
+   * credential from the stored row before it persists the item — dotted and
+   * item-relative, the `@objectstack/spec/kernel` redactor registry's
+   * `redactedKeys` spelling (`nodes.1.config.secret`). The read path withholds
+   * those credentials, so a body saved back after a read arrives without them,
+   * and the host restores them only after this gate has run.
+   *
+   * Handed to the rules as `AuthoringRuleContext.restoredCredentialPaths`,
+   * translated into the candidate snapshot's finding-path spelling; see
+   * {@link restoredCredentialStackPaths}. Omitted, every position is judged on
+   * the body as sent. ⛔ Positions only: no credential value reaches this gate.
+   */
+  restoredCredentialPaths?: readonly string[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -921,11 +978,24 @@ export function runRuntimeAuthoringRules(args: {
     sduiManifest: args.sduiManifest,
     runtimeWriteType: args.type,
     judgeFilter: args.judgeFilter,
+    // [#20611] Spelled against the CANDIDATE, the one snapshot that holds the
+    // written item. The baseline pass shares the set and cannot match it: the
+    // item is not in the baseline, and every other entry sits at an index the
+    // item does not.
+    ...(args.restoredCredentialPaths !== undefined && args.restoredCredentialPaths.length > 0
+      ? {
+          restoredCredentialPaths: restoredCredentialStackPaths(
+            snapshots.candidate,
+            args.type,
+            args.restoredCredentialPaths,
+          ),
+        }
+      : {}),
   };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
   const added = runRules(rules, snapshots.candidate, ctx)
     .filter((f) => !before.has(fingerprint(f)))
-    // [#10064] The wire shape: collection-resident findings key their
+    // [commit def0d3e63] The wire shape: collection-resident findings key their
     // top-level collection entry by NAME, not by this gate's private snapshot
     // index. Rewritten only on what leaves the gate — the differential above
     // ran on the rules' raw positional paths.

@@ -907,9 +907,10 @@ describe('#18058 — install contract bound to the live door', () => {
     });
 
     it('parses a COMPLETE manifest posted BARE — the form the door reads as `body.manifest || body`', () => {
-      // The bare form's green fixture is a manifest that is complete, not a
-      // transcription of any one caller: the callers that post bare bodies post
-      // INCOMPLETE ones, and those are pinned as refused in the block below.
+      // The bare form's green fixture is a manifest that is complete. The
+      // callers that post bare bodies post complete ones too, since PR #20218
+      // gave them the `type` they lacked: the block below transcribes them,
+      // beside the incomplete bodies they used to post.
       const bare = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0', type: 'app' };
       expect(PackageInstallBodySchema.safeParse(bare).success).toBe(true);
     });
@@ -1027,87 +1028,98 @@ describe('#18058 — install contract bound to the live door', () => {
   });
 
   /**
-   * [#18058 F2] The bodies the runtime's own door drives really post — pinned
-   * as REFUSED, because that is what they are.
+   * [#18058 F2] The bodies the runtime's own door drives really post — and the
+   * bodies they USED to post, which is where the residual lived.
    *
    * These two drives were cited as the evidence for KEEPING the bare form, and
    * an earlier revision transcribed the first of them with `type: 'app'` ADDED
    * under a comment claiming it posted "exactly this" — the one key that
-   * decides the parse. The form they use is declared; the manifests they send
-   * are incomplete, so every measured bare-form sender sits in the residual.
-   * ⛔ The remedy is to SAY that, not to relax `ManifestSchema`.
+   * decides the parse. They posted no `type` then, so they were pinned here as
+   * REFUSED: the measured bare-form senders of the residual. PR #20218 made
+   * the door parse the whole body and gave both drives the `type` they lacked,
+   * in their own files, so the transcription below now carries it because the
+   * drives do. The bodies they used to post stay pinned as refused. ⛔ The
+   * remedy was never to relax `ManifestSchema`.
    */
-  describe('the measured bare-form senders are the RESIDUAL, not green fixtures', () => {
-    /** The `manifest` helper in `packages/runtime/src/package-door-namespace-conflict-code.test.ts` — no `type`. */
-    const DOOR_DRIVE_CONFLICT = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0' };
+  describe('the measured bare-form senders parse green — the residual they sat in is closed', () => {
+    /** The `manifest` helper in `packages/runtime/src/package-door-namespace-conflict-code.test.ts`. */
+    const DOOR_DRIVE_CONFLICT = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0', type: 'app' };
     /**
-     * The duplicate-id drive in `packages/runtime/src/domain-handler-registry.test.ts` — no `type`.
-     * Two of its keys were repaired, each by the PR that made the door parse that leg: PR #19326
-     * gave it the `version` it lacked (the docblock's clause 1a, CLOSED), and PR #19473 replaced its
-     * id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The old body is the REVERSED pin beside the
-     * drive, answered `400`, so ⛔ it is no residual and is not transcribed here. This is the body
-     * the drive posts: `409` first, then `201` on `?overwrite=true`.
+     * The duplicate-id drive in `packages/runtime/src/domain-handler-registry.test.ts`.
+     * Three of its keys were repaired, each by the PR that made the door parse that leg: PR #19326
+     * gave it the `version` it lacked (the docblock's clause 1a), PR #19473 replaced its id `pkg-a`,
+     * which `MANIFEST_ID_PATTERN` refuses, and PR #20218 gave it the `type` it lacked (clause 1b).
+     * The `pkg-a` body is the REVERSED pin beside the drive, answered `400`. This is the body the
+     * drive posts: `409` first, then `201` on `?overwrite=true`.
      */
-    const DOOR_DRIVE_REGISTRY = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0' };
+    const DOOR_DRIVE_REGISTRY = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0', type: 'app' };
 
-    it('the namespace-conflict drive is REFUSED — it carries no `type`', () => {
-      expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_CONFLICT).success).toBe(false);
+    /** The body each drive posted before PR #20218: the same manifest, no `type`. */
+    const untyped = ({ type: _type, ...rest }: Record<string, unknown>) => rest;
+
+    it('the namespace-conflict drive parses green — it carries `type` since PR #20218', () => {
+      expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_CONFLICT).success).toBe(true);
     });
 
-    it('the domain-handler-registry drive is REFUSED — it carries no `type`', () => {
-      expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(false);
+    it('the domain-handler-registry drive parses green — it carries `type` since PR #20218', () => {
+      expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(true);
     });
 
-    it('the missing `type` is what decides it, for BOTH drives — the registry drive\'s old id is refused on its own', () => {
-      // The control that makes the two refusals above a measurement of the
+    it('the missing `type` is what decided it, for BOTH drives — the registry drive\'s old id is refused on its own', () => {
+      // The two green parses above are the controls: these bodies differ from
+      // them by the one key, so each refusal is a measurement of the
       // MANIFEST's required keys rather than of the bare branch existing at all.
-      expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_CONFLICT, type: 'app' }).success).toBe(true);
-      const registryKeysCompleted = { ...DOOR_DRIVE_REGISTRY, type: 'app' };
-      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(true);
-      // ⭐ Until PR #19473 this half ran the other way. The drive posted `pkg-a`,
-      // which `MANIFEST_ID_PATTERN` has refused since #17534 (PR #18319), so
+      expect(PackageInstallBodySchema.safeParse(untyped(DOOR_DRIVE_CONFLICT)).success).toBe(false);
+      expect(PackageInstallBodySchema.safeParse(untyped(DOOR_DRIVE_REGISTRY)).success).toBe(false);
+      // ⭐ Until PR #19473 the registry drive posted `pkg-a`, which
+      // `MANIFEST_ID_PATTERN` has refused since #17534 (PR #18319), so
       // completing its keys was not sufficient and this case pinned the
       // refusal. PR #19473 made the door parse the id leg as well, so the door
       // answers that body `400` (the REVERSED pin beside the drive), and it
       // repaired the drive's id. ⛔ The old reading is kept, pointed at the old
-      // body: refused on the id alone (the lit control is the green parse just
-      // above, the same body with the drive's current id), so it is no part of
-      // the `201` residual.
-      expect(PackageInstallBodySchema.safeParse({ ...registryKeysCompleted, id: 'pkg-a' }).success).toBe(false);
+      // body: refused on the id alone (the lit control is the green parse
+      // above, the same body with the drive's current id).
+      expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_REGISTRY, id: 'pkg-a' }).success).toBe(false);
     });
 
-    /** Bodies the door still answers `201` to while this declaration refuses them — the live residual. */
-    const DOOR_201_RESIDUALS: ReadonlyArray<Record<string, unknown>> = [
-      DOOR_DRIVE_CONFLICT,
-      DOOR_DRIVE_REGISTRY,
+    /**
+     * Bodies the door answered `201` to while this declaration refused them — the residual, one
+     * body per class: 1b (the two drives' old bodies), 2, 4 and 3. Every one is CLOSED: since
+     * PR #20218 the door parses the whole body through this declaration and answers each `400`.
+     */
+    const CLOSED_RESIDUALS: ReadonlyArray<Record<string, unknown>> = [
+      untyped(DOOR_DRIVE_CONFLICT),
+      untyped(DOOR_DRIVE_REGISTRY),
       { ...SDK_MANIFEST, label: 'an unknown key on the bare form' },
       { ...SDK_MANIFEST, enableOnInstall: false },
       { manifest: SDK_MANIFEST, enableOnInstall: 'false' },
       { manifest: SDK_MANIFEST, overwrite: 'true' },
     ];
 
-    it('the door answers 201 to all of them anyway — so this declaration is a SUBSET of the door', () => {
+    it('the declaration refuses every one — and, since PR #20218, so does the door: no residual is left', () => {
       // Pinned as prose-with-a-parse rather than a live HTTP drive: the door
       // lives in `@objectstack/runtime`, which this package cannot import.
-      // `packages/runtime/src/domains/packages-install-enable-on-install.test.ts`
-      // and the two drive files above are where the 201s are measured.
-      for (const residual of DOOR_201_RESIDUALS) {
+      // `packages/runtime/src/domains/packages-install-body-contract.test.ts`
+      // is where the door's `400`s are measured: its §0 holds the door to this
+      // declaration, and §1–§4 drive one class each.
+      for (const residual of CLOSED_RESIDUALS) {
         expect(PackageInstallBodySchema.safeParse(residual).success).toBe(false);
       }
     });
 
-    it('✅ clause 1a is CLOSED — every body in the live residual carries a `version` the declaration accepts', () => {
+    it('✅ clause 1a is CLOSED — every closed-class body carries a `version` the declaration accepts, so each is refused for its OWN class', () => {
       // PR #19326 made the door parse `ManifestSchema.shape.version` by
       // reference: a manifest missing `version` answers `400` /
       // `VALIDATION_ERROR` there now and installs nothing. The door-side pin is
       // §1 of `packages/runtime/src/domains/packages-install-manifest-version.test.ts`,
-      // cited rather than repeated — this package cannot import the door. On
-      // that key the declaration and the door agree, so a versionless body in
-      // the list above would record a `201` the door no longer answers, which
-      // is what the registry drive's first transcription, `{ id: 'pkg-a',
-      // name: 'A' }`, did.
-      // ⛔ Clause 1b stays open: both drives above still carry no `type`.
-      for (const residual of DOOR_201_RESIDUALS) {
+      // cited rather than repeated — this package cannot import the door. The
+      // door answers that leg AHEAD of the whole-body parse, so a versionless
+      // body in the list above would measure the `version` leg rather than
+      // the class it is listed for. The registry drive's first transcription,
+      // `{ id: 'pkg-a', name: 'A' }`, was such a body.
+      // Clause 1b is closed too: the drives carry `type` now (pinned green
+      // above), and the list holds the bodies they used to post.
+      for (const residual of CLOSED_RESIDUALS) {
         const manifest = ('manifest' in residual ? residual.manifest : residual) as { version?: unknown };
         expect(ManifestSchema.shape.version.safeParse(manifest.version).success).toBe(true);
       }
@@ -1127,9 +1139,11 @@ describe('#18058 — install contract bound to the live door', () => {
       // Lit control — the id is what decided it: the same wrapped body with the
       // fixture's own conforming id parses green.
       expect(PackageInstallBodySchema.safeParse({ manifest: SDK_MANIFEST }).success).toBe(true);
-      // ⛔ NOT a claim that declaration and door are now equal: the refusals
-      // pinned above still run the other way — bodies the door answers 201 to
-      // that this declaration refuses. One spelling closed; the class remains.
+      // This direction closed first. The classes pinned above, which ran the
+      // other way (bodies the door answered `201` while this declaration
+      // refused them), closed with PR #20218, so no measured class is answered
+      // differently by the two faces any more. The door refuses this body on
+      // its trimmed-empty id (`Package id is required`).
     });
   });
 

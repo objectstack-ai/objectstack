@@ -199,7 +199,7 @@ describe('containsCJK / isCompanionMatchableTerm', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// [#10290] The primary key is never a companion source.
+// [commit 2570ab05c] The primary key is never a companion source.
 //
 // The two blocks below are a matched pair and are meant to be read together:
 // the first is the NEGATIVE control (the defect — it fails on the pre-fix

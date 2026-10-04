@@ -210,9 +210,11 @@ export function isBindableComparand(value: unknown): boolean {
  * type face now answers first, in its own sentence and at its own path, with
  * the same verdict and envelope. #6386's gate stays as `fieldLeaves`'
  * invariant and still answers the two positions the face steps around: an
- * `undefined` inside an ARRAY comparand (`{d: {$contains: ['a', undefined]}}`)
- * and the comparand of an operator outside the vocabulary (`{d: {$wat:
- * undefined}}`). Either way, nothing reaches this predicate holding one.
+ * `undefined` inside an ARRAY comparand and the comparand of an operator
+ * outside the vocabulary (`{d: {$wat: undefined}}`). [#21448] The array arm is
+ * reached under an operator outside the vocabulary alone (`{d: {$wat: ['a',
+ * undefined]}}`): a list at a declared scalar operator is the shared
+ * comparand-SHAPE face's refusal first. Either way, nothing reaches this predicate holding one.
  *
  * So `comparand()`'s normalise-to-`null` is itself a deliberately-kept dead arm
  * (its own TSDoc says so, and says reopening it is #5526's call, not a
@@ -530,7 +532,8 @@ export function shapePreview(value: unknown): string {
  *
  * [#20035] On the `where` door this sentence now answers only what the shared
  * comparand-TYPE face steps around — an ARRAY comparand and a `{ $field }`
- * reference. A plain object, a `Map`, a binary or a class instance is refused
+ * reference. [#21448] And of those only the reference: an ARRAY there is a list
+ * at a scalar operator, which the shared comparand-SHAPE face refuses first. A plain object, a `Map`, a binary or a class instance is refused
  * there first by that face, in its own sentence. The read-scope lowering still
  * says this sentence for every object, because its own gates run before the
  * face (#20018).
@@ -598,13 +601,14 @@ export function fieldReferenceComparandMessage(
     `with nothing to read. ⚠️ This is NOT the platform declining the rule. @objectstack/spec ` +
     `declares this shape (FieldReferenceSchema), @objectstack/formula resolves it per record in ` +
     `memory, driver-sql / driver-sqlite-wasm compile it to a same-table column comparison for the ` +
-    `six scalar operators since #5222, and since the 2026-08-12 ruling on #7598 the analytics ` +
-    `native-SQL strategy DECLINES such a query so it routes to the ObjectQL engine path and runs ` +
-    `there — the driver enforcing declared-only enumeration, the tenant-isolation ban and the ` +
-    `comparison class with metadata it owns. What refuses here is this SQL lowering, whose only ` +
-    `remaining caller is the /analytics/sql display echo; it has no faithful rendering of the ` +
-    `predicate the engine path actually runs, and half-rendering one would describe a query that ` +
-    `returns different rows. Run the query itself (/analytics/query) to get its rows (#7598).`
+    `six scalar operators, and the analytics native-SQL strategy DECLINES such a query so it ` +
+    `routes to the ObjectQL engine path and runs there — the driver enforcing declared-only ` +
+    `enumeration, the tenant-isolation ban and the comparison class with metadata it owns, so ` +
+    `those rules are enforced in one place, next to the metadata they read. What refuses here is ` +
+    `this SQL lowering, whose only remaining caller is the /analytics/sql display echo; it has no ` +
+    `faithful rendering of the predicate the engine path actually runs, and half-rendering one ` +
+    `would describe a query that returns different rows. Run the query itself (/analytics/query) ` +
+    `to get its rows.`
   );
 }
 
@@ -645,17 +649,19 @@ export function fieldReferenceBetweenBoundMessage(
   return (
     `"${op}" on "${field}" has the field reference { "$field": "${ref}" } at index ${index} of its ` +
     `[min, max] bounds. A range BOUND may not be a field reference on any backend: driver-sql and ` +
-    `driver-sqlite-wasm refuse both endpoints (#5222), @objectstack/formula does not resolve a ` +
+    `driver-sqlite-wasm refuse both endpoints, @objectstack/formula does not resolve a ` +
     `reference inside a list either — it orders the bounds against the raw reference object, which ` +
     `no value compares meaningfully to — and @objectstack/spec no longer declares the position at ` +
-    `all (#7596 removed FieldReferenceSchema from the $between endpoint union, ADR-0049 declared = ` +
-    `enforced). Refusing rather than lowering it: this compiler splits $between into its two ` +
+    `all (FieldReferenceSchema was removed from the $between endpoint union rather than implemented ` +
+    `there, since nothing asked for it, ADR-0049 declared = enforced). Refusing rather than ` +
+    `lowering it: this compiler splits $between into its two ` +
     `bounds, so the reference would arrive at the driver under a "$gte" / "$lte" the author never ` +
     `wrote — a position the SQL drivers DO compile — and the range would quietly succeed here ` +
     `while the identical filter is refused everywhere else. Use a literal bound, or spell the ` +
     `comparison you meant as a scalar one ({ "${field}": { "$gte": { "$field": "${ref}" } } }), ` +
-    `which IS served — on the ObjectQL engine path, where the driver enforces the #5222 rulings ` +
-    `(#7598).`
+    `which IS served — on the ObjectQL engine path, where the driver enforces the cross-field ` +
+    `rules (declared same-table columns only, never the tenant-isolation column, one comparison ` +
+    `class).`
   );
 }
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14744] The flow-facing `record` / `previous` roots share no mutable object
+ * [commit 4f85e4d11] The flow-facing `record` / `previous` roots share no mutable object
  * with the engine's own state.
  *
  * `before-update-flow-payload-reach.test.ts` is the END-TO-END pin: it boots a

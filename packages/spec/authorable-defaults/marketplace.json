@@ -12,7 +12,7 @@
     "marketplace/MarketplaceSearchRequest:sortDirection = \"desc\"",
     "marketplace/Package:isStarter = false",
     "marketplace/Package:publisher = \"private\"",
-    "marketplace/Package:visibility = \"private\"",
+    "marketplace/Package:visibility = \"org\"",
     "marketplace/PackageDependency:optional = false",
     "marketplace/PackageManifest:dependencies = []",
     "marketplace/PackageManifest:metadataTypes = []",

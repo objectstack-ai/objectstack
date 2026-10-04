@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Seam 3 — the per-call tenant-scope refusal (#16589).
+ * Seam 3 — the per-call tenant-scope refusal (commit 555a89cbd).
  *
  * The defect: the engine scopes an object unless it opts OUT
  * (`buildDriverOptions`), while the boot guard refuses only an explicit opt-IN
@@ -26,7 +26,7 @@
  * | the correct subset for ORG_A               |    2 | row-level isolation — the   |
  * |                                            |      | direction the ruling REFUSED|
  * | the union ORG_A + ORG_B                    |    5 | a widened `tenantIds` scope |
- * | everything                                 |   12 | the #16589 defect           |
+ * | everything                                 |   12 | what commit 555a89cbd fixed |
  *
  * (2, 3, 7, 5, 10, 9 and 12 are pairwise distinct, so no two of those readings
  * can be confused for each other.)
@@ -136,7 +136,7 @@ describe('per-call tenant-scope refusal (#16589)', () => {
   describe('BEFORE — the defect is still reproducible on the unscoped path', () => {
     it('an UNSCOPED read returns every organization, which is what a scoped read used to answer', async () => {
       const driver = await seedDriver();
-      // This is the #16589 answer, preserved deliberately: the driver has no
+      // This is the defect's answer (fixed in commit 555a89cbd), preserved deliberately: the driver has no
       // isolation, so with no scope handed to it, it returns the whole table
       // including the other two organizations' rows. Before this card, a SCOPED
       // read returned exactly this — identical rows, identical count — because
@@ -190,11 +190,11 @@ describe('per-call tenant-scope refusal (#16589)', () => {
         expect(message).toContain(SCOPED_OBJECT);
         expect(message).toContain(ORG_A);
         // The remedy must name the isolating driver and the ADR-0066 opt-out,
-        // and must reach the tracking card — a refusal that does not say what to
-        // do next is the "loud" half without the "locatable" half.
+        // and the message must state the decision in words — a refusal that
+        // does not say what to do next is the "loud" half without the rest.
         expect(message).toContain('@objectstack/driver-sql');
         expect(message).toContain('tenancy: { enabled: false }');
-        expect(message).toContain('16589');
+        expect(message).toContain('Rather than answer it unisolated, the driver refuses it.');
       }
     });
 

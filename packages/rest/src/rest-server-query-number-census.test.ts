@@ -173,13 +173,6 @@ const LEDGER: readonly LedgerRow[] = [
             + 'mapped to the ImportJobProgress DTO — no request value reaches it.',
     })),
     {
-        site: 'GET ${basePath}/forms/:slug/lookup/:field » Number(picker.maxResults)',
-        disposition: 'not-a-query-value',
-        reason: '`picker` is `fieldCfg.publicPicker`, the STORED form metadata\'s picker config — '
-            + 'the author\'s declared result cap, not anything on the request. (The request\'s own '
-            + '`?q=` is read as a string two lines below.)',
-    },
-    {
         site: 'POST ${metaPath}/:type/:name/rollback » Number(toVersionRaw)',
         disposition: 'exempt',
         reason: 'Read body-first (`body.toVersion ?? body.version ?? req.query.toVersion`) and then '

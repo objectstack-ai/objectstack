@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #13273 — a `find` that failed because the table was never created is not the
+ * Commit 3a86a65e7 — a `find` that failed because the table was never created is not the
  * same fact as a `find` that FAILED, and the two must not share a log level.
  *
  * ## What was measured, and where
@@ -82,8 +82,8 @@ function envelope(cause: unknown): Error {
   const err = new Error(
     `The database refused to run this query for object '${OBJECT}'. The driver could not ` +
       'attribute the failure to any part of the request, so no verdict about the query is ' +
-      "claimed here. The backend's own diagnostic and the compiled statement were written " +
-      'to the server log for an operator to read.',
+      "claimed here. The backend's own diagnostic was written to the server log for an " +
+      'operator to read, with the compiled statement and its bound values cut.',
   ) as Error & { code?: string; status?: number };
   err.code = 'DATABASE_ERROR';
   Object.defineProperty(err, 'cause', {

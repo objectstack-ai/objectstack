@@ -305,15 +305,15 @@ describe('#5503 — autonumber is runtime-owned: bulk-create surfaces', () => {
     expect((res.droppedFields ?? []).flatMap((e: DroppedFieldsEvent) => e.fields)).toContain('account_number');
   });
 
-  it('insertManyData reports the union at BATCH level and names no row', async () => {
+  it('insertManyData reports the union at BATCH level, and the row that lost the value on its own outcome', async () => {
     // The import runner prefers this partial-success surface, so it is the one
-    // that has to stay honest — and honest here means naming no row: the
-    // engine's event carries no row index, and the two facts that would let a
-    // caller resolve it are both unavailable at the protocol seam. The row
-    // records below are the second one: BOTH come back carrying
-    // `account_number`, because the strip is followed by `applyAutonumbers`.
-    // So "is the key still on the row?" answers the same for the row that was
-    // stripped and the row that was not.
+    // that has to stay honest. The batch-level union names no row: the
+    // engine's event carries no row index. Nor can the row records resolve it:
+    // BOTH come back carrying `account_number`, because the strip is followed
+    // by `applyAutonumbers`, so "is the key still on the row?" answers the
+    // same for the row that was stripped and the row that was not.
+    // [#20922] Row precision comes from the ENGINE instead: the strip records
+    // what it took per row, and the row's `ok` outcome carries it.
     const rig = await makeEngine();
     const res: any = await rig.protocol.insertManyData({
       object: 'an_account',
@@ -323,7 +323,10 @@ describe('#5503 — autonumber is runtime-owned: bulk-create surfaces', () => {
       ],
     });
     expect(res.outcomes.map((o: any) => o.record.account_number)).toEqual(['ACC-0001', 'ACC-0002']);
-    for (const o of res.outcomes) expect(o).not.toHaveProperty('droppedFields');
+    expect(res.outcomes[0]).not.toHaveProperty('droppedFields');
+    expect(res.outcomes[1].droppedFields).toEqual([
+      { object: 'an_account', fields: ['account_number'], reason: 'readonly' },
+    ]);
     expect((res.droppedFields ?? []).flatMap((e: DroppedFieldsEvent) => e.fields)).toEqual(['account_number']);
   });
 });

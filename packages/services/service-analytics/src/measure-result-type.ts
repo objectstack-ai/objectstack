@@ -37,6 +37,14 @@ import { isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
  * ⛔ There is therefore no second account of which pairs are supported in this
  * package. A row changed in the spec changes this rule in the same commit.
  *
+ * [#21044] The cube door reads this rule too. `POST /analytics/query` asks the
+ * same table ahead of both strategies (`cube-measure-field-type-door.ts`, a
+ * refused pair answers `INVALID_FIELD` / 400 before anything is read), and
+ * describes a served measure column by this function at the seam every
+ * strategy's result leaves through (`withMeasureResultTypes` in
+ * `analytics-service.ts`), with the cube measure's aggregate and the declared
+ * type of the base-object column it reads. Two doors, one rule, one table.
+ *
  * ## The aggregate axis, enumerated rather than sampled
  *
  * `AggregationFunction` (`spec/data/query.zod.ts`) is a CLOSED vocabulary, so
@@ -112,8 +120,8 @@ import { isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
  * `number` it has (the accurate word for the raw SQLite value).
  *
  * ⚠️ ⛔ This is NOT a missing refusal. `AGGREGATE_FIELD_TYPE_COMPATIBILITY`
- * ACCEPTS `sum` / `avg` / `min` / `max` over `boolean` / `toggle` — #16685
- * ruled A, landed as #16750, on the authority of maintainer ruling #11152 — so
+ * ACCEPTS `sum` / `avg` / `min` / `max` over `boolean` / `toggle` — commit
+ * ed7243d52 (#16750) added those rows, on the authority of maintainer ruling #11152 — so
  * the pair is deliberately allowed and the compile leg never refuses it. This
  * is the one accepted class where the rule declines, and it declines because
  * the readings disagree, not because the pair is unsupported.
@@ -168,9 +176,11 @@ export const TEMPORAL_SOURCE_FIELD_TYPES: ReadonlySet<string> = new Set([
  *
  * Tiered "cannot answer, do not block", the same way every other chain reading
  * `sourceFieldMeta` is: an unknown field type, a host with no data engine
- * wired, and a relationship-path measure (`account.closed_at`, which
- * `sourceFieldMeta` cannot resolve because it looks a column up on the BASE
- * object) all answer `undefined` and leave the column exactly as it was.
+ * wired, and a relationship-path measure whose caller looks its column up on
+ * the BASE object (`account.closed_at`, which the dataset door's enrichment
+ * asks of the dataset's own object) all answer `undefined` and leave the
+ * column exactly as it was. [#21129] The cube door's caller locates such a
+ * column on the object its last hop reaches, so it passes the real type.
  *
  * `undefined` is also the answer for every ACCEPTED pair whose `min`/`max` has
  * no single backend-independent value (booleans) and for every pair the spec

@@ -253,26 +253,31 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       actor_id: {
-        label: "Actor"
+        label: "Actor",
+        help: "The user who took this action. Empty when no person is recorded: a system-initiated action, or a decision recorded before the deciding user was captured, which still shows the slot it was taken as."
+      },
+      acted_as: {
+        label: "Acted As",
+        help: "The pending-approver slot this action was taken as, in the slot’s stored spelling: a user id, an email, or a position address. Empty when no slot admitted the action, such as the submitter’s own actions, system actions and admin overrides."
       },
       comment: {
         label: "Comment"
       },
       via_override: {
         label: "Via Admin Override",
-        help: "True when the actor was admitted to this action only by the privileged-override path (#3424) — they held no slot in the request’s pending-approver slate."
+        help: "True when the actor held no slot in the request’s pending-approver slate and was admitted to this action only by the privileged override, which lets a platform or organization admin act on any pending request so that one nobody in its slate can decide never stays stuck."
       },
       reassign_from: {
         label: "Reassigned From",
-        help: "User whose pending-approver slot was handed over (reassign actions only)"
+        help: "The pending-approver slot that was handed over, in the slot’s stored spelling: a user id, an email, or a position address (reassign actions only)."
       },
       reassign_to: {
         label: "Reassigned To",
-        help: "User who received the pending-approver slot (reassign actions only)"
+        help: "The pending-approver address the slot was handed to, in its stored spelling: a user id, an email, or a position address (reassign actions only)."
       },
       attachments: {
         label: "Attachments",
-        help: "Files supporting this action — e.g. a signed contract or evidence (#3266)."
+        help: "Files supporting this action — e.g. a signed contract or evidence."
       },
       created_at: {
         label: "Created At"
@@ -297,7 +302,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
     fields: {
       id: {
         label: "Delegation ID"

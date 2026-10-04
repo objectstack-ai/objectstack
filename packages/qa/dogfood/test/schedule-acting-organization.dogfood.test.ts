@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#16659] A time-triggered flow declares its acting organization and the run
+// [commit ecdfc9411] A time-triggered flow declares its acting organization and the run
 // executes as it — proven end to end through the real automation + messaging +
 // ObjectQL stack, on BOTH drivers.
 //
@@ -143,7 +143,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
         // ⚠️ sqlite-wasm ONLY, and the asymmetry is measured rather than
         // assumed: `driver-memory` declares NO row-level tenant isolation and
         // REFUSES any call the engine hands a tenant scope
-        // (`MemoryMultiTenantUnsupportedError`, #16589 / #6915). An org-bound
+        // (`MemoryMultiTenantUnsupportedError`, commit 555a89cbd / #6915). An org-bound
         // session makes the authorization resolver's own `sys_position` read
         // tenant-scoped, so on that driver every HTTP request from such a
         // session 503s before reaching any route. The HTTP control is therefore
@@ -532,7 +532,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
      *    third id, and `orgA`'s absence is the witness. On `driver-memory` no
      *    session can be org-bound — the driver declares no row-level tenant
      *    isolation and refuses any tenant-scoped call
-     *    (`MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589 / #6915), so the
+     *    (`MEMORY_MULTI_TENANT_UNSUPPORTED`, commit 555a89cbd / #6915), so the
      *    authorization resolver's own `sys_position` read is refused and the
      *    door answers 503 before any route runs. This suite therefore boots
      *    memory with `orgContext: false`, which leaves the HTTP caller carrying

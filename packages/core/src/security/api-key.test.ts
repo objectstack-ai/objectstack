@@ -16,7 +16,7 @@ import {
 /**
  * In-memory sys_api_key store exposing the `find` shape the verifier uses.
  *
- * [#10978] `limit` is ENFORCED — presence, not truthiness, so `limit: 0` returns
+ * [commit 4c9780c7a] `limit` is ENFORCED — presence, not truthiness, so `limit: 0` returns
  * nothing rather than everything. A double that drops the bound makes any limit
  * change on this read green by construction; the verifier reads with `limit: 1`.
  */

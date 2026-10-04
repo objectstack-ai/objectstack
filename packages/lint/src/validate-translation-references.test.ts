@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 // The contract the object branch's coverage is pinned against (#13835) — see
 // the coverage describe block at the foot of this file. `@objectstack/spec` is
 // already a runtime dependency of this package, so the pin adds no edge.
-import { ObjectTranslationDataSchema } from '@objectstack/spec/system';
+import { ObjectTranslationDataSchema, TranslationDataSchema } from '@objectstack/spec/system';
 // The schema the #18441 fold is SIZED against — see the surface pin in that
 // block. Same package, already a runtime dependency, so no new edge either.
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
@@ -2160,9 +2160,9 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
   // nothing here, drops the record, and reports every view key the app ships —
   // ~40 correct keys on the real corpus.
   //
-  // The default list carries a `label` (#6038): without one it is
-  // signature-identical to `listViews.my_leads` (`{type,label,columns}` all
-  // equal), the composer collapses the two, and `all_leads` is not a runtime
+  // The default list carries a `label` (#6038): without one it restates
+  // `listViews.my_leads` key for key (each view's own `name` aside), the
+  // composer collapses the two, and `all_leads` is not a runtime
   // view name at all — so the fixture would be asserting that a key nothing
   // resolves is legal. The label makes it the distinct default list this test
   // says it is. The collapse itself is pinned separately below.
@@ -2304,9 +2304,9 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
     });
 
     it('a default list collapsed into a `listViews` entry contributes that entry\'s key, not its own `name`', () => {
-      // Composer fact 2 — the `examples/app-crm` shape: `list` is
-      // signature-identical to `listViews.all` (`{type,label,columns}` equal),
-      // so the two are ONE registry entry named `all`. `list.name` resolves to
+      // Composer fact 2 — the `examples/app-crm` shape: `list` restates
+      // `listViews.all` key for key (its own `name` is identity, not body), so
+      // the two are ONE registry entry named `all`. `list.name` resolves to
       // nothing and must not be a legal bundle key.
       const collapsed = {
         objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
@@ -3071,5 +3071,419 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
       }),
     );
     expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * #21216 — every KEYED child of an action's translation entry, judged against
+ * the declaration `translateAction` reads it through, at both addresses
+ * (`objects.<obj>._actions.<name>` and `globalActions.<name>`).
+ *
+ * `params.<name>` was the only one judged; `outcomeMessages.<outcome>` (#21095)
+ * and `resultDialog.fields.<path>` joined the shape with no leg following, so a
+ * key the action does not declare parsed, linted clean and was read by nothing.
+ * The dialog's prose leaves followed in #21264: under an action with no
+ * `resultDialog` they are read by nothing either.
+ */
+describe('validateTranslationReferences — keyed children of an action entry (#21216)', () => {
+  /**
+   * Spec-legal actions, one per keyed group, bound and object-less. Kept apart
+   * because `outcomeMessages` is refused beside `resultDialog`.
+   */
+  const actionStack = (bundle: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_env', label: 'Env', fields: { name: { type: 'text', label: 'Name' } } }],
+    actions: [
+      {
+        name: 'archive_env',
+        label: 'Archive',
+        objectName: 'crm_env',
+        type: 'script',
+        target: 'archiveEnv',
+        outcomeMessages: { archived: 'Archived.', already_archived: 'Already archived.' },
+        params: [
+          {
+            name: 'mode',
+            label: 'Mode',
+            type: 'select',
+            options: [
+              { value: 'soft', label: 'Soft' },
+              { value: 'hard', label: 'Hard delete' },
+            ],
+          },
+          { field: 'name' },
+          { name: 'reason', label: 'Reason', type: 'text' },
+        ],
+      },
+      {
+        name: 'rotate_secret',
+        label: 'Rotate',
+        objectName: 'crm_env',
+        type: 'api',
+        target: '/api/v1/rotate',
+        resultDialog: { title: 'Secret', fields: [{ path: 'client.secret', label: 'Secret' }, { path: 'token' }] },
+      },
+      { name: 'plain_env', label: 'Plain', objectName: 'crm_env', type: 'script', target: 'plainEnv' },
+      {
+        name: 'check_updates',
+        label: 'Check',
+        type: 'api',
+        target: '/api/v1/updates',
+        outcomeMessages: { up_to_date: 'Up to date.' },
+      },
+      {
+        name: 'mint_token',
+        label: 'Mint',
+        type: 'api',
+        target: '/api/v1/mint',
+        resultDialog: { fields: [{ path: 'token' }] },
+      },
+    ],
+    translations: [{ 'zh-CN': bundle }],
+  });
+  const onEnv = (actions: Record<string, unknown>) => ({ objects: { crm_env: { _actions: actions } } });
+  const ENV = 'translations[0]["zh-CN"].objects.crm_env._actions';
+  const GLOBAL = 'translations[0]["zh-CN"].globalActions';
+
+  describe('outcomeMessages.<outcome>', () => {
+    it('refuses an outcome `_actions.<name>` does not declare, at the code and level `params` uses', () => {
+      const findings = validateTranslationReferences(
+        actionStack(onEnv({ archive_env: { outcomeMessages: { archived: '已归档。', restored: '已恢复。' } } })),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.archive_env.outcomeMessages.restored`],
+      ]);
+    });
+
+    it('refuses an outcome `globalActions.<name>` does not declare', () => {
+      const findings = validateTranslationReferences(
+        actionStack({ globalActions: { check_updates: { outcomeMessages: { up_to_date: '已是最新。', stale: '已过期。' } } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.check_updates.outcomeMessages.stale`],
+      ]);
+    });
+
+    it('accepts every outcome the action declares, at both addresses (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({ archive_env: { outcomeMessages: { archived: '已归档。', already_archived: '早已归档。' } } }),
+            globalActions: { check_updates: { outcomeMessages: { up_to_date: '已是最新。' } } },
+          }),
+        ),
+      ).toEqual([]);
+    });
+
+    it('refuses every outcome on an action that declares no `outcomeMessages` — nothing reads the map', () => {
+      const findings = validateTranslationReferences(
+        actionStack(onEnv({ plain_env: { outcomeMessages: { archived: '已归档。' } } })),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.outcomeMessages.archived`],
+      ]);
+    });
+  });
+
+  describe('resultDialog.fields.<path>', () => {
+    it('refuses a result field `_actions.<name>` does not declare, quoting a dotted path as ONE key', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            rotate_secret: {
+              resultDialog: { title: '密钥', fields: { 'client.secret': '密钥', token: '令牌', 'client.ghost': '幽灵' } },
+            },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.fields["client.ghost"]`],
+      ]);
+    });
+
+    it('refuses a result field `globalActions.<name>` does not declare', () => {
+      const findings = validateTranslationReferences(
+        actionStack({ globalActions: { mint_token: { resultDialog: { fields: { token: '令牌', ghost_token: '幽灵' } } } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.mint_token.resultDialog.fields.ghost_token`],
+      ]);
+    });
+
+    it('accepts every declared path, at both addresses (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({ rotate_secret: { resultDialog: { fields: { 'client.secret': '密钥', token: '令牌' } } } }),
+            globalActions: { mint_token: { resultDialog: { title: '令牌', fields: { token: '令牌' } } } },
+          }),
+        ),
+      ).toEqual([]);
+    });
+
+    it('refuses a result field on an action that declares no `resultDialog`', () => {
+      const findings = validateTranslationReferences(
+        actionStack(onEnv({ plain_env: { resultDialog: { fields: { token: '令牌' } } } })),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.fields.token`],
+      ]);
+    });
+  });
+
+  /**
+   * #21264 — the dialog's prose leaves. `resolveActionResultDialog` returns
+   * before any lookup when the action declares no `resultDialog`, so these are
+   * judged on that one fact; under a declared dialog every leaf is read, even
+   * one the dialog does not author itself (`mint_token` declares no `title`).
+   */
+  describe('resultDialog.title / .description / .acknowledge', () => {
+    it('refuses each leaf under `_actions.<name>` when the action declares no `resultDialog`, at the code and level `params` uses', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            plain_env: {
+              label: '普通',
+              resultDialog: { title: '无对话框', description: '无说明', acknowledge: '知道了', fields: { token: '令牌' } },
+            },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.title`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.description`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.acknowledge`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.fields.token`],
+      ]);
+    });
+
+    it('refuses a leaf under `globalActions.<name>` when the object-less action declares no `resultDialog`', () => {
+      const findings = validateTranslationReferences(
+        actionStack({ globalActions: { check_updates: { resultDialog: { acknowledge: '好的' } } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.check_updates.resultDialog.acknowledge`],
+      ]);
+    });
+
+    it('accepts every leaf under a declared dialog at both addresses, one the dialog does not author included (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({ rotate_secret: { resultDialog: { title: '密钥', description: '请保存', acknowledge: '已保存' } } }),
+            globalActions: { mint_token: { resultDialog: { title: '令牌', description: '请保存', acknowledge: '已保存' } } },
+          }),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('params.<name>.options.<value>', () => {
+    it('warns on an option key a declared param does not declare, as the field `options` leg does', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            archive_env: { params: { mode: { options: { soft: '软', hard: '硬', 'Hard delete': '彻底删除', purge: '清除' } } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_OPTION_KEY_UNKNOWN, 'warning', `${ENV}.archive_env.params.mode.options.Hard delete`],
+        [TRANSLATION_OPTION_KEY_UNKNOWN, 'warning', `${ENV}.archive_env.params.mode.options.purge`],
+      ]);
+    });
+
+    it('warns once on an options map under a param that declares no options and references no field', () => {
+      const findings = validateTranslationReferences(
+        actionStack(onEnv({ archive_env: { params: { reason: { label: '原因', options: { a: 'A' } } } } })),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_OPTION_KEY_UNKNOWN, 'warning', `${ENV}.archive_env.params.reason.options`],
+      ]);
+    });
+
+    it('leaves a FIELD-BACKED param with no inline options unjudged — its list is inherited at render time', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack(onEnv({ archive_env: { params: { name: { label: '名称', options: { anything: '任意' } } } } })),
+        ),
+      ).toEqual([]);
+    });
+
+    it('judges an undeclared param once, as the param — never its option keys as well', () => {
+      const findings = validateTranslationReferences(
+        actionStack(onEnv({ archive_env: { params: { ghost: { options: { soft: '软' } } } } })),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.archive_env.params.ghost`],
+      ]);
+    });
+  });
+
+  /**
+   * The action-entry twin of the #13835 object-branch pin above: every key the
+   * action translation shape declares — down into `params.<name>.*` and
+   * `resultDialog.*` — classified, and every `reference-checked` claim backed
+   * by a ghost that must report at BOTH addresses. A keyed group that joins the
+   * shape with no leg now fails here, which is how `outcomeMessages` went
+   * unjudged.
+   */
+  describe('coverage vs the action translation shape', () => {
+    type ShapeNode = {
+      _zod: { def: { type: string; innerType?: ShapeNode; valueType?: ShapeNode } };
+      shape?: Record<string, ShapeNode>;
+    };
+    /** Unwrap optional / record wrappers down to the object shape they hold. */
+    const objectShapeOf = (schema: unknown): Record<string, ShapeNode> => {
+      let node = schema as ShapeNode;
+      while (!node.shape) {
+        const def = node._zod.def;
+        const next = def.type === 'record' ? def.valueType : def.innerType;
+        if (!next) throw new Error(`no object shape under a "${def.type}" node`);
+        node = next;
+      }
+      return node.shape;
+    };
+    const entryKeys = (address: unknown): string[] => {
+      const entry = objectShapeOf(address);
+      return [
+        ...Object.keys(entry),
+        ...Object.keys(objectShapeOf(entry.params)).map((k) => `params.*.${k}`),
+        ...Object.keys(objectShapeOf(entry.resultDialog)).map((k) => `resultDialog.${k}`),
+      ].sort();
+    };
+
+    type Address = 'bound' | 'global';
+    type Host = 'outcome' | 'dialog' | 'noDialog';
+    /**
+     * Which declared action a ghost is written under, per address. `noDialog`
+     * names an action that declares no `resultDialog`: the dialog's leaves
+     * reference the declaration of the dialog itself (#21264).
+     */
+    const HOST: Record<Host, Record<Address, string>> = {
+      outcome: { bound: 'archive_env', global: 'check_updates' },
+      dialog: { bound: 'rotate_secret', global: 'mint_token' },
+      noDialog: { bound: 'plain_env', global: 'check_updates' },
+    };
+    type Coverage =
+      | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
+      | { kind: 'leaf-copy' | 'container'; why: string };
+
+    const COVERAGE: Record<string, Coverage> = {
+      label: { kind: 'leaf-copy', why: 'prose' },
+      description: { kind: 'leaf-copy', why: 'prose' },
+      confirmText: { kind: 'leaf-copy', why: 'prose' },
+      successMessage: { kind: 'leaf-copy', why: 'prose' },
+      outcomeMessages: {
+        kind: 'reference-checked',
+        host: 'outcome',
+        ghost: { outcomeMessages: { ghost_outcome: 'x' } },
+        suffix: '.outcomeMessages.ghost_outcome',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      params: {
+        kind: 'reference-checked',
+        host: 'outcome',
+        ghost: { params: { ghost_param: { label: 'x' } } },
+        suffix: '.params.ghost_param',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'params.*.label': { kind: 'leaf-copy', why: 'prose' },
+      'params.*.helpText': { kind: 'leaf-copy', why: 'prose' },
+      'params.*.placeholder': { kind: 'leaf-copy', why: 'prose' },
+      'params.*.options': {
+        kind: 'reference-checked',
+        host: 'outcome',
+        ghost: { params: { mode: { options: { ghost_value: 'x' } } } },
+        suffix: '.params.mode.options.ghost_value',
+        rule: TRANSLATION_OPTION_KEY_UNKNOWN,
+      },
+      resultDialog: {
+        kind: 'container',
+        why: 'a fixed-key node; its leaves and its keyed child `resultDialog.fields` are each judged below',
+      },
+      'resultDialog.title': {
+        kind: 'reference-checked',
+        host: 'noDialog',
+        ghost: { resultDialog: { title: 'x' } },
+        suffix: '.resultDialog.title',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'resultDialog.description': {
+        kind: 'reference-checked',
+        host: 'noDialog',
+        ghost: { resultDialog: { description: 'x' } },
+        suffix: '.resultDialog.description',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'resultDialog.acknowledge': {
+        kind: 'reference-checked',
+        host: 'noDialog',
+        ghost: { resultDialog: { acknowledge: 'x' } },
+        suffix: '.resultDialog.acknowledge',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'resultDialog.fields': {
+        kind: 'reference-checked',
+        host: 'dialog',
+        ghost: { resultDialog: { fields: { ghost_path: 'x' } } },
+        suffix: '.resultDialog.fields.ghost_path',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+    };
+
+    // The global action needs a param with inline options for the options ghost.
+    const coverageStack = (bundle: Record<string, unknown>) => {
+      const stack = actionStack(bundle);
+      const check = stack.actions.find((a) => a.name === 'check_updates') as Record<string, unknown>;
+      check.params = [{ name: 'mode', label: 'Mode', type: 'select', options: [{ value: 'soft', label: 'Soft' }] }];
+      return stack;
+    };
+    const bundleAt = (address: Address, actionName: string, node: Record<string, unknown>) =>
+      address === 'bound' ? onEnv({ [actionName]: node }) : { globalActions: { [actionName]: node } };
+
+    it('classifies every key the action translation shape declares, at both addresses', () => {
+      const bound = entryKeys((ObjectTranslationDataSchema as unknown as { shape: Record<string, unknown> }).shape._actions);
+      const global = entryKeys((TranslationDataSchema as unknown as { shape: Record<string, unknown> }).shape.globalActions);
+      expect(global).toEqual(bound);
+      expect(Object.keys(COVERAGE).sort()).toEqual(bound);
+    });
+
+    it('backs every `reference-checked` claim with a leg that reports at both addresses', () => {
+      for (const [key, coverage] of Object.entries(COVERAGE)) {
+        if (coverage.kind !== 'reference-checked') continue;
+        for (const address of ['bound', 'global'] as const) {
+          const actionName = HOST[coverage.host][address];
+          const findings = validateTranslationReferences(
+            coverageStack(bundleAt(address, actionName, coverage.ghost)),
+          );
+          const prefix = address === 'bound' ? `${ENV}.${actionName}` : `${GLOBAL}.${actionName}`;
+          expect(findings.map((f) => f.path), `"${key}" has no working leg at the ${address} address`).toEqual([
+            `${prefix}${coverage.suffix}`,
+          ]);
+          expect(findings[0].rule).toBe(coverage.rule);
+        }
+      }
+    });
+
+    it('accepts the real instance of every keyed group at both addresses at once', () => {
+      const real = (address: Address): Record<string, unknown> => {
+        const outcome = HOST.outcome[address];
+        const dialog = HOST.dialog[address];
+        return {
+          [outcome]: {
+            label: 'x',
+            description: 'x',
+            confirmText: 'x',
+            successMessage: 'x',
+            outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
+            params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
+          },
+          [dialog]: { resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' } } },
+        };
+      };
+      expect(
+        validateTranslationReferences(coverageStack({ ...onEnv(real('bound')), globalActions: real('global') })),
+      ).toEqual([]);
+    });
   });
 });

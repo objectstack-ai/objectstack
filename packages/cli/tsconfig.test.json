@@ -1,4 +1,4 @@
-// The TEST-layer type-check program (#14710), adopting the mechanism #5286 set
+// The TEST-layer type-check program (commit 95fdf627b), adopting the mechanism #5286 set
 // for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
 // stays exactly as it is: it is the BUILD config, and its `include: ["src"]` is
 // correct for a build — `tsconfig.build.json` ships `src` and nothing else.
@@ -133,9 +133,10 @@
     // each package's `exports` map to `dist/index.d.ts` — A BUILD ARTIFACT — so
     // this suite's type verdict about the readers the reader program is about to
     // CHANGE would be a verdict about the last `pnpm build` instead, which is
-    // exactly what `check:type-source-resolution` refuses. That gate's registry
-    // is shrink-only and widening it is not the fix; `paths` is, for a dep
-    // exposed through an EXISTING program, which `tsconfig.test.json` is.
+    // exactly what `check:type-source-resolution` refused until it was retired
+    // on 2026-09-18 (#18373). That gate's registry was shrink-only and widening
+    // it was not the fix; `paths` was, for a dep exposed through an EXISTING
+    // program, which `tsconfig.test.json` is. No gate checks this rule now.
     //
     // ⛔ No star and no directory target. A starred rule matches by PREFIX and
     // would swallow subpath imports, resolving them THROUGH a file

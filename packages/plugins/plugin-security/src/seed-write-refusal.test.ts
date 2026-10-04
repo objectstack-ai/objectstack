@@ -603,7 +603,7 @@ describe('a pass that is not refused reports exactly what it did before', () => 
  * closed to new entries), and it refused this file when the pin was first
  * written that way.
  *
- * [#13176] the sibling `tsconfig.test.json` compiles this file, so that
+ * [commit a68c61267] the sibling `tsconfig.test.json` compiles this file, so that
  * measurement no longer holds and a directive here WOULD be evaluated. The pin
  * stays a runtime assertion over the declaration's own AST anyway, and now for
  * its own reason rather than for the absent compiler: it reads OPTIONALITY off

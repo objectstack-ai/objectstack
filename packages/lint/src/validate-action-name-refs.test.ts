@@ -296,6 +296,98 @@ describe('validateActionNameRefs — page:header actions', () => {
   });
 });
 
+// The related list resolves its `actions` ids against the RELATED (child)
+// object's own actions — never the page's object — and places each by that
+// action's own `locations`; an id that misses either draws no button, only a
+// refusal notice. So this walk, unlike the stack-wide ones above, answers from
+// the child object, and only when this stack defines it.
+describe('validateActionNameRefs — record:related_list actions', () => {
+  const stackWith = (component: Record<string, unknown>) => ({
+    objects: [
+      {
+        name: 'crm_account',
+        fields: { name: { type: 'text' } },
+        actions: [{ name: 'crm_merge_accounts', type: 'script', locations: ['record_header'] }],
+      },
+      {
+        name: 'crm_contact',
+        fields: { name: { type: 'text' } },
+        actions: [
+          { name: 'crm_log_call', type: 'script', locations: ['record_related'] },
+          { name: 'crm_new_contact', type: 'script', locations: ['list_toolbar'] },
+          { name: 'crm_email_contact', type: 'script', locations: ['list_item'] },
+          { name: 'crm_pin_contact', type: 'script', locations: ['record_header'] },
+          { name: 'crm_sync_contact', type: 'script', locations: [] },
+          { name: 'crm_score_contact', type: 'script' },
+        ],
+      },
+    ],
+    actions: [
+      { name: 'crm_tag_contact', objectName: 'crm_contact', type: 'script', locations: ['list_item'] },
+      { name: 'crm_export_all', type: 'script', locations: ['list_toolbar'] },
+    ],
+    pages: [
+      {
+        name: 'account_record',
+        object: 'crm_account',
+        regions: [{ name: 'main', components: [{ type: 'record:related_list', ...component }] }],
+      },
+    ],
+  });
+  const relatedList = (actions: unknown[], objectName = 'crm_contact') =>
+    stackWith({ properties: { objectName, relationshipField: 'account_id', actions } });
+  const at = (i: number) => `pages[0].regions[0].components[0].properties.actions[${i}]`;
+
+  it('accepts ids that resolve on the child object at every location a related list draws', () => {
+    expect(
+      validateActionNameRefs(
+        relatedList(['crm_log_call', 'crm_new_contact', 'crm_email_contact', 'crm_tag_contact']),
+      ),
+    ).toEqual([]);
+  });
+
+  it('errors on an id that resolves nowhere, naming the child object', () => {
+    const findings = validateActionNameRefs(relatedList(['crm_log_call', 'crm_lgo_call']));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(ACTION_NAME_UNDEFINED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe(at(1));
+    expect(findings[0].message).toContain('"crm_lgo_call"');
+    expect(findings[0].hint).toContain('"crm_contact"');
+  });
+
+  // The decision the direction fixes: the list never reads the page's object
+  // (or a global action), so an id defined only there is as dead as a typo.
+  it('errors on an id defined only on the page object or as a global action', () => {
+    const findings = validateActionNameRefs(relatedList(['crm_merge_accounts', 'crm_export_all']));
+    expect(findings.map((f) => f.path)).toEqual([at(0), at(1)]);
+    expect(findings.every((f) => f.rule === ACTION_NAME_UNDEFINED && f.severity === 'error')).toBe(true);
+    expect(findings[0].message).toContain('"crm_contact"');
+  });
+
+  it('errors on a child action placed at no location a related list draws', () => {
+    const findings = validateActionNameRefs(
+      relatedList(['crm_pin_contact', 'crm_log_call', 'crm_sync_contact', 'crm_score_contact']),
+    );
+    expect(findings.map((f) => f.path)).toEqual([at(0), at(2), at(3)]);
+    expect(findings.every((f) => f.rule === ACTION_NAME_UNDEFINED && f.severity === 'error')).toBe(true);
+  });
+
+  it('resolves against a bound dataSource object, which the renderer writes over objectName', () => {
+    const findings = validateActionNameRefs(
+      stackWith({
+        dataSource: { object: 'crm_contact' },
+        properties: { objectName: 'crm_account', relationshipField: 'account_id', actions: ['crm_log_call', 'crm_merge_accounts'] },
+      }),
+    );
+    expect(findings.map((f) => f.path)).toEqual([at(1)]);
+  });
+
+  it('says nothing about a child object this stack does not define', () => {
+    expect(validateActionNameRefs(relatedList(['invite_user', 'nope'], 'sys_member'))).toEqual([]);
+  });
+});
+
 describe('validateActionNameRefs — navigation action items', () => {
   it('errors on an undefined nav actionName', () => {
     const findings = validateActionNameRefs({

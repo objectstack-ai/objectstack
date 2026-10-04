@@ -5,7 +5,7 @@
 // `files` never names the directory — see scripts/check-published-files.mjs).
 //
 // It used to be `await execute({ type: 'esm', dir: import.meta.url })`. What is
-// inlined below IS `execute()` from @oclif/core 4.13.3, verbatim apart from the
+// inlined below IS `execute()` from @oclif/core 5.1.2, verbatim apart from the
 // added lines, because `execute` swallows the error into `handle()` and
 // there is no hook between the two. `handle()` writes the parse error and then
 // a full usage dump; #10111 needs one unmistakable line to reach stderr FIRST,
@@ -31,7 +31,7 @@ import { flush, handle, run, settings } from '@oclif/core';
  * `development`/`test`, with no baseline and only two declared exceptions.
  *
  * What was missing is that **this file never asserted it about itself.**
- * `@oclif/core@4.13.3`'s `lib/config/ts-path.js` skips its TypeScript path
+ * `@oclif/core@5.1.2`'s `lib/config/ts-path.js` skips its TypeScript path
  * lookup only when `isProd()`, which `lib/util/util.js` defines as
  * `['development', 'test'].includes(process.env.NODE_ENV ?? '')` negated. So an
  * ambient `NODE_ENV` — exported by a developer, or inherited by any child this
@@ -86,15 +86,16 @@ import { flush, handle, run, settings } from '@oclif/core';
  * (`plugin?.type !== 'link'` guards the `isProduction` early return), and this
  * setting is checked ahead of that — so a `plugins link`ed TypeScript plugin
  * would no longer be auto-transpiled through this entry. ⭐ That path is not
- * reachable today: `@oclif/plugin-plugins` sits in `devDependencies`, and
- * oclif's core-plugin loader only matches names under `dependencies`, so
- * `os plugins` is not a registered command at all (measured on this entry —
- * `os --help` lists 34 topics and none of them is `plugins`; the count is the
- * control, so the zero is a reading). `content/docs/plugins/index.mdx` says the
- * same in its own words and tells an extension author to build an `os`
- * distribution listing the package in both places. ⛔ If that is ever fixed,
- * this line is what has to be revisited — the remedy is `bin/run-dev.js`, or
- * building the plugin.
+ * reachable today: this package ships no plugin manager — `package.json`
+ * declares no `oclif.plugins` and does not depend on `@oclif/plugin-plugins` —
+ * so `os plugins` (and with it `os plugins link`) is not a registered command
+ * at all (measured on this entry — `os --help` lists 34 entries, 12 topics and
+ * 22 commands, and none of them is `plugins`; the count is the control, so the
+ * zero is a reading). `content/docs/plugins/index.mdx` says the same in its own
+ * words and tells an extension author to build an `os` distribution listing
+ * the package in both `oclif.plugins` and `dependencies`. ⛔ If a plugin
+ * manager is ever shipped, this line is what has to be revisited — the remedy
+ * is `bin/run-dev.js`, or building the plugin.
  *
  * The other change in behaviour is a convergence, not a loss: on an UNBUILT
  * tree this file now answers oclif's "command not found" under
@@ -160,12 +161,12 @@ try {
 
 /**
  * Make a FAILED stderr write non-fatal, so a caller whose read end is gone
- * still gets this CLI's own exit status instead of a crash. #14858, reached on
+ * still gets this CLI's own exit status instead of a crash. The crash class commit 0c5e97368 fixed, reached on
  * THIS entry point by the #15564 measurement.
  *
  * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
  * listening IS an uncaught exception. `bin/run-dev.js` has carried this
- * listener since #14858; the published entry did not, and #15564 was filed
+ * listener since commit 0c5e97368; the published entry did not, and #15564 was filed
  * NOT REPRODUCED because the two probes that had been run against it — a
  * bad command id, and `OBJECTSTACK_DEBUG=1` over an unbuilt `@objectstack/spec`
  * — both answered exit 2 with no `uncaughtException`. Re-run here, they still
@@ -217,12 +218,12 @@ try {
  *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
  *     exit  code=1
  *
- * 3 of 3 runs, 3049-3433 ms in — the same frame and the same status #14858
+ * 3 of 3 runs, 3049-3433 ms in — the same frame and the same status commit 0c5e97368's card
  * traced on the dev shim. The same child read by a draining parent boots and
  * serves, exit 0 at a 20 s SIGTERM, having written 7926 bytes over 16.6 s. So
  * the crash costs the run at its FIRST diagnostic line and 20 of its 21 stderr
  * writes, on the entry point a customer's install actually runs (`files` names
- * only `dist`, but npm packs a `bin` target regardless — #14874).
+ * only `dist`, but npm packs a `bin` target regardless).
  *
  * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, for the reason
  * `bin/run-dev.js` records: the reason to tolerate is not WHICH error it is.

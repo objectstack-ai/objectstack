@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16829] The record-view ledger keeps the VIEW instant, measured through the
+ * [commit 8d4690b8f] The record-view ledger keeps the VIEW instant, measured through the
  * REAL `sys_stamp_audit_insert` hook.
  *
  * ## Why this file exists next to a suite that already claims this

@@ -5,7 +5,7 @@
  *
  * ## The defect, exactly
  *
- * #10243's ruling put the enablement door into the `manage_metadata` authoring
+ * Commit 266436a7f's ruling put the enablement door into the `manage_metadata` authoring
  * write set, and #11660 landed it by adding one arm to `isFlowAuthoringWrite`.
  * The refusal that arm reached was the shared one:
  *
@@ -174,7 +174,7 @@ describe('#11666 — the enablement door refuses in its own words', () => {
         });
 
         it('says the same thing in both directions — enabling and disabling', async () => {
-            // #10243's measurement was symmetric, and a caller switching a flow
+            // Commit 02b41232d's measurement was symmetric, and a caller switching a flow
             // ON is no more "authoring" than one switching it off.
             const h = boot();
 

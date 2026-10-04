@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import type { Plugin } from 'esbuild';
+import { hasStackProvenance, stackConversionsOf, type ConversionNotice } from '@objectstack/spec';
 import { printErrorToStderr, printWarningToStderr } from './format.js';
 
 export interface LoadedConfig {
@@ -39,6 +40,39 @@ export interface LoadedConfig {
    * finding does not depend on a caller opting in.
    */
   shadowedNamedExports: readonly string[];
+
+  /**
+   * Whether the module's DEFAULT export was built by a stack producer —
+   * `defineStack` (either mode) or `composeStacks` — read with
+   * `hasStackProvenance` (`@objectstack/spec`) off `mod.default` itself.
+   *
+   * Read HERE, before the named-export merge, because the merge builds a new
+   * object with a spread and the provenance mark is non-enumerable: `config`
+   * never carries it once any named export is merged, so asking `config` would
+   * answer `false` for a correct `defineStack` project that also exports
+   * `onEnable`. `false` for a plain object literal, a spread or JSON copy of a
+   * built stack, and a module with no default export at all.
+   *
+   * `os validate` and `os build` refuse on `false` (`STACK_PROVENANCE_MISSING`,
+   * `refuseUnbuiltStack`); every other command reads the config as before.
+   */
+  stackProvenance: boolean;
+
+  /**
+   * The ADR-0087 D2 conversions the stack producer applied while building the
+   * DEFAULT export — `stackConversionsOf` (`@objectstack/spec`) read off
+   * `mod.default` itself, beside {@link stackProvenance} and for the same
+   * reason: the record rides beside the mark, non-enumerable, so the
+   * named-export merge below drops it just as it drops the mark.
+   *
+   * `defineStack` converts at load, so `config` is already canonical and a
+   * command re-running the conversion pass over it finds nothing the producer
+   * converted. This is the only place those conversions can be read from:
+   * `os validate` / `os build` fold it into their `conversions` field and the
+   * `--strict` gate. `[]` for an unbuilt export and for a source that needed
+   * no conversion.
+   */
+  stackConversions: readonly ConversionNotice[];
 }
 
 /**
@@ -223,7 +257,8 @@ export function resolveConfigPath(source?: string): string {
 
 /**
  * Every `@objectstack/spec` entrypoint an authored config can reach the
- * `define*` helpers through — the root and every subpath export. Real projects
+ * `define*` helpers and the {@link STRICT_AUTHORING_FACTORIES} through — the
+ * root and every subpath export. Real projects
  * use both: the example apps import `defineView`/`defineApp` from
  * `@objectstack/spec/ui` and `defineHook`/`defineDatasource` from
  * `@objectstack/spec/data`, so a shim that knew only the root package would
@@ -234,28 +269,160 @@ const SPEC_MODULE_RE = /^@objectstack\/spec(?:\/[\w./-]+)?$/;
 /** esbuild namespace the authored-source shim modules live in. */
 const AUTHORED_SOURCE_NAMESPACE = 'objectstack-authored-source';
 
+/** The package root, which carries `formatZodError` for the shim's refusal text. */
+const SPEC_ROOT_MODULE = '@objectstack/spec';
+
 /** `defineStack`, `defineView`, … — the authoring helpers, by naming convention. */
 const DEFINE_HELPER_RE = /^define[A-Z]/;
 
 /**
- * The `define*` helpers a given `@objectstack/spec` entrypoint exports, read
- * from the copy **the config itself would import** (resolved from the config's
- * own directory, not the CLI's).
- *
- * Returns `[]` — i.e. "shim nothing" — when the entrypoint cannot be resolved
- * or imported. That is the safe direction: an unshimmed load is exactly
- * today's behaviour, so a project the enumeration cannot read is no worse off
- * than before.
+ * One strict authoring factory that is not a `define*` helper: the function
+ * `member` of the exported value `owner`, which validates its argument AT THE
+ * CALL and throws on a shape the current schema refuses.
  */
-async function defineHelpersOf(specifier: string, requireFromConfig: NodeRequire): Promise<string[]> {
+export interface StrictAuthoringFactory {
+  /** The export that carries the factory: `ObjectSchema`, `App`, … */
+  readonly owner: string;
+  /** The factory on it: `create`. */
+  readonly member: string;
+  /**
+   * The `@objectstack/spec` entrypoint the entry was measured on. The shim does
+   * not read it — it wraps the factory on EVERY entrypoint whose `owner` export
+   * carries the member — and the pin reads it to prove the entry is still live.
+   */
+  readonly home: string;
+}
+
+/**
+ * Every strict authoring factory `@objectstack/spec` exports besides the
+ * `define*` helpers: the ONE list the authored-source shim wraps them from.
+ *
+ * `ObjectSchema.create(…)` is the authoring spelling of every example app's
+ * objects, and it is as strict as a `define*` helper — it parses at the call.
+ * Unwrapped, a retired key inside it aborted `os migrate meta` at load with a
+ * raw `ZodError` array, while the tombstone it printed told the author to run
+ * `os migrate meta`.
+ *
+ * ## Why a written list and not a pattern
+ *
+ * Measured over all 19 JS entrypoints of `@objectstack/spec`: 18 distinct
+ * exported values carry a `create` member (31 export names — each identity
+ * factory is exported a second time as its `*Schema`). Five validate — the
+ * five below — and thirteen (`ApiEndpoint`, `Task`, `RestServerConfig`, …) are
+ * identity factories, `(config) => config`, that refuse nothing and so have
+ * nothing to tolerate.
+ * The other function members of exported namespaces (`Field.*`, `SCIM.*`,
+ * `RLS.*`, `OData.*`) build or read values and validate nothing. So:
+ *
+ *  - a NAME pattern (`*.create`) would wrap thirteen no-ops and still say
+ *    nothing about which factories are strict;
+ *  - a SHAPE enumeration at load cannot even see the one this list exists for:
+ *    `ObjectSchema` is a lazy-schema Proxy whose `ownKeys` trap throws, so
+ *    `Object.keys(ObjectSchema)` never names `create`.
+ *
+ * The pin beside this file's tests holds the list to the spec surface in both
+ * directions: every entry resolves at its `home` and throws on a refused input,
+ * and every `create` member spec exports that is NOT listed returns its
+ * argument untouched. A new strict factory in spec therefore reddens the pin
+ * with its name instead of reopening this defect.
+ *
+ * ⛔ Unlisted factories are never wrapped. `ObjectSchema.create` itself stays
+ * strict everywhere else: this list is read by {@link authoredSourcePlugin}
+ * alone, which only `os migrate meta` installs.
+ */
+export const STRICT_AUTHORING_FACTORIES: readonly StrictAuthoringFactory[] = Object.freeze([
+  { owner: 'ObjectSchema', member: 'create', home: '@objectstack/spec/data' },
+  { owner: 'App', member: 'create', home: '@objectstack/spec/ui' },
+  { owner: 'Dashboard', member: 'create', home: '@objectstack/spec/ui' },
+  { owner: 'Report', member: 'create', home: '@objectstack/spec/ui' },
+  { owner: 'Action', member: 'create', home: '@objectstack/spec/ui' },
+]);
+
+/** What one `@objectstack/spec` entrypoint gives the shim to wrap. */
+interface AuthoredSourceHelpers {
+  /** Its `define*` helpers, by {@link DEFINE_HELPER_RE}. */
+  readonly defineHelpers: readonly string[];
+  /** Its {@link STRICT_AUTHORING_FACTORIES}, as owner export → factory members. */
+  readonly factories: ReadonlyMap<string, readonly string[]>;
+}
+
+/**
+ * The strict authoring surface a given `@objectstack/spec` entrypoint exports —
+ * its `define*` helpers and its {@link STRICT_AUTHORING_FACTORIES} — read from
+ * the copy **the config itself would import** (resolved from the config's own
+ * directory, not the CLI's).
+ *
+ * A listed factory is read by PROPERTY (`ns[owner][member]`), never by
+ * enumerating the owner: `ObjectSchema` is a lazy-schema Proxy, and its
+ * `ownKeys` trap throws.
+ *
+ * Returns nothing to wrap — i.e. "shim nothing" — when the entrypoint cannot
+ * be resolved or imported. That is the safe direction: an unshimmed load is
+ * exactly today's behaviour, so a project the enumeration cannot read is no
+ * worse off than before.
+ */
+async function authoredSourceHelpersOf(
+  specifier: string,
+  requireFromConfig: NodeRequire,
+): Promise<AuthoredSourceHelpers> {
   try {
     const resolved = requireFromConfig.resolve(specifier);
     const ns = (await import(pathToFileURL(resolved).href)) as Record<string, unknown>;
-    return Object.keys(ns).filter((k) => DEFINE_HELPER_RE.test(k) && typeof ns[k] === 'function');
+    const defineHelpers = Object.keys(ns).filter((k) => DEFINE_HELPER_RE.test(k) && typeof ns[k] === 'function');
+    const factories = new Map<string, string[]>();
+    for (const { owner, member } of STRICT_AUTHORING_FACTORIES) {
+      const value = ns[owner];
+      if (value === null || (typeof value !== 'object' && typeof value !== 'function')) continue;
+      if (typeof (value as Record<string, unknown>)[member] !== 'function') continue;
+      factories.set(owner, [...(factories.get(owner) ?? []), member]);
+    }
+    return { defineHelpers, factories };
   } catch {
-    return [];
+    return { defineHelpers: [], factories: new Map() };
   }
 }
+
+/**
+ * The helpers every generated shim module opens with.
+ *
+ * `__tolerant` is the try-real-then-authored wrap; `__tolerantMembers` applies
+ * it to a factory member and hands every other member of the owner through
+ * untouched — a Proxy rather than a copy, because the owner may itself be a
+ * lazy-schema Proxy that cannot be enumerated.
+ *
+ * `__refusal` renders a raw `ZodError` — whose `message` is its issues as a
+ * JSON array — through the project's own `formatZodError`, so the swallowed
+ * verdict reads like the loader's `defineStack validation failed` block rather
+ * than as a JSON dump. An error that already carries prose keeps its message.
+ */
+const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
+  `const __refusal = (label, error) =>`,
+  `  error && error.name === 'ZodError' && Array.isArray(error.issues)`,
+  `    && typeof __specRoot.formatZodError === 'function'`,
+  `    ? __specRoot.formatZodError(error, label + ' validation failed')`,
+  `    : (error && error.message) || String(error);`,
+  `const __tolerant = (label, call) => (...authored) => {`,
+  `  try {`,
+  `    return call(...authored);`,
+  `  } catch (error) {`,
+  `    console.warn(`,
+  `      '[authored-source] ' + label + '(): the current schema refuses this '`,
+  `      + 'artifact, so it is handed to the migration chain exactly as authored. '`,
+  `      + __refusal(label, error),`,
+  `    );`,
+  `    return authored[0];`,
+  `  }`,
+  `};`,
+  `const __tolerantMembers = (owner, ownerName, members) => {`,
+  `  const wrapped = new Map(members.map((member) => [`,
+  `    member,`,
+  `    __tolerant(ownerName + '.' + member, (...authored) => owner[member](...authored)),`,
+  `  ]));`,
+  `  return new Proxy(owner, {`,
+  `    get: (target, prop) => (wrapped.has(prop) ? wrapped.get(prop) : Reflect.get(target, prop)),`,
+  `  });`,
+  `};`,
+];
 
 /**
  * Load an authored config **as authored**, for the one consumer whose input is
@@ -283,13 +450,20 @@ async function defineHelpersOf(specifier: string, requireFromConfig: NodeRequire
  *
  * Each `@objectstack/spec` entrypoint the config imports is replaced by a
  * generated module that re-exports the real one and wraps its `define*`
- * helpers as **try-real-then-authored**:
+ * helpers — and the {@link STRICT_AUTHORING_FACTORIES} it carries, such as
+ * `ObjectSchema.create` — as **try-real-then-authored**:
  *
  * ```js
  * export const defineView = (...authored) => {
  *   try { return realDefineView(...authored); } catch { return authored[0]; }
  * };
  * ```
+ *
+ * A factory is wrapped in place on its owner: `ObjectSchema` stays the real
+ * schema for every other member (`parse`, `shape`, …), and only `create` is
+ * tolerant. Both kinds are strict at the call, so both must be wrapped for the
+ * chain to convert first — a `defineStack` wrap alone never ran, because the
+ * `ObjectSchema.create(…)` inside its argument threw before it was called.
  *
  * The narrowness is the point, and it is what keeps this a restoration rather
  * than a widening of what the command accepts:
@@ -336,26 +510,22 @@ function authoredSourcePlugin(configPath: string): Plugin {
       });
 
       build.onLoad({ filter: /.*/, namespace: AUTHORED_SOURCE_NAMESPACE }, async (args) => {
-        const helpers = await defineHelpersOf(args.path, requireFromConfig);
+        const { defineHelpers, factories } = await authoredSourceHelpersOf(args.path, requireFromConfig);
         const spec = JSON.stringify(args.path);
         const lines = [
           `import * as __real from ${spec};`,
+          `import * as __specRoot from ${JSON.stringify(SPEC_ROOT_MODULE)};`,
           `export * from ${spec};`,
+          ...AUTHORED_SOURCE_PRELUDE,
         ];
-        for (const name of helpers) {
+        for (const name of defineHelpers) {
           lines.push(
-            `export const ${name} = (...authored) => {`,
-            `  try {`,
-            `    return __real.${name}(...authored);`,
-            `  } catch (error) {`,
-            `    console.warn(`,
-            `      '[authored-source] ' + ${JSON.stringify(name)} + '(): the current schema refuses this '`,
-            `      + 'artifact, so it is handed to the migration chain exactly as authored. '`,
-            `      + ((error && error.message) || String(error)),`,
-            `    );`,
-            `    return authored[0];`,
-            `  }`,
-            `};`,
+            `export const ${name} = __tolerant(${JSON.stringify(name)}, (...authored) => __real.${name}(...authored));`,
+          );
+        }
+        for (const [owner, members] of factories) {
+          lines.push(
+            `export const ${owner} = __tolerantMembers(__real.${owner}, ${JSON.stringify(owner)}, ${JSON.stringify(members)});`,
           );
         }
         return { contents: lines.join('\n'), loader: 'js' };
@@ -433,6 +603,15 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
     throw new Error(`No default export found in ${path.basename(absolutePath)}`);
   }
 
+  // [#20367 ruling B] Read the producer's mark off the default export ITSELF,
+  // before the merge below spreads it into a new object and drops it (the mark
+  // is non-enumerable by design). `mod` stands in for a missing default, and a
+  // module namespace never carries the mark.
+  const stackProvenance = hasStackProvenance(baseConfig);
+  // The producer's conversion record rides beside the mark and is dropped by
+  // the same spread, so it is read here too, off the same value.
+  const stackConversions = stackConversionsOf(baseConfig);
+
   // Preserve named exports (e.g. the `onEnable` runtime hook and `functions`)
   // alongside the default-exported stack. Module-namespace named exports are
   // otherwise dropped when we unwrap `mod.default`, which prevents AppPlugin
@@ -484,6 +663,8 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
     duration: Date.now() - start,
     namedExports,
     shadowedNamedExports,
+    stackProvenance,
+    stackConversions,
   };
 }
 

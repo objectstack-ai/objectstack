@@ -6,8 +6,10 @@ import { DATE_RANGE_PRESETS } from './date-range-presets';
 import { DateGranularity } from './query.zod';
 
 /**
+ * @module data/analytics
+ *
  * Analytics/Semantic Layer Protocol
- * 
+ *
  * Defines the "Business Logic" for data analysis.
  * Inspired by Cube.dev, LookML, and dbt MetricFlow.
  * 
@@ -15,24 +17,74 @@ import { DateGranularity } from './query.zod';
  * "Business Data" (Metrics/Dimensions).
  */
 
-/**
- * Aggregation Metric Type
- * The mathematical operation to perform on a metric.
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+import {
+  ANALYTICS_COLUMN_PATH,
+  ANALYTICS_COLUMN_REFERENCE,
+  rowWildcardOutsideCount,
+  rowWildcardOutsideCountRefusal,
+} from './analytics-column-reference';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-export const AggregationMetricType = z.enum([
-  'count', 
-  'sum', 
-  'avg', 
-  'min', 
-  'max', 
-  'count_distinct', 
-  'number', // Custom SQL expression returning a number
-  'string', // Custom SQL expression returning a string
-  'boolean' // Custom SQL expression returning a boolean
-]);
+
+// ── Retired metric types (ADR-0049 enforce-or-remove) ───────────────────────
+//
+// #21000. `number`, `string` and `boolean` declared "a custom SQL expression
+// returning a number / string / boolean": the measure's `sql` WAS the whole
+// computation, and the type only named what it returned. Ruling D on #20943
+// made a cube member's `sql` a column reference (`CUBE_MEMBER_SQL` below), so
+// the three were left with nothing to declare. Measured through
+// `AnalyticsService` on both strategies before this retirement, with a column
+// `sql`: the raw-SQL path emitted the column UNAGGREGATED
+// (`SELECT status AS "status", amount AS "m" … GROUP BY status` — a bare
+// column in a grouped statement, by SQL's own rules an error on PostgreSQL and
+// an arbitrary row's value on SQLite), and the ObjectQL path refused the
+// measure.
+//
+// A VALUE-level retirement (`enumWithRetiredValues`, shared/retired-key.ts):
+// the members left the enum, so `tsc` refuses them, and the parse answers each
+// with the prescription below instead of zod's anonymous enum message. No D2
+// conversion — no rewrite can say which aggregate the author meant — so the
+// D3 entry `cube-metric-expression-types-retired` carries that judgement. A
+// stored cube carrying one is REFUSED, never stood down: every door that
+// parses a cube refuses it here, and both analytics strategies refuse a cube
+// that reached them unparsed with this same text, read off this enum.
+//
+// Module-private and written with `//`, never `/** */`: prose an enum's error
+// map consumes, not documented surface — an export with no reader is a
+// published surface the next narrowing must keep.
+const METRIC_TYPE_EXPRESSION_FIX =
+  'Name the aggregate the measure means — `sum`, `avg`, `min` or `max` over the column, `count` '
+  + '(over `\'*\'` for a row count, or over a column for its non-null values), or `count_distinct`. '
+  + 'A value computed per row has no expression form in the cube layer: keep it as a field of the '
+  + 'object (a stored or formula field) and aggregate that field here; a ratio or other value '
+  + 'derived from measures is `derived: { op, of: [...] }` on an ADR-0021 dataset.';
+
+const metricTypeExpressionRetired = (member: 'number' | 'string' | 'boolean') =>
+  `\`${member}\` was removed from \`AggregationMetricType\` (a cube measure's \`measures.<metric>.type\`) `
+  + 'in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — it declared a custom SQL expression '
+  + `returning a ${member}, and a measure's \`sql\` is a column reference, so the type had nothing left `
+  + 'to compute: the raw-SQL path returned the column unaggregated and the ObjectQL path refused the '
+  + `measure. ${METRIC_TYPE_EXPRESSION_FIX}`;
+
+/**
+ * Aggregation Metric Type
+ *
+ * The aggregate a cube measure applies to its column: the six aggregation
+ * functions, the same six an ADR-0021 dataset measure's `aggregate` names.
+ * The custom-SQL-expression members `number`, `string` and `boolean` were
+ * retired (ADR-0049) — a measure's `sql` is a column reference, so they had
+ * nothing left to compute — and are answered at parse with their prescription.
+ */
+export const AggregationMetricType = enumWithRetiredValues(
+  ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'],
+  {
+    number: metricTypeExpressionRetired('number'),
+    string: metricTypeExpressionRetired('string'),
+    boolean: metricTypeExpressionRetired('boolean'),
+  },
+);
 export type AggregationMetricType = z.input<typeof AggregationMetricType>;
 
 /**
@@ -148,6 +200,136 @@ export const TimeUpdateInterval = z.enum(
 export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
 
 /**
+ * The inner `name` a cube member used to REQUIRE — RETIRED (#20300, ADR-0049
+ * enforce-or-remove; triage verdict RETIRE by the maintainer's criterion for
+ * declared-but-unenforced families: Cube.dev and LookML key a member by its
+ * declared name, with no second inner name that can disagree).
+ *
+ * `measures` and `dimensions` are RECORDS, and the record key was always the
+ * member's identity: `AnalyticsService#getMeta` and the in-memory driver
+ * publish every member as `${cube.name}.${key}`,
+ * `NativeSQLStrategy#lookupMember` and the in-memory driver's
+ * `resolveMeasure` / `resolveDimension` index the bag by key, and a query names
+ * the member that way. Measured before removal with a lit control: zero reads
+ * of a member's inner `name` in non-test source, against four reads of the
+ * neighbouring `measure.label` / `dimension.label` in the same two `getMeta`
+ * projections. So the key was a REQUIRED second copy of the identity that
+ * nothing read — and one that disagreed with its key was inert (the in-memory
+ * driver's own fixtures authored `totalAmount: { name: 'total_amount' }` and
+ * queried `orders.totalAmount`).
+ *
+ * A `retiredKey()` tombstone rather than a bare deletion, although the member
+ * shapes are `strictObject`s (the `action.aria` precedent): a bare delete is
+ * loud only as a generic unrecognized-key report, which cannot carry the
+ * prescription, and the tombstone also types the key `never` so a typed
+ * authoring site fails `tsc` first. Stored and built cubes carry the key —
+ * it was REQUIRED — so the ADR-0087 D2 conversion
+ * `cube-member-inner-name-removed` strips it at every rehydration seam, and the
+ * D3 entry `cube-member-inner-name-retired` carries the judgement a disagreeing
+ * value still owes its author.
+ */
+const CUBE_MEMBER_NAME_MIGRATE =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const cubeMemberNameRemoved = (qualifiedKey: string, bag: 'measures' | 'dimensions', member: string) =>
+  `\`${qualifiedKey}\` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — `
+  + `it never had an effect: the record key is the ${member}'s name. Every consumer resolves a ${member} `
+  + `by its key in \`${bag}\` (\`GET /analytics/meta\` publishes it as \`<cube>.<key>\`, and a query names it `
+  + 'that way), so the inner `name` was a second copy of the identity that nothing read, and one that '
+  + 'disagreed with its key was silently ignored. Delete the key. To rename a '
+  + `${member}, rename its key in \`${bag}\` — and every query, dashboard and report that names `
+  + `\`<cube>.<key>\`. ${CUBE_MEMBER_NAME_MIGRATE}`;
+
+const CUBE_METRIC_NAME_REMOVED = cubeMemberNameRemoved('measures.<metric>.name', 'measures', 'metric');
+const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension>.name', 'dimensions', 'dimension');
+
+/**
+ * A cube member's `sql` is a COLUMN REFERENCE, never a SQL expression — the
+ * expression half RETIRED (#20943, maintainer ruling D on 2026-09-30: ADR-0021's
+ * "zero raw SQL / zero raw expressions" carried from the dataset layer down to
+ * the cube members it compiles to; ADR-0049 enforce-or-remove).
+ *
+ * Admitted, on a measure and a dimension alike, and parsed byte-identically to
+ * before — the accept set the ruling's execution parameters name:
+ * - a column of the cube's object — `amount`;
+ * - a relationship path of bare identifiers ending in one — `account.amount`,
+ *   `account.owner.region` — the chain
+ *   `NativeSQLStrategy#qualifyAndRegisterJoin` lowers into its LEFT JOINs;
+ * - the row wildcard `'*'`, the form a `count` measure uses — and, since
+ *   #21409, ONLY there: a dimension's `sql` takes
+ *   {@link ANALYTICS_COLUMN_PATH}, the same path without the wildcard arm
+ *   (no aggregate consumes it on a dimension), and a measure's `sql` admits it
+ *   under `type: 'count'` alone, by the one predicate
+ *   {@link rowWildcardOutsideCount} — see `./analytics-column-reference.ts`,
+ *   which states both halves and their measurements.
+ *
+ * The identifier half of {@link CUBE_MEMBER_SQL} is the pattern the readers
+ * already use to tell a column path from an expression — `IDENTIFIER_PATH` in
+ * `native-sql-strategy.ts`, and the field-level read gate's bare-identifier /
+ * identifier-path pair in `analytics-service.ts` — so the contract now admits
+ * exactly the values those readers resolve to fields (and `'*'`, which reads
+ * no field value). It is a `.regex()`, not a refinement, so the published JSON
+ * Schema carries the same rule as a `pattern`: a document validated against
+ * `json-schema/**` is judged as the parse judges it.
+ *
+ * The pattern itself is declared ONCE, in `./analytics-column-reference.ts`
+ * ({@link ANALYTICS_COLUMN_REFERENCE}), and this binding is that one `RegExp`:
+ * the dataset layer's `field` — which the dataset compiler copies into a cube
+ * member's `sql` verbatim — takes the same accept set from the same module
+ * (#21220), so the two slots cannot drift apart.
+ *
+ * Refused at parse: everything else — `CASE WHEN …`, `SUM(…) / COUNT(*)`, a
+ * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
+ * names no single field, so no platform check could judge which fields it
+ * reads, and the two strategies never agreed on it: the raw-SQL path emitted
+ * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refused only
+ * the `number` / `string` / `boolean` metric types (retired since, #21000 —
+ * see `AggregationMetricType`) and forwards an expression under an aggregate
+ * type as a field name, which fails downstream.
+ * A derived value has a declared home the platform CAN judge — an ADR-0021
+ * dataset, where a conditional count or sum is a measure with its own
+ * structured `filter`, and a ratio / sum / difference / product of measures is
+ * `derived: { op, of: [...] }` over measures named in the same dataset.
+ *
+ * No D2 conversion, deliberately: an expression has no mechanical rewrite — it
+ * moves to another metadata type (`dataset`), and a ratio's value may change
+ * scale on the way (a `derived` ratio is a 0–1 fraction). The D3 entry
+ * `cube-member-sql-expression-retired` carries what the upgrader still owes.
+ * The runtime's expression branches (the gate's stand-down, the raw-SQL
+ * verbatim emit) are left as they are here; they become unreachable for any
+ * cube that met this parse, and their deletion is the services lane's
+ * follow-up, not this schema's.
+ */
+const CUBE_MEMBER_SQL = ANALYTICS_COLUMN_REFERENCE;
+
+const CUBE_MEMBER_SQL_RETIRED =
+  'A SQL expression there was retired in @objectstack/spec 17 (ADR-0021 zero raw expressions; '
+  + 'ADR-0049 enforce-or-remove) — an expression names no single field, so no platform check can '
+  + 'judge which fields it reads, and the two analytics strategies never agreed on it: one ran it '
+  + 'verbatim, the other refused it.';
+
+const CUBE_METRIC_SQL_EXPRESSION_REFUSED =
+  '`measures.<metric>.sql` is a column reference: a field of the cube\'s object (`amount`), a '
+  + 'relationship path ending in one (`account.amount`), or `\'*\'` for a count. '
+  + `${CUBE_MEMBER_SQL_RETIRED} Name the column the measure aggregates, or declare the derived `
+  + 'value on an ADR-0021 dataset, where the platform judges every field it reads: a conditional '
+  + 'count or sum is a dataset measure with its own structured `filter` '
+  + '(`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a ratio, '
+  + 'sum, difference or product of measures is `derived: { op, of: [...] }` over measures named in '
+  + 'the same dataset (`{ name: \'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', '
+  + '\'task_count\'] }, format: \'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a '
+  + 'percentage).';
+
+const CUBE_DIMENSION_SQL_EXPRESSION_REFUSED =
+  '`dimensions.<dimension>.sql` is a column reference: a field of the cube\'s object (`status`) '
+  + `or a relationship path ending in one (\`account.industry\`). ${CUBE_MEMBER_SQL_RETIRED} `
+  + 'Group by the column itself. `\'*\'` is no dimension: it names every column at once, which is '
+  + 'not an axis — to count rows, declare a `count` measure (`type: \'count\'`, `sql: \'*\'`). '
+  + 'A bucket computed over a column\'s values (a CASE over them) '
+  + 'has no expression form in the cube layer or the dataset layer: keep the bucket as a field '
+  + 'of the object, and name that field here or in an ADR-0021 dataset dimension\'s `field`.';
+
+/**
  * Metric Schema
  * A quantitative measurement (e.g., "Total Revenue", "Average Order Value").
  *
@@ -157,6 +339,10 @@ export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
  * roots + `ObjectStackSchema` resolves the whole family reachable, with
  * `ObjectSchema` as positive control and a fresh uncarried shape as negative
  * control in the same run).
+ *
+ * A metric carries no name of its own: its key in the cube's `measures` record
+ * IS its name (the inner `name` was retired, see
+ * {@link CUBE_METRIC_NAME_REMOVED}).
  */
 export const MetricSchema = lazySchema(() => strictObject(
   {
@@ -171,9 +357,11 @@ export const MetricSchema = lazySchema(() => strictObject(
       // both SQL strategies aggregate `sql` and never read it, so a
       // hand-authored condition parsed, registered, and silently returned the
       // UNFILTERED aggregate under the author's metric name (the #10298 shape,
-      // one level up). What actually filters: the query's `where`, the
-      // condition folded into the metric's own `sql` expression, or an
-      // ADR-0021 dataset measure's structured `filter` (#10411). The nested
+      // one level up). What actually filters: the query's `where`, or an
+      // ADR-0021 dataset measure's structured `filter` (#10411). A third
+      // channel this text used to name — folding the condition into the
+      // metric's own `sql` expression — went with #20943: a member's `sql` is
+      // a column reference (see `CUBE_MEMBER_SQL`). The nested
       // `strictObject` the key carried (closed by #4001 batch D) is gone with
       // it — strictness on a shape nothing reads was fake compliance either way.
       filters:
@@ -182,20 +370,34 @@ export const MetricSchema = lazySchema(() => strictObject(
         + 'both aggregate the metric\'s `sql` and ignore `filters`), so an authored '
         + '`filters: [{ sql: … }]` parsed clean and the query returned the UNFILTERED aggregate. '
         + 'Delete the key. To filter what a metric measures: filter at query time with `where` '
-        + '(canonical Query DSL FilterCondition), fold the condition into the metric\'s own `sql` '
-        + 'expression, or use an ADR-0021 dataset measure\'s structured `filter`. '
+        + '(canonical Query DSL FilterCondition), or declare the measure on an ADR-0021 dataset, whose '
+        + 'measure takes a structured `filter` — a metric\'s own `sql` is a column reference and '
+        + 'carries no condition. '
         + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
     },
   },
   {
-    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique metric ID'),
+    // `name` REMOVED (#20300, ADR-0049 enforce-or-remove) — the record key in
+    // `measures` is the metric's name. See the module-level note above
+    // `CUBE_METRIC_NAME_REMOVED`.
+    name: retiredKey(CUBE_METRIC_NAME_REMOVED),
     label: z.string().describe('Human readable label'),
     description: z.string().optional(),
 
     type: AggregationMetricType,
 
-    /** Source Calculation */
-    sql: z.string().describe('SQL expression or field reference'),
+    /**
+     * The column the measure aggregates — a field of the cube's object, a
+     * relationship path ending in one, or `'*'` for a count. A SQL expression
+     * is refused at parse (#20943, ruling D; see `CUBE_MEMBER_SQL`): a derived
+     * value is declared on an ADR-0021 dataset instead. `'*'` under any `type`
+     * but `count` is refused by the schema's refinement below (#21409).
+     */
+    sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_METRIC_SQL_EXPRESSION_REFUSED }).describe(
+      'Column reference: a field of the cube\'s object ("amount"), a relationship path ending in one '
+      + '("account.amount"), or "*" for a count. Never a SQL expression: a derived value is '
+      + 'declared on an ADR-0021 dataset (a measure-scoped filter, or derived: { op, of }).',
+    ),
 
     // `filters` was REMOVED here (#10414) — see the `guidance` entry above for
     // the full story and the replacement channels. The raw-SQL fragment shape
@@ -204,16 +406,44 @@ export const MetricSchema = lazySchema(() => strictObject(
     // re-targeted per driver dialect, or walked by the lint rules
     // (`packages/lint/src/filter-walk.ts` deliberately never enumerated it).
 
-    /** Format for display (e.g. "currency", "percent") */
-    format: z.string().optional(),
+    /**
+     * Display format for this measure's result column. The analytics service
+     * relays it as `fields[].format` on `POST /analytics/query` results, the
+     * slot the dataset door fills from a dataset measure's own `format`, so its
+     * vocabulary is that slot's: a numeral pattern. The `GET /analytics/meta`
+     * projection publishes it on the measure too.
+     */
+    format: z.string().optional().describe(
+      'Display format for this measure\'s result column: a numeral pattern such as "$0,0.00" or "0.0%". '
+      + 'Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta.',
+    ),
   },
-));
+).superRefine((metric, ctx) => {
+  // [#21409] `'*'` is the row wildcard a `count` aggregates (`COUNT(*)`), and
+  // only a `count` consumes it: under any other `type` it names no column, and
+  // the strategies emitted `SUM(*)` / `AVG(*)` / … verbatim, which the database
+  // refused. Cross-field (the `sql` and the `type` beside it), so a refinement
+  // — declared as a dropped-refinement site, since no JSON-Schema keyword
+  // carries it. The rule is the ONE predicate both measure schemas share
+  // (`./analytics-column-reference.ts`); the dataset measure calls the same one.
+  if (rowWildcardOutsideCount(metric.sql, metric.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sql'],
+      message: rowWildcardOutsideCountRefusal('measures.<metric>.sql', 'type', metric.type),
+    });
+  }
+}));
 
 /**
  * Dimension Schema
  * A categorical attribute to group by (e.g., "Product Category", "Order Date").
  *
  * Strict as of #4001 batch D — same doors as {@link MetricSchema}.
+ *
+ * A dimension carries no name of its own: its key in the cube's `dimensions`
+ * record IS its name (the inner `name` was retired, see
+ * {@link CUBE_DIMENSION_NAME_REMOVED}).
  */
 export const DimensionSchema = lazySchema(() => strictObject(
   {
@@ -227,17 +457,41 @@ export const DimensionSchema = lazySchema(() => strictObject(
     },
   },
   {
-    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique dimension ID'),
+    // `name` REMOVED (#20300, ADR-0049 enforce-or-remove) — the record key in
+    // `dimensions` is the dimension's name. See the module-level note above
+    // `CUBE_METRIC_NAME_REMOVED`.
+    name: retiredKey(CUBE_DIMENSION_NAME_REMOVED),
     label: z.string().describe('Human readable label'),
     description: z.string().optional(),
 
     type: DimensionType,
 
-    /** Source Column */
-    sql: z.string().describe('SQL expression or column reference'),
+    /**
+     * The column the dimension groups by — a field of the cube's object, or a
+     * relationship path ending in one. A SQL expression is refused at parse
+     * (#20943, ruling D; see `CUBE_MEMBER_SQL`), and so is the row wildcard
+     * `'*'` (#21409): no aggregate consumes it on a dimension, so the slot
+     * takes {@link ANALYTICS_COLUMN_PATH} — the measure's path without the
+     * wildcard arm, the pattern a dataset dimension's `field` already takes.
+     */
+    sql: z.string().regex(ANALYTICS_COLUMN_PATH, { error: () => CUBE_DIMENSION_SQL_EXPRESSION_REFUSED }).describe(
+      'Column reference: a field of the cube\'s object ("status") or a relationship path ending in one '
+      + '("account.industry"). Never a SQL expression.',
+    ),
 
-    /** For Time Dimensions: Supported Granularities */
-    granularities: z.array(TimeUpdateInterval).optional(),
+    /**
+     * For a time dimension: the intervals it is bucketed at. A SINGLE interval
+     * is the dimension's default bucket — a query that groups by it without
+     * stating a granularity is bucketed at that interval, on
+     * `POST /analytics/query` and `POST /analytics/sql` alike, the reading a
+     * compiled dataset's `dateGranularity` gets. Two or more state no default.
+     * A granularity the query states always wins, listed or not.
+     */
+    granularities: z.array(TimeUpdateInterval).optional().describe(
+      'For a time dimension. A single interval is its default bucket: a query that groups by this dimension '
+      + 'without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity '
+      + 'the query states always wins, listed or not.',
+    ),
   },
 ));
 
@@ -299,9 +553,11 @@ const CUBE_JOIN_ON_REMOVED =
  * and `sql` outright (ADR-0049 enforce-or-remove, maintainer-ruled batch #154):
  * the near-miss was the smaller half of the defect, because the DECLARED
  * spellings were being replaced just as silently. `MetricSchema.filters` above
- * took the same route one shape over — every cube shape is a `strictObject`, so
- * the route is strict deletion plus a `guidance` entry carrying the prescription,
- * never a `retiredKey()` tombstone (the key leaves the walked shape entirely).
+ * took the same route one shape over: strict deletion plus a `guidance` entry
+ * carrying the prescription, so the key leaves the walked shape entirely. That
+ * is one of two routes on a `strictObject`, not the only one — the members'
+ * inner `name` (#20300) is a `retiredKey()` tombstone instead, which keeps the
+ * key in the walked shape and types it `never` for `tsc`.
  */
 export const CubeJoinSchema = lazySchema(() => strictObject(
   {
@@ -332,6 +588,43 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * A cube's `refreshKey` — the refresh cadence (`every`) and the data-change
+ * probe (`sql`) of a pre-aggregation cache — RETIRED whole (#20637, ADR-0049
+ * enforce-or-remove; maintainer ruling 5890724395, letter C).
+ *
+ * Measured before removal: no reader. `git grep refreshKey` over the non-test
+ * sources of `packages/services`, `packages/drivers` and `packages/rest`
+ * answered 0 lines, against 4 for the neighbouring `.public` in the same
+ * pathspec; repo-wide the key appeared only in this schema, its generated
+ * surfaces, the migration notes and one author (`examples/app-showcase`,
+ * `every: '1 hour'`). And nothing for it to key on: `service-analytics`
+ * references no cache or job service — its one cache is the request-scoped
+ * `packages/services/service-analytics/src/dimension-labels.ts#withLabelFetchCache`
+ * — so every analytics query is computed when it is asked. `sql` was security-adjacent as well: raw SQL run on
+ * a schedule, outside the read-scope machinery every other cube `sql` goes
+ * through.
+ *
+ * The mainstream capability (a result cache keyed by cube, normalized query,
+ * read scope and tenant — Cube.dev, Looker) is not lost from the plan: the
+ * ruling re-declares a cadence the day such a cache exists, with its own design,
+ * rather than carrying a key that does nothing until then.
+ *
+ * A `retiredKey()` tombstone on the `strictObject` below rather than a strict
+ * deletion, so the refusal carries this prescription instead of a bare
+ * unknown-key verdict and a typed authoring site fails `tsc` first (the members'
+ * inner `name` precedent). The nested `strictObject` the key carried is gone
+ * with it. The ADR-0087 D2 conversion `cube-refresh-key-removed` strips the
+ * block wherever the chain is replayed, and the D3 entry
+ * `cube-refresh-key-retired` carries what the author still owes.
+ */
+const CUBE_REFRESH_KEY_REMOVED =
+  '`analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'nothing read it: no analytics result is cached, so neither `every` nor `sql` ever refreshed '
+  + 'anything. Delete the key; every analytics query is computed when it is asked. A refresh cadence '
+  + 'is declared again when a result cache exists. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
  * Cube Schema
  * A logical data model representing a business entity or process for analysis.
  * Maps physical tables to business metrics and dimensions.
@@ -340,10 +633,10 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
  * showcase example authors through) and `defineStack({ analyticsCubes })` /
  * artifact ingest, both of which parse `StackSchema` → `analyticsCubes[]`.
  *
- * [#10194] This docblock used to say the ADR-0010 protection envelope is
+ * [commit 2306a765c] This docblock used to say the ADR-0010 protection envelope is
  * deliberately NOT declared here, on the premise that `analytics_cube`
  * resolves no `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s
- * it). #10194 retired that premise: `analytics_cube` is now bound in
+ * it). Commit 2306a765c retired that premise: `analytics_cube` is now bound in
  * `UNREGISTERED_KIND_SCHEMAS`, so `PUT /meta/analytics_cube/:name` parses a
  * body through THIS schema — and the `getMetaItemLayered` → `saveMetaItem`
  * round-trip carries the `applyProtection` stamp. The shape is `.strict()`,
@@ -375,30 +668,45 @@ export const CubeSchema = lazySchema(() => strictObject(
     sql: z.string().describe('Base SQL statement or Table Name'),
 
     /** Semantic Definitions */
-    measures: z.record(z.string(), MetricSchema).describe('Quantitative metrics'),
-    dimensions: z.record(z.string(), DimensionSchema).describe('Qualitative attributes'),
+    measures: z.record(z.string(), MetricSchema).describe(
+      'Quantitative metrics, keyed by metric name: the record key IS the metric\'s name, published and '
+      + 'queried as `<cube>.<key>`. A metric declares no inner `name`.',
+    ),
+    dimensions: z.record(z.string(), DimensionSchema).describe(
+      'Qualitative attributes, keyed by dimension name: the record key IS the dimension\'s name, published '
+      + 'and queried as `<cube>.<key>`. A dimension declares no inner `name`.',
+    ),
 
     /** Relationships */
     joins: z.record(z.string(), CubeJoinSchema).optional(),
 
-    /** Pre-aggregations / Caching */
-    refreshKey: strictObject(
-      {
-        surface: 'this cube refreshKey block',
-        history: 'Until this shape was closed, an undeclared refreshKey key was silently dropped — '
-          + 'a typo\'d `sql` probe left the cube refreshing on nothing.',
-      },
-      {
-        every: z.string().optional().describe('Refresh interval (e.g. "1 hour")'),
-        sql: z.string().optional().describe('SQL to check for data changes'),
-      },
-    ).optional(),
+    // `refreshKey` REMOVED (#20637, ADR-0049 enforce-or-remove) — `every` and
+    // `sql` with it. No analytics result is cached, so nothing read either. See
+    // the note above `CUBE_REFRESH_KEY_REMOVED`.
+    refreshKey: retiredKey(CUBE_REFRESH_KEY_REMOVED),
 
-    /** Access Control */
-    public: z.boolean().default(false),
+    /**
+     * Visibility on the analytics API (the Cube.dev `public` semantics).
+     *
+     * Defaults to VISIBLE. `false` hides the cube from discovery
+     * (`GET /analytics/meta`) and refuses every query door that names it
+     * (`POST /analytics/query`, `POST /analytics/sql`) with `CUBE_NOT_FOUND`.
+     * It is visibility, not row security: an object's records stay governed by
+     * its permissions and row-level security on every door, whether or not a
+     * cube over it is hidden. Enforced by `@objectstack/service-analytics`
+     * (`cube-visibility.ts`). The default was `false` while nothing read the
+     * key; it moved to the mainstream default in the change that enforced it,
+     * because enforcing `false` as declared would have hidden every cube.
+     */
+    public: z.boolean().default(true).describe(
+      'Whether the analytics API exposes this cube. Default true (visible). false hides it from '
+      + 'GET /analytics/meta and refuses POST /analytics/query and /analytics/sql for it '
+      + '(CUBE_NOT_FOUND). Visibility only: the underlying object\'s permissions and row-level '
+      + 'security still govern its records on every door.'
+    ),
 
     // ADR-0010 — runtime protection envelope (internal — set by loader).
-    // [#10194] See the docblock above for why this spread became load-bearing
+    // [commit 2306a765c] See the docblock above for why this spread became load-bearing
     // the day the `/meta` write door started parsing bodies with this schema.
     ...MetadataProtectionFields,
   },
@@ -655,11 +963,13 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
     guidance: {
       // The second sentence used to point at the cube metric's own `filters` —
       // a key #10414 removed (never suggest a key the schema cannot accept;
-      // the `triggerPhrase` lesson in strict-object.ts).
+      // the `triggerPhrase` lesson in strict-object.ts). It also used to offer
+      // folding the condition into the metric's own `sql` expression, which
+      // #20943 retired (a member's `sql` is a column reference).
       filters: '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL '
         + 'FilterCondition, the same shape find() takes). There is no per-metric filter key '
-        + 'either: fold the condition into the metric\'s own `sql` expression, or use '
-        + 'an ADR-0021 dataset measure\'s structured `filter`.',
+        + 'either: a measure that counts or sums only some rows is an ADR-0021 dataset measure '
+        + 'with its own structured `filter`.',
     },
     // No `extraKeys`: the one extension (`AnalyticsQueryRequestSchema`) adds
     // only the #3878 `retiredKey` tombstones, and a tombstone must never be
@@ -731,8 +1041,32 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
 
   order: z.record(z.string(), z.enum(['asc', 'desc'])).optional(),
 
-  limit: z.number().optional(),
-  offset: z.number().optional(),
+  /**
+   * The row window, applied after `order`: a non-negative integer each.
+   *
+   * Both were a bare `z.number()` until #21365, and every value outside the
+   * non-negative integers answered differently per driver and per face —
+   * measured at `POST /analytics/query`: `limit: -1` returned every row on
+   * SQLite, a 500 on PostgreSQL and all but the last row on the ObjectQL face;
+   * `limit: 1.5` a 500, two rows and one row; `offset: -1` a 500 on both
+   * drivers and a slice on the ObjectQL face. No answer was one answer, so the
+   * schema refuses them (`400 VALIDATION_FAILED` at the door) rather than any
+   * engine guessing. `limit: 0` stays legal — it is `LIMIT 0`, no rows.
+   *
+   * An `offset` with no `limit` is a valid window (every row after the
+   * offset); each face renders it for its own dialect.
+   *
+   * ⛔ Declared once: `DatasetSelectionSchema` (`api/analytics.zod.ts`) reads
+   * these two declarations off this shape, so the dataset door holds the same
+   * accept set with no second copy.
+   */
+  limit: z.number().int().nonnegative().optional().describe(
+    'Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows)',
+  ),
+  offset: z.number().int().nonnegative().optional().describe(
+    'Number of rows to skip before the first row returned, applied after `order` — a non-negative '
+    + 'integer; an `offset` with no `limit` returns every row after it',
+  ),
 
   /**
    * Reference timezone (IANA name) for date bucketing. OPTIONAL WITH NO

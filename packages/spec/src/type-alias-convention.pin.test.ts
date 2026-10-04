@@ -5,9 +5,9 @@
 // ## What this file is
 //
 // ADR-0122 makes the bare name `X` the AUTHOR state and `XParsed` the PARSED
-// state. Phase 1 (#5551 / PR #6072) declared an `XParsed` for every alias whose
+// state. Phase 1 (#5551 / commit 7f713b662) declared an `XParsed` for every alias whose
 // schema actually HAS two shapes (`z.input` differs from `z.infer`); phase 2
-// (#6083, protocol 17) flipped all 1384 bare aliases to `z.input` and retired
+// (commit 53068c130, protocol 17) flipped all 1384 bare aliases to `z.input` and retired
 // the 102 `XInput` names the flip turned into synonyms. The complement —
 // schemas whose two shapes coincide, so the flip changed nothing observable —
 // deliberately gets no `XParsed`, because a permanent synonym is a name an
@@ -54,13 +54,13 @@ import { RetryPolicySchema } from './shared/retry-policy.zod';
 import type { RetryPolicy, RetryPolicyParsed } from './shared/retry-policy.zod';
 import {
   ConnectorSchema,
-  DataSyncConfigSchema,
+  RetryConfigSchema,
 } from './integration/connector.zod';
 import type {
   Connector,
   ConnectorParsed,
-  DataSyncConfig,
-  DataSyncConfigParsed,
+  RetryConfig,
+  RetryConfigParsed,
 } from './integration/connector.zod';
 import { ViewFilterRuleSchema, ViewSchema } from './ui/view.zod';
 import type { View, ViewFilterRule, ViewFilterRuleParsed, ViewParsed } from './ui/view.zod';
@@ -116,7 +116,6 @@ import type * as M38 from './automation/bpmn-interop.zod.js';
 import type * as M39 from './automation/execution.zod.js';
 import type * as M40 from './automation/flow-function.zod.js';
 import type * as M41 from './automation/node-executor.zod.js';
-import type * as M42 from './automation/state-machine.zod.js';
 import type * as M43 from './automation/time-relative-trigger.zod.js';
 import type * as M44 from './automation/webhook.zod.js';
 import type * as M50 from './marketplace/marketplace.zod.js';
@@ -155,7 +154,7 @@ import type * as M82 from './kernel/dependency-resolution.zod.js';
 import type * as M83 from './kernel/events/core.zod.js';
 import type * as M84 from './kernel/events/handlers.zod.js';
 import type * as M85 from './kernel/manifest.zod.js';
-// (M86 was kernel/metadata-customization.zod.js, removed whole in #13135 —
+// (M86 was kernel/metadata-customization.zod.js, removed whole in commit 9e0ba21a1 —
 // ADR-0049 retirement of the paper customization protocol. The M number is
 // positional and stays vacant.)
 import type * as M87 from './kernel/metadata-loader.zod.js';
@@ -254,7 +253,7 @@ import type * as M162 from './ui/notification.zod.js';
 import type * as M163 from './ui/page.zod.js';
 import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
-// M166 was './ui/theme.zod.js' — retired whole at #10485 (ADR-0049); the
+// M166 was './ui/theme.zod.js' — retired whole at commit 35ad101bc (ADR-0049); the
 // M-indices are positional, so the slot stays vacant rather than renumbering.
 import type * as M167 from './ui/view.zod.js';
 // Appended out of alphabetical order deliberately: the M-indices are positional
@@ -275,12 +274,12 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 786 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 773 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
 // every sentence stating it — this header and that case's own title — agrees
-// (#6605). Before the check existed this line had been left at 717 while the
+// (commit c6b05c76a). Before the check existed this line had been left at 717 while the
 // list grew past 800, because the counting assertion reads the `export type
 // Iso...` declarations and never the prose sitting beside them.
 // ---------------------------------------------------------------------------
@@ -309,7 +308,7 @@ import type * as M188 from './ai/build-progress.zod.js';
 // Two cohorts used to head blocks of their own; their pins are now filed under
 // their modules like every other pin.
 //
-// Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
+// Phase 2 (commit 53068c130) additions. These 35 schemas were never in phase 1's
 // population: their bare alias already read `z.input` before the flip, so the
 // phase-1 gate — which only looked at bare `z.infer` aliases — never asked
 // whether their parsed state was named. The inverted gate does ask, and the
@@ -449,6 +448,7 @@ export type Iso_api_contract__UpdateRequestSchema = Assert<Eq< z.input< typeof M
 // api/discovery.zod.ts
 // [#16325] `EnvironmentTypeSchema` moved here from cloud/environment.zod.ts (was Iso262).
 export type Iso_api_discovery__ApiRoutesSchema = Assert<Eq< z.input< typeof M17.ApiRoutesSchema >, z.infer< typeof M17.ApiRoutesSchema > >>;
+export type Iso_api_discovery__AuthFamiliesSchema = Assert<Eq< z.input< typeof M17.AuthFamiliesSchema >, z.infer< typeof M17.AuthFamiliesSchema > >>;
 export type Iso_api_discovery__CapabilityDescriptorSchema = Assert<Eq< z.input< typeof M17.CapabilityDescriptorSchema >, z.infer< typeof M17.CapabilityDescriptorSchema > >>;
 export type Iso_api_discovery__DiscoveryEnvironmentSchema = Assert<Eq< z.input< typeof M17.DiscoveryEnvironmentSchema >, z.infer< typeof M17.DiscoveryEnvironmentSchema > >>;
 export type Iso_api_discovery__DiscoverySchema = Assert<Eq< z.input< typeof M17.DiscoverySchema >, z.infer< typeof M17.DiscoverySchema > >>;
@@ -740,7 +740,7 @@ export type Iso_automation_nodeExecutor__WaitResumePayloadSchema = Assert<Eq< z.
 export type Iso_automation_nodeExecutor__WaitTimeoutBehaviorSchema = Assert<Eq< z.input< typeof M41.WaitTimeoutBehaviorSchema >, z.infer< typeof M41.WaitTimeoutBehaviorSchema > >>;
 
 // automation/schedule-organization.zod.ts
-// [#16659] A bare non-empty string: no transform, no default, no coercion — an
+// [commit ecdfc9411] A bare non-empty string: no transform, no default, no coercion — an
 // organization id is written exactly as it is stored. So input === infer, and an
 // `XParsed` here would be a permanent synonym. The day this schema learns to
 // normalize an id, this line goes red and the ADR's remedy applies.
@@ -748,13 +748,6 @@ export type Iso_automation_scheduleOrganization__ScheduleOrganizationSchema = As
 
 // automation/schemaless-node-config.zod.ts
 export type Iso_automation_schemalessNodeConfig__DecisionConditionSchema = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, z.infer< typeof M173.DecisionConditionSchema > >>;
-
-// automation/state-machine.zod.ts
-export type Iso_automation_stateMachine__ActionRefSchema = Assert<Eq< z.input< typeof M42.ActionRefSchema >, z.infer< typeof M42.ActionRefSchema > >>;
-export type Iso_automation_stateMachine__GuardRefSchema = Assert<Eq< z.input< typeof M42.GuardRefSchema >, z.infer< typeof M42.GuardRefSchema > >>;
-export type Iso_automation_stateMachine__StateMachineSchema = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infer< typeof M42.StateMachineSchema > >>;
-export type Iso_automation_stateMachine__StateNodeSchema = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< typeof M42.StateNodeSchema > >>;
-export type Iso_automation_stateMachine__TransitionSchema = Assert<Eq< z.input< typeof M42.TransitionSchema >, z.infer< typeof M42.TransitionSchema > >>;
 
 // automation/time-relative-trigger.zod.ts
 export type Iso_automation_timeRelativeTrigger__TimeRelativeTriggerSchema = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
@@ -792,7 +785,6 @@ export type Iso_data_dataEngine__DataEngineInsertRequestSchema = Assert<Eq< z.in
 export type Iso_data_dataEngine__DataEngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineUpdateOptionsSchema >, z.infer< typeof M56.DataEngineUpdateOptionsSchema > >>;
 export type Iso_data_dataEngine__DataEngineVectorFindRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
 export type Iso_data_dataEngine__DroppedFieldsEventSchema = Assert<Eq< z.input< typeof M56.DroppedFieldsEventSchema >, z.infer< typeof M56.DroppedFieldsEventSchema > >>;
-export type Iso_data_dataEngine__EngineAggregateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineAggregateOptionsSchema >, z.infer< typeof M56.EngineAggregateOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineCountOptionsSchema = Assert<Eq< z.input< typeof M56.EngineCountOptionsSchema >, z.infer< typeof M56.EngineCountOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.EngineDeleteOptionsSchema >, z.infer< typeof M56.EngineDeleteOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineUpdateOptionsSchema >, z.infer< typeof M56.EngineUpdateOptionsSchema > >>;
@@ -930,19 +922,16 @@ export type Iso_identity_scim__SCIMPatchOperationSchema = Assert<Eq< z.input< ty
 
 // integration/connector.zod.ts
 // [#4395] `ConnectorActionEffectSchema`, added after the generated corpus: a
-// bare `z.enum`, exactly like its `ConnectorType` / `ConnectorStatus` siblings
-// in this module — no default, no transform, so author and parsed states
-// coincide and D5 gives it no `XParsed`.
+// bare `z.enum`, exactly like its `ConnectorType` sibling in this module (and
+// `ConnectorStatus`, until ADR-0049 retired it with `connector.status`) — no
+// default, no transform, so author and parsed states coincide and D5 gives it
+// no `XParsed`. The connector-nested `WebhookEvent` / `WebhookSignatureAlgorithm`
+// pins left here with their schemas in the same retirement, and the
+// `ConnectorTrigger` pin with its schema in the `triggers` retirement after it.
 export type Iso_integration_connector__ConnectorActionEffectSchema = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 export type Iso_integration_connector__ConnectorActionSchema = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
-export type Iso_integration_connector__ConnectorConflictResolutionSchema = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
 export type Iso_integration_connector__ConnectorRetryStrategySchema = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
-export type Iso_integration_connector__ConnectorStatusSchema = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
-export type Iso_integration_connector__ConnectorTriggerSchema = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
 export type Iso_integration_connector__ConnectorTypeSchema = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
-export type Iso_integration_connector__SyncStrategySchema = Assert<Eq< z.input< typeof M78.SyncStrategySchema >, z.infer< typeof M78.SyncStrategySchema > >>;
-export type Iso_integration_connector__WebhookEventSchema = Assert<Eq< z.input< typeof M78.WebhookEventSchema >, z.infer< typeof M78.WebhookEventSchema > >>;
-export type Iso_integration_connector__WebhookSignatureAlgorithmSchema = Assert<Eq< z.input< typeof M78.WebhookSignatureAlgorithmSchema >, z.infer< typeof M78.WebhookSignatureAlgorithmSchema > >>;
 
 // kernel/cli-extension.zod.ts
 // Iso385 (`CLICommandContributionSchema`) left with the #12007 retirement.
@@ -982,7 +971,7 @@ export type Iso_kernel_manifest__PluginRuntimeSchema = Assert<Eq< z.input< typeo
 // kernel/metadata-customization.zod.ts
 // (Iso408 `CustomizationOriginSchema` / Iso409 `FieldChangeSchema` /
 // Iso410 `MergeConflictSchema` / Iso411 `MergeResultSchema` removed with
-// their module — #13135's ADR-0049 retirement of the paper
+// their module — commit 9e0ba21a1's ADR-0049 retirement of the paper
 // metadata-customization protocol.)
 
 // kernel/metadata-loader.zod.ts
@@ -1483,8 +1472,8 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // bare-string arm TRANSFORMS to the canonical `{ dialect, source }` envelope,
 // so input ≠ infer by construction — the alias stays `z.input` (the authoring
 // face), per the convention's own rule for Expression-carrying shapes.
-// The object-* block family (#7751; `ObjectFormPropsSchema` and
-// `ObjectMasterDetailFormPropsSchema` are the members still pinned) —
+// The object-* block family (#7751; `ObjectFormPropsSchema` is the member
+// still pinned) —
 // deliberately default-free in its first, warning-tier step ("the author said
 // nothing" must stay distinguishable from "the author asked for the renderer's
 // fallback"), so input === infer holds. A default added to any of them goes
@@ -1498,8 +1487,15 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // ui#6206-B filter orthography reaching the four `object-*` `filter` doors:
 // each now carries `z.array(ViewFilterRuleSchema)` (input ≠ infer), so the
 // three `XParsed` aliases are declared and the three pins deleted.
+// `ObjectMasterDetailFormPropsSchema` left the same way on #20928: its
+// `details[].columns` now carries `InlineGridColumnSchema` (input ≠ infer), so
+// `ObjectMasterDetailFormPropsParsed` is declared and its pin deleted.
+// #20371 — `element:definition-list` (`ElementDefinitionListPropsSchema`),
+// default-free on the same principle: the renderer's one-column and
+// "No details" fallbacks stay the renderer's facts. Its five sibling rows from
+// that card carry an expression or a filter rule and declare `XParsed` instead.
+export type Iso_ui_component__ElementDefinitionListPropsSchema = Assert<Eq< z.input< typeof M170.ElementDefinitionListPropsSchema >, z.infer< typeof M170.ElementDefinitionListPropsSchema > >>;
 export type Iso_ui_component__ObjectFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
-export type Iso_ui_component__ObjectMasterDetailFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
 export type Iso_ui_component__PageContainerProps = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
 export type Iso_ui_component__RecordAlertActionSchema = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
 export type Iso_ui_component__RecordHighlightsField = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
@@ -1551,7 +1547,10 @@ export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.Pag
 export type Iso_ui_page__PageTypeSchema = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 
 // ui/report.zod.ts
-export type Iso_ui_report__JoinedReportBlockSchema = Assert<Eq< z.input< typeof M164.JoinedReportBlockSchema >, z.infer< typeof M164.JoinedReportBlockSchema > >>;
+// `JoinedReportBlockSchema` left the family on #19920: its `z.ZodTypeAny`
+// annotation made input and infer the same `unknown`, and with the annotation
+// gone its `type` default makes them differ, so `JoinedReportBlockParsed` is
+// declared and the pin deleted.
 export type Iso_ui_report__ReportType = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
 
 // ui/responsive.zod.ts
@@ -1563,9 +1562,13 @@ export type Iso_ui_report__ReportType = Assert<Eq< z.input< typeof M164.ReportTy
 export type Iso_ui_responsive__ResponsiveStylesSchema = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
 export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
 
-// ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at #10485.
+// ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at commit 35ad101bc.
 
 // ui/view.zod.ts
+// `ViewItemSchema` and `ViewItemWireSchema` left the family on #19920: their
+// `config` was `z.ZodTypeAny` (input and infer the same `unknown`), and typed by
+// its arm it carries the list and form configs' defaults, so `ViewItemParsed` and
+// `ViewItemWireParsed` are declared and both pins deleted.
 // `KanbanConfigSchema` left this list as Iso829 when #17393 gave it a `limit`
 // with an APPLIED default, and returns as Iso_ui_view__KanbanConfigSchema now
 // that #19228 removed that member before it was published: the two shapes
@@ -1573,6 +1576,9 @@ export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.
 export type Iso_ui_view__CalendarConfigSchema = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
 export type Iso_ui_view__ColumnSummaryConfigSchema = Assert<Eq< z.input< typeof M167.ColumnSummaryConfigSchema >, z.infer< typeof M167.ColumnSummaryConfigSchema > >>;
 export type Iso_ui_view__ColumnSummarySchema = Assert<Eq< z.input< typeof M167.ColumnSummarySchema >, z.infer< typeof M167.ColumnSummarySchema > >>;
+// `EmptyStateSchema` joined on #20694, extracted from the list view's inline
+// `emptyState` so the `object-grid` row can take it by reference.
+export type Iso_ui_view__EmptyStateSchema = Assert<Eq< z.input< typeof M167.EmptyStateSchema >, z.infer< typeof M167.EmptyStateSchema > >>;
 export type Iso_ui_view__FormButtonConfigSchema = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;
 export type Iso_ui_view__GanttConfigSchema = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
 export type Iso_ui_view__GanttQuickFilterSchema = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
@@ -1584,8 +1590,6 @@ export type Iso_ui_view__RowHeightSchema = Assert<Eq< z.input< typeof M167.RowHe
 export type Iso_ui_view__TreeConfigSchema = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
 export type Iso_ui_view__UserFilterFieldSchema = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 export type Iso_ui_view__ViewItemNameSchema = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
-export type Iso_ui_view__ViewItemSchema = Assert<Eq< z.input< typeof M167.ViewItemSchema >, z.infer< typeof M167.ViewItemSchema > >>;
-export type Iso_ui_view__ViewItemWireSchema = Assert<Eq< z.input< typeof M167.ViewItemWireSchema >, z.infer< typeof M167.ViewItemWireSchema > >>;
 export type Iso_ui_view__ViewKindSchema = Assert<Eq< z.input< typeof M167.ViewKindSchema >, z.infer< typeof M167.ViewKindSchema > >>;
 export type Iso_ui_view__ViewScopeSchema = Assert<Eq< z.input< typeof M167.ViewScopeSchema >, z.infer< typeof M167.ViewScopeSchema > >>;
 export type Iso_ui_view__VisualizationTypeSchema = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
@@ -1604,8 +1608,11 @@ export type Iso_ui_view__VisualizationTypeSchema = Assert<Eq< z.input< typeof M1
 
 export type Spot1 = Assert<Eq< ConnectorParsed, z.infer< typeof ConnectorSchema > >>;
 export type Spot1Flipped = Assert<Eq< Connector, z.input< typeof ConnectorSchema > >>;
-export type Spot2 = Assert<Eq< DataSyncConfigParsed, z.infer< typeof DataSyncConfigSchema > >>;
-export type Spot2Flipped = Assert<Eq< DataSyncConfig, z.input< typeof DataSyncConfigSchema > >>;
+// Spot 2 was `DataSyncConfig` until protocol 18 retired it whole with
+// `connector.syncConfig` (ADR-0049); `RetryConfig`, the connector's executed
+// policy block, holds the same two facts in the same module.
+export type Spot2 = Assert<Eq< RetryConfigParsed, z.infer< typeof RetryConfigSchema > >>;
+export type Spot2Flipped = Assert<Eq< RetryConfig, z.input< typeof RetryConfigSchema > >>;
 export type Spot3 = Assert<Eq< ViewParsed, z.infer< typeof ViewSchema > >>;
 export type Spot3Flipped = Assert<Eq< View, z.input< typeof ViewSchema > >>;
 export type Spot4 = Assert<Eq< ViewFilterRuleParsed, z.infer< typeof ViewFilterRuleSchema > >>;
@@ -1653,12 +1660,12 @@ export type AFamilyParsedIsParseState = Assert<
 
 describe('ADR-0122 type-alias convention', () => {
   // The title states the count as well, and hand-tracking it did not hold: it
-  // was corrected once, from 751 to 754 (#6037), and had drifted again to sit
-  // 68 behind by the time #6605 looked. Both prose statements of the number —
+  // was corrected once, from 751 to 754 (commit 18189983d), and had drifted again to sit
+  // 68 behind when commit c6b05c76a counted. Both prose statements of the number —
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 786 isomorphic pins', () => {
+  it('still declares all 773 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1692,7 +1699,7 @@ describe('ADR-0122 type-alias convention', () => {
     // are in this number at once, which is exactly why it is recomputed from the
     // source rather than reasoned about: -4 retired, +0 of my own.
     //
-    // The fourth way is the one ADR-0122 phase 2 (#6083) added, and it is a
+    // The fourth way is the one ADR-0122 phase 2 (commit 53068c130) added, and it is a
     // BULK rise with no schema change behind it at all: 716 -> 751. Those
     // 35 schemas are not new and did not move. Their bare alias already read
     // `z.input` before the flip, so phase 1's gate — which only ever looked at
@@ -1701,12 +1708,12 @@ describe('ADR-0122 type-alias convention', () => {
     // answered "isomorphic". A jump this size is normally the shape of a
     // mistake; this one is a gate widening, and the pins are its receipt.
     //
-    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // 751 -> 754 is commit 18189983d's `ValidateDataIssue` / `ValidateDataRequest` /
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
     //
     //
-    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // 751 -> 754 is commit 18189983d's `ValidateDataIssue` / `ValidateDataRequest` /
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
     //
@@ -1715,7 +1722,7 @@ describe('ADR-0122 type-alias convention', () => {
     // has no default or transform, so its two shapes coincide and it gets a pin
     // rather than a `SpecifierValueDomainParsed` synonym.
     //
-    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
+    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486; commit f549a0d4a), the
     // first way again — a schema left the package, so its pin left with it.
     // Written out per member, because a MULTI-member sweep is exactly where a
     // count gets nudged to fit instead of recomputed:
@@ -1723,7 +1730,7 @@ describe('ADR-0122 type-alias convention', () => {
     //   #5295  -3  ServerEventType, ServerEventSchema, ServerStatusSchema
     //             (`ServerCapabilities` has a `Parsed` alias, so it was never
     //             pinned here — a retired schema does not always cost a line)
-    //   #6239  -4  DeleteViewResponseSchema, ListViewsRequestSchema,
+    //   views  -4  DeleteViewResponseSchema, ListViewsRequestSchema,
     //             GetViewRequestSchema, DeleteViewRequestSchema (four of the
     //             ten view schemas were isomorphic; the other six were paired)
     //   #6414   0  every ETL alias already had a `Parsed` counterpart
@@ -1732,9 +1739,9 @@ describe('ADR-0122 type-alias convention', () => {
     // because they are the ways a MINUS gets miscomputed here. (1) The member
     // count (3) and the pin count (7) have no relation to each other. (2) The
     // -7 was computed against 751 at the branch point and had to be rebased
-    // TWICE before landing — onto #6037's 754, then onto #5933's 755 — so the
+    // TWICE before landing — onto commit 18189983d's 754, then onto #5933's 755 — so the
     // subtrahend was the only stable operand. (3) A sibling retirement in the
-    // same window contributed ZERO: #6527 retired `array_agg` / `string_agg`
+    // same window contributed ZERO: commit 259459d8b retired `array_agg` / `string_agg`
     // from `AggregationFunction`, and an enum VALUE narrowing is invisible
     // here, exactly as it is to the four surface ratchets. Recompute from the
     // file; never from the changelog.
@@ -1802,7 +1809,7 @@ describe('ADR-0122 type-alias convention', () => {
     // renumbered, because the ids are claims about pins and not positions
     // (`Iso824` remains the highest, and the next author still takes 825).
     //
-    // 823 -> 824 is #6604 — the `-1` in #4593's arithmetic above, collected.
+    // 823 -> 824 is commit d127ff002 — the `-1` in #4593's arithmetic above, collected.
     // That subtraction was not a measurement but an OPEN QUESTION: the alias
     // for `system/ServiceStatus` was withheld because declaring it would have
     // minted the #4411 dual-source trap against `./api`'s discovery health
@@ -1831,7 +1838,7 @@ describe('ADR-0122 type-alias convention', () => {
     // two shapes coincide and ADR-0122 gives it a pin rather than an
     // `XParsed`. Its id is `Iso836`, the next free one, not a number near its
     // neighbours: the ids are claims about pins and not positions (the same
-    // rule the #4914 decrease and the #6604 entry above both record).
+    // rule the #4914 decrease and the commit d127ff002 entry above both record).
     //
     // 825 -> 826 is #4717's `RuntimeAuthoringIssueSchema` — the ONE element
     // shape the #4463 runtime authoring gate reports a finding in, on both
@@ -1926,12 +1933,12 @@ describe('ADR-0122 type-alias convention', () => {
     // input/output identity into the annotation itself, where both halves
     // spell the same type.
     //
-    // 839 -> 834 is #10485 — `Iso700`-`Iso704` DELETED with `ui/theme.zod.ts`
+    // 839 -> 834 is commit 35ad101bc — `Iso700`-`Iso704` DELETED with `ui/theme.zod.ts`
     // (ADR-0049 retirement of the whole theme authoring surface): the five
     // schemas they pinned no longer exist, so there is nothing left to exempt.
     // The Iso numbers are positional and stay vacant.
     //
-    // 836 -> 837 is #11006's `PublishMetaItemRequestSchema` — the request half
+    // 836 -> 837 is commit cccbe51bf's `PublishMetaItemRequestSchema` — the request half
     // of the door whose response half `Iso836` pinned (#7294), declared on the
     // 2026-08-22 maintainer ruling that also gave `MetadataProtocol` the
     // optional `publishMetaItem` member. Isomorphism MEASURED, not assumed:
@@ -1949,7 +1956,7 @@ describe('ADR-0122 type-alias convention', () => {
     // exempt. -4 retired, +0 of my own; the Iso numbers stay vacant.
     //
     // 833 -> 835 is #11678's `AuditMetaItemRequestSchema` /
-    // `AuditMetaItemResponseSchema` — the audit door declared on the #11006
+    // `AuditMetaItemResponseSchema` — the audit door declared on the commit cccbe51bf
     // pattern (PR #12003). Isomorphism MEASURED, not assumed: the request is
     // two required `z.string()`s, a `z.string().nullable().optional()` and an
     // optional `z.number()`; the response is one `z.array` of a plain object
@@ -1979,7 +1986,7 @@ describe('ADR-0122 type-alias convention', () => {
     // rather than an `XParsed`. Ids `Iso859`/`Iso860`/`Iso861`, the next
     // free ones — ids are claims about pins, not positions.
     //
-    // 837 -> 838 is #12194's `MetadataItemNameSchema` — the item-name grammar
+    // 837 -> 838 is commit 311433f6b's `MetadataItemNameSchema` — the item-name grammar
     // (shared/identifiers.zod.ts). A bare `z.string().regex()` with no
     // `.default()`, `.transform()`, `.catch()` or `.pipe()`, so `z.input` and
     // `z.infer` are both `string` and ADR-0122 gives it a pin rather than an
@@ -1995,7 +2002,7 @@ describe('ADR-0122 type-alias convention', () => {
     // removed; the Iso number stays vacant (ids are claims about pins, not
     // positions).
     //
-    // 837 -> 833 is #13135's ADR-0049 retirement of the paper
+    // 837 -> 833 is commit 9e0ba21a1's ADR-0049 retirement of the paper
     // metadata-customization protocol: `kernel/metadata-customization.zod.ts`
     // removed whole, so its four pins `Iso408`-`Iso411`
     // (`CustomizationOriginSchema` / `FieldChangeSchema` /
@@ -2005,7 +2012,7 @@ describe('ADR-0122 type-alias convention', () => {
     //
     // 833 -> 835 is #12005's `HistoryMetaItemRequestSchema` /
     // `HistoryMetaItemResponseSchema` — the history door declared on the
-    // #11006 pattern, exactly as #11678 (PR #12003) declared its audit twin.
+    // commit cccbe51bf pattern, exactly as #11678 (PR #12003) declared its audit twin.
     // Isomorphism MEASURED, not assumed: the request is two required
     // `z.string()`s, an optional `z.string()` and two optional
     // `z.number()`s; the response is one `z.array` of a plain object of
@@ -2064,7 +2071,7 @@ describe('ADR-0122 type-alias convention', () => {
     // absence of all six retired names on every public entry. -3 removed; the
     // Iso numbers stay vacant (ids are claims about pins, not positions).
     //
-    // 832 -> 831 is #14691's ADR-0049 retirement of `crud.patterns` on
+    // 832 -> 831 is commit b3a63d32c's ADR-0049 retirement of `crud.patterns` on
     // `CrudEndpointsConfigSchema` (api/rest-server.zod.ts): its value def
     // `CrudEndpointPatternSchema` had no other consumer and left the module
     // whole (RETIRED_DEFS_BY_MAJOR[18] `api/CrudEndpointPattern`), so its pin
@@ -2111,7 +2118,7 @@ describe('ADR-0122 type-alias convention', () => {
     // disjoint pins.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\w+ = Assert</gm) ?? [];
-    // 828 -> 826 is #14676's ADR-0049 retirement of `connector.errorMapping`:
+    // 828 -> 826 is commit 13c48c2a5's ADR-0049 retirement of `connector.errorMapping`:
     // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
     // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
     // two pins that named them (`Iso381` / `Iso382`) leave with the schemas.
@@ -2165,7 +2172,7 @@ describe('ADR-0122 type-alias convention', () => {
     // `Iso871`. The four package-format modules (M50–M53) moved to
     // `marketplace/` and kept their pins. -30 + 1.
     //
-    // 782 -> 783 is #16659's `ScheduleOrganizationSchema`
+    // 782 -> 783 is commit ecdfc9411's `ScheduleOrganizationSchema`
     // (automation/schedule-organization.zod.ts, new module slot M186): the
     // acting organization a time-triggered flow declares, a bare
     // `z.string().min(1)` — no coercion, no default, no transform, because an
@@ -2305,10 +2312,109 @@ describe('ADR-0122 type-alias convention', () => {
     // touch disjoint pins (M22's three, M14's one); #17158 landed first, so
     // this entry's arrow starts from its 787. The count below was re-derived
     // from the merged file, not added up. -1 removed.
-    expect(pins).toHaveLength(786);
+    //
+    // 786 -> 783 is #19920's typing of three schemas whose static type had been
+    // erased, so that input and infer were the same `unknown` and the pins held
+    // vacuously: `JoinedReportBlockSchema` (its `z.ZodTypeAny` annotation
+    // removed) and `ViewItemSchema` / `ViewItemWireSchema` (their `config` typed
+    // by its arm). Typed, each carries defaults, so input !== infer:
+    // Iso_ui_report__JoinedReportBlockSchema, Iso_ui_view__ViewItemSchema and
+    // Iso_ui_view__ViewItemWireSchema leave, and `JoinedReportBlockParsed`,
+    // `ViewItemParsed` and `ViewItemWireParsed` are declared. -3 removed.
+    //
+    // 783 -> 780 is the ADR-0049 retirement of the connector resilience family
+    // (`connector.health`, `connector.status` and the connector-nested
+    // `webhooks`): `ConnectorStatusSchema`, `WebhookEventSchema` and
+    // `WebhookSignatureAlgorithmSchema` left whole with their carrier keys
+    // (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so their three M78 pins
+    // leave with the schemas. The other four defs of that retirement
+    // (`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`,
+    // `WebhookConfig`) each carried an `XParsed` alias and were never on this
+    // list. The M78 slot stays occupied by the module's surviving pins.
+    // The two movements were authored in parallel off the same 786 and
+    // touch disjoint pins (M164's one and M167's two, M78's three); #19920
+    // landed first, so this entry's arrow starts from its 783. The count
+    // below was re-derived from the merged file, not added up. -3 removed.
+    //
+    // 780 -> 781 is #20371's `ElementDefinitionListPropsSchema` — the
+    // `element:definition-list` row of `ComponentPropsMap` (ui/component.zod.ts,
+    // module slot M170), the (RISE) case once. Isomorphism MEASURED, not
+    // assumed: a strict item of one `z.string()` and one `z.unknown()`, a
+    // `z.literal([1, 2])` and a `z.boolean()`, every member optional but the
+    // item's `term`, with no `.default()`, `.transform()`, `.catch()` or
+    // `.pipe()` anywhere. Its five siblings in that card are NOT here: the four
+    // `action:*` rows carry `EvaluatedExpressionInputSchema` on `visible` (and
+    // `disabled`), whose bare-string arm transforms to the canonical envelope,
+    // and `element:repeater` carries `ViewFilterRuleSchema` on `filter` — so
+    // each declares an `XParsed` alias instead. +1 added.
+    // Authored off 786 and re-derived on two merges — #19920's 786 -> 783,
+    // then the connector resilience retirement's 783 -> 780 — so this entry's
+    // arrow starts from 780. The count below was re-derived from the merged
+    // file, not added up.
+    //
+    // 781 -> 780 is the aggregate verb honouring ADR-0061 `search`:
+    // `EngineAggregateOptionsSchema` gained `search` / `searchFields`, declared
+    // exactly as on `EngineQueryOptionsSchema`, and the structured
+    // `FullTextSearchSchema` arm carries flag defaults, so input !== infer —
+    // the same reason `EngineQueryOptions` has always had its `XParsed`.
+    // Iso_data_dataEngine__EngineAggregateOptionsSchema leaves and
+    // `EngineAggregateOptionsParsed` is declared. -1 removed.
+    // Authored off 780 (as 780 -> 779) and re-derived on the merge of the
+    // `ElementDefinitionListPropsSchema` pin above, so this entry's arrow
+    // starts from 781. The count below was re-derived from the merged file,
+    // not added up.
+    //
+    // 780 -> 779 is the ADR-0049 retirement of the connector `triggers` array:
+    // `ConnectorTriggerSchema` left whole with its carrier key (whole-def
+    // removal, `RETIRED_DEFS_BY_MAJOR[18]`), so its one M78 pin
+    // (Iso_integration_connector__ConnectorTriggerSchema) leaves with the
+    // schema. It carried no `XParsed` alias — its only tombstone, the
+    // `interval` rename's `retiredKey()`, kept input and output equal — so the
+    // pin was the whole of its footprint here. The M78 slot stays occupied by
+    // the module's surviving pins. -1 removed.
+    //
+    // 779 -> 780 is #20694: the list view's inline `emptyState` shape was
+    // extracted into the exported `EmptyStateSchema` so the `object-grid` row
+    // can take it by reference, and the docs gate requires its `EmptyState`
+    // author alias. It has no default or transform in its tree, so it is
+    // pinned here (Iso_ui_view__EmptyStateSchema) rather than given an
+    // `EmptyStateParsed` synonym. +1 added.
+    //
+    // 780 -> 778 is the ADR-0049 retirement of connector-attached sync from the
+    // connector (`connector.syncConfig` / `connector.fieldMappings`; the sync
+    // definition moved to the target `mapping`'s `connectorSource`):
+    // `SyncStrategySchema` and `ConnectorConflictResolutionSchema` left whole
+    // with their carrier (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so
+    // their two M78 pins leave with the schemas. The other two defs of that
+    // retirement (`DataSyncConfig`, `ConnectorFieldMapping`) each carried an
+    // `XParsed` alias and were never on this list; `DataSyncConfig` was Spot 2
+    // above, which now reads `RetryConfig`. The M78 slot stays occupied by the
+    // module's surviving pins. -2 removed. Authored off 779 (as 779 -> 777)
+    // and re-derived on the merge of #20694's `EmptyStateSchema` pin above, so
+    // this entry's arrow starts from 780.
+    //
+    // 778 -> 779 is #21046: discovery reports which optional `/auth` route
+    // families are mounted, and the new exported `AuthFamiliesSchema` needs its
+    // `AuthFamilies` author alias. A closed object of booleans with no default
+    // or transform in its tree, so it is pinned here
+    // (Iso_api_discovery__AuthFamiliesSchema) rather than given an
+    // `AuthFamiliesParsed` synonym. +1 added.
+    //
+    // 779 -> 778 is #20928: `object-master-detail-form`'s `details` entries
+    // became a strict shape whose `columns` carry `InlineGridColumnSchema`,
+    // whose own input ≠ infer, so `ObjectMasterDetailFormPropsSchema` left the
+    // isomorphic family for an `ObjectMasterDetailFormPropsParsed` alias, the
+    // route the object-* family note above prescribes. -1 removed.
+    //
+    // 778 -> 773 is #21320: `automation/state-machine.zod.ts` was deleted whole
+    // when its last authorable door, `agent.lifecycle`, was tombstoned
+    // (ADR-0049). Its five pins (`ActionRefSchema`, `GuardRefSchema`,
+    // `StateMachineSchema`, `StateNodeSchema`, `TransitionSchema`) went with the
+    // module, and so did its `M42` import. -5 removed.
+    expect(pins).toHaveLength(773);
 
     // The count is stated in PROSE twice as well — this case's title and the
-    // section header above the pin list — and until #6605 nothing read either
+    // section header above the pin list — and until commit c6b05c76a nothing read either
     // one. Both had drifted, by different amounts: the header sat 106 behind,
     // the title 68. Correcting them is not the fix, because correcting was
     // already tried on the title once (the receipt at the top of this case)
@@ -2359,7 +2465,11 @@ describe('ADR-0122 type-alias convention', () => {
       type: 'saas',
     });
     expect(parsedConnector.enabled).toBe(true);
-    expect(parsedConnector.status).toBe('inactive');
+    // This line read `expect(parsedConnector.status).toBe('inactive')` until
+    // ADR-0049 retired `connector.status`: the key is a tombstone now and a
+    // parse no longer emits its default. `enabled` above is the surviving
+    // defaulted key this case needs — one default supplied by the parse.
+    expect(parsedConnector).not.toHaveProperty('status');
 
     // And the flip's whole point, stated at runtime: the three keys above are
     // everything an author has to write, and the bare name is the type that

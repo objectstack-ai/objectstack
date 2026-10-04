@@ -59,6 +59,7 @@ export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-wid
 export {
   validateDatasetMeasureAggregates,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
+  DIMENSION_JSON_STORED_FIELD_REFUSED,
 } from './validate-dataset-measure-aggregates.js';
 export type { DatasetMeasureAggregateFinding } from './validate-dataset-measure-aggregates.js';
 
@@ -126,12 +127,14 @@ export type { ManagedApiMethodFinding } from './validate-managed-api-methods.js'
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
 export {
   validateFlowTriggerReadiness,
+  validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
+  FLOW_API_TRIGGER_SECRET_MISSING,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -392,6 +395,9 @@ export type {
   DashboardActionRefSeverity,
 } from './validate-dashboard-action-refs.js';
 
+export { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
+export type { DashboardWidgetOptionFinding } from './validate-dashboard-widget-options.js';
+
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
 export { validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN } from './validate-flow-filter-tokens.js';
 export type { FlowFilterTokenFinding } from './validate-flow-filter-tokens.js';
@@ -497,7 +503,9 @@ export type {
 
 // [#15254] The object-level half of the same sweep: the field-name LISTS an
 // object carries about its own fields (`highlightFields`,
-// `publicSharing.redactFields`). `error`, and on the runtime publish door as
+// `publicSharing.redactFields`, and since #20432 `indexes[].fields` and the
+// field-level lists `relatedListColumns` / `lookupColumns` /
+// `lookupFilters[].field` / `dependsOn`). `error`, and on the runtime publish door as
 // well as the three commands — Studio's app builder mints no `view` items, so
 // the list-view members above have nothing to inspect on the only artifacts
 // the click path authors, and a dangling `highlightFields` reference produced
@@ -841,7 +849,16 @@ export {
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
+  FLOW_DECISION_MODE_INVALID,
+  FLOW_DECISION_INCLUSIVE_OVERLAP,
 } from './lint-flow-patterns.js';
+
+// A credential typed as a literal into a served flow position — the advisory,
+// its rule id, and the ONE predicate it asks (the name lists live in that
+// module and nowhere else; a consumer that needs the verdict calls it).
+export { lintFlowCredentialLiterals, FLOW_CREDENTIAL_LITERAL } from './lint-flow-credential-literals.js';
+export type { FlowCredentialLiteralFinding } from './lint-flow-credential-literals.js';
+export { isCredentialShapedLiteral } from './credential-literal.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 // #11624 — the ledger's warn set, as a decision procedure. `os lint` runs the

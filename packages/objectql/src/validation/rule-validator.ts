@@ -878,7 +878,7 @@ interface ReadonlyWhenStripOptions {
  *
  * It once was, and this docblock said so. #14088 moved that one off value
  * equality onto a RECORD of the keys the before-phase hook chain actually
- * assigned (`options.hookWrittenKeys`), and #14472 did the same to the
+ * assigned (`options.hookWrittenKeys`), and commit 00ff228fe did the same to the
  * insert-side {@link stripRuntimeOwnedFields}. This predicate deliberately
  * stayed behind. The divergence is not drift, and it is not a port nobody got
  * to — it is decided by what each face GUARDS:
@@ -1818,7 +1818,7 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  * Strip CALLER-SUPPLIED writes to read-only fields from an UPDATE payload
  * (#2948). Unlike `readonlyWhen` (conditional, handled above), a
  * static `readonly` field was never enforced on the server write path: the
- * record validator only SKIPS it from validation, so a user-context update
+ * record validator only SKIPPED it from validation, so a user-context update
  * could overwrite audit stamps, provenance, or any other read-only column. We
  * STRIP the change (symmetric with `readonlyWhen`) rather than reject it, for
  * compatibility.
@@ -1845,6 +1845,11 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  *  - system context — the caller passes this strip only for NON-system writes;
  *    system-context writes (import, seed replay, approvals, lifecycle hooks —
  *    all `isSystem: true`) legitimately set read-only columns and skip it.
+ *    [#21663] They skip THIS strip and nothing else: the value they keep is
+ *    stored, so the engine judges its SHAPE after the strip point on every
+ *    path (`validateRecordInScope` in `record-validator.ts`, `ReadonlyValueScope`). A
+ *    malformed readonly value from a system writer is refused with the same
+ *    sentence a non-readonly field gets, never stored.
  *
  * ### Why `supplied` carries VALUES, not just keys (#5591)
  *
@@ -2564,8 +2569,8 @@ function preserveAuditRemedySentence(options?: StripWarningOptions): string {
   if (options?.preserveAuditApplies !== true) return '';
   return (
     ` A historical import restoring this record's own earlier values does NOT need that blanket ` +
-    `exemption: pass the narrower historical-import context { context: { preserveAudit: true } } ` +
-    `(#3493), which reinstates THIS field while the rest of the strip stays in force.`
+    `exemption: pass the narrower historical-import context { context: { preserveAudit: true } }, ` +
+    `which reinstates THIS field while the rest of the strip stays in force.`
   );
 }
 
@@ -2578,9 +2583,9 @@ function preserveAuditRemedySentence(options?: StripWarningOptions): string {
 function observeInsteadSentence(options?: StripWarningOptions): string {
   return options?.strict === true
     ? ` To let the strip happen and merely observe it instead of refusing the write, drop ` +
-        `options.strictReadonlyWrites and pass options.onFieldsDropped (#3407).`
+        `options.strictReadonlyWrites and pass options.onFieldsDropped.`
     : ` To detect drops programmatically instead of reading ` +
-        `this log, pass options.onFieldsDropped (#3407).`;
+        `this log, pass options.onFieldsDropped.`;
 }
 
 /**
@@ -2616,10 +2621,10 @@ export function runtimeOwnedStripWarning(
       ? `DROPPED and the write is being REFUSED ENTIRELY — the runtime issues this value from its ` +
         `sequence, and this write passed options.strictReadonlyWrites, so NOTHING is written: not ` +
         `this column, and not the fields that would have survived the strip. The call throws ` +
-        `ERR_READONLY_FIELD_REJECTED rather than returning success (#5126).`
+        `ERR_READONLY_FIELD_REJECTED rather than returning success.`
       : `DROPPED and the write is being COMMITTED WITHOUT IT — the runtime issues this value from its ` +
         `sequence, so the call returns success while the column holds the generated number, not the one ` +
-        `sent (#5503).`;
+        `sent.`;
   return (
     `Field '${field}'${on} is a runtime-owned '${type}' field: the caller-supplied value was ` +
     consequence +
@@ -2627,8 +2632,8 @@ export function runtimeOwnedStripWarning(
     `declare itself trusted by passing { context: { isSystem: true } }` +
     (audit
       ? `; a data import reinstating ` +
-        `legacy record numbers uses the historical-import context ({ context: { preserveAudit: true } }, ` +
-        `#3493), which reinstates THIS field while the rest of the strip stays in force. ` +
+        `legacy record numbers uses the historical-import context ({ context: { preserveAudit: true } }), ` +
+        `which reinstates THIS field while the rest of the strip stays in force. ` +
         `A beforeInsert/beforeUpdate hook does NOT need either — hook-written keys are not ` +
         `caller-supplied.`
       : `. A beforeInsert/beforeUpdate hook does NOT need it — hook-written keys are not ` +
@@ -2680,14 +2685,14 @@ export function readonlyStripWarning(
       ? `the caller-supplied value was DROPPED and the ${noun} is being REFUSED ENTIRELY — this ` +
         `write passed options.strictReadonlyWrites, so NOTHING is written: not this column, and ` +
         `not the fields that would have survived the strip. The call throws ` +
-        `ERR_READONLY_FIELD_REJECTED rather than returning success (#5126).`
+        `ERR_READONLY_FIELD_REJECTED rather than returning success.`
       : insert
         ? `the caller-supplied value was DROPPED and the create ` +
           `is being COMMITTED WITHOUT IT — the call returns success while this column takes its ` +
           `declared defaultValue instead of the value you sent.`
         : `the caller-supplied value was DROPPED and the update ` +
           `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
-          `value (#2948).`;
+          `value.`;
   return (
     `Field '${field}'${on} is read-only: ` +
     consequence +
@@ -4065,7 +4070,7 @@ function checkPredicate(
     // Still logged — the operator needs the fault in the log even though the
     // caller now gets it in the response. Note the verb: rejected, not skipped.
     logger?.warn?.(
-      `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected (#4649)`,
+      `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
     const unevaluable = unevaluableRuleError(rule.name, field, result.error, 'predicate');
     // [#20006] Same verdict; on a delete's reference cleanup, a text that names it.
@@ -4229,7 +4234,7 @@ function checkConditional(
 
   if (!result.ok) {
     ctx.logger?.warn?.(
-      `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected (#4649)`,
+      `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
     return unevaluableRuleError(rule.name, '_record', result.error, 'when-predicate');
   }

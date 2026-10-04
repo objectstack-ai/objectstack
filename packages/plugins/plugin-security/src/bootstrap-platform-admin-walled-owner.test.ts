@@ -6,7 +6,7 @@
  * History of this surface, because the pins below flip an older family:
  *  - #11184 (framework leg of cloud#1509): walled postures stopped promoting
  *    the first registrant; only the env-declared owner elevated.
- *  - #11343: the walled match additionally required a VERIFIED email.
+ *  - commit c0714eb5d: the walled match additionally required a VERIFIED email.
  *  - #13147: `OS_PLATFORM_OWNER_EMAIL` became a comma-separated list through
  *    the ONE parser in `@objectstack/core`.
  *  - **#11974 (#11663 L4, maintainer acceptance 2026-08-25, Choice 4A/5A):
@@ -24,7 +24,7 @@
  * state, and `single` still PROMOTES (Choice 4A — the over-denial guard:
  * retiring the walled write must not retire the `single` one).
  *
- *  - **#16682: the `single` SELECTION is repaired.** That guard used to be
+ *  - **Commit 9b9581b11: the `single` SELECTION is repaired.** That guard used to be
  *    written as "byte-for-byte", and one case snapshotted the incumbent's
  *    refusal to read `OS_PLATFORM_OWNER_EMAIL` on this branch. The incumbent
  *    was the defect: an unordered, cap-50 `sys_user` read sorted client-side,
@@ -460,7 +460,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
   });
 
   /**
-   * ⚠️ RE-AUTHORED by #16682. This case used to assert the opposite —
+   * ⚠️ RE-AUTHORED by commit 9b9581b11. This case used to assert the opposite —
    * "never consults the owner-email variable: a declared owner does NOT
    * redirect the single-org promotion" — and it is worth being explicit about
    * what changed and what did NOT, because the two are easy to confuse.
@@ -479,7 +479,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
    * only on the walled branch.
    *
    * The authority for the reversal is a MAINTAINER ruling — 2026-09-08,
-   * decision batch #100, recorded on #16682 (comment 5587754690), which
+   * decision batch #100, applied by commit 9b9581b11, which
    * supersedes the Choice 4A sentence for this one point and states what
    * survives it, verbatim:
    *
@@ -490,7 +490,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
    *   > `single` one, and the over-denial invariant (`adminPromoted === true`
    *   > with a grant row minted) stays pinned.
    *
-   * ⛔ An earlier revision of this comment quoted the #16682 TRIAGE seat's
+   * ⛔ An earlier revision of this comment quoted the TRIAGE seat's
    * ruling instead. That quotation was the reviewer's F3 finding: a pin
    * recorded under a maintainer ruling cannot be rewritten under a seat's.
    * The quotation above is the record that resolved it.
@@ -518,7 +518,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
     // #11974's over-denial guard, unchanged: the `single` write still happens.
     expect(r.adminPromoted).toBe(true);
     expect(ql.grants()).toHaveLength(1);
-    // #16682: and it goes to the address the operator declared, not to
+    // Commit 9b9581b11: and it goes to the address the operator declared, not to
     // whichever row the driver handed back first.
     expect(ql.grants()[0]?.user_id).toBe('u_second');
     expect(r.basis).toBe('declared-owner');
@@ -550,8 +550,8 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// [#11974, amended by #16682] The bootstrap-replay trigger set. #11974
-// narrowed it to `single` + create/insert: the #11343 update arm (email /
+// [#11974, amended by commit 9b9581b11] The bootstrap-replay trigger set. #11974
+// narrowed it to `single` + create/insert: commit c0714eb5d's update arm (email /
 // email_verified) fired for the walled verify-then-elevate sequence, which no
 // longer exists, and its own rationale was that "`single` promotes the oldest
 // authenticable human and never reads `email`/`email_verified`".

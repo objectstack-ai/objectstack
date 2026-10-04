@@ -47,16 +47,19 @@
  *
  * `the two pure shapes do not move` is the risk. The gate must move the
  * refusal set by EXACTLY the mixed shape: all-`$` wrappers keep compiling,
- * all-non-`$` wrappers keep flattening to dotted members. An over-reaching
+ * all-non-`$` wrappers keep their nested-relation path (flattened to dotted
+ * members until #20887, carried as written for the engine since). An over-reaching
  * gate shows up there as a throw.
  *
  * `the #5146 rewrite cannot swallow the wrapper` is the gate-side question,
- * same as #6386's: the gate sits in `fieldLeaves`, downstream of
- * `nullSafeNegationOperand`. For a MIXED wrapper the carry-through is
- * structural: a non-`$` key never satisfies `operatorIsNullTotal`, so
- * `nullGuardForFieldSpec` never answers `none` for one — the disposition is
- * always `requireValue`/`allowNull`, both of which push the spec by
- * reference, so the gate always sees the author's wrapper.
+ * same as #6386's: the gate sits in `fieldLeaves`, downstream of the rewrite —
+ * the shared lowering's rule 3 (`lowerFilterCondition`, `filter-lowering.ts`),
+ * since #5930 step 4 deleted this module's own copy of it. For a MIXED wrapper
+ * the carry-through is structural: a non-`$` key is never total for a missing
+ * value (the lowering's `operatorIsNullTotal`), so its `nullGuardForFieldSpec`
+ * never answers `none` for one — the disposition is always
+ * `requireValue`/`allowNull`, both of which carry the spec by reference, so the
+ * gate always sees the author's wrapper.
  *
  * ## Reverse verification — direction predicted BEFORE running
  *
@@ -86,7 +89,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 
 /** The ADR-0112 fields a refusal must carry. */
 interface FilterRefusal extends Error {
@@ -96,7 +99,7 @@ interface FilterRefusal extends Error {
 
 function refusalFor(where: unknown): FilterRefusal | undefined {
   try {
-    normalizeAnalyticsFilterTree({ where });
+    normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
     return undefined;
   } catch (e) {
     return e as FilterRefusal;
@@ -104,7 +107,7 @@ function refusalFor(where: unknown): FilterRefusal | undefined {
 }
 
 function treeFor(where: unknown): unknown {
-  return normalizeAnalyticsFilterTree({ where });
+  return normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
 }
 
 /**
@@ -162,14 +165,13 @@ const MIXED: Array<{
     nonOpKeys: ['nested'],
     wasReadAs: 'd notSet — the flag survived, the member did not',
   },
-  {
-    name: '⑥ the mix one relation DOWN, refused on the DOTTED member',
-    where: { profile: { verified: { $eq: 1, extra: 'x' } } },
-    field: 'profile.verified',
-    opKeys: ['$eq'],
-    nonOpKeys: ['extra'],
-    wasReadAs: 'profile.verified equals [1]',
-  },
+  // [#20887] Row ⑥ — the mix one relation DOWN, `{ profile: { verified: { $eq:
+  // 1, extra: 'x' } } }` — left this table: the nested-relation condition is
+  // no longer flattened to the dotted member, it is carried as written for the
+  // engine, which reads the related object with it and refuses the mixed
+  // wrapper there (`INVALID_FILTER` / 400, "Unsupported filter operator
+  // "extra"", measured on the engine for #20887). Its carriage is pinned in
+  // the pure-shapes block below.
   {
     name: '⑦ inside a $and branch',
     where: { $and: [{ d: { $eq: 1, nested: 'x' } }] },
@@ -250,11 +252,11 @@ describe('[#6444] a mixed $/non-$ field wrapper is ONE refusal', () => {
     // key-by-key and shown in place.
     expect(message).toContain('"gte" → "$gte"');
     expect(message).toContain('{ "amount": { "$gte": ... } }');
-    // Intent 2 — a nested-relation member: a wrapper of its own, the dotted
-    // member it compiles to, and the explicit $and (one JSON object cannot
-    // spell the same field key twice).
+    // Intent 2 — a nested-relation member: a wrapper of its own, read as a
+    // condition on the related record (#20887: the engine's reading), and the
+    // explicit $and (one JSON object cannot spell the same field key twice).
     expect(message).toContain('{ "amount": { "gte": ... } }');
-    expect(message).toContain('"amount.gte"');
+    expect(message).toContain('a condition on the related record\'s own "gte"');
     expect(message).toContain('"$and"');
     // …and why it refuses rather than picking: the drop it replaces WIDENED.
     expect(message).toContain('WIDENS');
@@ -263,11 +265,12 @@ describe('[#6444] a mixed $/non-$ field wrapper is ONE refusal', () => {
 });
 
 describe('[#6444] the #5146 rewrite cannot swallow the wrapper', () => {
-  // The gate lives in `fieldLeaves`, DOWNSTREAM of `nullSafeNegationOperand`.
-  // A mixed wrapper reaches it because a non-$ key never satisfies
-  // `operatorIsNullTotal`, so `nullGuardForFieldSpec` never answers `none` for
-  // one — `requireValue` and `allowNull` both push the author's spec by
-  // REFERENCE. One case per rewrite path that can carry a mixed wrapper.
+  // The gate lives in `fieldLeaves`, DOWNSTREAM of the `$not` rewrite (the
+  // shared lowering's rule 3 since #5930 step 4). A mixed wrapper reaches it
+  // because a non-$ key never satisfies the lowering's `operatorIsNullTotal`,
+  // so its `nullGuardForFieldSpec` never answers `none` for one —
+  // `requireValue` and `allowNull` both carry the author's spec by REFERENCE.
+  // One case per rewrite path that can carry a mixed wrapper.
   const REWRITE_PATHS: Array<{ name: string; where: unknown; field: string }> = [
     {
       name: '`requireValue` — pushes {k: {$null: false}}, {k: spec}; spec kept by reference',
@@ -284,11 +287,10 @@ describe('[#6444] the #5146 rewrite cannot swallow the wrapper', () => {
       where: { $not: { d: { $eq: null, nested: 'x' } } },
       field: 'd',
     },
-    {
-      name: 'the nested-relation recursion in `guardFieldEntry`, which guards the DOTTED member',
-      where: { $not: { profile: { verified: { $eq: 1, extra: 2 } } } },
-      field: 'profile.verified',
-    },
+    // [#20887] The fourth path — the nested-relation recursion in
+    // `guardFieldEntry`, which guarded the DOTTED member — is gone: a
+    // nested-relation condition is carried as written for the engine, and the
+    // engine refuses a mixed wrapper inside it (row ⑥'s note above).
   ];
 
   for (const c of REWRITE_PATHS) {
@@ -303,19 +305,26 @@ describe('[#6444] the #5146 rewrite cannot swallow the wrapper', () => {
 });
 
 describe('[#6444] the two pure shapes do not move', () => {
-  it('an ALL-non-$ wrapper still flattens to the dotted member (the nested-relation path)', () => {
+  it('an ALL-non-$ wrapper is the nested-relation condition, carried as written for the engine (#20887)', () => {
     // The pin the issue's own control row named: the ONLY reason the siblings
     // were droppable is that this legitimate path sat after the early return.
+    // [#20887] It used to flatten to the dotted member (`d.nested`); it is now
+    // the engine's form, carried whole — the engine reads the related object
+    // with it as the caller, and judges it there (one level, declared keys, the
+    // mixed wrapper one level down included).
     expect(treeFor({ d: { nested: 'x' } })).toEqual({
-      kind: 'leaf', member: 'd.nested', operator: 'equals', values: ['x'],
+      kind: 'relation', member: 'd', condition: { nested: 'x' },
     });
     expect(treeFor({ a: { b: { c: 1 } } })).toEqual({
-      kind: 'leaf', member: 'a.b.c', operator: 'equals', values: [1],
+      kind: 'relation', member: 'a', condition: { b: { c: 1 } },
     });
-    // A nested member carrying an OPERATOR wrapper (all-$ one level down) is
-    // legal on both levels and keeps compiling.
+    // An OPERATOR wrapper one level down (all-$) and a mixed one travel as
+    // written too: both are the related object's to judge.
     expect(treeFor({ profile: { verified: { $eq: true } } })).toEqual({
-      kind: 'leaf', member: 'profile.verified', operator: 'equals', values: [true],
+      kind: 'relation', member: 'profile', condition: { verified: { $eq: true } },
+    });
+    expect(treeFor({ profile: { verified: { $eq: 1, extra: 'x' } } })).toEqual({
+      kind: 'relation', member: 'profile', condition: { verified: { $eq: 1, extra: 'x' } },
     });
   });
 

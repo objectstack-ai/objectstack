@@ -62,7 +62,7 @@ describe('bindHooksToEngine', () => {
     expect(seen).toEqual(['called']);
   });
 
-  it('skips hooks whose string handler cannot be resolved', () => {
+  it('refuses a hook whose string handler names no function of its package', () => {
     const engine = makeEngine();
     const hook: Hook = {
       name: 'h3',
@@ -74,7 +74,7 @@ describe('bindHooksToEngine', () => {
     const result = bindHooksToEngine(engine, [hook], { packageId: 'p' });
     expect(result.registered).toBe(0);
     expect(result.skipped).toBe(1);
-    expect(result.errors[0]?.reason).toMatch(/unknown function/);
+    expect(result.errors[0]).toMatchObject({ hook: 'h3', code: 'INVALID_REFERENCE', status: 400 });
   });
 
   // #4001: `normalizeObjects` used to widen a blank target to `['*']`, the
@@ -164,7 +164,7 @@ describe('bindHooksToEngine', () => {
       };
 
       expect(() => bindHooksToEngine(engine, [hook], { strict: true }))
-        .toThrow(/unknown function 'no_such_fn'/);
+        .toThrowError(expect.objectContaining({ code: 'INVALID_REFERENCE', status: 400, handler: 'no_such_fn' }));
     });
 
     it('still records-and-continues when strict is off', () => {

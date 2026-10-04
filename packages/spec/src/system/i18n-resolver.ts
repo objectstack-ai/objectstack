@@ -15,6 +15,7 @@
  *   objects.<object>._actions.<action_name>.description
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
  *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
@@ -24,12 +25,23 @@
  * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
  * list/form key) — never the `<object>.<key>` identity the registry assigns a
  * served view document. `resolveViewLabel` derives the bare key from that
- * identity, so the same bundle serves both hand-built and served views (#4854).
+ * identity, so the same bundle serves both hand-built and served views (#4854),
+ * and `translateObject` reads the same keys for the views an object document
+ * embeds in its `listViews`, by their record key.
  *
- * For object-less actions (no `objectName`), helpers fall back to:
+ * An action's copy lives at ONE address, chosen by the action's own
+ * `objectName` — never by the object a caller renders it under. A bound action
+ * reads only its `objects.<object>._actions.<action_name>` keys above. An
+ * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .params.<param_name>.*
+ *     .successMessage / .outcomeMessages.<outcome> / .params.<param_name>.* /
+ *     .resultDialog.*
+ *
+ * That is the declaration `TranslationDataSchema.globalActions` makes: global
+ * translations are for object-less actions. A `globalActions` entry that names
+ * a bound action is never read, and `os validate` refuses it with the
+ * object-scoped key to write instead. See {@link actionTranslationNode}.
  *
  * Lookup order: requested locale → each entry of `fallbackChain` → literal
  * `label` from the metadata — except that a request for the deployment's
@@ -56,6 +68,7 @@
  */
 
 import { mapFlowNodeList } from '../conversions/walk.js';
+import { pageComponentSlotPositions } from '../ui/component.zod.js';
 
 import type {
   PlatformTranslationBundle,
@@ -149,6 +162,11 @@ export interface ActionLike {
   description?: string;
   confirmText?: string;
   successMessage?: string;
+  /**
+   * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
+   * narrowed to `string` values for the same reason `successMessage` is.
+   */
+  outcomeMessages?: Record<string, string>;
   /** `ActionSchema.params` — the param dialog's own copy. */
   params?: ActionParamLike[];
   /** When omitted, the action is treated as global. */
@@ -401,6 +419,32 @@ function viewTranslationKey(view: ViewLike, objectName: string): string {
 }
 
 /**
+ * One string off a view's `objects.<object>._views.<viewKey>` node, across the
+ * locale chain — `undefined` when no locale carries it.
+ *
+ * The ONE read of that address. Both view channels go through it: a served
+ * view document ({@link resolveViewLabel}, {@link resolveViewDescription},
+ * keyed by {@link viewTranslationKey}) and a view embedded in an object
+ * document's `listViews` ({@link translateObject}, keyed by its record key).
+ * Both keys are the bare authoring key the i18n extractor's `pushViewEntries`
+ * writes, so one lookup serves both — ⛔ never a second key convention.
+ */
+function lookupViewText(
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  viewKey: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._views?.[viewKey]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Resolve a translated view label, falling back to the literal `view.label`
  * (or `view.name`) when no translation is available.
  */
@@ -411,14 +455,8 @@ export function resolveViewLabel(
 ): string {
   const fallback = view.label ?? view.name;
   const objectName = viewObjectName(view);
-  if (!bundle || !objectName) return fallback;
-  const key = viewTranslationKey(view, objectName);
-  for (const code of localeChain(opts)) {
-    const data = pickData(bundle, code);
-    const candidate = data?.objects?.[objectName]?._views?.[key]?.label;
-    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-  }
-  return fallback;
+  if (!objectName) return fallback;
+  return lookupViewText(bundle, objectName, viewTranslationKey(view, objectName), 'label', opts) ?? fallback;
 }
 
 /**
@@ -431,16 +469,9 @@ export function resolveViewDescription(
   opts?: ResolveOptions,
 ): string | undefined {
   const objectName = viewObjectName(view);
-  if (bundle && objectName) {
-    const key = viewTranslationKey(view, objectName);
-    for (const code of localeChain(opts)) {
-      const data = pickData(bundle, code);
-      const candidate =
-        data?.objects?.[objectName]?._views?.[key]?.description;
-      if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-    }
-  }
-  return view.description;
+  if (!objectName) return view.description;
+  return lookupViewText(bundle, objectName, viewTranslationKey(view, objectName), 'description', opts)
+    ?? view.description;
 }
 
 /**
@@ -524,6 +555,36 @@ function lookupTabLabel(
   return undefined;
 }
 
+/**
+ * The ONE translation node an action resolves through, in one locale's data.
+ * Every action lookup below reads its leaf off this node, so they cannot
+ * disagree about the address.
+ *
+ * The address is keyed on the action's OWN `objectName`:
+ *
+ *  - a bound action reads only `objects.<objectName>._actions.<name>`;
+ *  - an object-less action reads only `globalActions.<name>`.
+ *
+ * A bound action never falls back to `globalActions`. The declaration
+ * `TranslationDataSchema.globalActions` scopes that group to object-less
+ * actions, and the translation linter refuses a `globalActions` key that names
+ * a bound action, at error level, as never read. A fallback here would make
+ * that refused key work at runtime.
+ *
+ * An object document's inline action carries no `objectName`, and is bound to
+ * the object that declares it. {@link translateObject} scopes it to that object
+ * before it reaches here.
+ */
+function actionTranslationNode(
+  data: TranslationData | undefined,
+  action: ActionLike,
+): NonNullable<TranslationData['globalActions']>[string] | undefined {
+  if (!data) return undefined;
+  return action.objectName
+    ? data.objects?.[action.objectName]?._actions?.[action.name]
+    : data.globalActions?.[action.name];
+}
+
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
@@ -532,14 +593,8 @@ function lookupActionField(
 ): string | undefined {
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
-    const data = pickData(bundle, code);
-    if (!data) continue;
-    const fromObject = action.objectName
-      ? data.objects?.[action.objectName]?._actions?.[action.name]?.[field]
-      : undefined;
-    if (typeof fromObject === 'string' && fromObject.length > 0) return fromObject;
-    const fromGlobal = data.globalActions?.[action.name]?.[field];
-    if (typeof fromGlobal === 'string' && fromGlobal.length > 0) return fromGlobal;
+    const candidate = actionTranslationNode(pickData(bundle, code), action)?.[field];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
   return undefined;
 }
@@ -574,20 +629,15 @@ export function resolveActionConfirm(
 
 /**
  * Look up the translated `resultDialog` node for an action in a single
- * locale's data (object-scoped first, then global). The node's `fields`
- * record is keyed by the LITERAL result-field path (`"user.email"`), so it
- * is indexed directly — never split on `.`.
+ * locale's data, at the action's one address ({@link actionTranslationNode}).
+ * The node's `fields` record is keyed by the LITERAL result-field path
+ * (`"user.email"`), so it is indexed directly — never split on `.`.
  */
 function lookupActionResultDialogNode(
   data: TranslationData | undefined,
   action: ActionLike,
 ): { title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> } | undefined {
-  if (!data) return undefined;
-  const fromObject = action.objectName
-    ? data.objects?.[action.objectName]?._actions?.[action.name]?.resultDialog
-    : undefined;
-  if (fromObject) return fromObject;
-  return data.globalActions?.[action.name]?.resultDialog;
+  return actionTranslationNode(data, action)?.resultDialog;
 }
 
 function lookupActionResultDialogText(
@@ -659,9 +709,48 @@ export function resolveActionSuccess(
 }
 
 /**
+ * The translated `outcomeMessages` map of an action (#21095), or `undefined`
+ * when the action declares none.
+ *
+ * Overlaid KEY BY KEY, and only for outcomes the action itself declares: the
+ * map's keys are the closed set of `outcome` facts the handler reports, so a
+ * bundle cannot add an outcome — a translated entry for an undeclared key is
+ * never selected by anything and is not copied in. Each declared key resolves
+ * the way {@link lookupActionField} resolves `successMessage`: at the action's
+ * one address ({@link actionTranslationNode}), so
+ * `objects.<object>._actions.<action>.outcomeMessages.<outcome>` for a bound
+ * action and `globalActions.<action>.outcomeMessages.<outcome>` for an
+ * object-less one, per locale in the chain, falling back to the authored copy.
+ * The `${result.*}` tokens in a message are the renderer's to interpolate — a
+ * translation carries them verbatim.
+ */
+function resolveActionOutcomeMessages(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike,
+  opts?: ResolveOptions,
+): Record<string, string> | undefined {
+  const declared = action.outcomeMessages;
+  if (!declared || typeof declared !== 'object') return undefined;
+  if (!bundle) return declared;
+  const chain = localeChain(opts);
+  let out: Record<string, string> | undefined;
+  for (const outcome of Object.keys(declared)) {
+    for (const code of chain) {
+      const candidate = actionTranslationNode(pickData(bundle, code), action)?.outcomeMessages?.[outcome];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        out ??= { ...declared };
+        out[outcome] = candidate;
+        break;
+      }
+    }
+  }
+  return out ?? declared;
+}
+
+/**
  * The `params.<param>` translation node for one action, in one locale's data —
- * object-scoped first, then `globalActions`, the same split
- * {@link lookupActionField} walks.
+ * at the action's one address ({@link actionTranslationNode}), the same
+ * address {@link lookupActionField} reads.
  */
 function lookupActionParamNode(
   data: TranslationData | undefined,
@@ -670,12 +759,7 @@ function lookupActionParamNode(
 ): NonNullable<
   NonNullable<NonNullable<NonNullable<TranslationData['objects']>[string]['_actions']>[string]['params']>
 >[string] | undefined {
-  if (!data) return undefined;
-  const fromObject = action.objectName
-    ? data.objects?.[action.objectName]?._actions?.[action.name]?.params?.[paramName]
-    : undefined;
-  if (fromObject) return fromObject;
-  return data.globalActions?.[action.name]?.params?.[paramName];
+  return actionTranslationNode(data, action)?.params?.[paramName];
 }
 
 /**
@@ -812,13 +896,21 @@ function lookupBulkActionText(
  * Reference identity is load-bearing rather than tidy: `translateView` uses it
  * to decide whether to rebuild `config` at all, so a view with no bulk
  * translations comes back with its config object untouched.
+ *
+ * `packagedConfig` is the `config` of the view's packaged base (`undefined`
+ * when no base was supplied, `{}` when the base carries none): each def and
+ * each param is found in it by the `name` the bundle addresses it by
+ * ({@link packagedPart}), and a string that diverged from its packaged
+ * counterpart is authored and keeps its value (#20731, see
+ * {@link translateView}).
  */
 function translateBulkActionDefs(
   defs: unknown,
   bundle: TranslationBundle | undefined,
   objectName: string,
   viewKey: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
   if (!Array.isArray(defs) || !bundle) return defs;
   let changed = false;
@@ -828,12 +920,21 @@ function translateBulkActionDefs(
       return raw;
     }
     const defName = def.name;
-    const text = (pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown) =>
-      lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
+    const packagedDef = packagedPart(packagedConfig, 'bulkActionDefs', (candidate) => candidate.name === defName);
+    // The catalog's string for `attr`, unless the authored value diverged from
+    // `packaged`'s — then `undefined`, which leaves the authored value in place.
+    const text = (
+      packaged: Record<string, unknown> | undefined,
+      attr: string,
+      authored: unknown,
+      pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown,
+    ) => valueOverridesPackagedBase(packaged, attr, authored)
+      ? undefined
+      : lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
 
-    const label = text((n) => n.label);
-    const confirmText = text((n) => n.confirmText);
-    const confirmLabel = text((n) => n.confirmLabel);
+    const label = text(packagedDef, 'label', def.label, (n) => n.label);
+    const confirmText = text(packagedDef, 'confirmText', def.confirmText, (n) => n.confirmText);
+    const confirmLabel = text(packagedDef, 'confirmLabel', def.confirmLabel, (n) => n.confirmLabel);
 
     let params = def.params;
     if (Array.isArray(def.params)) {
@@ -843,9 +944,10 @@ function translateBulkActionDefs(
           return param;
         }
         const paramName = param.name;
-        const pLabel = text((n) => n.params?.[paramName]?.label);
-        const pHelp = text((n) => n.params?.[paramName]?.help);
-        const pPlaceholder = text((n) => n.params?.[paramName]?.placeholder);
+        const packagedParam = packagedPart(packagedDef, 'params', (candidate) => candidate.name === paramName);
+        const pLabel = text(packagedParam, 'label', param.label, (n) => n.params?.[paramName]?.label);
+        const pHelp = text(packagedParam, 'help', param.help, (n) => n.params?.[paramName]?.help);
+        const pPlaceholder = text(packagedParam, 'placeholder', param.placeholder, (n) => n.params?.[paramName]?.placeholder);
         if (pLabel === undefined && pHelp === undefined && pPlaceholder === undefined) return param;
         paramsChanged = true;
         return {
@@ -902,24 +1004,61 @@ function translateBulkActionDefs(
  * `expandViewContainer` put the whole `ListViewSchema` under `config`. The
  * object is rebuilt only when a def actually gained a translation, so a view
  * with none comes back with the very same `config` reference.
+ *
+ * ## [#20731] The catalog LOSES to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog (`objects.<object>._views.<viewKey>`) is the packaged
+ * translation of the PACKAGED view. Consulting it first overwrote every
+ * string authored on top of that view — measured: an org overlay on the
+ * showcase's packaged `showcase_task.in_progress` (ADR-0126 Regime O, "yours
+ * to edit directly") changed its label to `In Progress (edited-20680)`, the
+ * metadata protocol's item and list reads both served the edit, an `en`
+ * reader got it, and a `zh-CN` reader — admin or member, item or list — got
+ * `进行中`, the catalog's translation of the label the package shipped.
+ *
+ * So every string here follows the rule {@link translateDashboard} and
+ * {@link translateObject} follow, by the same comparison
+ * ({@link valueOverridesPackagedBase}; ⛔ never a second one): the catalog
+ * applies only while the served value still equals the one in
+ * {@link TranslateDocumentOptions.packagedBase}, which the serving layer
+ * supplies — the packaged view before any tenant overlay,
+ * `getPackagedViewBase` on the metadata protocol, looked up by the served
+ * view's registry identity (the qualified `<object>.<viewKey>` name, never the
+ * bare key the catalog uses, which another object's view may share). The view
+ * `label` and `description` are judged against the base's; each bulk-action
+ * def's `label` / `confirmText` / `confirmLabel` and each of its params'
+ * `label` / `help` / `placeholder` against the def and param the base carries
+ * under the same `name` — the key the bundle addresses them by — and a def or
+ * param the base does not carry was authored after the fact and counts as
+ * diverged. No base supplied is the pre-#20731 behaviour, unchanged: the
+ * catalog applies.
  */
 export function translateView<T extends ViewLike>(
   view: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
-  const label = resolveViewLabel(bundle, view, opts);
-  const description = resolveViewDescription(bundle, view, opts);
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', view.label)
+    ? (view.label as string)
+    : resolveViewLabel(bundle, view, opts);
+  const description = valueOverridesPackagedBase(base, 'description', view.description)
+    ? view.description
+    : resolveViewDescription(bundle, view, opts);
 
   let config = view.config;
   const objectName = viewObjectName(view);
   if (config && typeof config === 'object' && bundle && objectName) {
+    // The base's own `config` — `{}` when the base is known but carries none,
+    // so every def on the served view then counts as authored.
+    const packagedConfig = base === undefined ? undefined : asRecord(base.config) ?? {};
     const defs = translateBulkActionDefs(
       config.bulkActionDefs,
       bundle,
       objectName,
       viewTranslationKey(view, objectName),
       opts,
+      packagedConfig,
     );
     if (defs !== config.bulkActionDefs) config = { ...config, bulkActionDefs: defs };
   }
@@ -934,8 +1073,9 @@ export function translateView<T extends ViewLike>(
 
 /**
  * Apply the active locale to an action metadata document by overwriting
- * `label`, `description`, `confirmText`, `successMessage`, the `params[]` copy
- * and the `resultDialog` copy with translated values when available. The
+ * `label`, `description`, `confirmText`, `successMessage`, each declared
+ * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy with
+ * translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -964,6 +1104,7 @@ export function translateAction<T extends ActionLike>(
   const description = lookupActionField(bundle, action, 'description', opts) ?? action.description;
   const confirmText = resolveActionConfirm(bundle, action, opts);
   const successMessage = resolveActionSuccess(bundle, action, opts);
+  const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
   return {
@@ -972,6 +1113,7 @@ export function translateAction<T extends ActionLike>(
     ...(description !== undefined ? { description } : {}),
     ...(confirmText !== undefined ? { confirmText } : {}),
     ...(successMessage !== undefined ? { successMessage } : {}),
+    ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
   };
@@ -1003,6 +1145,7 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // `@objectstack/rest` reads the derived set.
   dataset: translateDataset,
   page: translatePage,
+  picklist: translatePicklist,
 };
 
 /**
@@ -1142,10 +1285,12 @@ export interface WidgetLike {
   title?: string;
   description?: string;
   /**
-   * The renderer-extras bag (`DashboardWidgetOptionsSchema`). `translateDashboard`
-   * writes exactly one key into it — `description`, the metric widget's
-   * sub-caption slot — when the bundle carries a
-   * `dashboards.<name>.widgets.<id>.subCaption` entry (#5428 item 4, #7862).
+   * The widget options bag (`DashboardWidgetOptionsSchema`). `translateDashboard`
+   * writes nothing into it and carries it through untouched. It used to
+   * overlay `description` here — the metric sub-caption, from a
+   * `dashboards.<name>.widgets.<id>.subCaption` entry — until ruling C on
+   * objectui#11389 retired the sub-caption at both ends: a widget keeps one
+   * authored description, `widget.description`.
    */
   options?: Record<string, any>;
   [key: string]: any;
@@ -1227,24 +1372,78 @@ function lookupGlobalFilterOption(
   return undefined;
 }
 
+/** A plain (non-array) object, or `undefined`. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** A global-filter option value the bundle can address (`String(value)`). */
+function isOptionValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+/**
+ * [#20680] The packaged counterpart of one addressable part of a translated
+ * document — a dashboard's widget, global filter or filter option; a view's
+ * bulk-action def or its param (#20731) — found in `parent[key]` (an array) by
+ * the key the bundle addresses it by.
+ *
+ * Three answers, and the difference between the first two is the point:
+ *
+ *  - `undefined` when `parent` is unknown — no packaged base was supplied, so
+ *    nothing may be inferred and the catalog keeps applying
+ *    ({@link valueOverridesPackagedBase} answers `false` for it);
+ *  - `{}` when the base IS known but carries no such part — the part was
+ *    authored after the fact (a widget the tenant added), so every string on
+ *    it counts as diverged, as a scalar the packaged object never declared
+ *    does under #8284;
+ *  - the packaged part itself otherwise.
+ *
+ * One finder for both translators ({@link translateDashboard},
+ * {@link translateView}), as there is one comparison behind them.
+ */
+function packagedPart(
+  parent: Record<string, unknown> | undefined,
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params',
+  matches: (candidate: Record<string, any>) => boolean,
+): Record<string, unknown> | undefined {
+  if (parent === undefined) return undefined;
+  const list = parent[key];
+  if (!Array.isArray(list)) return {};
+  for (const candidate of list) {
+    const record = asRecord(candidate);
+    if (record !== undefined && matches(record)) return record;
+  }
+  return {};
+}
+
 /**
  * Overlay `dashboards.<name>.globalFilters.<key>.{label,options.<value>}`
  * onto one authored filter (#16772). Returns the input object itself when
  * nothing resolved, so `translateDashboard` can tell "untouched" from
  * "rebuilt" by identity and leave `globalFilters` off the copy when no filter
  * moved.
+ *
+ * `packagedFilter` is the same filter in the dashboard's packaged base
+ * ({@link packagedPart}); a label that diverged from it is authored
+ * and keeps its value (#20680, see {@link translateDashboard}).
  */
 function translateGlobalFilter(
   filter: GlobalFilterLike,
   bundle: TranslationBundle,
   dashboardName: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedFilter: Record<string, unknown> | undefined,
 ): GlobalFilterLike {
   const key = globalFilterKey(filter);
   if (key === undefined) return filter;
 
   let next = filter;
-  const label = lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
+  const label = valueOverridesPackagedBase(packagedFilter, 'label', filter.label)
+    ? undefined
+    : lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
   if (label !== undefined) next = { ...next, label };
 
   if (Array.isArray(filter.options)) {
@@ -1257,6 +1456,12 @@ function translateGlobalFilter(
       // is the one spelling every value has; `null`/`undefined`/objects have
       // no such spelling and are left alone.
       if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return option;
+      const packagedOption = packagedPart(
+        packagedFilter,
+        'options',
+        (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(value),
+      );
+      if (valueOverridesPackagedBase(packagedOption, 'label', option.label)) return option;
       const translated = lookupGlobalFilterOption(bundle, dashboardName, key, String(value), opts);
       if (translated === undefined) return option;
       changed = true;
@@ -1285,7 +1490,7 @@ function lookupWidgetAttr(
   bundle: TranslationBundle | undefined,
   dashboardName: string,
   widgetId: string,
-  attr: 'title' | 'description' | 'subCaption',
+  attr: 'title' | 'description',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1300,15 +1505,14 @@ function lookupWidgetAttr(
 /**
  * Apply the active locale to a dashboard metadata document — translates the
  * dashboard's `label` / `description` and each widget's `title` /
- * `description` / `subCaption` against `dashboards.<name>.widgets.<id>.*`.
- * The input document is not mutated.
+ * `description` against `dashboards.<name>.widgets.<id>.*`. The input
+ * document is not mutated.
  *
- * `subCaption` overlays the widget's `options.description` — the metric
- * widget's sub-caption, a DIFFERENT authored field from `widget.description`
- * (#5428 item 4: two authored fields, two keys; #7862). The `description`
- * key never reaches `options.description`, and `subCaption` never reaches
- * `widget.description`; the other `options` keys are carried through
- * untouched.
+ * A widget's `options` bag is carried through untouched: nothing here writes
+ * into it. The metric sub-caption — a `subCaption` bundle entry overlaid onto
+ * `options.description` — was retired at both ends by ruling C on
+ * objectui#11389 (reversing #5428 item 4); the bundle key is a tombstone and a
+ * widget keeps one authored description, `widget.description`.
  *
  * Global filters are translated too (#16772), against
  * `dashboards.<name>.globalFilters.<key>.label` and
@@ -1319,25 +1523,64 @@ function lookupWidgetAttr(
  * a string. Only filters the bundle actually addresses are rebuilt, and
  * `globalFilters` is left off the copy entirely when none moved, so a
  * dashboard without filters gains no invented key.
+ *
+ * ## [#20680] The catalog LOSES to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog is keyed by dashboard name and widget id, and it is the
+ * packaged translation of the PACKAGED declaration. Consulting it first
+ * overwrote every string authored on top of that declaration — measured: an
+ * org overlay on the platform's own `system_overview` (ADR-0126 Regime O,
+ * "yours to edit directly") published `200`, `?layers=true` showed it as
+ * effective, the metadata protocol's item and list reads both returned it,
+ * and the `/meta` item and list doors — the list is what the console draws
+ * the board from — kept serving the shipped widget title, because
+ * `platform-objects` ships an `en` bundle whose `widgets.<id>.title` repeats
+ * it. A dashboard whose bundle carries no widget titles (the showcase
+ * control) served the same overlay correctly.
+ *
+ * So every translatable string here follows the one sentence ADR-0029 D9.2a
+ * records for both object layers — *an explicit override beats a packaged
+ * default* — by the same comparison #8284 was ruled on: the catalog applies
+ * only while the served value still equals the one in
+ * {@link TranslateDocumentOptions.packagedBase}, which the serving layer
+ * supplies (the packaged dashboard declaration, before any tenant overlay —
+ * `getPackagedDashboardBase` on the metadata protocol). Each string is judged
+ * against ITS packaged counterpart, found by the key the bundle addresses it
+ * by (widget `id`, filter key, option `value`), so an edited widget title
+ * leaves every other widget translated; a widget, filter or option the base
+ * does not carry was authored after the fact and counts as diverged (the
+ * object rule's "a base that declares no such scalar"). No base supplied is
+ * the pre-#20680 behaviour, unchanged: the catalog applies.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
   if (!name || !bundle) return doc;
 
-  const label = lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
-  const description = lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', doc.label)
+    ? doc.label
+    : lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
+  const description = valueOverridesPackagedBase(base, 'description', doc.description)
+    ? doc.description
+    : lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
 
   let globalFilters: GlobalFilterLike[] | undefined;
   if (Array.isArray(doc.globalFilters)) {
     let changed = false;
     const rebuilt = doc.globalFilters.map((filter) => {
       if (!filter || typeof filter !== 'object') return filter;
-      const next = translateGlobalFilter(filter, bundle, name, opts);
+      const key = globalFilterKey(filter);
+      const packagedFilter = packagedPart(
+        base,
+        'globalFilters',
+        (candidate) => key !== undefined && globalFilterKey(candidate) === key,
+      );
+      const next = translateGlobalFilter(filter, bundle, name, opts, packagedFilter);
       if (next !== filter) changed = true;
       return next;
     });
@@ -1348,12 +1591,15 @@ export function translateDashboard<T extends DashboardLike>(
     ? doc.widgets.map((w) => {
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
-        const title = lookupWidgetAttr(bundle, name, w.id, 'title', opts);
+        const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
+        const title = valueOverridesPackagedBase(packagedWidget, 'title', w.title)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'title', opts);
         if (title) next.title = title;
-        const desc = lookupWidgetAttr(bundle, name, w.id, 'description', opts);
+        const desc = valueOverridesPackagedBase(packagedWidget, 'description', w.description)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'description', opts);
         if (desc) next.description = desc;
-        const subCaption = lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
-        if (subCaption) next.options = { ...w.options, description: subCaption };
         return next;
       })
     : doc.widgets;
@@ -1577,7 +1823,7 @@ function lookupPageAttr(
  * or omitting one it reads — so there is one list and both sides import it.
  * `translation.zod.ts` declares the same five; `translation.test.ts` pins the
  * two in agreement. (`submitLabel` retired with its only declarer,
- * `element:form` — #9249 / #10926.)
+ * `element:form` — #9249 / commit d173125fb.)
  */
 export const PAGE_COMPONENT_COPY_KEYS = [
   'title', 'description', 'label', 'placeholder', 'emptyText',
@@ -1616,9 +1862,11 @@ function lookupPageComponentCopy(
 }
 
 /**
- * How many levels of composition nesting — `properties.children` (#12961) and
- * `properties.items[].children` (#16772), each panel costing one level —
- * {@link walkAddressedPageComponents} descends below root level.
+ * How many levels of composition nesting — every authorable slot position
+ * `pageComponentSlotPositions()` names: `properties.children` (commit 901355c3b),
+ * `properties.items[].children` (#16772) and `properties.footer` (#20940), each
+ * panel costing one level — {@link walkAddressedPageComponents} descends below
+ * root level.
  * Authored page trees run three or four deep in practice, so the cap is not a
  * limit any real document meets — it exists because `children` is authored
  * data, and a walk that never throws must still be finite on a pathological
@@ -1628,7 +1876,7 @@ function lookupPageComponentCopy(
  * the cycle guard catches a subtree that contains itself, the cap catches one
  * that is merely absurd. Still deliberately NOT exported — the NUMBER is a
  * safety property, not a contract consumers address; what IS exported is the
- * walk that encloses it (#13218), so no consumer needs the number to stay in
+ * walk that encloses it (commit c45d8e6b4), so no consumer needs the number to stay in
  * step. The pin lives in `i18n-resolver.test.ts`, which restates this literal
  * so raising it here reds there; the CLI's deep-chain differential
  * (`platform-page-i18n-parity.test.ts`) holds both consumers of the walk to
@@ -1656,9 +1904,11 @@ export interface AddressedPageComponentContext {
    */
   id: string | undefined;
   /**
-   * `true` below root level — the component was reached through a container's
-   * declared `properties.children`, or through a `properties.items[].children`
-   * panel of a `page:tabs` / `page:accordion` (#16772).
+   * `true` below root level — the component was reached through one of a
+   * container's authorable slot positions (`pageComponentSlotPositions()`):
+   * `properties.children`, a `page:card`'s `properties.footer` (#20940), or a
+   * `properties.items[].children` panel of a `page:tabs` / `page:accordion`
+   * (#16772).
    */
   nested: boolean;
   /**
@@ -1669,7 +1919,7 @@ export interface AddressedPageComponentContext {
   depth: number;
   /**
    * `true` when this component OWNS its id's `pages.<name>.components.<id>`
-   * entry under the ruled collision arbitration (#12961): a root-level
+   * entry under the ruled collision arbitration (commit 901355c3b): a root-level
    * component carrying the id wins outright — even over a nested match seen
    * earlier in document order — and among nested components the depth-first
    * document-order FIRST sighting takes it. At most one visited component is
@@ -1693,11 +1943,11 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  * (this package) and the CLI extractor's `collectExpectedEntries`
  * (`packages/cli`, behind `os i18n extract` / `os i18n coverage`).
  *
- * Exported for the same reason {@link PAGE_COMPONENT_COPY_KEYS} is (#13218,
+ * Exported for the same reason {@link PAGE_COMPONENT_COPY_KEYS} is (commit c45d8e6b4,
  * ruled 2026-08-30, completing that precedent): the WALK used to be
  * hand-mirrored across the two packages, and a mirrored traversal drifts into
  * the classic pair of failures — the extractor offering an id the resolver
- * ignores, or omitting one it reads (#13109 was the second half going live).
+ * ignores, or omitting one it reads (the second half went live; commit 8b236c826 fixed it).
  * Five invariants live here and ONLY here:
  *
  *   - roots: `regions[].components[]` AND `slots.<slot>` — a `kind: 'slotted'`
@@ -1706,15 +1956,23 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  *     such a page had exactly two addressable keys (`label`, `description`)
  *     however many components it authored. Regions first, then the slots in
  *     authored key order; both are ROOT level (depth `0`, `nested: false`);
- *   - descent: a container's declared `properties.children` (#5775, the one
- *     composition key) AND a `page:tabs` / `page:accordion` panel's
- *     `properties.items[].children` (#16772 — the panel object itself is not
- *     a component and is not visited; its `children` sit one level below the
- *     tabs node, exactly as a `children` entry would). Both are matched by
+ *   - descent: every AUTHORABLE slot position `pageComponentSlotPositions()`
+ *     (`ui/component.zod.ts`) derives from the component rows — the list this
+ *     walk shares with the ADR-0087 conversion walker and lint's
+ *     `walkPageComponents`, so the three cannot disagree about where a
+ *     sub-tree hangs (#20940). Today: a container's `properties.children`
+ *     (#5775, the one composition key), a `page:card`'s `properties.footer`
+ *     (a declared, rendered slot distinct from `children` — #20940; before it
+ *     a node there was judged by `os lint` and skipped here), and a
+ *     `page:tabs` / `page:accordion` panel's `properties.items[].children`
+ *     (#16772 — the panel object itself is not a component and is not
+ *     visited; its `children` sit one level below the tabs node, exactly as a
+ *     `children` entry would), visited in that order. All are matched by
  *     SHAPE, not by component type, because `properties` is an open bag and
- *     custom component types are legal. `body` / `footer` are deliberately
- *     still not descended — a renderer-side back-compat fallback for stored
- *     documents, not an authorable spelling;
+ *     custom component types are legal. A RETIRED spelling (`page:card.body`,
+ *     tombstoned by #5775 under the 2026-08-06 ruling) is deliberately not
+ *     descended — a renderer-side back-compat fallback for stored documents,
+ *     not an authorable spelling;
  *   - the descent is depth-capped ({@link MAX_NESTED_COMPONENT_DEPTH},
  *     module-private — the walk is the contract, the number is its safety
  *     property);
@@ -1726,14 +1984,14 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  * The visitor is called for EVERY component the walk reaches (addressed or
  * not), parent before children, siblings in document order. Its return value
  * REPLACES the node in the rebuilt root trees the walk returns; after the
- * visitor runs, the walk re-attaches the node's rebuilt `children` array (and
- * rebuilt `items[].children` arrays) in place of the existing keys, so the
- * visitor never needs to recurse itself. Enumeration-only consumers return
- * the component unchanged and ignore the walk's return value. The input
- * document is never mutated. Entries of `children` that are not component
- * objects (bare id strings, `null` — the slot is `z.array(z.unknown())`) pass
- * through unvisited; a region or slot whose shape is off-spec is returned
- * as-is.
+ * visitor runs, the walk re-attaches the node's rebuilt slot arrays (`children`,
+ * `footer`, and the panel list `items` with each panel's `children` rebuilt)
+ * in place of the existing keys, so the visitor never needs to recurse itself.
+ * Enumeration-only consumers return the component unchanged and ignore the
+ * walk's return value. The input document is never mutated. Entries of a slot
+ * that are not component objects (bare id strings, `null` — every slot is
+ * `z.array(z.unknown())`) pass through unvisited; a region or slot whose shape
+ * is off-spec is returned as-is.
  *
  * Returns the rebuilt {@link AddressedPageRoots} — `regions` and `slots`, each
  * present exactly when present on the input.
@@ -1746,7 +2004,7 @@ export function walkAddressedPageComponents(
     ? doc.slots
     : undefined;
 
-  // Collision arbitration, pass 1 (#12961): every id carried by a ROOT-LEVEL
+  // Collision arbitration, pass 1 (commit 901355c3b): every id carried by a ROOT-LEVEL
   // component — a region's entry or a slot's. The ruling makes root level the
   // outright winner when an id repeats across levels, so the whole set has to
   // be known before the descent visits its first nested component — a
@@ -1784,48 +2042,56 @@ export function walkAddressedPageComponents(
   // and the collision ledger above is what decides between them.
   const ancestors = new Set<PageComponentLike>();
 
+  // The slot positions this walk descends: the AUTHORABLE entries of the one
+  // list the component rows derive (#20940), read once per walk. A retired
+  // spelling (`page:card.body`) is not among them — see the docblock above.
+  const slotPositions = pageComponentSlotPositions().filter((position) => !position.retired);
+
+  /** Is `entry` a panel of a panel list — an object carrying `panelKey`'s array? */
+  const isPanel = (entry: unknown, panelKey: string): entry is Record<string, unknown> =>
+    !!entry && typeof entry === 'object' && !Array.isArray(entry)
+      && Array.isArray((entry as Record<string, unknown>)[panelKey]);
+
   /**
-   * The component's rebuilt composition slots — `properties.children` and
-   * `properties.items` (each panel's `children` rebuilt) — or `undefined` for
-   * a slot there is nothing to descend into, so a component without either is
-   * returned untouched rather than gaining an invented `properties` bag.
+   * The component's rebuilt composition slots — one entry per slot key the
+   * component carries (`properties.children`, `properties.footer`, and the
+   * panel list `properties.items` with each panel's `children` rebuilt) — or
+   * `undefined` when there is nothing to descend into, so a component without
+   * any is returned untouched rather than gaining an invented `properties` bag.
+   * A panel list is descended (and rebuilt WHOLE) only when at least one of
+   * its entries is a panel; anything else in it (an option row of some other
+   * component, a bare string) passes through untouched.
    */
   const walkComposition = (
     component: PageComponentLike,
     depth: number,
-  ): { children?: unknown[]; items?: unknown[] } | undefined => {
+  ): Record<string, unknown[]> | undefined => {
     if (depth >= MAX_NESTED_COMPONENT_DEPTH) return undefined;
     const props = component.properties;
     if (!props || typeof props !== 'object' || Array.isArray(props)) return undefined;
-    const { children, items } = props as Record<string, unknown>;
-    const hasChildren = Array.isArray(children);
-    // A panel is descended when it is an object carrying a `children` array;
-    // anything else in `items` (an option row of some other component, a bare
-    // string) passes through untouched, and `items` is only rebuilt when at
-    // least one panel was descended.
-    const panels = Array.isArray(items)
-      ? items.map((item) =>
-          item && typeof item === 'object' && !Array.isArray(item)
-            && Array.isArray((item as Record<string, unknown>).children))
-      : undefined;
-    const hasPanels = panels !== undefined && panels.some(Boolean);
-    if (!hasChildren && !hasPanels) return undefined;
+    const bag = props as Record<string, unknown>;
+    const present = slotPositions.filter(({ key, panelKey }) => {
+      const list = bag[key];
+      if (!Array.isArray(list)) return false;
+      return panelKey === undefined || list.some((entry) => isPanel(entry, panelKey));
+    });
+    if (present.length === 0) return undefined;
     ancestors.add(component);
     try {
-      const rebuilt: { children?: unknown[]; items?: unknown[] } = {};
-      if (hasChildren) {
-        rebuilt.children = children.map((child) => visitComponent(child as PageComponentLike, depth + 1));
-      }
-      if (hasPanels) {
-        rebuilt.items = (items as unknown[]).map((item, index) => {
-          if (!panels![index]) return item;
-          const panel = item as Record<string, unknown>;
-          return {
-            ...panel,
-            children: (panel.children as unknown[]).map((child) =>
-              visitComponent(child as PageComponentLike, depth + 1)),
-          };
-        });
+      const rebuilt: Record<string, unknown[]> = {};
+      for (const { key, panelKey } of present) {
+        // Read the list already rebuilt for this key when two positions share
+        // it (two panel keys on one panel list), so they compose.
+        const list = rebuilt[key] ?? (bag[key] as unknown[]);
+        rebuilt[key] = panelKey === undefined
+          ? list.map((child) => visitComponent(child as PageComponentLike, depth + 1))
+          : list.map((entry) => (isPanel(entry, panelKey)
+            ? {
+                ...entry,
+                [panelKey]: (entry[panelKey] as unknown[]).map((child) =>
+                  visitComponent(child as PageComponentLike, depth + 1)),
+              }
+            : entry));
       }
       return rebuilt;
     } finally {
@@ -1851,14 +2117,15 @@ export function walkAddressedPageComponents(
     // consumer that emits in visit order emits in document order. The rebuilt
     // composition slots land on the RETURNED node afterwards, and they are
     // rebuilt from the ORIGINAL component, never from `next`. The walk owns
-    // two `properties` keys, each only when the ORIGINAL node carries it:
-    // `children` (rebuilt entry by entry), and — on a node carrying at least
-    // one panel (an `items` entry with a `children` array) — the WHOLE `items`
-    // array, panels rebuilt and every other entry carried across exactly as it
-    // was authored. So a visitor's edit to any other `items[*]` key (a panel's
-    // own `label`, say) is overwritten; on a node with no panel `items` is not
-    // rebuilt at all and such an edit stands. Everything else the visitor
-    // returns — every other `properties` key, every top-level key — is kept.
+    // the `properties` keys of its slot positions, each only when the ORIGINAL
+    // node carries it: a direct slot (`children`, `footer`) rebuilt entry by
+    // entry, and — on a node carrying at least one panel (an `items` entry
+    // with a `children` array) — the WHOLE panel list, panels rebuilt and
+    // every other entry carried across exactly as it was authored. So a
+    // visitor's edit to any other `items[*]` key (a panel's own `label`, say)
+    // is overwritten; on a node with no panel `items` is not rebuilt at all
+    // and such an edit stands. Everything else the visitor returns — every
+    // other `properties` key, every top-level key — is kept.
     let next = visit(component, { id, nested, depth, addressed });
 
     const rebuilt = walkComposition(component, depth);
@@ -1927,7 +2194,7 @@ export function walkAddressedPageComponents(
  * therefore id-only.
  *
  * Components nested in a container's declared `properties.children` array are
- * visited too, recursively (#12961, ruled 2026-08-29). This REVERSES the
+ * visited too, recursively (commit 901355c3b, ruled 2026-08-29). This REVERSES the
  * region-only boundary that stood here — "components nested inside another
  * component's `properties` are untyped free-form props" — which had made the
  * resolver narrower than the face it serves: `pages.<name>.components.<id>`
@@ -1939,7 +2206,7 @@ export function walkAddressedPageComponents(
  *
  * Two composition slots are descended: `children` — the one composition key
  * (#5775) — and, since #16772, a `page:tabs` / `page:accordion` panel's
- * `items[].children`, which sits one level deeper than the slot the #12961
+ * `items[].children`, which sits one level deeper than the slot commit 901355c3b's
  * ruling named and was left for its own contract call; that call is #16772,
  * measured on a slotted contract page whose seven tab panels held every
  * related list and the resolver reached none of them. `body` / `footer` stay
@@ -1968,7 +2235,7 @@ export function walkAddressedPageComponents(
  *
  * The traversal itself — roots, descent key, depth cap, cycle guard,
  * collision arbitration — is {@link walkAddressedPageComponents}, the ONE
- * walk this resolver and the CLI extractor both consume (#13218); this
+ * walk this resolver and the CLI extractor both consume (commit c45d8e6b4); this
  * function owns only what happens AT each component it hands back.
  *
  * A list page's filter-preset tab bar
@@ -1993,14 +2260,15 @@ export function translatePage<T extends PageLike>(
   const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
 
   // The traversal — roots, descent, depth cap, cycle guard, collision
-  // arbitration — is the shared walk (#13218). This visitor owns only the
-  // per-component overlay; the walk re-attaches each node's translated
-  // `children` after the visitor returns, so the overlay never contends with
-  // the descent for a key (`children` is not a copy key).
+  // arbitration — is the shared walk (commit c45d8e6b4). This visitor owns only the
+  // per-component overlay; the walk re-attaches each node's translated slot
+  // arrays (`children`, `footer`, panel `items`) after the visitor returns, so
+  // the overlay never contends with the descent for a key (no slot key is a
+  // copy key).
   const { regions, slots } = walkAddressedPageComponents(doc, (component, { nested, id, addressed }) => {
     // Per-component copy (#6080) — addressed by the component's own id, and
     // applied before the page-name route below. `addressed` carries the ruled
-    // collision arbitration (#12961), so a looked-up entry is this component's
+    // collision arbitration (commit 901355c3b), so a looked-up entry is this component's
     // alone; within one call `lookupPageComponentCopy` is a pure function of
     // the id (bundle, page name and options are fixed), so the walk's
     // claim-on-first-sighting selects the same component a
@@ -2084,13 +2352,13 @@ export function translatePage<T extends PageLike>(
  * the page has no tab bar or nothing resolved, so `translatePage` leaves the
  * key off the copy entirely.
  *
- * **This is where `ViewTabSchema` is actually rendered.** The schema has two
- * carriers — `UserFiltersSchema.tabs` (page-only preset bar, ADR-0047) and
- * `ListViewSchema.tabs` ("multi-tab view interface") — and only the first has a
- * renderer: objectui's `TabFilters` draws it from a page's `interfaceConfig`,
- * while nothing in either repo reads the ListView carrier. Translating the
- * carrier nothing draws would declare a capability no user can see, so this
- * covers the live one and stops there.
+ * **This is where `ViewTabSchema` is actually rendered.** Its one carrier is
+ * `UserFiltersSchema.tabs` (page-only preset bar, ADR-0047), which objectui's
+ * `TabFilters` draws from a page's `interfaceConfig`. The list view's own
+ * `tabs` is a `retiredKey` tombstone (@objectstack/spec 17.5.0): nothing ever
+ * drew it, and a named list-view preset is a `listViews` entry, which the
+ * saved-view switcher renders as a tab. So there is no second carrier to
+ * translate.
  *
  * The object comes from `interfaceConfig.source` — the page's own binding for
  * the records these presets filter — falling back to the page-level `object`.
@@ -2138,6 +2406,12 @@ export interface ObjectLike {
   fields?: Record<string, ObjectFieldLike> | ObjectFieldLike[];
   /** Actions declared inline on the object (`Object.actions`). */
   actions?: ActionLike[];
+  /**
+   * List views embedded in the object document (`Object.listViews`), keyed by
+   * view name. Each entry is narrowed at runtime to the copy
+   * {@link translateObject} overlays; the record key is the `_views` key.
+   */
+  listViews?: Record<string, unknown>;
 }
 
 export interface ObjectFieldLike {
@@ -2514,10 +2788,10 @@ function builtinSystemFieldLabel(
  *    exactly the packaged string — is a no-op: the catalog still applies, and
  *    the tenant sees the packaged translation of the word they typed.
  *
- * ## [#8460] Exported, because the SAME question is asked one layer down
+ * ## [ADR-0029 D9.2a] Exported, because the SAME question is asked one layer down
  *
  * The 2026-08-13 ruling settled catalog-vs-explicit-scalar here. The 2026-08-13
- * ruling on #8460 settled extension-vs-tenant-overlay inside the object FOLD —
+ * ruling (ADR-0029 D9.2a) settled extension-vs-tenant-overlay inside the object FOLD —
  * `mergeObjectDefinitions` applies an extender's scalar only while the fold's
  * base still carries the packaged owner's value — and required it be "the same
  * comparison-based mechanism, one layer down", explicitly not a second
@@ -2534,17 +2808,115 @@ export function scalarOverridesPackagedBase(
   key: 'label' | 'pluralLabel' | 'description',
   value: unknown,
 ): boolean {
+  return valueOverridesPackagedBase(base, key, value);
+}
+
+/**
+ * [#20680] The ONE comparison behind {@link scalarOverridesPackagedBase},
+ * keyed by any attribute name — the exported predicate's key union names the
+ * object scalars its two callers ask about, and the dashboard translator
+ * ({@link translateDashboard}) asks the same question of `title`, which that
+ * union does not carry; the view translator ({@link translateView}, #20731)
+ * asks it of a bulk-action def's `confirmText` and its params' `help`. One
+ * implementation, so the three conservative edges documented on the exported
+ * predicate hold for every caller alike; ⛔ never a second copy of the
+ * comparison.
+ */
+function valueOverridesPackagedBase(base: unknown, key: string, value: unknown): boolean {
   if (!base || typeof base !== 'object') return false;
   if (typeof value !== 'string' || value.length === 0) return false;
   return (base as Record<string, unknown>)[key] !== value;
 }
 
 /**
+ * Overlay the catalog onto an object document's EMBEDDED `listViews` — each
+ * view's `label`, `description` and `bulkActionDefs[]` copy, the same strings
+ * {@link translateView} overlays on a served view document — returning the
+ * SAME record reference when nothing matched, so {@link translateObject} can
+ * leave `listViews` off its copy.
+ *
+ * ## The address is the extractor's, by construction
+ *
+ * The i18n extractor walks `obj.listViews` and hands `pushViewEntries` each
+ * RECORD key, so `objects.<object>._views.<recordKey>.*` is the one address a
+ * translation for an embedded view exists under. That key is already bare —
+ * there is no `<object>.` prefix to strip, as there is on a served view
+ * document's registry name — so it goes straight to {@link lookupViewText} and
+ * {@link translateBulkActionDefs}, the helpers {@link translateView} reads
+ * through. The view's own optional `name` is never consulted.
+ *
+ * An embedded view carries its `bulkActionDefs` on itself, the authored
+ * address the extractor reads; a served view document nests them under
+ * `config`, which is why `translateView` reads them there. Nothing is
+ * translated that `translateView` would not translate: `emptyState` has no
+ * server-side reader on either channel.
+ *
+ * ## The catalog loses to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog translates the PACKAGED view, so every string is judged by
+ * {@link valueOverridesPackagedBase} (⛔ never a second comparison) against the
+ * same view in the packaged object's `listViews` — the base the serving layer
+ * supplies as {@link TranslateDocumentOptions.packagedBase}. A view the base
+ * does not carry was authored after the fact, and every string on it counts as
+ * diverged; no base supplied means nothing is inferred and the catalog applies.
+ */
+function translateObjectListViews(
+  listViews: unknown,
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  opts: TranslateDocumentOptions | undefined,
+): unknown {
+  const views = asRecord(listViews);
+  if (views === undefined || !bundle) return listViews;
+  const base = asRecord(opts?.packagedBase);
+  // The base's own `listViews` — `{}` when the base is known but carries none,
+  // so every view on the served document then counts as authored.
+  const packagedViews = base === undefined ? undefined : asRecord(base.listViews) ?? {};
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [viewKey, raw] of Object.entries(views)) {
+    const view = asRecord(raw);
+    if (view === undefined) {
+      next[viewKey] = raw;
+      continue;
+    }
+    const packagedView = packagedViews === undefined ? undefined : asRecord(packagedViews[viewKey]) ?? {};
+    const text = (attr: 'label' | 'description') =>
+      valueOverridesPackagedBase(packagedView, attr, view[attr])
+        ? undefined
+        : lookupViewText(bundle, objectName, viewKey, attr, opts);
+    const label = text('label');
+    const description = text('description');
+    const defs = translateBulkActionDefs(view.bulkActionDefs, bundle, objectName, viewKey, opts, packagedView);
+    if (label === undefined && description === undefined && defs === view.bulkActionDefs) {
+      next[viewKey] = raw;
+      continue;
+    }
+    changed = true;
+    next[viewKey] = {
+      ...view,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(defs !== view.bulkActionDefs ? { bulkActionDefs: defs } : {}),
+    };
+  }
+  return changed ? next : listViews;
+}
+
+/**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
- * translate its `label`, `help`, and per-option `label`s, and walks any
- * inline-declared `actions` through {@link translateAction}. The input document
+ * translate its `label`, `help`, and per-option `label`s, walks any
+ * inline-declared `actions` through {@link translateAction}, and overlays the
+ * copy of each EMBEDDED `listViews` entry from the `_views` keys the i18n
+ * extractor writes for it ({@link translateObjectListViews}). The input document
  * is not mutated; a structural clone of the touched branches is returned.
+ *
+ * The embedded views were the second long-standing hole: `os i18n extract`
+ * wrote `objects.<object>._views.<view>.*` for them and every shipped platform
+ * bundle carried the leaves, while the served object went out with the
+ * authored tab labels — extract and serve disagreed, and only a client
+ * re-translating with its own bundle showed a tab in the reader's language.
  *
  * Field maps come in two shapes across the codebase: a `Record<string, Field>`
  * (preferred — the canonical authored shape) and an `Array<Field>` (some REST
@@ -2580,6 +2952,10 @@ export function scalarOverridesPackagedBase(
  * The rule is scoped to the three SCALARS, which are what the ruling covers:
  * `fields` is a key-keyed spread whose per-field labels have their own
  * (per-field) catalog keys, and no read has been measured to diverge on them.
+ * The embedded `listViews` follow the VIEW translator's application of the
+ * same rule (ADR-0029 D9.2a, as {@link translateView} applies it), judged per
+ * view against the packaged object's own `listViews` — see
+ * {@link translateObjectListViews}.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -2616,9 +2992,16 @@ export function translateObject<T extends ObjectLike>(
     const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
     if (translatedHelp) next.help = translatedHelp;
     if (Array.isArray(def.options)) {
+      // A picklist-bound field is served with its list's options resolved
+      // onto it (`PicklistServedFieldSchema`), and INHERITS the list's option
+      // labels (`picklists.<name>.options.<value>`); a field-level entry, when
+      // one exists, is the more specific and wins.
+      const picklist = typeof def.picklist === 'string' ? def.picklist : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
-        const translated = lookupObjectFieldOption(bundle, objectName, name, opt.value, opts);
+        const translated =
+          lookupObjectFieldOption(bundle, objectName, name, opt.value, opts) ??
+          (picklist !== undefined ? lookupPicklistOption(bundle, picklist, opt.value, opts) : undefined);
         return translated ? { ...opt, label: translated } : opt;
       });
     }
@@ -2653,6 +3036,8 @@ export function translateObject<T extends ObjectLike>(
       })
     : undefined;
 
+  const listViews = translateObjectListViews(doc.listViews, bundle, objectName, opts);
+
   return {
     ...doc,
     ...(label !== undefined ? { label } : {}),
@@ -2660,6 +3045,83 @@ export function translateObject<T extends ObjectLike>(
     ...(description !== undefined ? { description } : {}),
     ...(fields !== undefined ? { fields } : {}),
     ...(actions !== undefined ? { actions } : {}),
+    ...(listViews !== doc.listViews ? { listViews } : {}),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Picklist resolvers (label / options) — `picklists.<name>`
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal picklist metadata shape consumed by `translatePicklist`. */
+export interface PicklistLike {
+  name: string;
+  label?: string;
+  options?: Array<{ label?: string; value: string | number | boolean; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+function lookupPicklistLabel(
+  bundle: TranslationBundle | undefined,
+  picklistName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.picklists?.[picklistName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupPicklistOption(
+  bundle: TranslationBundle | undefined,
+  picklistName: string,
+  optionValue: string | number | boolean,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  const key = String(optionValue);
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.picklists?.[picklistName]?.options?.[key];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a picklist metadata document — its `label`
+ * against `picklists.<name>.label`, and each option's `label` against
+ * `picklists.<name>.options.<value>`. The same option labels are what every
+ * referencing field inherits in {@link translateObject}, so the list is
+ * translated once. The input document is not mutated; a key the bundle does
+ * not carry leaves the authored value in place.
+ */
+export function translatePicklist<T extends PicklistLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (!doc || typeof doc !== 'object' || typeof doc.name !== 'string' || !bundle) return doc;
+  const picklistName = doc.name;
+  const label = lookupPicklistLabel(bundle, picklistName, opts);
+  let options = doc.options;
+  if (Array.isArray(doc.options)) {
+    let changed = false;
+    const next = doc.options.map((opt) => {
+      if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
+      const translated = lookupPicklistOption(bundle, picklistName, opt.value, opts);
+      if (!translated) return opt;
+      changed = true;
+      return { ...opt, label: translated };
+    });
+    if (changed) options = next;
+  }
+  if (label === undefined && options === doc.options) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(options !== doc.options ? { options } : {}),
   };
 }
 
@@ -3278,7 +3740,7 @@ export function resolveMetadataFormSchemaTitles<T extends Record<string, any>>(
  * `ScreenFieldConfigSchema` (`automation/builtin-node-config.zod.ts`) narrowed
  * to what the overlay reads and writes. The served `ScreenFieldSpec`
  * (`contracts/automation-service.ts`) satisfies it structurally too: the
- * executor forwards `name` / `label` / `placeholder` verbatim, so the same
+ * executor forwards `name` / `label` / `placeholder` / `inlineHelpText` verbatim, so the same
  * overlay works whichever side of the wire the runner half lands on.
  */
 export interface FlowScreenFieldLike {
@@ -3290,6 +3752,8 @@ export interface FlowScreenFieldLike {
   name?: string;
   label?: string;
   placeholder?: string;
+  /** Help text drawn under the input (`ScreenFieldConfig.inlineHelpText`). */
+  inlineHelpText?: string;
   [key: string]: unknown;
 }
 
@@ -3363,19 +3827,24 @@ export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
  * the per-FIELD face of {@link FLOW_SCREEN_COPY_KEYS}, measured against
  * `ScreenFieldConfigSchema`.
  *
- * `help` is deliberately absent. ⚠️ Not for its original reason any more: the
- * screen field used to declare nothing help-shaped, so a `help` key would have
- * parsed clean and translated nothing (the ADR-0078 shape #6080 kept out of the
- * page-component face). #17306 gave it `inlineHelpText`, so the string exists —
- * what does not exist is a key on THIS face for it, and growing the face is a
- * ruled step against the #7646 enumeration, never a resolver-side accretion.
- * The exclusion therefore stands with the same outcome and a different reason.
+ * Each key is spelled exactly as the screen field spells the string it
+ * overlays, because the overlay writes the translation back onto that same
+ * key: {@link translateScreenField} spreads the resolved copy over the field,
+ * and objectui's `FlowRunner` walks this list over the `ScreenFieldSpec` it
+ * draws.
+ *
+ * `inlineHelpText` joined `label` and `placeholder` once the console's screen
+ * dialog drew the help text under the control (#17306), so a translated help
+ * line reaches the user rather than a bundle nothing reads. It is the screen
+ * field's own spelling, which is the object field's (`FieldSchema`), so the
+ * report's `help` is not a key here: the schema answers `help` / `helpText` /
+ * `hint` / `tooltip` by name with the rename to `inlineHelpText`.
  *
  * `options` is absent because `ScreenFieldConfig.options[].value` is
- * unconstrained, so a value-keyed map cannot address the labels. Both are
- * refused by name with guidance at the schema.
+ * unconstrained, so a value-keyed map cannot address the labels. It is refused
+ * by name with guidance at the schema.
  */
-export const FLOW_SCREEN_FIELD_COPY_KEYS = ['label', 'placeholder'] as const;
+export const FLOW_SCREEN_FIELD_COPY_KEYS = ['label', 'placeholder', 'inlineHelpText'] as const;
 
 export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
 
@@ -3473,7 +3942,7 @@ export function resolveFlowScreenTitle(
  * B, the resolver half #11287): translates the flow's own `label` against
  * `flows.<name>.label`, and — for every `type: 'screen'` node with an id —
  * the screen heading and per-field copy against
- * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder}}`.
+ * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder,inlineHelpText}}`.
  * The input document is not mutated.
  *
  * **Where the translated title lands.** The bundle's `title` is written to
@@ -3522,7 +3991,10 @@ export function resolveFlowScreenTitle(
  * draws, read at the `.objectui-sha` pin `f8a9d0fb`, and the ledger's
  * `flows.screens` row is `live` citing it. This function stays unregistered
  * because the server-side route is not the one taken. `flows.<flow>.label`
- * has no reader on either side yet, so its ledger row stays `planned`.
+ * takes the same client side: the authored label it falls back to reaches the
+ * runner on every run result as `AutomationResult.flowLabel`, but nothing reads
+ * the translation key on either side yet (the objectui runner half is still to
+ * land), so its ledger row stays `planned`.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,

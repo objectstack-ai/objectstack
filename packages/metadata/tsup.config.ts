@@ -14,10 +14,15 @@ export default defineConfig({
     // predicate does not load the manager, the loaders and their deps.
     'src/errors.ts',
     // `@objectstack/metadata/view-container` — the shared "which object does
-    // this aggregated container bind to?" derivation (#14399/#14680). Its own
+    // this aggregated container bind to?" derivation (commits 3c1bbd2a8 and 3bd9b3498). Its own
     // entry for the same reason `errors` has one: objectql's ADR-0076 lean
     // entry needs the pure function, not the manager, the loaders or their deps.
     'src/view-container.ts',
+    // `@objectstack/metadata/view-container-name` — the divergent container
+    // `name` refusal every door that files a container calls (#21412). Its
+    // own entry, not the leaf above: it needs `@objectstack/spec`, which the
+    // leaf deliberately does not import.
+    'src/view-container-name.ts',
   ],
   splitting: false,
   sourcemap: true,

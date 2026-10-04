@@ -82,6 +82,36 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// [#20311] The `$empty` expansion — the ruled per-type 「is empty」 table read
+// off a field DEFINITION (text-like, multi-value, null only) plus the
+// value-level predicate for the faces with no declaration. The operator is
+// declared in filter.zod.ts and STAGED out of FILTER_OPERATORS; this module is
+// what each compile surface calls when it gains its arm.
+export * from './filter-empty-operator';
+// [#20347] The cross-field COMPARISON CLASS — which two declared columns a
+// field-to-field comparison (`{ a: { $eq: { $field: 'b' } } }` and its five
+// sibling operators) may put on either side: six classes over the existing
+// value-class sets, three families with none (a list or an object, the file
+// family, formula), and a pure verdict over two declared types. Lifted case
+// for case from driver-sql's #5222 boundary so every judge — the authoring
+// door, driver-sql, the write check — reads one definition.
+export * from './filter-cross-field-comparison-class';
+// [#20336] The NUMBER-comparand declared-type door — the contract half of the
+// triage direction: a non-numeric STRING compared against a field whose
+// declared type is numeric (`NUMERIC_VALUE_TYPES`, by reference; `formula` by
+// its returnType) is refused at the engine's field-aware seam with
+// INVALID_FILTER 400, and a numeric one is narrowed to its number. Also the
+// platform's one numeric grammar for a string (a JSON number literal, finite),
+// which the record validator's number arm reads on the write side. The engine
+// door is its own card; this module is the contract only.
+export * from './filter-number-comparand-declared-type';
+// [#21333] The BOOLEAN twin of the door above — the contract half of the
+// triage ruling: a comparand against a declared boolean field accepts true /
+// false, 1 / 0, "1" / "0" and "true" / "false" (the record validator's
+// write-side set), each narrowed to its boolean at the engine's field-aware
+// seam, and any other string is refused with INVALID_FILTER 400. The engine
+// door is objectql's; this module is the contract only.
+export * from './filter-boolean-comparand-declared-type';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result
@@ -98,7 +128,7 @@ export * from './aggregation-conformance';
 // wrote is what you read back", asserted on type as well as value, plus the
 // injectivity pairs a per-value check cannot see. The census's nine other
 // case-sets are all about WHICH ROWS come back; this is the one about what the
-// values in them are, and its absence is why that family (#12380, #11535,
+// values in them are, and its absence is why that family (commit 4045b954d, #11535,
 // #11782, #10995) kept arriving one card at a time.
 export * from './value-roundtrip-conformance';
 export * from './date-macros.zod';
@@ -108,6 +138,13 @@ export * from './date-macros.zod';
 // rule (#8690 C half). `ui/dashboard.zod.ts` re-exports the vocabulary.
 export * from './date-range-presets';
 export * from './calendar-day';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
+// FilterCondition` lowering the seams run once, after the comparand doors and
+// after filter-token resolution: the `$between` split, the whole-day upper
+// bound in the calendar-string domain, and the NULL-polarity guards. Beside
+// `calendar-day` because what a bare day denotes as a bound is protocol, and
+// on this subpath only — never the package root entry (the ruling's D3).
+export * from './filter-lowering';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —
 // the sibling vocabulary to date macros. Presentation scope only; RLS is the
 // enforcement boundary. See context-tokens.zod.ts.
@@ -175,6 +212,7 @@ export * from './hook-api';
 // flag per event so "not yet" can never read as "yes".
 export * from './bulk-write-hook-conformance';
 export * from './mapping.zod';
+export * from './picklist.zod';
 export * from './data-engine.zod';
 export * from './driver.zod';
 export * from './driver-sql.zod';
@@ -273,6 +311,13 @@ export * from './search-fields';
 // fieldGroups layout derivation (ADR-0085 §5) — the single source of the
 // grouping semantics every renderer (form, detail, drawer, designer) applies.
 export * from './field-group-layout';
+
+// Default inline-grid columns — the single source of which child fields an
+// inline master-detail grid draws when its author listed none, and of which
+// fields its per-row expand form draws (and when that form is offered).
+// Consumed by the renderer and credited by lint's `field-no-consumers`, so the
+// two agree.
+export * from './inline-grid-columns';
 
 // record-surface derivation (ADR-0085 §5) — the single source for how a record's
 // create/edit/detail opens by default (full page vs drawer/modal overlay).

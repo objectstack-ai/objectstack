@@ -93,7 +93,7 @@ describe('TimeRelativeTriggerSchema', () => {
 //
 // It also sits BELOW the deliberately-open node `config` slot (ADR-0018), so
 // the flow gate cannot see inside it. This schema is the only gate there is.
-describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
+describe('unknown keys are rejected, not stripped', () => {
     const unknownKeyIssue = (value: unknown) => {
         const result = TimeRelativeTriggerSchema.safeParse(value);
         expect(result.success).toBe(false);

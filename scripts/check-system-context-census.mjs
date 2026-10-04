@@ -194,11 +194,14 @@
  * So the anchors are recoverable and the loss is loud -- PROVIDED the gate is
  * scheduled. Nothing asserted that it was. `check-self-test-wired` is conditional
  * in the wrong direction here: it requires that a script CI runs also has its
- * `--self-test` run, so deleting BOTH invocations from `lint.yml` retires this gate
- * with every check still green. The self-test therefore reads the workflow text and
- * asserts both legs, the way `check-doc-frontmatter`, `check-aggregator-roster` and
- * `check-ci-filter-parity` each assert their own -- a gate that exists and is not
- * scheduled is the dormant shape seen from the other side.
+ * `--self-test` run, and since #21351 that a root alias declaring a `--self-test`
+ * has it run, so deleting BOTH invocations from `lint.yml` now reds there through
+ * `check:system-context-census` -- but deleting the production invocation alone
+ * still retires this gate with every check green. The self-test therefore reads
+ * the workflow text and asserts both legs, the way `check-doc-frontmatter`,
+ * `check-aggregator-roster` and `check-ci-filter-parity` each assert their own -- a
+ * gate that exists and is not scheduled is the dormant shape seen from the other
+ * side.
  *
  * ⚠️ The pin deliberately needs NO workflow edit: `lint.yml` already invokes both
  * legs, in the required `Lint & Repo Gates` job, on a trigger set that includes

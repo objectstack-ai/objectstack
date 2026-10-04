@@ -76,7 +76,7 @@ const FLOW = new URL('./flow.zod.ts', import.meta.url).href;
 const BARREL = new URL('./index.ts', import.meta.url).href;
 const ENVELOPE = JSON.stringify({ dialect: 'cel', source: 'row.x > 1' });
 
-describe('#4415 — the flow ↔ control-flow schema cycle under OS_EAGER_SCHEMAS=1', () => {
+describe('FlowNodeSchema parses its own regions — the flow ↔ control-flow schema cycle under OS_EAGER_SCHEMAS=1', () => {
   it('evaluates and parses regions through the automation barrel', () => {
     expect(importEagerly(BARREL, FLOW)).toBe(ENVELOPE);
   }, 60_000);

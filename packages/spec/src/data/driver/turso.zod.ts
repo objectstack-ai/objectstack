@@ -33,7 +33,7 @@ import {
  * then connect unauthenticated, which is precisely the failure #4410 exists to
  * end, surviving in the one driver #4410 could not see.
  *
- * The maintainer's #6345 ruling closes it by making turso a complete builtin
+ * The maintainer's ruling (commit e2798fab7) closes it by making turso a complete builtin
  * rather than a permanent exception. Optionality of the PACKAGE is orthogonal to
  * existence of the CONTRACT — `mongodb` and `sqlite-wasm` are optional installs
  * too, and both have had a contract since #4410.
@@ -78,13 +78,14 @@ export const TursoTransportModeSchema = z.enum(['local', 'replica', 'remote'])
 export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 
 // ==========================================================================
-// 1b. Transport coherence — what `new TursoDriver` refuses or ignores
+// 1b. Transport coherence — what `new TursoDriver` refuses
 // ==========================================================================
 //
 // #19977. `url`, `syncUrl`, `mode` and `timeoutMs` each parsed on their own,
 // so this shape accepted combinations the driver refuses at construction
-// (`VALIDATION_ERROR` / 400) — or constructs and then ignores. Authoring now
-// refuses exactly those, with the supported spelling in the message:
+// (`VALIDATION_ERROR` / 400) — or, until #20200, constructed and then ignored.
+// Authoring now refuses exactly those, with the supported spelling in the
+// message:
 //
 //  - a local or replica mode (forced by `mode`, or selected by `syncUrl`
 //    beside a `file:` / `:memory:` url, or by a url that is none of those)
@@ -92,20 +93,31 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    that is not a `file:` url or `:memory:` (a bare path, another scheme);
 //  - a replica on an in-memory url;
 //  - `timeoutMs` beside a `wss://` / `ws://` url in remote mode;
-//  - `syncUrl` under a forced `mode: 'remote'`, which the driver accepts and
-//    then IGNORES: the remote client is built without it, no sync ever runs,
-//    and the driver's sync call fails as not supported while its sync-enabled
-//    check still answers true. That arm has no constructor refusal behind it;
-//    it is refused here because a declared setting that changes nothing is
-//    the shape ADR-0049 does not ship.
+//  - `syncUrl` under a forced `mode: 'remote'`, which the driver used to accept
+//    and then IGNORE: the remote client was built without it, no sync ever
+//    ran, and the driver's sync call failed as not supported while its
+//    sync-enabled check still answered true. It was refused here first,
+//    because a declared setting that changes nothing is the shape ADR-0049
+//    does not ship; since #20200 the constructor refuses it too, in this
+//    arm's own words;
+//  - a forced `mode: 'replica'` with no `syncUrl` (#20437): a replica with no
+//    remote to replicate from. The driver used to build it as a replica, never
+//    synced it and ran it as a plain local database; authoring and the
+//    constructor now refuse it together, in this arm's words;
+//  - a forced `mode: 'local'` beside a `syncUrl` (#20586), the same defect the
+//    other way round: the driver used to label it local and then run it as an
+//    embedded replica, syncing with the remote on connect and on the interval
+//    while its sync-enabled check answered true. Authoring and the constructor
+//    now refuse it together, in this arm's words.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
 // `packages/drivers/driver-turso/src/turso-driver.ts`): a scheme matches in
 // any letter case, `:memory:` is matched exactly, and a `file:` url whose path
 // is `:memory:` (or starts `:memory:?`) is in-memory. Nothing the constructor
-// accepts is refused here, the `syncUrl`-under-`mode: 'remote'` arm aside. The
-// url is classified TRIMMED, because
+// accepts is refused here: the one former exception, the
+// `syncUrl`-under-`mode: 'remote'` arm, has been a constructor refusal too
+// since #20200. The url is classified TRIMMED, because
 // both loaders trim it before construction (`resolveTursoUrl` in
 // `@objectstack/service-datasource`); `syncUrl` counts when it is a non-empty
 // string, as `buildTursoDriverConfig` forwards it. The driver-local mirror
@@ -156,7 +168,7 @@ interface TursoTransportKeys {
 
 /** One refusal: the key it sits on and its message. */
 interface TursoTransportIssue {
-  path: 'url' | 'syncUrl' | 'timeoutMs';
+  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode';
   message: string;
 }
 
@@ -240,6 +252,38 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + `${drop} for a plain in-memory local database.`,
       }];
     }
+    if (mode === 'replica' && !hasSyncUrl) {
+      // #20437. Only a FORCED replica reaches here: with no `mode`, a replica is
+      // selected by `syncUrl` alone. The url is a `file:` url (every other one
+      // met a refusal above), so the url is fine and the MODE is what cannot be
+      // honoured — the issue sits on `mode`, as the `sync` refusal sits on `sync`.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'replica'` makes this datasource an embedded replica, a local file kept in sync with "
+          + 'the remote named in `syncUrl`, but no `syncUrl` is set: nothing would ever sync, so it would '
+          + 'run as a plain local database that never replicates — the turso driver refuses this '
+          + 'configuration when it starts. For an embedded replica, name the remote in `syncUrl` beside '
+          + "the local file: `url: 'file:./data/replica.db'` with `syncUrl` set to the `libsql://` or "
+          + "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.",
+      }];
+    }
+    if (mode === 'local' && hasSyncUrl) {
+      // #20586. Only a FORCED local mode reaches here: with no `mode`, a
+      // `syncUrl` selects a replica. The url is a `file:` url or `:memory:`
+      // (every other one met a refusal above), so the url is fine; what the
+      // runtime would ignore is the MODE, because the driver syncs whenever
+      // `syncUrl` is set — so the issue sits on `mode`, as #20437's does.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'local'` makes this datasource a plain local database, but `syncUrl` names a remote to "
+          + 'replicate from: the database would still be synced with that remote as an embedded replica, '
+          + 'so the declared local mode would be ignored — the turso driver refuses this configuration '
+          + 'when it starts. For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: '
+          + "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).",
+      }];
+    }
     return [];
   }
 
@@ -262,8 +306,8 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
       path: 'syncUrl',
       message:
         "`syncUrl` configures an embedded replica, but `mode: 'remote'` sends every read and write "
-        + 'straight to `url` and builds no replica: the turso driver never hands `syncUrl` to the '
-        + 'remote client and runs no sync, so the setting changes nothing. For a remote database, '
+        + 'straight to `url` and builds no replica: the turso driver refuses this configuration when '
+        + 'it starts. For a remote database, '
         + `drop ${syncUrlKeys}. For an embedded replica, drop \`mode\` and point \`url\` at a local `
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
@@ -331,7 +375,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * The libSQL endpoint or local file. REQUIRED — there is no default: this
      * is the single fact that makes `hasLocalDefault: false` true for turso,
      * and the reason both boot hosts refuse a driver selection with no URL
-     * rather than guessing one (#6345 fork 2).
+     * rather than guessing one (commit e2798fab7's fork 2).
      *
      * Credential-free by contract since #8082: a `user:password@` userinfo is
      * refused at publish exactly like an inline `authToken` (#7990) — bind the
@@ -467,8 +511,8 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
           + 'nothing.',
       });
     }
-    // What the driver refuses at construction, or constructs and ignores —
-    // see `tursoTransportIssues` above the shape.
+    // What the driver refuses at construction — see `tursoTransportIssues`
+    // above the shape.
     for (const issue of tursoTransportIssues(cfg)) {
       ctx.addIssue({ code: 'custom', path: [issue.path], message: issue.message });
     }

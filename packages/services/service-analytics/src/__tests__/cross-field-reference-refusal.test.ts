@@ -97,7 +97,7 @@ import {
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import {
@@ -129,7 +129,7 @@ function refusalOf(run: () => unknown): WireBearingError {
   );
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any, NO_DATETIME_COLUMNS);
 const scope = (where: unknown) => compileScopedFilterToSql(where as FilterCondition, 'deal');
 
 /** Every leaf comparand the normalizer produced, structure discarded. */
@@ -150,13 +150,13 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
-    budget: { name: 'budget', label: 'Budget', type: 'number', sql: 'budget' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    amount: { label: 'Amount', type: 'number', sql: 'amount' },
+    budget: { label: 'Budget', type: 'number', sql: 'budget' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 // ── The supported arm: routed, not refused ───────────────────────────────────
@@ -214,7 +214,10 @@ describe("[#7598] the #5222 corpus's SUPPORTED arm is ROUTED by the `where` door
     expect(tree({ amount: { $ne: { $field: 'budget' } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'notEquals', values: [{ $field: 'budget' }],
     });
-    // …and the literal keeps its guard, unchanged. This pair is the whole claim.
+    // …and the literal keeps its guard. This pair is the whole claim.
+    // [ADR-0053 D-D1, amended — #5930 step 4] The guard arrives once: the
+    // shared lowering's NULL escape, its one source since this face's own copy
+    // was deleted. The reference above gets none.
     expect(tree({ amount: { $ne: 5 } })).toEqual({
       kind: 'or',
       children: [

@@ -13,9 +13,9 @@ import stack from '../objectstack.config.js';
  * This is the `examples/app-showcase/test/seed.test.ts` "keys the contact
  * form sections to exactly what the container declares" harness, generalized
  * to every CRM view container instead of one hand-picked object: for each
- * container, every section any of its `formViews` declares must (a) carry a
- * `name` and (b) resolve to a REAL zh-CN `_sections.<name>.label` — non-empty
- * and not an echoed English string.
+ * container, every section its default `form` or any of its `formViews`
+ * declares must (a) carry a `name` and (b) resolve to a REAL zh-CN
+ * `_sections.<name>.label` — non-empty and not an echoed English string.
  *
  * Read on the COMPOSED stack (`objectstack.config.ts`'s `views`/`translations`
  * arrays), not the imported view/bundle modules directly — what the platform's
@@ -37,6 +37,7 @@ describe('app-crm form section i18n coverage (#8231)', () => {
   }
   interface ViewContainer {
     list?: { data?: { object?: unknown } };
+    form?: FormView;
     formViews?: Record<string, FormView>;
   }
 
@@ -45,19 +46,23 @@ describe('app-crm form section i18n coverage (#8231)', () => {
   for (const container of containers) {
     const containerObject = container.list?.data?.object;
     if (typeof containerObject !== 'string') continue;
-    const formViews = container.formViews ?? {};
+    // The default `form` and every named form, each under its container key.
+    const forms = Object.entries(container.formViews ?? {}).map(
+      ([k, v]): [string, FormView] => [`formViews.${k}`, v],
+    );
+    if (container.form) forms.unshift(['form', container.form]);
 
-    for (const [viewKey, formView] of Object.entries(formViews)) {
+    for (const [viewKey, formView] of forms) {
       const sections = Array.isArray(formView.sections) ? formView.sections : [];
       if (sections.length === 0) continue;
       const objectName = typeof formView.data?.object === 'string' ? formView.data.object : containerObject;
 
       sections.forEach((section, i) => {
         const label = typeof section.label === 'string' ? section.label : '(untitled)';
-        it(`${objectName} · formViews.${viewKey} · section "${label}" declares a name and resolves in zh-CN`, () => {
+        it(`${objectName} · ${viewKey} · section "${label}" declares a name and resolves in zh-CN`, () => {
           expect(
             typeof section.name === 'string' && section.name.length > 0,
-            `${objectName}.formViews.${viewKey}.sections[${i}] ("${label}") has no \`name\` — ` +
+            `${objectName}.${viewKey}.sections[${i}] ("${label}") has no \`name\` — ` +
               'it can never be translated (translation-section-name-missing).',
           ).toBe(true);
           const name = section.name as string;
@@ -82,7 +87,7 @@ describe('app-crm form section i18n coverage (#8231)', () => {
     const total = containers.reduce(
       (n, c) =>
         n +
-        Object.values(c.formViews ?? {}).reduce(
+        [...(c.form ? [c.form] : []), ...Object.values(c.formViews ?? {})].reduce(
           (m, fv) => m + (Array.isArray(fv.sections) ? fv.sections.length : 0),
           0,
         ),

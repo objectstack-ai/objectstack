@@ -363,7 +363,7 @@ export type HttpAckResult = HttpAckSuccess | HttpAckFailure;
  * stamps on a row when {@link IHttpOutbox.claim} takes it — handed back to
  * {@link IHttpOutbox.ack} so the outcome is written only while that claim still
  * holds the row. It is exactly the pair the notification outbox's
- * `ClaimedDeliveryRecord` guarantees for `INotificationOutbox.ack` (#11859), with
+ * `ClaimedDeliveryRecord` guarantees for `INotificationOutbox.ack` (commit d9cf78eaa), with
  * the same meaning:
  *
  *  - ownership is proven by ROUND-TRIPPING what `claim()` returned, never by the
@@ -511,7 +511,7 @@ export function assertHttpRedeliverable(row: HttpDelivery): void {
                 + `the row: ${row.error ?? '(none recorded)'}. Redelivering it would send the payload `
                 + 'for the first time, and a parked row carries no HMAC signature because the signing '
                 + 'secret it needed could not be resolved — so the delivery would go out UNSIGNED '
-                + '(#7799, #8069). Fix the underlying configuration instead; the subscription re-arms '
+                + '— which is never allowed. Fix the underlying configuration instead; the subscription re-arms '
                 + 'on its own and future events are delivered signed.',
             'DELIVERY_NEVER_SENT',
         );
@@ -544,7 +544,8 @@ export async function assertRedeliverAllowed(
         throw new HttpRedeliverError(
             `Delivery row '${row.id}' cannot be redelivered: its producer's configuration check `
                 + `failed, so it is unknown whether this delivery can still be signed — refusing `
-                + `rather than sending (#8069). Cause: ${(err as Error)?.message ?? String(err)}`,
+                + `rather than sending, because a check that could not run never reads as allowed. `
+                + `Cause: ${(err as Error)?.message ?? String(err)}`,
             'DELIVERY_NOT_ELIGIBLE',
         );
     }
@@ -569,7 +570,7 @@ export function assertEnqueueDeliverable(input: EnqueueHttpInput): void {
     if (input.undeliverableReason !== undefined) {
         throw new Error(
             'IHttpOutbox.enqueue: input carries `undeliverableReason` — a row that must NEVER be sent '
-                + 'cannot be minted `pending`. Route it to recordUndeliverable() instead (#8069). '
+                + 'cannot be minted `pending`. Route it to recordUndeliverable() instead. '
                 + `Reason was: ${input.undeliverableReason}`,
         );
     }
@@ -649,7 +650,7 @@ export interface IHttpOutbox {
      *
      * [#17634] **Pass `claimed`** — the claim credential on the row {@link claim}
      * returned (the row itself will do). With it, `ack` is the ownership-checked
-     * completion `INotificationOutbox.ack` performs (#11453, #11859):
+     * completion `INotificationOutbox.ack` performs (commits 1a47a5368, d9cf78eaa):
      *
      * ⛔ **Precondition: the row MUST still be held by that claim.** Two tests,
      * both re-stated IN the conditional write: the row is `in_flight`, AND its

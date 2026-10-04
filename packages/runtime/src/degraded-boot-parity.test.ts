@@ -86,7 +86,7 @@ async function bootDatasource(): Promise<Error | undefined> {
     }) as any,
     engine: () => ({
       registerDriver: (d: any) => drivers.set(d.name, d),
-      // [#12010] The double stores a bare `{ name: 'd' }` stand-in, while
+      // [commit 77b91bdb4] The double stores a bare `{ name: 'd' }` stand-in, while
       // `ConnectionEngineLike.getDriverByName` is now derived from the engine
       // contract and answers `IDataDriver | undefined`. Narrowing on the way
       // out keeps the double as loose as this parity test needs it without

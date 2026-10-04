@@ -50,9 +50,9 @@
  *
  * ⚠️ **Both of the two that do can now raise.** driver-mongodb raises a
  * single-field unique index's `E11000` when the field declares `unique`; since
- * #13197 driver-memory refuses a declared-unique collision too, in the ADR-0112
+ * commit 56c093c4d driver-memory refuses a declared-unique collision too, in the ADR-0112
  * envelope (`code: 'UNIQUE_VIOLATION'`, `status: 409`), with `driver-sql`'s
- * ADR-0120 D1/D3 scoping. Until #13197 it never could — `create` was a
+ * ADR-0120 D1/D3 scoping. Until commit 56c093c4d it never could — `create` was a
  * `table.push()` storing no constraints at all (#4065) — so a duplicate landed
  * SILENTLY and this branch was unreachable there. Section (3b) carries the
  * pin, INVERTED in place rather than deleted, so the change of fact stays
@@ -65,7 +65,7 @@
  * as `ruled-permanent` («#6664 A, maintainer 2026-08-08 — inherits #5704
  * Q2 = B») — "InMemoryDriver declares `supports = {}`, so the ENGINE's
  * autonumber seeding owns the counter. No SQL backend can stand in". What
- * #13197 moved is which store can REJECT, never who issues the number, so that
+ * commit 56c093c4d moved is which store can REJECT, never who issues the number, so that
  * ruling is untouched. Section (3b) pins the consequence rather than authoring
  * a second answer to the same question (#6832's one-contract-two-numbers
  * shape). Adoption still covers the drift no store can report, and still waits
@@ -171,7 +171,7 @@ function matches(row: Row, where: any): boolean {
  * `uniqueViolationColumn` answers `undefined`. That combination is exactly why
  * the resync treats an unnamed column as attributable: neither in-repo fallback
  * driver names a column this predicate can read — MongoDB names the INDEX, and
- * driver-memory (since #13197) raises a coded envelope with no dialect prose in
+ * driver-memory (since commit 56c093c4d) raises a coded envelope with no dialect prose in
  * it — so demanding a named column would make the resync unreachable on both.
  */
 const mongoDuplicate = (field: string, value: string) =>
@@ -183,7 +183,7 @@ const mongoDuplicate = (field: string, value: string) =>
   );
 
 /**
- * [#13197] `driver-memory`'s duplicate refusal — the ADR-0112 envelope, not a
+ * [commit 56c093c4d] `driver-memory`'s duplicate refusal — the ADR-0112 envelope, not a
  * dialect. It carries `code: 'UNIQUE_VIOLATION'` (the platform's own registered
  * code) and `status: 409`, and names no column in any spelling
  * `uniqueViolationColumn` parses. So, exactly like the MongoDB shape above,
@@ -723,7 +723,7 @@ describe('ObjectQL autonumber resync (#6806)', () => {
   /* ====================================================================== *
    * (3b) The collision half is STORAGE-DEPENDENT — name which driver gives
    *      which guarantee, rather than implying one that is not delivered.
-   *      #13197 changed the ANSWER for driver-memory (it constrains now); the
+   *      Commit 56c093c4d changed the ANSWER for driver-memory (it constrains now); the
    *      question, and the duty to answer it by driver name, are unchanged.
    * ==================================================================== */
 
@@ -731,7 +731,7 @@ describe('ObjectQL autonumber resync (#6806)', () => {
     const SCHEMA = schemaWith('doc_no', 'D-{0000}');
 
     it('the duplicate is REFUSED and the number re-issued — it used to land silently', async () => {
-      // ⚠️ INVERTED IN PLACE by #13197. Until then this test asserted the
+      // ⚠️ INVERTED IN PLACE by commit 56c093c4d. Until then this test asserted the
       // DEFECT as correct behaviour — `written.doc_no === 'D-0005'` and
       // `rows.filter(…D-0005).toHaveLength(2)`, over a comment calling two rows
       // carrying one business identifier "the honest outcome". It was honest:
@@ -750,7 +750,7 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       // `driver-sql`'s ADR-0120 D1/D3 scoping, and raises the ADR-0112
       // envelope `code: 'UNIQUE_VIOLATION'` / `status: 409` — the shape
       // `memoryDuplicate` below reproduces. `isUniqueViolationError` reads that
-      // code (#13197 added the limb), so the collision branch is REACHABLE on
+      // code (commit 56c093c4d added the limb), so the collision branch is REACHABLE on
       // this driver for the first time: the stale counter is dropped, the
       // counter re-seeds from the store's real max, and the number is re-issued.
       //

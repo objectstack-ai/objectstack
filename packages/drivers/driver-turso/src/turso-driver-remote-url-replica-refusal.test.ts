@@ -25,7 +25,7 @@
  * file: + syncUrl + client stub (CONTROL)           -> knex on the file, 1 row, 1 after restart
  * ```
  *
- * `@libsql/client@0.17.4` builds no embedded replica for a remote url:
+ * `@libsql/client@0.18.0` builds no embedded replica for a remote url:
  * `lib-esm/node.js` routes http/https to its HTTP client and ws/wss to its
  * WebSocket client, `syncUrl` is read only in `lib-esm/sqlite3.js` (a `syncUrl`
  * grep over `http.js` / `ws.js` returns zero, while `authToken` returns six in

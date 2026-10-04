@@ -23,7 +23,7 @@
 // half — a guest / previewMode boot writes an `@anon` metadata seed, so does the
 // server refuse an anonymous WRITE? — and no artifact in this repo answered it
 // end-to-end. The mutating routes are now driven here as real HTTP (six when
-// #11373 measured; five since #12176 D3 retired the compound save — see the
+// #11373 measured; five since commit 7986d973f (D3) retired the compound save — see the
 // retired-door case beside the table). The reading is recorded in full at the
 // door table below; the short version is that the umbrella already refused all
 // of them, so #11373 is a measurement plus its pin, not a fix.
@@ -49,6 +49,17 @@
 // authz-row: anonymous-deny-actions
 // authz-row: anonymous-deny-automation
 // authz-row: anonymous-deny-packages
+// authz-row: anonymous-deny-analytics
+//
+// ── Why the analytics faces are here (#21061) ──────────────────────────────
+//
+// The analytics dispatcher domain was the one data-serving dispatcher domain
+// without the floor: on a stock boot its faces (cube read, SQL echo, meta)
+// answered an unauthenticated caller 200 while the record doors and the
+// analytics dataset door beside them answered 401. Each face is driven below
+// anonymously (well-formed AND malformed body — the floor runs before the body
+// validator) and with a signed-in member as the 200 control, and each anonymous
+// denial is classified into the dispatcher-wrapper family.
 //
 // The value this boot adds OVER #5569's own runtime integration test
 // (`dispatcher-plugin.anonymous-gate.integration.test.ts`) is precisely the
@@ -82,6 +93,49 @@ const ACTION = '/actions/showcase_task/showcase_mark_done/anon-probe-id';
 // A real showcase flow declaration, so the deregister case names something that
 // genuinely exists in the app's metadata.
 const FLOW = 'showcase_reassign_wizard';
+
+// ── #21060 — the two `@objectstack/rest` families this file did not drive ───
+//
+// The checklist item this file pins (`access-security.anonymous-deny-surfaces`)
+// names SIX surface families (seven since the analytics family below joined at
+// #21061), and until #21060 this file drove four of those six:
+// the cross-object `POST /batch` and the ADR-0090 D6 `/security/explain` pair
+// were checked by hand on every QA run and by nothing else. Both are
+// `@objectstack/rest` routes whose handler opens with `enforceAuth`, so both
+// answer the REST seam's flat envelope — measured live by QA run #21056
+// (6/6 `401 UNAUTHENTICATED` across the item's families).
+//
+// The batch body is the checklist's own probe — an EMPTY operation list, which
+// carries nothing to write — so the anonymous case also shows the floor runs
+// before the body is judged, and the member contrast below cannot mutate the
+// shared stack whatever the batch validator answers. The explain probe is a
+// read, and names a real object so a member's answer is about authorization,
+// never about the target.
+const BATCH = '/batch';
+const BATCH_PROBE_BODY = { operations: [] } as const;
+const EXPLAIN = '/security/explain?object=showcase_task&operation=read';
+
+// ── #21061 — the analytics faces (dispatcher-mounted; runtime domains/analytics.ts)
+//
+// One handler body serves all three, so the floor is its first statement. The
+// cube is a real showcase object (an inferred cube), so the member control is
+// a real 200 read and not a 404 that would make the anonymous 401 vacuous. The
+// malformed body is one the entry validator refuses with 400 — for a caller who
+// gets that far. Labels name the FACE, never the request (#21061's pin rule).
+interface AnalyticsFace {
+  readonly face: string;
+  readonly method: 'GET' | 'POST';
+  readonly path: string;
+  readonly body?: unknown;
+  readonly malformed?: unknown;
+}
+const ANALYTICS_VALID_BODY = { cube: 'showcase_task', measures: ['count'] };
+const ANALYTICS_MALFORMED_BODY = { filters: { done: true } };
+const ANALYTICS_FACES: readonly AnalyticsFace[] = [
+  { face: 'the analytics cube-read face', method: 'POST', path: '/analytics/query', body: ANALYTICS_VALID_BODY, malformed: ANALYTICS_MALFORMED_BODY },
+  { face: 'the analytics SQL face', method: 'POST', path: '/analytics/sql', body: ANALYTICS_VALID_BODY, malformed: ANALYTICS_MALFORMED_BODY },
+  { face: 'the analytics meta face', method: 'GET', path: '/analytics/meta' },
+];
 
 // ── #11373 — the /meta WRITE doors, driven through the REAL mount ──────────
 //
@@ -128,7 +182,7 @@ interface MetaWriteDoor {
  * The five mutating `/meta` routes `registerMetadataEndpoints` composes.
  *
  * There were six when #11373 measured: `PUT /meta/:type/:section/:name` (the
- * compound save) was retired by #12176 D3 — the item-name grammar (#12194)
+ * compound save) was retired by commit 7986d973f (D3) — the item-name grammar (commit 311433f6b)
  * refuses every slash-bearing name, so the arity addressed only names that can
  * no longer exist. A retired door cannot sit in this table: the registered-door
  * anti-vacuity leg below asserts `.not.toBe(404)`, which is exactly what a
@@ -148,7 +202,7 @@ const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
   { seam: 'POST /meta/:type/:name/rollback', method: 'POST', path: `/meta/object/${META_PROBE_OBJECT}/rollback`, body: { toVersion: 1 } },
 ];
 
-/** The retired compound-save spelling (#12176 D3) — routed nowhere, for anyone. */
+/** The retired compound-save spelling (commit 7986d973f, D3) — routed nowhere, for anyone. */
 const RETIRED_COMPOUND_PATH = `/meta/object/views/${META_PROBE_VIEW}`;
 
 // ── #5632 — the TWO declared anonymous-401 envelopes, as executable rules ───
@@ -289,7 +343,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       //  method, same body, one process, one second apart: a session changes
       //  the answer, so the refusal is the auth floor and not the door being
       //  broken. (Deliberately not `.toBe(403)`. A member's exact status is the
-      //  capability gate's business — #8919's proof owns that, and pinning it
+      //  capability gate's business — commit b5378550e's proof owns that, and pinning it
       //  here would make this file red for another proof's reasons. Measured
       //  today it is 403 FORBIDDEN `manage_metadata` on all six.)
       //
@@ -507,6 +561,34 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'anonymous draft publish must be 401').toBe(401);
   });
 
+  // ── /batch and /security/explain (@objectstack/rest) — #21060 ───────────
+  it('anonymous POST /batch is denied (401) — before the body is judged', async () => {
+    const r = await anon('POST', BATCH, BATCH_PROBE_BODY);
+    expect(r.status, 'anonymous cross-object batch must be 401').toBe(401);
+  });
+
+  it('anonymous GET /security/explain is denied (401) — the access diagnosis stays private', async () => {
+    const r = await anon('GET', EXPLAIN);
+    expect(r.status, 'anonymous access explanation must be 401').toBe(401);
+  });
+
+  it.each([
+    ['POST /batch', 'POST', BATCH, BATCH_PROBE_BODY],
+    ['GET /security/explain', 'GET', EXPLAIN, undefined],
+  ] as const)(
+    'an authenticated member is NOT denied on %s — and is NOT 404, so the door is really there',
+    async (seam, method, path, body) => {
+      // The same two claims the /meta write-door contrast makes. `.not.toBe(401)`:
+      // a session changes the answer, so the anonymous 401 is the auth floor.
+      // `.not.toBe(404)`: the route is registered on this boot, so that 401 is
+      // not vacuous. The member's exact status is the batch validator's or the
+      // explain gate's business, deliberately not pinned here.
+      const r = await stack.apiAs(memberToken, method, path, body);
+      expect(r.status, `${seam}: an authenticated caller must clear the auth floor`).not.toBe(401);
+      expect(r.status, `${seam}: the route must be registered — a 404 would make the 401 above vacuous`).not.toBe(404);
+    },
+  );
+
   it('an authenticated member reaches the packages domain — not 401 (the deny targets anonymity)', async () => {
     // Teeth for the anonymous cases above: the same route, with a session,
     // clears the auth floor. A plain member holds neither `studio.access` nor
@@ -517,6 +599,42 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     const r = await stack.apiAs(memberToken, 'GET', '/packages');
     expect(r.status, 'authenticated package listing must clear the auth floor').not.toBe(401);
   });
+
+  // ── analytics (dispatcher-mounted; runtime domains/analytics.ts) — #21061 ─
+  //
+  // The same domain-wide shape as /packages: the floor is the handler's first
+  // statement, ahead of the service-availability probe and the body validator.
+  // The member control is the teeth: the same face, with a session, answers
+  // 200 — so the anonymous 401 is the floor's answer, and the face is really
+  // mounted and serving on this boot (a 404 here would make the 401 vacuous).
+  it.each(ANALYTICS_FACES)('an anonymous caller on $face is denied (401)', async (face) => {
+    const r = await anon(face.method, face.path, face.body);
+    expect(r.status, `${face.face}: an anonymous caller must be refused by the floor`).toBe(401);
+  });
+
+  it.each(ANALYTICS_FACES.filter((f) => f.malformed !== undefined))(
+    'an anonymous caller on $face is still denied (401) with a malformed body — not the validator\'s 400',
+    async (face) => {
+      const r = await anon(face.method, face.path, face.malformed);
+      expect(r.status, `${face.face}: the floor must run before the body validator`).toBe(401);
+    },
+  );
+
+  it.each(ANALYTICS_FACES)('a signed-in member on $face is served 200 — the control', async (face) => {
+    const r = await stack.apiAs(memberToken, face.method, face.path, face.body);
+    expect(r.status, `${face.face}: an authenticated member must clear the floor and be served`).toBe(200);
+  });
+
+  it.each(ANALYTICS_FACES.filter((f) => f.malformed !== undefined))(
+    'a signed-in member on $face still meets the validator (400) with a malformed body',
+    async (face) => {
+      // The other half of the ordering claim: the validator is still THERE for a
+      // caller who clears the floor, so the anonymous 401 above is not the
+      // validator having been removed.
+      const r = await stack.apiAs(memberToken, face.method, face.path, face.malformed);
+      expect(r.status, `${face.face}: a signed-in caller's malformed body is a 400`).toBe(400);
+    },
+  );
 
   // ── one code, one message — two wrappers ───────────────────────────────
   it('every denied surface answers the SAME code and message (the wrappers differ)', async () => {
@@ -531,6 +649,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       anon('DELETE', `/automation/${FLOW}`).then((r) => r.json()),
       anon('GET', '/packages').then((r) => r.json()),
       anon('POST', '/packages/anon-probe-pkg/discard-drafts', {}).then((r) => r.json()),
+      ...ANALYTICS_FACES.map((f) => anon(f.method, f.path, f.body).then((r) => r.json())),
     ]);
 
     // Each family is read in ITS OWN declared shape — no `??` chain across the
@@ -581,19 +700,22 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   // The ownership map. `owner` names the producer, so a failure reads as "this
   // seam changed family" rather than "some assertion moved".
   //
-  // Coverage, stated as measured rather than as assumed: five dispatcher
-  // domains hold an anonymous gate (ai / meta / security / actions /
-  // automation) and only the last two are drivable on THIS boot — probed on
-  // the same shared showcase stack these cases use:
+  // Coverage, stated as measured rather than as assumed: the dispatcher
+  // domains holding an anonymous gate include ai / meta / security / actions /
+  // automation / analytics (and /packages, driven above); of those six only
+  // actions, automation and analytics (#21061) are drivable on THIS boot —
+  // probed on the same shared showcase stack these cases use:
   //   - `GET /ai/status` answers 501 `NOT_IMPLEMENTED` (no
   //     `@objectstack/service-ai` ships in the open framework, and that
   //     domain's gate sits BEHIND its route match, so it never runs here);
   //   - `GET /security/permissions` answers 404 (the showcase registration
-  //     path mounts no `/security`);
+  //     path mounts no dispatcher `/security` domain — `/security/explain`
+  //     below is a different owner, `@objectstack/rest`, in the flat family);
   //   - `/meta` on this stack is served by `@objectstack/rest`, so it exercises
   //     the flat family, not the dispatcher's meta domain.
-  // The wrapper family is therefore represented by actions + automation. Adding
-  // a row is the whole change needed the day another domain becomes reachable.
+  // The wrapper family is therefore represented by actions + automation +
+  // analytics. Adding a row is the whole change needed the day another domain
+  // becomes reachable.
   const DENIED_SEAMS: Array<{
     seam: string;
     owner: string;
@@ -615,10 +737,20 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       call: () => anon(door.method, door.path, door.body),
     })),
     { seam: `GET ${OBJ}`, owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', OBJ) },
+    // [#21060] The two remaining REST families the checklist item names.
+    { seam: 'POST /batch', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('POST', BATCH, BATCH_PROBE_BODY) },
+    { seam: 'GET /security/explain', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', EXPLAIN) },
     { seam: 'POST /actions/:object/:action/:id', owner: 'runtime domains/actions.ts', family: 'dispatcher-wrapper', call: () => anon('POST', ACTION, { params: {} }) },
     { seam: 'POST /automation/:name/trigger', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('POST', `/automation/${FLOW}/trigger`, {}) },
     { seam: 'GET /automation/_status', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('GET', '/automation/_status') },
     { seam: 'DELETE /automation/:name', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('DELETE', `/automation/${FLOW}`) },
+    // [#21061] Labelled by FACE, not by request — the pin rule for this family.
+    ...ANALYTICS_FACES.map((f) => ({
+      seam: f.face,
+      owner: 'runtime domains/analytics.ts',
+      family: 'dispatcher-wrapper' as DenyFamily,
+      call: () => anon(f.method, f.path, f.body),
+    })),
   ];
 
   it.each(DENIED_SEAMS)(

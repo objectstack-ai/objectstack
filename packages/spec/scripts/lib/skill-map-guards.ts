@@ -22,12 +22,14 @@
  * not assumed:
  *
  *  - the ADR-0087 registry (`src/migrations/entries/retired-defs/**`) names
- *    defs removed at a major version. `automation/state-machine.zod.ts` is not
- *    there and correctly so: the def still exists and still parses, through
- *    `AgentSchema.lifecycle`;
- *  - the file's own header carries the ADR-0020 retirement in prose, and that
- *    same header documents the door that SURVIVES — so a prose grep flags a
- *    file that is live surface for another package;
+ *    defs removed at a major version. `automation/state-machine.zod.ts` was the
+ *    measured case: for as long as `AgentSchema.lifecycle` parsed through it,
+ *    it was not there, and correctly so. It entered the registry
+ *    (`automation/StateMachine`) only when that door was tombstoned and the
+ *    file deleted (#21320) — a removal, never a per-package verdict;
+ *  - the file's own header carried the ADR-0020 retirement in prose, and that
+ *    same header documented the door that SURVIVED — so a prose grep would
+ *    have flagged a file that was live surface for another package;
  *  - the liveness ledger classifies properties, not files.
  *
  * The retirement that mattered was PACKAGE-RELATIVE: dead surface for

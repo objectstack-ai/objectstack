@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE pin #6345 exists for: both boot hosts answer the SAME question about the
- * SAME `OS_DATABASE_DRIVER` value the same way.
+ * THE pin of commit e2798fab7: both boot hosts answer the SAME question about the
+ * SAME `OS_DATABASE_DRIVER` value — and, since the in-memory engine's
+ * retirement, the same `OS_DATABASE_URL` scheme — the same way.
  *
  * ## Why this file, and why here
  *
- * The fork survived three separate cards (#3276, #5820, #6265) that each fixed
+ * The fork survived three separate changes (#3276, #5820, commit cfb549db8) that each fixed
  * one spelling on one side. Every one of them was pinned — by a test that drove
  * exactly one host. `packages/cli/src/utils/storage-driver.test.ts` proved the
  * CLI accepted `pg`; `packages/runtime/src/standalone-stack*.test.ts` proved the
@@ -22,13 +23,19 @@
  *
  * ## What it drives
  *
- * The real entry points, not the table:
- *  - `os start` side → `resolveDriverType` + `resolveStorageDefinition`
- *    (`commands/serve.ts` calls exactly this pair);
- *  - `os migrate` side → `resolveStandaloneDatabase` (the pre-boot resolution
- *    `os migrate plan` and every `createStandaloneStack` embedder run).
+ * The real entry points of the two HOSTS, not the table:
+ *  - the CLI host → `resolveDriverType` + `resolveStorageDefinition`, the pair
+ *    `commands/serve.ts` calls on its LEGACY path only (`OS_MODE=off|none|legacy`,
+ *    `bootMode: 'off'`, or a host config — `shouldBootWithLibrary`);
+ *  - the runtime host → `resolveStandaloneDatabase`, the pre-boot resolution of
+ *    every ordinary boot: `os dev` / `os start` / `os serve` over a config or an
+ *    artifact (both reach `createStandaloneStack`), every `os migrate`
+ *    subcommand, and every embedder.
  *
- * Driving the shared spec table instead would pin that the table equals itself.
+ * The verdict helpers and the case titles still say `os start` and `os migrate`
+ * — the two commands the fork was first measured between; read them as "the CLI
+ * host" and "the runtime host". Driving the shared spec table instead would pin
+ * that the table equals itself.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -38,6 +45,8 @@ import { join } from 'node:path';
 import {
   BUILTIN_DRIVER_IDS,
   DATABASE_DRIVER_SELECTION_ALIASES,
+  DATABASE_DRIVER_SELECTION_IDS,
+  DRIVER_ID_ALIASES,
   driverHasLocalDefault,
   resolveDatabaseDriverId,
   resolveDriverId,
@@ -47,7 +56,6 @@ import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } f
 
 /** A URL whose scheme matches each canonical kind, so only the SPELLING varies. */
 const URL_FOR: Readonly<Record<string, string>> = {
-  memory: 'memory://',
   sqlite: 'file:/tmp/os6345-parity.db',
   'sqlite-wasm': 'file:/tmp/os6345-parity.db',
   postgres: 'postgres://u:p@localhost:5432/db',
@@ -56,8 +64,29 @@ const URL_FOR: Readonly<Record<string, string>> = {
   turso: 'libsql://my-db.turso.io',
 };
 
-/** Spellings NEITHER host accepted before #6345, and which must stay refused. */
+/** Spellings NEITHER host accepted before commit e2798fab7, and which must stay refused. */
 const CONTRACT_ONLY_SPELLINGS = ['sqlite3', 'better-sqlite3', 'mariadb', 'inmemory'] as const;
+
+/**
+ * The in-memory (mingo) engine's selection spellings, which BOTH hosts accepted
+ * until the engine was withdrawn as a boot store — written out because a reader
+ * of the retirement looks for these three words, and checked below against the
+ * table so a fourth withdrawn spelling cannot escape the refuse rows.
+ */
+const WITHDRAWN_MEMORY_SPELLINGS = ['memory', 'mingo', 'in-memory'] as const;
+
+/** The engine's URL schemes, which both hosts recognise and refuse. */
+const WITHDRAWN_MEMORY_URLS = ['memory://', 'memory://named', 'mingo://', 'MINGO://upper'] as const;
+
+/** Run a host's resolution and return the refusal's message, or `null` when it accepted. */
+function refusalMessage(run: () => unknown): string | null {
+  try {
+    run();
+    return null;
+  } catch (err) {
+    return (err as Error).message;
+  }
+}
 
 type Verdict = { accepted: true; driverId: string } | { accepted: false };
 
@@ -134,7 +163,7 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   );
 
   // The other half of "the same answer": a spelling one host refuses, the other
-  // must refuse too. Before #6345 the CLI silently booted SQLite in dev for
+  // must refuse too. Before commit e2798fab7 the CLI silently booted SQLite in dev for
   // these while `os migrate` named them in a refusal.
   it.each([...CONTRACT_ONLY_SPELLINGS, 'nonsense', 'com.vendor.snowflake'])(
     'both hosts REFUSE `%s`, in dev AND in prod',
@@ -150,7 +179,7 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   );
 
   // The card's own reproduction, kept verbatim as a named case: it is the line a
-  // reader of #6345 will look for, and a table row does not read as one.
+  // reader of commit e2798fab7 will look for, and a table row does not read as one.
   it('the card repro: OS_DATABASE_DRIVER=pg is accepted by BOTH (was: start yes, migrate no)', () => {
     const url = 'postgres://u:p@localhost:5432/db';
     expect(cliVerdict('pg', url)).toEqual({ accepted: true, driverId: 'postgres' });
@@ -169,6 +198,72 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   ])('`%s` still resolves the %s config contract while not being selectable', (alias, canonical) => {
     expect(resolveDriverId(alias)).toBe(canonical);
     expect(resolveDatabaseDriverId(alias)).toBeUndefined();
+  });
+
+  // ── The in-memory engine's retirement ──────────────────────────────────────
+  // Withdrawn at the DECLARATION: the spec table keeps `memory` on its contract
+  // face and offers no selection spelling for it. The accept rows above iterate
+  // the selection face, so the three spellings simply LEAVE them — these rows
+  // are what keeps that from being a silent drop in coverage.
+  it('the spec table withdrew exactly these spellings: contract face yes, selection face no', () => {
+    const withdrawn = Object.keys(DRIVER_ID_ALIASES)
+      .filter((alias) => !DATABASE_DRIVER_SELECTION_IDS.includes(DRIVER_ID_ALIASES[alias]!))
+      .sort();
+    expect(withdrawn).toEqual([...WITHDRAWN_MEMORY_SPELLINGS, 'inmemory'].sort());
+    for (const spelling of withdrawn) {
+      expect(resolveDriverId(spelling), spelling).toBe('memory');
+      expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
+    }
+  });
+
+  it.each([...WITHDRAWN_MEMORY_SPELLINGS])(
+    'both hosts REFUSE the withdrawn spelling `%s`, in dev AND prod, and both name the SQLite replacements',
+    (spelling) => {
+      for (const isDev of [false, true]) {
+        const cli = refusalMessage(() => resolveStorageDefinition(resolveDriverType(spelling, undefined), { isDev }));
+        expect(cli, `os start (isDev=${isDev}) accepted '${spelling}'`).not.toBeNull();
+        expect(cli).toContain('--fresh');
+        expect(cli).toContain(':memory:');
+      }
+      process.env.OS_DATABASE_DRIVER = spelling;
+      const standalone = refusalMessage(() => resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }));
+      expect(standalone, `os migrate accepted '${spelling}'`).not.toBeNull();
+      expect(standalone).toContain('--fresh');
+      expect(standalone).toContain(':memory:');
+    },
+  );
+
+  // The URL door. Before the retirement it was the one door the pin had no row
+  // for: the runtime matched `memory://` literally and the CLI matched
+  // `(memory|mingo)://`, so `mingo://` booted the engine on the CLI host and was
+  // an "unsupported scheme" on the runtime host — a disagreement this file could
+  // not see, because every row above names a driver.
+  it.each([...WITHDRAWN_MEMORY_URLS])(
+    'both hosts REFUSE OS_DATABASE_URL=%s with no driver named, and both name the SQLite replacements',
+    (url) => {
+      for (const isDev of [false, true]) {
+        const cli = refusalMessage(() =>
+          resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev }),
+        );
+        expect(cli, `os start (isDev=${isDev}) accepted ${url}`).not.toBeNull();
+        expect(cli).toContain('--fresh');
+        expect(cli).toContain(':memory:');
+      }
+      process.env.OS_DATABASE_URL = url;
+      const standalone = refusalMessage(() => resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }));
+      expect(standalone, `os migrate accepted ${url}`).not.toBeNull();
+      expect(standalone).toContain('--fresh');
+      expect(standalone).toContain(':memory:');
+    },
+  );
+
+  // The control on the URL door: the replacement the refusals name is accepted
+  // by both hosts, as SQLite — so the refusal is scoped to the engine, not to
+  // the word "memory".
+  it('both hosts ACCEPT the replacement OS_DATABASE_URL=:memory: as sqlite', () => {
+    expect(cliVerdict('', ':memory:')).toEqual({ accepted: true, driverId: 'sqlite' });
+    process.env.OS_DATABASE_URL = ':memory:';
+    expect(resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }).driver).toBe('sqlite');
   });
 
   it('`mongo` and `mongodb` both select the renamed canonical id on both hosts', () => {
@@ -214,7 +309,7 @@ describe('fork 2: no local default + no URL is refused on BOTH sides — all 8 c
     'cell A — `os start` refuses `%s` with no URL instead of guessing one',
     (kind) => {
       expect(() => resolveStorageDefinition(kind, { isDev: false })).toThrow(UnsupportedDriverError);
-      // Dev is not an escape hatch: the pre-#6345 dev path was the one that
+      // Dev is not an escape hatch: the dev path before commit e2798fab7 was the one that
       // silently produced a definition.
       expect(() => resolveStorageDefinition(kind, { isDev: true })).toThrow(UnsupportedDriverError);
     },
@@ -254,9 +349,10 @@ describe('fork 2: no local default + no URL is refused on BOTH sides — all 8 c
     expect(message).not.toContain('the URL of the database this driver connects to');
   });
 
-  // The three local engines keep their defaults — the refusal must be scoped to
-  // "no local default", not to "no URL".
-  it.each(['memory', 'sqlite', 'sqlite-wasm'] as const)('`%s` with no URL still resolves', (kind) => {
+  // The selectable local engines keep their defaults — the refusal must be
+  // scoped to "no local default", not to "no URL". (`memory` was the third local
+  // engine; it is no longer selectable, and its refusal is pinned above.)
+  it.each(['sqlite', 'sqlite-wasm'] as const)('`%s` with no URL still resolves', (kind) => {
     expect(resolveStorageDefinition(kind, { isDev: false })!.driverId).toBe(kind);
   });
 });

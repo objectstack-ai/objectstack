@@ -70,6 +70,9 @@ function fakeEngine() {
         reads.push(`aggregate:${object}`);
         return [{ cnt: 24 }];
       },
+      // [#21080] The engine this double models answers which objects carry a
+      // middleware registered for them; none of this file's objects does.
+      hasObjectMiddleware: () => false,
       getObject: (name: string) =>
         name === 'employer_member' ? { fields: { id: { type: 'text' } } } : undefined,
       resolveEffectiveDatasource: () => undefined,
@@ -117,7 +120,7 @@ async function bootAnalytics(security?: () => unknown) {
  * A working security service's ROW-SCOPE half, carried by every double below
  * that is meant to represent one.
  *
- * `getReadFilter` is a REQUIRED member of `ISecurityService`, and since #16918
+ * `getReadFilter` is a REQUIRED member of `ISecurityService`, and since commit 5d12b16e7
  * the ROW-SCOPE bridge in the same `plugin.ts` refuses the query when the
  * registered service does not expose it — the sibling three-way of the one
  * this file measures. `undefined` is that method's documented answer for "no

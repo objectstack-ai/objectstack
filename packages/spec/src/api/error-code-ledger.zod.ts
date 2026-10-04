@@ -190,7 +190,6 @@ import { retiredStandardErrorCodeMessage } from './retired-error-codes';
 export const ERROR_CODE_LEDGER = {
   '@objectstack/rest': [
     'ALREADY_REVERTED',
-    'AMBIGUOUS_MATCH',            // import row matched more than one record
     'ANALYTICS_QUERY_FAILED',
     'APPROVAL_ACTIONS_FAILED',
     // [commit 30b1c636a] The eight rows below are the TEMPLATE-GENERATED members of the
@@ -217,8 +216,6 @@ export const ERROR_CODE_LEDGER = {
     'BATCH_NOT_ATOMIC',
     'BATCH_TOO_LARGE',
     'BATCH_UNRESOLVED_REF',
-    'BLANK_MATCH_KEY',
-    'CONCURRENT_UPDATE',
     // [#8111] `respondSharingError`'s 409 arm — `revoke` on a rule-materialised
     // share (`source != 'manual'`), thrown by plugin-sharing's `sharing-service`
     // and documented at `content/docs/kernel/runtime-services/sharing-service.mdx`.
@@ -235,7 +232,6 @@ export const ERROR_CODE_LEDGER = {
     'DUPLICATE_REQUEST',
     'EMAIL_SEND_FAILED',
     'ERR_BULK_RESULT_MISMATCH',
-    'ERR_DATASOURCE_UNAVAILABLE',
     'EXPLAIN_FAILED',
     'EXPORT_NOT_PERMITTED',
     'EXTERNAL_DATASOURCE_ERROR',     // introspection/connection-test refusal from the external-datasource service
@@ -255,15 +251,12 @@ export const ERROR_CODE_LEDGER = {
     'INTERNAL',
     'INVALID_REQUEST',
     'INVALID_STATE',
-    'LOOKUP_NOT_PUBLIC',
-    'LOOKUP_TARGET_MISSING',
     'MAPPING_FORMAT_MISMATCH',
     'MAPPING_FORMAT_UNSUPPORTED',
     'MAPPING_NOT_FOUND',
     'MAPPING_TARGET_MISMATCH',
     'NOT_FOUND',
     'NOT_UNDOABLE',
-    'NO_MATCH',                   // import upsert found no record for the match key
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
     'OPENAPI_UNAVAILABLE',        // no OpenAPI spec bundled with this runtime
@@ -294,7 +287,6 @@ export const ERROR_CODE_LEDGER = {
     'SUGGESTION_CONFIRM_FAILED',
     'SUGGESTION_DISMISS_FAILED',
     'SUGGESTION_LIST_FAILED',
-    'SUMMARY_RECOMPUTE_FAILED',
     // [commit 30b1c636a] `POST /approvals/requests/:id/remind` inside the reminder
     // cool-down window — `handleApprovalError` (`rest-server.ts`) maps
     // plugin-approvals' `THROTTLED: …` throw (`approval-service.ts`,
@@ -306,7 +298,6 @@ export const ERROR_CODE_LEDGER = {
     // API quota.
     'THROTTLED',
     'UNAUTHORIZED',
-    'UNIQUE_VIOLATION',
     'UNSUPPORTED_TRANSFORM',
     'VALIDATION_FAILED',          // record-level validation; carries `fields[]` (#3977)
   ],
@@ -908,6 +899,31 @@ export const ERROR_CODE_LEDGER = {
     // `status`. Raised while the kernel is still registering plugins, before
     // bootstrap and therefore before any HTTP boundary exists.
     'PLUGIN_CONTRACT_VIOLATION',
+    // [#20919] The bulk-import runner (`utils/import-runner.ts`) and the
+    // mapping pipeline (`utils/import-mapping.ts`) moved here from
+    // `@objectstack/rest`, and their row and refusal codes moved with them
+    // (the rows left `@objectstack/rest`'s key, except `UNSUPPORTED_TRANSFORM`,
+    // which rest's `resolveNamedMapping` still stamps too). Wire path: the
+    // import door (`POST /data/:object/import`, the async import-job worker)
+    // reports each row's `code` in its results, and the connector sync
+    // executor in `@objectstack/service-automation` returns the same report.
+    'AMBIGUOUS_MATCH',            // import row matched more than one record
+    'BLANK_MATCH_KEY',
+    'NO_MATCH',                   // import upsert found no record for the match key
+    'SUMMARY_RECOMPUTE_FAILED',
+    'UNSUPPORTED_TRANSFORM',
+  ],
+  '@objectstack/types': [
+    // [#20919] The REST door's error CLASSIFICATION half
+    // (`data-error-classification.ts`: `mapDataError` through
+    // `classifyDataError`) moved here from `@objectstack/rest`, and the codes
+    // its table stamps moved with it. Wire path: every `@objectstack/rest`
+    // route catch answers through `handleRouteError` / `sendThrownError`,
+    // which resolve the thrown error through this table, and the bulk-import
+    // runner adopts its verdict for each failed row.
+    'CONCURRENT_UPDATE',
+    'ERR_DATASOURCE_UNAVAILABLE',
+    'UNIQUE_VIOLATION',
   ],
   '@objectstack/hono': [
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
@@ -973,6 +989,14 @@ export const ERROR_CODE_LEDGER = {
     // the code `@objectstack/cloud-connection` already registers — one
     // condition, one vocabulary; provenance, not identity (see above).
     'ENVIRONMENT_NOT_FOUND',
+    // [#20367 ruling B] `os validate` / `os build` refuse a config whose default
+    // export no stack producer built (`hasStackProvenance`, `@objectstack/spec`)
+    // — right after load, before any other judgement, through each command's
+    // catch-all (`--json`: `code` beside `error`, exit 1). `door: 'none'`: a CLI
+    // exit, no HTTP boundary. Second EMITTER of the code `@objectstack/spec`
+    // registers for `composeStacks`' refusal of an unbuilt input — one
+    // condition, one vocabulary.
+    'STACK_PROVENANCE_MISSING',
   ],
   '@objectstack/cloud-connection': [
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
@@ -1033,11 +1057,25 @@ export const ERROR_CODE_LEDGER = {
     'AUTOMATION_UNSCOPED_RUN_DATA_ACCESS',
     'EXECUTION_ERROR',
     'INVALID_SIGNAL',             // resume signal writes engine-internal variables
+    // [#21106] The connector sync executor (`connector-pull.ts`,
+    // `pullConnectorSource`) stamps this row and `UNSUPPORTED_TRANSFORM` below
+    // onto `ConnectorPullError.code` through its local `refuse(code, status,
+    // reason, message)` helper: 404 when no mapping artifact has the requested
+    // name, 400 for a `javascript` transform a pull does not execute. The class
+    // ships in this package's `dist`. No HTTP door on this tree (nothing invokes
+    // the pull yet; the thrown value is the boundary). Both codes are already
+    // registered under `@objectstack/rest` (and `UNSUPPORTED_TRANSFORM` under
+    // `@objectstack/core`), so these rows are provenance, not identity.
+    // `check:error-code-provenance` cannot see a `refuse(...)` call site (a
+    // declared blind spot), so `check-error-code-provenance.test.ts` pins both
+    // rows by hand.
+    'MAPPING_NOT_FOUND',
     'NODE_FAILURE',
     'NO_EXECUTOR',
     'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
     'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
     'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown
+    'UNSUPPORTED_TRANSFORM',      // [#21106] see `MAPPING_NOT_FOUND` above
   ],
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',
@@ -1259,6 +1297,27 @@ export const ERROR_CODE_LEDGER = {
     // door answers with, never whether a shipped code is registered.
     // Producer: `packages/drivers/driver-sql/src/dialect-emission-refusal.ts`.
     'SQL_DIALECT_EMISSION_UNSUPPORTED',
+    // [#21185] An upsert whose conflict lands on a row outside the
+    // organization the row is written under is refused with this code and
+    // `status: 409`, stamped through `UPSERT_UNIQUE_VIOLATION_CODE` /
+    // `UPSERT_UNIQUE_VIOLATION_STATUS` (`packages/drivers/driver-sql/src/sql-driver.ts`).
+    // `TursoDriver` throws the same constructor on its remote face through
+    // `SqlDriver`, so `@objectstack/driver-turso` stamps nothing and carries no
+    // row for it. The ruling on #21185 (record 5934879010, refinement 2) chose
+    // the code `create()` answers for the same collision, and ⛔ no new code.
+    //
+    // Provenance ONLY: a code `@objectstack/types`, `@objectstack/plugin-security`
+    // and `@objectstack/driver-memory` already register, so the union, its casing
+    // and every other package's rows are byte-unchanged. Per this file's
+    // header, a code emitted by several packages is listed once per emitting
+    // package.
+    //
+    // `door: 'none'` on this tree. No HTTP route reaches the driver's
+    // `upsert`: the engine has no upsert door, and the sandbox body runner's
+    // upsert falls back to insert. The thrown value is the boundary, for a
+    // connector, plugin or host calling the driver directly, and that is why
+    // it ships in `dist` and is registered (#16404, "Door or no door").
+    'UNIQUE_VIOLATION',
   ],
   '@objectstack/driver-turso': [
     // [#14287] Provenance for the Turso REMOTE transport's unsafe-identifier
@@ -1330,9 +1389,16 @@ export const ERROR_CODE_LEDGER = {
     'STACK_CROSS_REFERENCE_INVALID',             // items name objects the stack does not define (the ADR-0130 matrix, plus the duplicate-action-key / global-`update` / mapping-transform findings the same aggregate carries)
     'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED', // a HIERARCHY permission scope while `requires` omits `hierarchy-security`
     'STACK_NAMESPACE_PREFIX_INVALID',            // an object name lacks the `manifest.namespace` prefix
+    // [#20367 ruling B] The provenance refusal of the same family: an input
+    // `composeStacks` was handed that no stack producer built (a plain object,
+    // a spread or JSON copy of a built stack), `status: 422`, one `issues`
+    // entry per refused input. `door: 'none'` on the same reading as the rows
+    // around it. Second emitter: `@objectstack/cli` raises the same code at
+    // `os validate` / `os build` for an unmarked default export — see its row.
+    'STACK_PROVENANCE_MISSING',                  // the value was not built by `defineStack` / `composeStacks` (`hasStackProvenance` is false)
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
-    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers`
+    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
     // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
     // the same reading: the six `composeStacks` refusals, one code per raise
     // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the
@@ -1390,6 +1456,21 @@ export const REGISTERED_ERROR_CODES: readonly RegisteredErrorCode[] = Object.fre
  * standard catalog ∪ registered extension codes. This is what
  * `ApiErrorSchema.code` parses against — an unregistered code is a schema
  * failure, not a new dialect.
+ *
+ * [#19920] The cast names BOTH of `z.ZodType`'s parameters, `<Output, Input>`.
+ * The cast exists because the spread above erases the members to `string`.
+ * Naming only the output left `Input` at its default, `unknown`, so `ApiError`
+ * (the INPUT type of `ApiErrorSchema`) typed `code` as `unknown`:
+ * `{ code: 42, message: 'x' }` compiled as an `ApiError` while this schema
+ * refuses it. An enum's input is its output, so both parameters are the same
+ * union.
+ *
+ * Both are spelled with the {@link ErrorCode} type alias, never the union
+ * written out: declaration emit prints an inline union literal by literal at
+ * every schema that embeds this one (78 sites in the `api` entry), while an
+ * alias it prints by name. Measured over the built declarations: with the
+ * union inline in both parameters they grew by 3.36 MB (+11%); with the alias
+ * they shrink by 3.32 MB, since the output half was printed inline before too.
  */
 export const ErrorCode = z.enum(
   [...StandardErrorCode.options, ...REGISTERED_ERROR_CODES] as [string, ...string[]],
@@ -1397,7 +1478,7 @@ export const ErrorCode = z.enum(
   // standard spelling would answer here with zod's bare enum message unless this
   // door passes the same prescription (`retired-error-codes.ts`).
   { error: retiredStandardErrorCodeMessage },
-) as z.ZodType<StandardErrorCode | RegisteredErrorCode>;
+) as z.ZodType<ErrorCode, ErrorCode>;
 
 export type ErrorCode = StandardErrorCode | RegisteredErrorCode;
 
@@ -1534,36 +1615,39 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'CONFLICT',
     shadows: 'RESOURCE_CONFLICT',
-    reason: 'Pre-gate synonym on the wire (respondSharingError 409 arm; registered by #8111). ' +
-      'Wire value kept; consolidation deferred per #8211.',
+    reason: 'Pre-gate synonym on the wire (respondSharingError 409 arm), registered as it stood ' +
+      'when the record-sharing errors moved onto the ADR-0112 envelope, so the wire stayed ' +
+      'byte-identical. Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
     code: 'FORBIDDEN',
     shadows: 'PERMISSION_DENIED',
     reason: 'Pre-gate synonym on the wire from @objectstack/rest, plugin-sharing and ' +
-      'plugin-approvals; #13353 added the cloud-connection provenance row for the same ' +
-      'pre-existing wire value (its marketplace-install plugin-route 403). ' +
-      'Wire value kept; consolidation deferred per #8211.',
+      'plugin-approvals; cloud-connection lists the same pre-existing wire value under its own ' +
+      'provenance row (its marketplace-install plugin-route 403). ' +
+      'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
     code: 'INTERNAL',
     shadows: 'INTERNAL_ERROR',
     reason: 'Pre-gate synonym on the wire from five packages. Wire value kept; ' +
-      'consolidation deferred per #8211.',
+      'consolidation deferred until it has a measured victim.',
   },
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
     reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
-      '#19441 added the plugin-security provenance row for the same pre-existing wire value ' +
-      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred per #8211.',
+      'plugin-security lists the same pre-existing wire value under its own provenance row ' +
+      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred until ' +
+      'it has a measured victim.',
   },
   {
     code: 'UNAUTHORIZED',
     shadows: 'UNAUTHENTICATED',
     reason: 'Pre-gate synonym (401 reason phrase) on the wire from @objectstack/rest — ' +
-      'surfaced by the detector when the #8211 gate landed, beyond the four the card named; ' +
-      'same class, same grandfather rationale. Wire value kept; consolidation deferred per #8211.',
+      'surfaced by the synonym detector when it landed, beyond the four first reported; ' +
+      'same class, same grandfather rationale. Wire value kept; consolidation deferred until ' +
+      'it has a measured victim.',
   },
 ];
 
@@ -1668,52 +1752,57 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
     reason: 'Shared constructor one package over: metadata-core\'s ' +
       '`engineUpdateDispatchRejectError` spells the string, but the throw ships in ' +
       'production from `ObjectQL.update` (engine.ts) — the objectql row\'s own comment ' +
-      'records "hence registered here" (#11142/#11230).',
+      'records "hence registered here".',
   },
   {
     package: '@objectstack/service-automation',
     code: 'FLOW_DISABLED',
     registeredUnder: '@objectstack/runtime',
     reason: 'The trigger door, not the producer, names the wire vocabulary: the engine ' +
-      'returns `AutomationResult.code` and runtime\'s doors read it and answer 409 ' +
-      '(#9415/#9446; the runtime row\'s comment records the decision).',
+      'returns `AutomationResult.code` and runtime\'s doors read it and answer 409 — every ' +
+      'door that dispatches a flow answers from one status table, by ruling (the runtime ' +
+      'row\'s comment records the decision).',
   },
   {
     package: '@objectstack/service-automation',
     code: 'FLOW_NO_START_NODE',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Same decision as FLOW_DISABLED, 422 arm (#9415/#9446): the trigger door ' +
+    reason: 'Same decision as FLOW_DISABLED, its 422 arm: the trigger door ' +
       'names the wire vocabulary; the engine result carries the classification.',
   },
   {
     package: '@objectstack/service-automation',
     code: 'FLOW_INPUT_SCHEMA_INVALID',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Registered ahead of its producer by design (#10025 → #11504, the #10413 → ' +
-      '#10576 split shape): the engine\'s `execute()` catch classifies the refusal, the ' +
-      'trigger door serves it — the runtime row\'s comment records "registered HERE and ' +
-      'not under the engine\'s package" with its three FLOW_* siblings.',
+    reason: 'Registered ahead of its producer by design: the ruling that a definition-level ' +
+      'input-schema refusal is non-retryable and never dispatched split into a contract ' +
+      'half, which minted this code, and a services half that emits it, the contract half ' +
+      'landing first. The engine\'s `execute()` catch classifies the refusal, the trigger ' +
+      'door serves it — the runtime row\'s comment records "registered HERE and not under ' +
+      'the engine\'s package" with its three FLOW_* siblings.',
   },
   {
     package: '@objectstack/service-datasource',
     code: 'EXTERNAL_IMPORT_ERROR',
     registeredUnder: '@objectstack/rest',
-    reason: 'Adjudicated on #13353: the only door for `importObject` is rest\'s ' +
-      '`POST …/tables/:remote/import` (external-datasource-routes.ts), whose catch stamps ' +
-      'this code itself for EVERY importObject throw and never reads the producer\'s ' +
-      'declaration — the door names the wire vocabulary. The producer\'s `err.code` ' +
-      '(`importNameRefusedError`) is the #8016 declaration shape, agreeing with the door ' +
-      'by construction, not a second wire emitter.',
+    reason: 'Adjudicated when the provenance gate landed: the only door for `importObject` ' +
+      'is rest\'s `POST …/tables/:remote/import` (external-datasource-routes.ts), whose ' +
+      'catch stamps this code itself for EVERY importObject throw and never reads the ' +
+      'producer\'s declaration — the door names the wire vocabulary. The producer\'s ' +
+      '`err.code` (`importNameRefusedError`) declares its own `status` and `code`, the ' +
+      'shape the shared thrown-error resolver honours, agreeing with the door by ' +
+      'construction, not a second wire emitter.',
   },
   {
     package: '@objectstack/client',
     code: 'UPLOAD_SESSION_EXPIRED',
     registeredUnder: '@objectstack/service-storage',
-    reason: 'Client-side synthesis (#7870): `resumeUpload` mirrors the server\'s 410 pair ' +
-      'when the progress poll reports `expired`, so caller branches fire identically. The ' +
-      'ledger\'s scope prose covers the SERVING side; whether a client-synthesised code ' +
-      'belongs in the ledger at all is the open scope question #13353 recorded — ' +
-      'deliberately a waiver, not a row, until that question is ruled.',
+    reason: 'Client-side synthesis: `resumeUpload` mirrors the server\'s 410 pair when the ' +
+      'progress poll reports `expired`, so caller branches fire identically. The ledger\'s ' +
+      'scope prose covers the SERVING side; whether a client-synthesised code belongs in ' +
+      'the ledger at all is an open scope question, recorded when the provenance gate ' +
+      'landed and left unruled for want of pull — deliberately a waiver, not a row, until ' +
+      'that question is ruled.',
   },
   {
     package: '@objectstack/spec',
@@ -1728,23 +1817,38 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
     package: '@objectstack/types',
     code: 'VALIDATION_FAILED',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Shared constructor by design (#8016/#3918): `validationFailure()` lives in ' +
-      'the dependency-light package so BOTH doors recognise one shape; the throws are ' +
-      'served under the emitting doors\' own registrations (runtime\'s dispatcher exits, ' +
-      'rest\'s `mapDataError` — both packages list the code).',
+    reason: 'Shared constructor by design: `validationFailure()` lives in the ' +
+      'dependency-light package beside the one thrown-error mapping both doors share, so ' +
+      'BOTH doors recognise one shape and answer it 400 with its `fields[]`, never 500; the ' +
+      'throws are served under the emitting doors\' own registrations (runtime\'s ' +
+      'dispatcher exits, rest\'s `mapDataError` — both packages list the code).',
   },
   {
     package: '@objectstack/core',
     code: 'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Shared constructor one package over, the #8016 shape (#16322): ' +
-      '`analyticsDateRangeUnrecognizedError` (utils/analytics-date-range.ts) spells the ' +
-      'string ONCE so driver-memory\'s cube face and BOTH service-analytics strategies ' +
-      'refuse identically — which is the property the card\'s shared conformance fixture ' +
-      'exists to hold, and which two independent refusals could not give. Core ships no ' +
-      'HTTP door; the wire emission stays runtime\'s, whose row names this exact second ' +
-      'moment. ⛔ Deliberately ONE waiver rather than a row per driver: with one ' +
-      'constructor there is one stamp site, and rows for packages that stamp nothing ' +
-      'would be the dead weight this file\'s gate refuses.',
+    reason: 'Shared constructor one package over: `analyticsDateRangeUnrecognizedError` ' +
+      '(utils/analytics-date-range.ts) spells the string ONCE so driver-memory\'s cube face ' +
+      'and BOTH service-analytics strategies refuse an unrecognised `dateRange` identically ' +
+      '— which is the property the shared date-range conformance fixture exists to hold, ' +
+      'and which two independent refusals could not give. Core ships no HTTP door; the wire ' +
+      'emission stays runtime\'s, whose row names this exact second moment. ⛔ Deliberately ' +
+      'ONE waiver rather than a row per driver: with one constructor there is one stamp ' +
+      'site, and rows for packages that stamp nothing would be the dead weight this file\'s ' +
+      'gate refuses.',
+  },
+  {
+    package: '@objectstack/runtime',
+    code: 'TENANT_SCOPE_REQUIRED',
+    registeredUnder: '@objectstack/metadata-protocol',
+    reason: 'The door mirrors the producer\'s refusal; it is not a second emitter. ' +
+      '`DELETE /packages/:id` (domains/packages.ts, `requireUninstallOrganizationScope`) ' +
+      'asks `deletePackage`\'s organization-scope question BEFORE ' +
+      '`registry.uninstallPackage`, and answers with the code `deletePackage` refuses a ' +
+      'scope-less uninstall with (an uninstall across every organization must be declared, ' +
+      'never inferred from a missing one), so a refused uninstall changes nothing. The door ' +
+      'never sends `allTenants`, so its condition is exactly the producer\'s "no ' +
+      'organization"; the protocol keeps its own refusal as the second line and stays the ' +
+      'registered emitter.',
   },
 ];

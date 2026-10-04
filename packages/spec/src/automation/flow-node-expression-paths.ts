@@ -168,8 +168,11 @@ export interface FlowNodeExpressionPath {
    * `service-automation`), in both directions over the `predicate` role, so
    * this flag cannot claim a requirement the contract does not make, nor miss
    * one it does. Never set on another role: the channels require
-   * `loop.collection` / `map.collection` too, but no door refuses their
-   * absence — their executors parse their own config.
+   * `loop.collection` / `map.collection` too, and since #20316 all three doors
+   * refuse their absence — but through `flowNodeConfigRefusals`
+   * (`flow-node-config-refusals.ts`), which
+   * judges every key an executor contract requires, not through this flag,
+   * which only decides what the expression walk emits.
    */
   readonly required?: true;
 }
@@ -353,7 +356,10 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *    emitted (as `undefined` or `null`, whichever was there) for the consumer
  *    to refuse through {@link predicateSlotRefusal}, the same way as a blank.
  *    Only the element's OWN slot is judged: an element that is not an object
- *    carries no slot, and the walk does not reach it. A **non-string**
+ *    carries no slot, and the walk does not reach it — an ARRAY element
+ *    included, since #20316 (the walk used to read an array element as an
+ *    object missing its slot); `flowNodeConfigRefusals` refuses such an
+ *    element as what it is. A **non-string**
  *    is emitted too (#15572), for the consumer to refuse through
  *    {@link predicateSlotRefusal}: it used to be skipped as "a type violation
  *    for the schema pass to report", and for a schemaless node type there is no
@@ -483,9 +489,29 @@ export type StructuralConditionValueKind =
   | 'function';
 
 /**
- * Refusal code → the params its message interpolates, for this file's two
- * refusal producers, {@link predicateSlotRefusal} and
- * {@link structuralConditionRefusal}. The keys ARE the closed set.
+ * What a value sitting where a node's `config` wants another shape was, as a
+ * token — for `flowNodeConfigRefusals` (`flow-node-config-refusals.ts`).
+ * `null` is spelled out on the
+ * codes that can meet it; the message renders the token as a phrase (`a
+ * string`, `an array`, `an object`).
+ */
+export type NodeConfigValueKind =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'bigint'
+  | 'symbol'
+  | 'function'
+  | 'array'
+  | 'object';
+
+/**
+ * Refusal code → the params its message interpolates, for the three flow slot
+ * refusal producers — this file's {@link predicateSlotRefusal} and
+ * {@link structuralConditionRefusal}, and (#20316) `flowNodeConfigRefusals`
+ * in `flow-node-config-refusals.ts`, kept in its own module because it reads
+ * the executor contracts, whose modules import this one. The keys ARE the
+ * closed set, for all three.
  *
  * A consumer that renders its own words — a localized designer — keys its
  * catalogue row to the `code` and fills it from the `params`; the English
@@ -503,9 +529,35 @@ export interface FlowSlotRefusalParams {
   'predicate-slot-not-text': { readonly found: PredicateSlotValueKind };
   /** A structural condition holding neither text nor an envelope carrying a string `source`. */
   'structural-condition-shape': { readonly found: StructuralConditionValueKind };
+  /** A `decision` node's `conditions` present, not `null`, and not an array. */
+  'decision-conditions-not-array': { readonly found: Exclude<NodeConfigValueKind, 'array'> };
+  /** An element of a `decision` node's `conditions` that is not an object (`null` and arrays included). */
+  'decision-branch-not-object': { readonly index: number; readonly found: Exclude<NodeConfigValueKind, 'object'> | 'null' };
+  /** A `decision` branch whose `label` is absent, `null`, blank after trimming, or not a string. */
+  'decision-branch-label-missing': {
+    readonly index: number;
+    readonly found: 'absent' | 'null' | 'blank' | Exclude<NodeConfigValueKind, 'string'>;
+  };
+  /** A key the node's executor contract requires, absent from the node's `config`. */
+  'node-config-key-missing': { readonly nodeType: string; readonly key: string };
+  /**
+   * A key the node's executor contract requires IN THIS CONFIGURATION — by a
+   * rule of the contract's own, whose message is the refusal's — absent from
+   * the node's `config`.
+   */
+  'node-config-key-required-by-rule': { readonly nodeType: string; readonly key: string };
+  /**
+   * (#21654) A `create_record` / `update_record` / `delete_record` node whose
+   * `config.objectName` is a static string naming a stored-metadata table
+   * (`isStoredMetadataBodyObject`) — a table a flow may not write directly.
+   */
+  'write-node-stored-metadata-target': {
+    readonly nodeType: 'create_record' | 'update_record' | 'delete_record';
+    readonly objectName: string;
+  };
 }
 
-/** Every refusal code this file's producers emit. */
+/** Every refusal code the three flow slot refusal producers emit. */
 export type FlowSlotRefusalCode = keyof FlowSlotRefusalParams;
 
 /** The codes {@link predicateSlotRefusal} emits. */
@@ -513,6 +565,15 @@ export type PredicateSlotRefusalCode = 'predicate-slot-missing' | 'predicate-slo
 
 /** The codes {@link structuralConditionRefusal} emits. */
 export type StructuralConditionRefusalCode = 'structural-condition-shape';
+
+/** The codes `flowNodeConfigRefusals` (`flow-node-config-refusals.ts`) emits. */
+export type FlowNodeConfigRefusalCode =
+  | 'decision-conditions-not-array'
+  | 'decision-branch-not-object'
+  | 'decision-branch-label-missing'
+  | 'node-config-key-missing'
+  | 'node-config-key-required-by-rule'
+  | 'write-node-stored-metadata-target';
 
 /** One refusal's `code` and `params`, correlated: narrowing on `code` narrows `params`. */
 type FlowSlotRefusalOf<Codes extends FlowSlotRefusalCode> = { message: string; source: string } & {
@@ -534,6 +595,15 @@ export type PredicateSlotRefusal = FlowSlotRefusalOf<PredicateSlotRefusalCode>;
 export type StructuralConditionRefusal = FlowSlotRefusalOf<StructuralConditionRefusalCode>;
 
 /**
+ * One reason a node's `config` is refused on SHAPE or PRESENCE: the English
+ * `message`, the `source` to attribute it to (always `''` — none of these
+ * holds CEL text), the `code` with its `params`, and the `path` inside
+ * `config` it is anchored at, in the ledger's spelling (`conditions[0].label`,
+ * `fields[1].options[0].value`, `collection`).
+ */
+export type FlowNodeConfigRefusal = FlowSlotRefusalOf<FlowNodeConfigRefusalCode> & { readonly path: string };
+
+/**
  * Keyed by code so the compiler holds {@link FLOW_SLOT_REFUSAL_CODES} equal to
  * {@link FlowSlotRefusalParams}.
  */
@@ -542,10 +612,16 @@ const FLOW_SLOT_REFUSAL_CODE_TABLE = {
   'predicate-slot-blank': true,
   'predicate-slot-not-text': true,
   'structural-condition-shape': true,
+  'decision-conditions-not-array': true,
+  'decision-branch-not-object': true,
+  'decision-branch-label-missing': true,
+  'node-config-key-missing': true,
+  'node-config-key-required-by-rule': true,
+  'write-node-stored-metadata-target': true,
 } as const satisfies Record<FlowSlotRefusalCode, true>;
 
 /**
- * The closed set of this file's refusal codes, as a value — for a consumer
+ * The closed set of the flow slot refusal codes, as a value — for a consumer
  * that must prove it has a catalogue row for every code.
  */
 export const FLOW_SLOT_REFUSAL_CODES: readonly FlowSlotRefusalCode[] = Object.freeze(
@@ -880,6 +956,12 @@ function walk(
   if (node == null || typeof node !== 'object') return;
   const [head, ...rest] = segments;
   if (head === undefined) return;
+  // A named key is read off an OBJECT (#20316). An array element where the
+  // path expects an object carries no slot at all — it is a malformed element,
+  // refused as such by `flowNodeConfigRefusals` (`decision-branch-not-object`)
+  // — so it must not be read as an object whose required slot is absent and
+  // refused a second time, for the wrong reason.
+  if (Array.isArray(node) && head !== '*' && !head.endsWith('[]')) return;
 
   if (head === '*') {
     // Every own key of a plain object (#14149). An array here is not "a map

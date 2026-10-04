@@ -225,6 +225,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/**/*.yaml',
       'examples/**/*.yml',
       'content/**',
+      // src/data/currency-mode-family-closure.pin.test.ts (#20126) is the
+      // currency-mode family's closure pin. Its rule B also scans example CODE,
+      // for a comment that cites the date record for currency: one family site
+      // was such a comment in a showcase dataset, and `tsc` never judges a
+      // comment, so the non-code reasoning above does not reach it. Declared as
+      // each app's `src/` tree only, ⛔ never `examples/**/*.ts` -- that glob
+      // covers the CRM example's smoke test, the dispatch-gates specimen above.
+      // Stated rather than discovered: the glob does reach the two translation
+      // tests that live inside the todo app's `src/` tree. The pin's site table
+      // quotes the showcase dataset's path, which holds this glob on the roster.
+      'examples/*/src/**/*.ts',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
@@ -737,6 +748,29 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `@objectstack/spec` already declares it verbatim, so Layer C reaches it
       // today. What stays uncovered stays recorded in that test's header.
       'scripts/**',
+      // The census's hand LEDGER names this file: a NOT_SDK row pins its five
+      // producer reads of `analytics.query`. A real input, so a changed call
+      // count re-runs this suite.
+      'packages/rest/src/analytics-nested-relation-filter.test.ts',
+      // [#20897] Declared by name for the same reason: the census LEDGER
+      // carries a row for driver-memory's `$exists` refusal suite, which calls
+      // `analytics.query(` on its own `MemoryAnalyticsService` (receiver
+      // `service`, verdict `NOT_SDK`). A call added to or removed from that file
+      // moves the census verdict, so a change to it has to re-run this suite.
+      // Per-file, not `packages/**`, for the price the `scripts/**` entry records.
+      'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+      // [#21441] Declared by name for the same reason: the census LEDGER
+      // carries a NOT_SDK row for service-analytics' date-bucket echo pin,
+      // which calls `analytics.query(` on the real AnalyticsService (receiver
+      // `service`). A call added to or removed from that file moves the census
+      // verdict, so a change to it has to re-run this suite.
+      'packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts',
+      // [#21647] Declared by name for the same reason: the census LEDGER
+      // carries a NOT_SDK row for service-analytics' bucket echo enumeration
+      // pin, which calls `analytics.query(` twice on the real AnalyticsService
+      // (receiver `service`). A call added to or removed from that file moves
+      // the census verdict, so a change to it has to re-run this suite.
+      'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts',
     ],
     heldBy: {
       // `scripts/**` is rostered TODAY through the census's own
@@ -781,8 +815,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/system/translations/index.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
       //   src/validate-jsx-pages.production-witness.test.ts (#12924) imports the
-      //     three shipped html pages LIVE and holds the wired gate's census over
-      //     them equal to the ratchet-to-zero ledger (sdui-jsx-baseline.json), so
+      //     three shipped html pages LIVE and holds the wired gate's run over
+      //     them clean (the ratchet-to-zero ledger reached zero and was deleted), so
       //     an edit to any page — or to the repo-root manifest whose vocabulary
       //     judges them — must re-run this package's suite. The manifest is the
       //     checked-in producer artefact `resolveSduiManifest()` picks up from
@@ -1185,9 +1219,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // next page to teach the route would land outside the declared globs, its
     // edit would not re-run this suite, and the gate would go on reporting
     // green over a corpus it no longer hashes.
+    //
+    // The two `packages/` files are #20919's move: the bulk-import runner went
+    // to `@objectstack/core` and the error CLASSIFICATION half of
+    // `error-response.ts` to `@objectstack/types`. The source-reading pins that
+    // scanned them in this package (`rest-server-canonical-query-ast.test.ts`;
+    // the three `error-response-*` arm-derivation tests) now read them there,
+    // each bound to one relative literal.
     globs: [
       'content/docs/protocol/objectql/state-machine.mdx',
       'skills/objectstack-automation/SKILL.md',
+      'packages/types/src/data-error-classification.ts',
+      'packages/core/src/utils/import-runner.ts',
       'content/**',
       'docs/**',
       'skills/**',
@@ -1200,6 +1243,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the scan itself.
       'docs/**': ['packages/rest/src/meta-state-route-doc-spelling.test.ts'],
     },
+  },
+  '@objectstack/service-automation': {
+    // src/connector-pull.integration.test.ts (#20919) drives the connector sync
+    // executor through the REAL `rest` provider, imported from
+    // `connector-rest`'s source by relative path: that package already
+    // dev-depends on this one, so a manifest edge back would close a cycle.
+    globs: ['packages/connectors/connector-rest/src/**'],
   },
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability

@@ -1,5 +1,6 @@
 ---
-title: Agent
+title: Agent schema — AI Protocol property reference
+navTitle: Agent
 description: "Agent schemas of the ObjectStack AI Protocol: AIModelConfig, Agent and 3 more — each property with its type, default and a TypeScript example."
 ---
 
@@ -47,8 +48,8 @@ const result = AIModelConfigSchema.parse(data);
 | **avatar** | `string` | optional |  |
 | **role** | `string` | ✅ | The persona/role (e.g. "Senior Support Engineer") |
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
-| **model** | `{ provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature: number; maxTokens?: number; … }` | optional |  |
-| **lifecycle** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }` | optional | [EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet. |
+| **model** | `{ provider?: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature?: number; maxTokens?: number; … }` | optional |  |
+| **lifecycle** | `never` | optional | [REMOVED] `agent.lifecycle` was removed in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — no runtime ever read it: no agent moved through a declared state and no transition was ever refused. Delete the key. A phase of a conversation is a skill with its own `instructions` and `tools`, selected by its `triggerConditions` (ADR-0064); multi-step process orchestration is a Flow (ADR-0019); a record's status transitions are a `state_machine` validation rule on the object (ADR-0020). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **surface** | `Enum<'ask' \| 'build'>` | optional (default: `"ask"`) | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
 | **tools** | `never` | optional | [REMOVED] `agent.tools` was removed in @objectstack/spec 17 — use `skills`. An agent reaches exactly the tools its surface-compatible skills declare (ADR-0064), so move each reference into a skill: a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions. This is NOT a rename — there is no key the value moves to: the migration DELETES the key and emits a notice naming each tool that was listed, and you re-declare each one in a skill by hand. ADR-0064 itself still reads `Proposed` and is cloud-owned — that scopes its RUNTIME half (tool resolution, which lives in cloud `service-ai`), not this rejection: the authoring invariant binds you here, and ADR-0109 (Accepted — implemented) is the in-repo record that carries it. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
@@ -56,10 +57,10 @@ const result = AIModelConfigSchema.parse(data);
 | **active** | `boolean` | optional (default: `true`) |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
-| **planning** | `{ maxIterations: integer }` | optional | Autonomous reasoning and planning configuration |
-| **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | [EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet. |
-| **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | [EXPERIMENTAL — not enforced] Safety guardrails for the agent. Parsed but not enforced — real limits come from the quota service. |
-| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | [EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet. |
+| **planning** | `{ maxIterations?: integer }` | optional | Autonomous reasoning and planning configuration |
+| **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | Agent memory (long-term notes recalled before each conversation and written by periodic reflection), enforced by the cloud AI runtime; the open framework edition does not run agents. |
+| **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents. |
+| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema'>; schema?: Record<string, any>; strict?: boolean; retryOnValidationFailure?: boolean; … }` | optional | Structured output contract for the agent's final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this agent. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -79,17 +80,6 @@ const result = AIModelConfigSchema.parse(data);
 | **maxTokens** | `number` | optional |  |
 | **topP** | `number` | optional |  |
 
-### Nested Shape: `Agent.lifecycle`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique Machine ID |
-| **description** | `string` | optional |  |
-| **contextSchema** | `Record<string, any>` | optional | Zod Schema for the machine context/memory |
-| **initial** | `string` | ✅ | Initial State ID |
-| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
-| **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional |  |
-
 ### Nested Shape: `Agent.planning`
 
 | Property | Type | Required | Description |
@@ -100,8 +90,8 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **longTerm** | `{ enabled: boolean; store: Enum<'vector' \| 'database' \| 'redis'>; maxEntries?: integer }` | optional | Long-term / persistent memory |
-| **reflectionInterval** | `integer` | optional | Reflect every N interactions to improve behavior |
+| **longTerm** | `{ enabled?: boolean; maxEntries?: integer }` | optional | Long-term memory: distilled notes kept per user and agent and recalled before each conversation |
+| **reflectionInterval** | `integer` | optional | Reflect every N delivered interactions: each reflection writes one distilled note to long-term memory. Required when longTerm.enabled is true, and refused without it |
 
 ### Nested Shape: `Agent.guardrails`
 
@@ -109,19 +99,19 @@ const result = AIModelConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxTokensPerInvocation** | `integer` | optional | Token budget per single invocation |
 | **maxExecutionTimeSec** | `integer` | optional | Max execution time in seconds |
-| **blockedTopics** | `string[]` | optional | Forbidden topics or action names |
+| **blockedTopics** | `string[]` | optional | Forbidden topics or action names: each entry is an exact, case-sensitive match on the tool name, on `action_` plus the action type, or on the tool category |
 
 ### Nested Shape: `Agent.structuredOutput`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
-| **schema** | `Record<string, any>` | optional | JSON Schema definition for output |
+| **format** | `Enum<'json_object' \| 'json_schema'>` | ✅ | Expected output format |
+| **schema** | `Record<string, any>` | optional | JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
 | **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
 | **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
-| **fallbackFormat** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | optional | Fallback format if primary format fails |
-| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate' \| 'coerce_types'>[]` | optional | Post-processing steps applied to output |
+| **fallbackFormat** | `Enum<'json_object' \| 'json_schema'>` | optional | Fallback format: once the primary format's retries are spent, the last answer is checked against this format instead |
+| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate'>[]` | optional | Post-processing steps applied to output |
 
 ### Nested Shape: `Agent.protection`
 
@@ -142,28 +132,25 @@ Structured output configuration for agent responses
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
-| **schema** | `Record<string, any>` | optional | JSON Schema definition for output |
+| **format** | `Enum<'json_object' \| 'json_schema'>` | ✅ | Expected output format |
+| **schema** | `Record<string, any>` | optional | JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
 | **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
 | **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
-| **fallbackFormat** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | optional | Fallback format if primary format fails |
-| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate' \| 'coerce_types'>[]` | optional | Post-processing steps applied to output |
+| **fallbackFormat** | `Enum<'json_object' \| 'json_schema'>` | optional | Fallback format: once the primary format's retries are spent, the last answer is checked against this format instead |
+| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate'>[]` | optional | Post-processing steps applied to output |
 
 
 ---
 
 ## StructuredOutputFormat
 
-Output format for structured agent responses
+Output format for structured agent responses (JSON only)
 
 ### Allowed Values
 
 * `json_object`
 * `json_schema`
-* `regex`
-* `grammar`
-* `xml`
 
 
 ---
@@ -177,7 +164,6 @@ Post-processing step for structured output
 * `trim`
 * `parse_json`
 * `validate`
-* `coerce_types`
 
 
 ---

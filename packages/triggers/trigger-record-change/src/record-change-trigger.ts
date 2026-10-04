@@ -121,7 +121,7 @@ export interface TriggerLogger {
  * `ctx.previous`, observed by every OTHER binding sharing the same
  * HookContext — pass a copy in. ⚠️ A SHALLOW copy is enough for THIS function
  * (it only ever assigns top-level keys), and it is NOT enough for the object
- * that reaches a flow: see {@link decoupleFromEngineState} and #14744.
+ * that reaches a flow: see {@link decoupleFromEngineState} and commit 4f85e4d11.
  *
  * Exported (module-scope only — NOT re-exported from `index.ts`, so this
  * stays off the package's published API) so
@@ -236,7 +236,8 @@ export class RecordChangeTrigger implements FlowTrigger {
                 this.logger.warn(
                     `[record-change] flow '${binding.flowName}' has an ARRAY trigger event ${JSON.stringify(rawTriggerType)} — ` +
                         `multi-event arrays are not supported, so the flow is NOT bound and will never fire. ` +
-                        `For "created or updated" use a single 'record-after-write'; for any other combination author one flow per event (#3457).`,
+                        `For "created or updated" use a single 'record-after-write'; for any other combination author one flow per event — ` +
+                        `multi-event arrays are deferred until two independent projects need a combination other than created-or-updated.`,
                 );
             } else {
                 this.logger.warn(
@@ -337,8 +338,8 @@ export class RecordChangeTrigger implements FlowTrigger {
      * declared fields (see the `materializeDeclaredFields` call below).
      *
      * ⭐ Both roots it returns are a SNAPSHOT and are DECOUPLED from the
-     * engine's own state (#14744): a flow can mutate them however it likes and
-     * reach nothing outside its own run. Until #14744 that was true only of the
+     * engine's own state (commit 4f85e4d11): a flow can mutate them however it likes and
+     * reach nothing outside its own run. Until commit 4f85e4d11 that was true only of the
      * TOP LEVEL — every overlay here is a shallow spread, so each nested value
      * was still the engine's own object, and `inputData` is the batch payload
      * ADR-0058 Addendum II D3 shares across every row of a `multi: true` write.
@@ -450,7 +451,7 @@ export class RecordChangeTrigger implements FlowTrigger {
         const materializedPrevious =
             priorBase && fields ? materializeDeclaredFields({ ...priorBase }, fields) : previous;
 
-        // #14744 — DECOUPLE the flow-facing roots from the engine's own objects.
+        // Commit 4f85e4d11 — DECOUPLE the flow-facing roots from the engine's own objects.
         // Every overlay above is a SHALLOW spread, so until this point each
         // nested value in `record` is still the engine's: `inputData` is
         // `ctx.input.data`, which ADR-0058 Addendum II D3 shares across every
@@ -493,7 +494,7 @@ export class RecordChangeTrigger implements FlowTrigger {
             ...(session.organizationId ? { tenantId: session.organizationId } : {}),
             // Expose the record as params too, so flows with named `isInput`
             // variables matching record fields get them seeded. Deliberately the
-            // SAME object as `record` (unchanged by #14744 — `params` was never a
+            // SAME object as `record` (unchanged by commit 4f85e4d11 — `params` was never a
             // second snapshot, and making it one here would be an observable
             // change on top of the aliasing fix).
             params: isolatedRecord,

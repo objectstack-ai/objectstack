@@ -1379,10 +1379,11 @@ export function extractJobOutputSources(jobText) {
  * not. Translating one language with the other is how a derivation goes
  * confidently wrong, so a glob carrying an extglob is DROPPED from the derived
  * population and counted, never approximated. Live specimen and the whole cost
- * of the refusal on this tree: `apps/!(docs)/**` in ci.yml's `core` filter, one
- * entry of six — the other five (`packages/**`, `examples/**`, `package.json`,
- * `pnpm-lock.yaml`, `tsconfig.json`, plus the workflow file itself) carry the
- * filter. A dropped POSITIVE entry can only narrow what is claimed; a dropped
+ * of the refusal on this tree: `apps/!(docs)/**` in ci.yml's `core` filter, its
+ * one extglob entry — the rest (`packages/**`, `examples/**`, `package.json`,
+ * `pnpm-lock.yaml`, `tsconfig.json`, the workflow file itself, and since #21202
+ * the root build inputs turbo.json declares) carry the filter. A dropped
+ * POSITIVE entry can only narrow what is claimed; a dropped
  * NEGATION would WIDEN it, so one of those refuses the whole population instead.
  */
 const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
@@ -20687,8 +20688,11 @@ function selfTest() {
   // identity test for the `check-*` regex the card proposed. Both were measured
   // on this tree: the regex fabricates 10 leads and misses 31 real gate scripts,
   // 93.3% precision and 81.8% recall against 100/100 here.
+  // The specimen is `check-test-typecheck.mts`, run only by package manifests.
+  // It was `check-dts-emitted.mjs` until ci.yml's Build Core began running that
+  // checker's `--self-test` (#21202), which made it a family file.
   t('a name-shaped script no family runs is NOT a gate script — the fabrication direction',
-    !isGateScriptPath('scripts/check-dts-emitted.mjs', gateFiles));
+    !isGateScriptPath('scripts/check-test-typecheck.mts', gateFiles));
   t('…and a real gate that is not called check-anything IS one — the recall direction',
     isGateScriptPath('packages/spec/scripts/build-schemas.ts', gateFiles));
   // The two instances this card measured. They are the whole reason the entry

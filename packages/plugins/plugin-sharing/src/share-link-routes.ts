@@ -43,7 +43,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // `share-link-service.ts` gates redemption with — one definition, not a
 // service-local one this layer re-exports.
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
-import { type ShareLinkService } from './share-link-service.js';
+import { readShareLinkInternalColumn, type ShareLinkService } from './share-link-service.js';
 import type { SharingEngine } from './sharing-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -60,7 +60,7 @@ export interface ShareLinkRoutesOptions {
    * trusted `x-user-id` / `x-tenant-id`, which let a client forge attribution
    * and enumerate/revoke other users' links.
    *
-   * [#6206 / #6430] It returns the FULL {@link ExecutionContext} — the whole
+   * [commit 8e13ca876 / #6430] It returns the FULL {@link ExecutionContext} — the whole
    * `resolveAuthzContext` envelope — because this module forwards it unchanged
    * into `createLink` / `listLinks` / `revokeLink`, every one of which
    * ADJUDICATES access. A resolver that rebuilds a subset here silently changes
@@ -78,7 +78,7 @@ export interface ShareLinkRoutesOptions {
 const defaultContext = (_req: IHttpRequest): ExecutionContext => ({});
 
 /**
- * [#6206] The routes' own 401 gate — authenticated vs anonymous, and nothing
+ * [commit 8e13ca876, full-envelope ruling] The routes' own 401 gate — authenticated vs anonymous, and nothing
  * more.
  *
  * Typed to {@link ShareLinkExecutionContext} deliberately: that is the shape
@@ -290,7 +290,12 @@ export function registerShareLinkRoutes(
           return invalidOrExpired();
         }
         if (row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now())) {
-          if (row.password_hash) {
+          // [#21197] `password_hash` is `internal`, so the probe row comes back
+          // without it; read off the row, every protected link would answer
+          // "invalid" here instead of prompting for its password. Recovered
+          // through the same fail-closed accessor redemption uses.
+          const [passwordHash] = await readShareLinkInternalColumn(engine, [row], 'password_hash');
+          if (passwordHash) {
             return sendError(
               res,
               401,

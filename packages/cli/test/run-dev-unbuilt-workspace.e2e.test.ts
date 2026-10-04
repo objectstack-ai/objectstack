@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The WIRING half of #12964 — `bin/run-dev.js` really asks, on a real failing
+ * The WIRING half of commit e6fd1caf7 — `bin/run-dev.js` really asks, on a real failing
  * run, whether "command … not found" is about a missing command at all.
  *
  * ```
@@ -464,7 +464,7 @@ describe('the mirror direction: a reader that is never coming back', () => {
   it('a CLOSED read end ends the child on its own, with the status every other reader gets', () => {
     // ⚠️ THE NUMBER BELOW MOVED FROM 1 TO 2, and this case is why it could not
     // move quietly. It pinned 1 on purpose — 1 was what the CLI DID, never what
-    // anyone contracted — and #14858 is the card that changed the CLI. ⛔ This
+    // anyone contracted — and commit 0c5e97368 is what changed the CLI. ⛔ This
     // was not a broken test and the flip is not a regression.
     //
     // What the child USED TO DO with its read end destroyed: node's OWN default
@@ -487,7 +487,7 @@ describe('the mirror direction: a reader that is never coming back', () => {
     // `process.stderr` before `run()`. A failed stderr write stops being fatal,
     // the run reaches the CLI's own exit path — oclif's `handle()`, status 2 —
     // and the closed reader answers what the drained and never-read readers
-    // already answered (#14715 pinned 2 for the never-read one). Re-measured
+    // already answered (commit accb9231c pinned 2 for the never-read one). Re-measured
     // for that change, one contiguous 2x2 ablation of the shim on one box, the
     // listener present/absent against the `write` callback kept/removed:
     //

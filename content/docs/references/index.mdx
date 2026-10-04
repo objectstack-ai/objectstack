@@ -1,6 +1,7 @@
 ---
-title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1523 schemas across 14 protocol modules
+title: Protocol reference — every schema by module
+navTitle: Protocol Reference
+description: Every schema published by @objectstack/spec — 1516 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,11 +21,11 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 32 | 429 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 14 | 75 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
-| [Data Protocol](/docs/references/data) | 29 | 175 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [API Protocol](/docs/references/api) | 32 | 430 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [Automation Protocol](/docs/references/automation) | 13 | 70 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Data Protocol](/docs/references/data) | 30 | 178 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
-| [Integration Protocol](/docs/references/integration) | 1 | 24 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
+| [Integration Protocol](/docs/references/integration) | 1 | 12 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 157 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [Marketplace Protocol](/docs/references/marketplace) | 4 | 30 | The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
@@ -32,8 +33,8 @@ counts are sums of the rows they head. Regenerate with
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 34 | 275 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 159 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **196** | **1523** | 14 protocol modules |
+| [UI Protocol](/docs/references/ui) | 16 | 165 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **196** | **1516** | 14 protocol modules |
 
 ---
 
@@ -62,7 +63,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **32 pages, 429 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **32 pages, 430 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -74,7 +75,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListRunsRequest`, `ListRunsResponse`, `ResumeFailureDetails`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
 | [`batch.zod.ts`](/docs/references/api/batch) | `BatchConfig`, `BatchOperationResult`, `BatchOperationType`, `BatchOptions`, `BatchRecord`, `BatchUpdateRequest`, `BatchUpdateResponse`, `CrossObjectBatchDroppedFields`, `CrossObjectBatchOperation`, `CrossObjectBatchRequest`, `CrossObjectBatchResponse`, `DeleteManyRequest`, `UpdateManyRecord`, `UpdateManyRequest` |
 | [`contract.zod.ts`](/docs/references/api/contract) | `ApiError`, `BaseResponse`, `BatchLoadingStrategy`, `BulkRequest`, `BulkResponse`, `CreateRequest`, `DataLoaderConfig`, `DeleteResponse`, `ExportRequest`, `IdRequest`, `ListRecordResponse`, `ModificationResult`, `QueryOptimizationConfig`, `RecordData`, `SingleRecordResponse`, `UpdateRequest` |
-| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `EnvironmentType`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
+| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `AuthFamilies`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `EnvironmentType`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
 | [`dispatcher.zod.ts`](/docs/references/api/dispatcher) | `DispatcherConfig`, `DispatcherErrorCode`, `DispatcherErrorResponse`, `DispatcherRoute` |
 | [`documentation.zod.ts`](/docs/references/api/documentation) | `ApiChangelogEntry`, `ApiDocumentationConfig`, `ApiTestCollection`, `ApiTestRequest`, `ApiTestingUiConfig`, `ApiTestingUiType`, `CodeGenerationTemplate`, `GeneratedApiDocumentation`, `OpenApiSecurityScheme`, `OpenApiServer`, `OpenApiSpec` |
 | [`endpoint.zod.ts`](/docs/references/api/endpoint) | `ApiEndpoint`, `ApiMapping` |
@@ -105,7 +106,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **14 pages, 75 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 70 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
@@ -122,7 +123,6 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 | [`node-executor.zod.ts`](/docs/references/automation/node-executor) | `ActionCategory`, `ActionDescriptor`, `ActionParadigm`, `NodeExecutorDescriptor`, `WaitEventType`, `WaitExecutorConfig`, `WaitResumePayload`, `WaitTimeoutBehavior` |
 | [`schedule-organization.zod.ts`](/docs/references/automation/schedule-organization) | `ScheduleOrganization` |
 | [`schemaless-node-config.zod.ts`](/docs/references/automation/schemaless-node-config) | `DecisionCondition`, `DecisionConfig`, `ScriptConfig`, `SubflowConfig` |
-| [`state-machine.zod.ts`](/docs/references/automation/state-machine) | `ActionRef`, `GuardRef`, `StateMachine`, `StateNode`, `Transition` |
 | [`time-relative-trigger.zod.ts`](/docs/references/automation/time-relative-trigger) | `TimeRelativeTrigger` |
 | [`webhook.zod.ts`](/docs/references/automation/webhook) | `Webhook`, `WebhookTriggerType` |
 
@@ -130,7 +130,7 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 175 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **30 pages, 178 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
@@ -161,6 +161,7 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`hook-body.zod.ts`](/docs/references/data/hook-body) | `ExpressionBody`, `HookBody`, `HookBodyCapability`, `ScriptBody` |
 | [`mapping.zod.ts`](/docs/references/data/mapping) | `ImportFieldMapping`, `Mapping`, `TransformType` |
 | [`object.zod.ts`](/docs/references/data/object) | `ApiMethod`, `ApiOperation`, `Index`, `Lifecycle`, `LifecycleClass`, `Object`, `ObjectAccessConfig`, `ObjectCapabilities`, `ObjectExtension`, `ObjectExternalBinding`, `ObjectFieldGroup`, `ObjectOwnershipEnum`, `ObjectRequiredPermissions`, `PerOperationRequiredPermissions`, `RowCrudActionOverride`, `TenancyConfig` |
+| [`picklist.zod.ts`](/docs/references/data/picklist) | `Picklist`, `PicklistExtension`, `PicklistServedField` |
 | [`query.zod.ts`](/docs/references/data/query) | `AggregationFunction`, `AggregationNode`, `DateGranularity`, `FieldNode`, `FullTextSearch`, `GroupByNode`, `Query`, `SortNode` |
 | [`seed.zod.ts`](/docs/references/data/seed) | `Seed`, `SeedMode` |
 | [`seed-loader.zod.ts`](/docs/references/data/seed-loader) | `ObjectDependencyGraph`, `ObjectDependencyNode`, `ReferenceResolution`, `ReferenceResolutionError`, `SeedIdentity`, `SeedLoadResult`, `SeedLoaderConfig`, `SeedLoaderRequest`, `SeedLoaderResult` |
@@ -186,13 +187,13 @@ Users and accounts, organizations, positions, SCIM provisioning.
 
 ## Integration Protocol
 
-**Source:** `packages/spec/src/integration/` · **Import:** `@objectstack/spec/integration` · **1 page, 24 schemas**
+**Source:** `packages/spec/src/integration/` · **Import:** `@objectstack/spec/integration` · **1 page, 12 schemas**
 
 The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances.
 
 | File | Schemas |
 | :--- | :--- |
-| [`connector.zod.ts`](/docs/references/integration/connector) | `CircuitBreakerConfig`, `Connector`, `ConnectorAction`, `ConnectorActionEffect`, `ConnectorConflictResolution`, `ConnectorFieldMapping`, `ConnectorHealth`, `ConnectorInstanceAPIKeyAuth`, `ConnectorInstanceAuth`, `ConnectorInstanceBasicAuth`, `ConnectorInstanceBearerAuth`, `ConnectorInstanceNoAuth`, `ConnectorRetryStrategy`, `ConnectorStatus`, `ConnectorTrigger`, `ConnectorType`, `DataSyncConfig`, `DeclarativeConnectorEntry`, `HealthCheckConfig`, `RetryConfig`, `SyncStrategy`, `WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm` |
+| [`connector.zod.ts`](/docs/references/integration/connector) | `Connector`, `ConnectorAction`, `ConnectorActionEffect`, `ConnectorInstanceAPIKeyAuth`, `ConnectorInstanceAuth`, `ConnectorInstanceBasicAuth`, `ConnectorInstanceBearerAuth`, `ConnectorInstanceNoAuth`, `ConnectorRetryStrategy`, `ConnectorType`, `DeclarativeConnectorEntry`, `RetryConfig` |
 
 ---
 
@@ -362,7 +363,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 159 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 165 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -373,7 +374,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `DocNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
 | [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
-| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
+| [`component.zod.ts`](/docs/references/ui/component) | `ActionButtonProps`, `ActionGroupProps`, `ActionIconProps`, `ActionMenuProps`, `ElementButtonProps`, `ElementDefinitionListProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementRepeaterProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordLineItemsProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetChartConfig`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
 | [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
 | [`expression-bindable-text-keys.zod.ts`](/docs/references/ui/expression-bindable-text-keys) | `ExpressionBindableTextKey` |
@@ -383,7 +384,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`report.zod.ts`](/docs/references/ui/report) | `JoinedReportBlock`, `Report`, `ReportChart`, `ReportSort`, `ReportType` |
 | [`responsive.zod.ts`](/docs/references/ui/responsive) | `ResponsiveStyles`, `StyleMap` |
 | [`sharing.zod.ts`](/docs/references/ui/sharing) | `SharingConfig` |
-| [`view.zod.ts`](/docs/references/ui/view) | `AddRecordConfig`, `AppearanceConfig`, `CalendarConfig`, `ColumnPrefix`, `ColumnSummary`, `ColumnSummaryConfig`, `FormButtonConfig`, `FormField`, `FormFieldPublicPicker`, `FormSection`, `FormSelectOption`, `FormView`, `GalleryConfig`, `GanttConfig`, `GanttQuickFilter`, `GroupingConfig`, `GroupingField`, `HttpMethodSubset`, `HttpRequest`, `KanbanConfig`, `ListChartConfig`, `ListColumn`, `ListMapConfig`, `ListView`, `NavigationConfig`, `NavigationMode`, `ObjectListView`, `ObjectUserFilters`, `PaginationConfig`, `RowColorConfig`, `RowHeight`, `SelectionConfig`, `TimelineConfig`, `TreeConfig`, `UserActionsConfig`, `UserFilterField`, `UserFilters`, `View`, `ViewData`, `ViewFilterRule`, `ViewItem`, `ViewItemName`, `ViewItemWire`, `ViewKind`, `ViewScope`, `ViewSharing`, `ViewTab`, `VisualizationType` |
+| [`view.zod.ts`](/docs/references/ui/view) | `AddRecordConfig`, `AppearanceConfig`, `CalendarConfig`, `ColumnPrefix`, `ColumnSummary`, `ColumnSummaryConfig`, `EmptyState`, `FormButtonConfig`, `FormField`, `FormSection`, `FormSelectOption`, `FormView`, `GalleryConfig`, `GanttConfig`, `GanttQuickFilter`, `GroupingConfig`, `GroupingField`, `HttpMethodSubset`, `HttpRequest`, `KanbanConfig`, `ListChartConfig`, `ListColumn`, `ListMapConfig`, `ListView`, `NavigationConfig`, `NavigationMode`, `ObjectListView`, `ObjectUserFilters`, `PaginationConfig`, `RowColorConfig`, `RowHeight`, `SelectionConfig`, `TimelineConfig`, `TreeConfig`, `UserActionsConfig`, `UserFilterField`, `UserFilters`, `View`, `ViewData`, `ViewFilterRule`, `ViewItem`, `ViewItemName`, `ViewItemWire`, `ViewKind`, `ViewScope`, `ViewSharing`, `ViewTab`, `VisualizationType` |
 
 ---
 

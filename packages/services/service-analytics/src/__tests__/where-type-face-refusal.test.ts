@@ -46,7 +46,7 @@ import { normalizeFilterComparandTypes, type Cube } from '@objectstack/spec/data
 import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { lowerAnalyticsWhere, normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { lowerAnalyticsWhere, normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -57,7 +57,7 @@ interface Refusal extends Error {
   status?: unknown;
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;
@@ -213,23 +213,35 @@ describe('[#20035] what the type face does not judge keeps this door\'s own sent
   // The face steps around arrays outside the list operators, `{ $field }`
   // references and unknown operators, so those positions reach the door's own
   // gates (#6386's `undefined` sweep, #5234's member and LIKE checks) exactly
-  // as before.
+  // as before. [#21448] Except an array at a SCALAR operator: the shared
+  // comparand-SHAPE face, which runs before this one, refuses that list as the
+  // list, so only an operator outside the vocabulary still carries an array
+  // to #6386's sweep.
   it('an undefined inside an ARRAY comparand, or under an unknown operator — #6386', () => {
     for (const [where, path] of [
-      [{ d: { $contains: ['a', undefined] } }, '"d".$contains[1]'],
+      [{ d: { $wat: ['a', undefined] } }, '"d".$wat[1]'],
       [{ d: { $wat: undefined } }, '"d".$wat'],
     ] as const) {
       const err = refusalOf(() => tree(where));
       expectEnvelope(err);
       expect(err.message).toContain(`[analytics] comparand at ${path} is undefined`);
     }
+    // [#21448] Under a declared scalar operator, the list is diagnosed as the
+    // list, by the shape face, before any member is read.
+    const list = refusalOf(() => tree({ d: { $contains: ['a', undefined] } }));
+    expectEnvelope(list);
+    expect(list.message).toMatch(/^Operator "\$contains" on field "d" requires a single comparable value/);
   });
 
-  it('an ARRAY or a { $field } member of $in, and the same as a LIKE comparand — #5234 / #7598', () => {
+  it('an ARRAY or a { $field } member of $in, and a { $field } LIKE comparand — #5234 / #7598', () => {
     expect(refusalOf(() => tree({ s: { $in: ['a', [1, 2]] } })).message).toContain('cannot be bound as a SQL parameter');
     expect(refusalOf(() => tree({ s: { $in: [{ $field: 'other' }] } })).message).toContain('cannot be bound as a SQL parameter');
-    expect(refusalOf(() => tree({ s: { $contains: ['a', 'b'] } })).message).toContain('StringOperatorSchema');
     expect(refusalOf(() => tree({ s: { $contains: { $field: 'other' } } })).message).toContain('StringOperatorSchema');
+    // [#21448] An ARRAY as a LIKE comparand is the shared comparand-shape
+    // face's now — a list at a scalar operator — so #5234's sentence no longer
+    // answers it from this door.
+    expect(refusalOf(() => tree({ s: { $contains: ['a', 'b'] } })).message)
+      .toMatch(/^Operator "\$contains" on field "s" requires a single comparable value/);
   });
 });
 
@@ -252,8 +264,9 @@ describe('[#20035] a bigint within 2^53 is NARROWED, copy-on-write — and every
       kind: 'and',
       children: [leaf('amt', 'gte', [2]), leaf('amt', 'lte', [5])],
     });
-    // A nested relation's bigint is narrowed on its dotted member.
-    expect(tree({ acct: { amt: 7n } })).toEqual(leaf('acct.amt', 'equals', [7]));
+    // A nested relation's bigint is narrowed inside the condition the engine
+    // receives as written (#20887: it used to flatten to the dotted member).
+    expect(tree({ acct: { amt: 7n } })).toEqual({ kind: 'relation', member: 'acct', condition: { amt: 7 } });
   });
 
   it('the caller\'s condition is never edited, and nothing is copied when nothing narrowed', () => {
@@ -281,7 +294,8 @@ describe('[#20035] a bigint within 2^53 is NARROWED, copy-on-write — and every
       [{ stage: { $null: true } }, leaf('stage', 'notSet', [])],
       [{ stage: { $contains: null } }, leaf('stage', 'contains', [null])],
       [{ amt: { $gt: { $field: 'id' } } }, leaf('amt', 'gt', [{ $field: 'id' }])],
-      [{ acct: { region: 'emea' } }, leaf('acct.region', 'equals', ['emea'])],
+      // [#20887] Carried as written for the engine (it used to flatten to `acct.region`).
+      [{ acct: { region: 'emea' } }, { kind: 'relation', member: 'acct', condition: { region: 'emea' } }],
     ];
     for (const [where, expected] of ACCEPTED) {
       expect(tree(where), JSON.stringify(where)).toEqual(expected);
@@ -311,9 +325,9 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    [['id', 'string'], ['amt', 'number'], ['stage', 'string']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
+    [['id', 'string'], ['amt', 'number'], ['stage', 'string']].map(([n, t]) => [n, { label: n, type: t, sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } } as never;
 

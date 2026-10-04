@@ -21,11 +21,13 @@
  *
  *  - ANY declared arm accepting the value clears the prop;
  *  - when NO arm accepts, a multi-arm input draws ONE `type-mismatch` naming
- *    every arm, at the STRICTEST arm's severity — `error` when an `enum` arm
- *    is present, `warning` otherwise;
- *  - a single-arm input produces the byte-identical diagnostic it always did,
- *    `invalid-enum` included — the port adds a form, it does not restate the
- *    old one.
+ *    every arm, at `error` severity — every value reaching the coarse check
+ *    is a literal, whose coarse type is final at compile time (the rule
+ *    `literal-type-mismatch-error.test.ts` pins; before it, a union without an
+ *    `enum` arm drew a `warning`);
+ *  - a single-arm input produces the code and message it always did, and the
+ *    single-enum `invalid-enum` diagnostic is byte-identical, severity
+ *    included — the port adds a form, it does not restate the old one.
  */
 import { describe, expect, it } from 'vitest';
 import { compile, generateDts, manifestFromConfigs } from '../index.js';
@@ -91,18 +93,18 @@ describe('union-arm type-mismatch: no arm accepting draws ONE diagnostic naming 
   // Before this port, BOTH cases below compiled with zero diagnostics: the
   // union fell through the single-arm switch's `default: return null`. That
   // silence is the drift this file closes — do not restore it.
-  it('non-enum union → ONE warning-severity `type-mismatch` naming both arms', () => {
+  it('non-enum union → ONE error-severity `type-mismatch` naming both arms', () => {
     const r = compile(`<stat-card value={true} />`, manifest);
     expect(r.diagnostics).toEqual([
       {
-        severity: 'warning',
+        severity: 'error',
         code: 'type-mismatch',
         message: '<stat-card> prop "value" expected a string or a number',
         tag: 'stat-card',
       },
     ]);
-    // warning does not move the save gate's pass/fail
-    expect(r.ok).toBe(true);
+    // a literal no arm accepts is certain, so it gates the save
+    expect(r.ok).toBe(false);
   });
 
   it('enum arm present → the ONE diagnostic is ERROR severity, code `type-mismatch` (not `invalid-enum`), and carries the allowed values', () => {
@@ -120,12 +122,12 @@ describe('union-arm type-mismatch: no arm accepting draws ONE diagnostic naming 
   });
 });
 
-describe('single-arm inputs are byte-identical to the pre-port diagnostics', () => {
-  it('single string arm → the same warning `type-mismatch` as always', () => {
+describe('single-arm inputs keep the pre-port code and message', () => {
+  it('single string arm → the same `type-mismatch` code and message, now at error severity (a literal)', () => {
     const r = compile(`<stat-card label={42} />`, manifest);
     expect(r.diagnostics).toEqual([
       {
-        severity: 'warning',
+        severity: 'error',
         code: 'type-mismatch',
         message: '<stat-card> prop "label" expected a string',
         tag: 'stat-card',

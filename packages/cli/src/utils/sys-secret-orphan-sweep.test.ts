@@ -217,7 +217,7 @@ async function buildRuntime() {
   };
 
   // --- family 1: a settings handle, minted by the real provider, IN FORCE ---
-  const settingsHandle = await crypto.encrypt('smtp-app-password', { namespace: 'smtp', key: 'password' });
+  const settingsHandle = await crypto.encrypt('smtp-app-password', { scope: 'settings', namespace: 'smtp', key: 'password' });
   seedSecret(settingsHandle, 'smtp', 'password');
   store.seed('sys_setting', {
     id: 'set_1', namespace: 'smtp', key: 'password', scope: 'tenant', user_id: null,
@@ -229,7 +229,7 @@ async function buildRuntime() {
   // deliberately not referenced by any sys_setting row. This is the one class
   // the ruling permits deleting, and it is what keeps every "deletable is
   // empty" assertion below falsifiable.
-  const orphanHandle = await crypto.encrypt('rotated-away-token', { namespace: 'smtp', key: 'retired_token' });
+  const orphanHandle = await crypto.encrypt('rotated-away-token', { scope: 'settings', namespace: 'smtp', key: 'retired_token' });
   seedSecret(orphanHandle, 'smtp', 'retired_token');
 
   // --- family 2: the engine's own secret-field channel, LIVE ---------------
@@ -428,7 +428,7 @@ describe('the classes the ruling puts out of reach', () => {
   });
 
   it('a LEGACY INLINE sibling is withheld — the #8063 guard in the opposite direction', async () => {
-    const inlineHandle = await rt.crypto.encrypt('older-inline', { namespace: 'smtp', key: 'inline_legacy' });
+    const inlineHandle = await rt.crypto.encrypt('older-inline', { scope: 'settings', namespace: 'smtp', key: 'inline_legacy' });
     rt.store.seed('sys_secret', {
       id: inlineHandle.id, namespace: 'smtp', key: 'inline_legacy',
       kms_key_id: inlineHandle.kmsKeyId, alg: inlineHandle.alg,
@@ -557,7 +557,7 @@ describe('the mandatory pre-delete export', () => {
 describe('the handle predicate comes from the producer', () => {
   it('agrees with a handle minted by the real LocalCryptoProvider', async () => {
     const crypto = new LocalCryptoProvider({ mode: 'test' });
-    const handle = await crypto.encrypt('x', { namespace: 'smtp', key: 'password' });
+    const handle = await crypto.encrypt('x', { scope: 'settings', namespace: 'smtp', key: 'password' });
     expect(isSecretHandle(handle.id)).toBe(true);
     // A legacy inline value is not a handle — the discriminator the guard rests on.
     expect(isSecretHandle('AQIDBAUGBwgJCg==')).toBe(false);

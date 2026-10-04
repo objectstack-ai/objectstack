@@ -253,26 +253,31 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       actor_id: {
-        label: "操作者"
+        label: "操作者",
+        help: "この操作を行ったユーザー。人物が記録されていない場合は空です。システムが開始した操作、または判断者が記録されるようになる前の判断（代表したスロットは引き続き表示されます）が該当します。"
+      },
+      acted_as: {
+        label: "代表スロット",
+        help: "この操作が代表した承認待ちスロット。スロットに保存された表記（ユーザー ID、メールアドレス、またはポジションアドレス）で記録されます。申請者自身の操作、システム操作、管理者オーバーライドなど、スロットを経由せずに許可された操作では空になります。"
       },
       comment: {
         label: "コメント"
       },
       via_override: {
         label: "管理者オーバーライド経由",
-        help: "true の場合、実行者は特権オーバーライド経路（#3424）によってのみ許可されたことを示します — 当該リクエストの承認待ちリストには含まれていません。"
+        help: "true の場合、実行者は当該リクエストの承認待ちリストに含まれておらず、特権オーバーライドによってのみこの操作を許可されたことを示します。特権オーバーライドにより、プラットフォーム管理者または組織管理者は保留中のどのリクエストにも対応できるため、リスト内の誰も判断できないリクエストが停滞したままになることはありません。"
       },
       reassign_from: {
         label: "引き継ぎ元",
-        help: "承認待ちスロットを引き渡したユーザー（引き継ぎ操作のみ）"
+        help: "引き渡された承認待ちスロット。スロットに保存された表記（ユーザー ID、メールアドレス、またはポジションアドレス）で記録されます（引き継ぎ操作のみ）。"
       },
       reassign_to: {
         label: "引き継ぎ先",
-        help: "承認待ちスロットを受け取ったユーザー（引き継ぎ操作のみ）"
+        help: "スロットの引き継ぎ先となった承認待ちアドレス。保存された表記（ユーザー ID、メールアドレス、またはポジションアドレス）で記録されます（引き継ぎ操作のみ）。"
       },
       attachments: {
         label: "添付ファイル",
-        help: "この操作を裏付けるファイル——署名済み契約書や証憑など（#3266）。"
+        help: "この操作を裏付けるファイル——署名済み契約書や証憑など。"
       },
       created_at: {
         label: "作成日時"
@@ -297,7 +302,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
     fields: {
       id: {
         label: "Delegation ID"

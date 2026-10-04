@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10888 — the face inventory for `saveMetaItem`'s spec-validation
+ * Commit d806081dd — the face inventory for `saveMetaItem`'s spec-validation
  * `422 INVALID_METADATA`, and the pins that hold its conclusion.
  *
  * ## The duplication that raised the card
@@ -17,10 +17,10 @@
  * A blanket trim was tried during #10524 and reverted: some faces put this
  * sentence on a **200 response body** or in a **log**, where no structured
  * channel exists and the sentence is the SOLE carrier of the author's
- * prescription. #10886 reached the same verdict for the sibling 409.
+ * prescription. Commit 809e61221 reached the same verdict for the sibling 409.
  *
- * The maintainer ruling on #11017 (2026-08-22, option D) resolved it by
- * reusing #11015/#11099's per-face rendering rather than by declaring a
+ * The maintainer ruling of 2026-08-22 (option D, landed as commit d806081dd) resolved it by
+ * reusing commit 82cb6e849/#11099's per-face rendering rather than by declaring a
  * response contract for `duplicatePackage`: faces that already carry a
  * structured `issues[]` drop the prose restatement; the duplicate face keeps
  * it in full.
@@ -97,7 +97,7 @@ interface Row {
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
 
-function makeProtocol() {
+function makeProtocol(opts: { datasets?: readonly unknown[] } = {}) {
     // ⚠️ Keyed BY TABLE. `find`/`findOne` below answer nothing, so this harness
     // cannot serve a `sys_metadata_history` row as a `sys_metadata` row the way
     // #16223 measured — but one flat map still made `rows.size` the total of
@@ -131,7 +131,16 @@ function makeProtocol() {
             assertEngineDeleteDispatch(opts);
             return { deleted: 0 };
         },
-        registry: { registerItem: () => {}, registerObject: () => {} },
+        registry: {
+            registerItem: () => {},
+            registerObject: () => {},
+            // `datasets` (section 5 only) is the registered dataset universe the
+            // author-time gate resolves a report's bindings against; every other
+            // caller passes none, so the registry lists nothing, as before.
+            ...(opts.datasets
+                ? { listItems: (type: string) => (type === 'dataset' ? [...opts.datasets!] : []) }
+                : {}),
+        },
     };
     const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map());
     return { protocol, rows };
@@ -290,7 +299,7 @@ describe('[#10888 · GUARD] a face that carries no `issues[]` keeps the whole se
         const duplicate = await refusal(protocol, 'package-duplicate');
         const plain = await refusal(protocol);
 
-        // #10886's verdict, unchanged: `failed[].error` is the sole carrier.
+        // Commit 809e61221's verdict, unchanged: `failed[].error` is the sole carrier.
         // (The end-to-end pin through `duplicatePackage` itself is P10 in
         // `protocol.batch-verb-driver-text.test.ts`, still green, untouched.)
         expect(duplicate.message).toBe(plain.message);
@@ -396,10 +405,18 @@ async function saveReport(protocol: any, item: Record<string, unknown>): Promise
 }
 
 describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door', () => {
-    // No `dataset` on the block: this door also runs the author-time lints, and
-    // `chart-dataset-unknown` refuses a dataset this stub engine cannot resolve —
-    // a second refusal the CONTROL below would otherwise be reading instead.
-    const block = { name: 'open_block', type: 'summary', rows: ['status'], values: ['task_count'] };
+    // The block binds a dataset the harness registers: a joined report's block
+    // with no `dataset` is itself refused at `blocks.0.dataset` (#21702), and
+    // this door also runs the author-time lints, where `chart-dataset-unknown`
+    // refuses a dataset the stub engine cannot resolve — either would be a
+    // second refusal the CONTROL below would otherwise be reading instead.
+    const datasets = [{
+        name: 'task_metrics',
+        object: 'task',
+        dimensions: [{ name: 'status', field: 'status' }],
+        measures: [{ name: 'task_count', aggregate: 'count' }],
+    }];
+    const block = { name: 'open_block', type: 'summary', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] };
     const joined = { name: 'task_overview', label: 'Task Overview', type: 'joined', blocks: [block] };
     const chart = { type: 'bar', xAxis: 'status', yAxis: 'task_count' };
 
@@ -408,7 +425,7 @@ describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door'
         ['the container', { ...joined, chart }, 'custom', 'chart', 'a `joined` report draws no chart'],
         ['a block', { ...joined, blocks: [{ ...block, chart }] }, 'unrecognized_keys', 'blocks.0', '`report.blocks[].chart` was removed'],
     ] as const)('`chart` on %s — 422 INVALID_METADATA, located at the key, nothing stored', async (_where, item, code, path, prescription) => {
-        const { protocol, rows } = makeProtocol();
+        const { protocol, rows } = makeProtocol({ datasets });
         const err = await saveReport(protocol, item);
 
         expect(err).toBeInstanceOf(Error);
@@ -421,10 +438,199 @@ describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door'
     });
 
     it('CONTROL — the same joined report without a `chart` is stored (the refusal is the key, not the report)', async () => {
-        const { protocol, rows } = makeProtocol();
+        const { protocol, rows } = makeProtocol({ datasets });
         const result = await saveReport(protocol, joined);
 
         expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
         expect([...rows.values()].map((r) => r.type)).toEqual(['report']);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. #21565 — the `hook` door refuses a body bound to a stored-metadata table
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// An app-authored hook body may not be bound to `sys_metadata` or
+// `sys_metadata_history`: the runtime refuses such a hook where a body becomes
+// a handler (`hookBodyRunnerFactory`), so it never runs. The save door used to
+// answer 200 for it. `HookSchema` now refuses it at parse, so THIS gate — the
+// one `PUT /api/v1/meta/hook/:name` reaches, built here exactly as that route
+// builds it for the administrator (`writeFace: 'meta-envelope'`, the actor
+// named) — refuses it with the ADR-0112 envelope, the issue located at
+// `object`, and the runtime's prescription. Rides this file's pinned engine
+// double, as sections 4 and 5 do. ⛔ No check of its own lives in
+// `protocol.ts`: the refusal is the registered type schema's.
+
+async function saveHookAsAdministrator(protocol: any, item: Record<string, unknown>): Promise<any> {
+    try {
+        return await protocol.saveMetaItem({
+            type: 'hook',
+            name: item.name,
+            item,
+            writeFace: 'meta-envelope',
+            actor: 'usr_admin',
+        });
+    } catch (e: any) {
+        return e;
+    }
+}
+
+describe('[#21565] a hook body bound to a stored-metadata table is refused at the metadata door', () => {
+    const body = { language: 'js', source: "ctx.input.status = 'seen';" };
+    const hookOn = (object: string | string[]) => ({
+        name: 'stamp_status',
+        object,
+        events: ['beforeInsert'],
+        body,
+    });
+
+    it.each([
+        ['sys_metadata', 'object'],
+        ['sys_metadata_history', 'object'],
+        [['hks_note', 'sys_metadata'], 'object.1'],
+    ] as const)('`object: %j` — 422 INVALID_METADATA at `%s`, with the prescription, nothing stored', async (object, path) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveHookAsAdministrator(protocol, hookOn(object as string | string[]));
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues as Array<{ code?: string; path?: string; message: string }>;
+        expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', path]]);
+        expect(issues[0]!.message).toContain('a table of stored metadata');
+        expect(issues[0]!.message).toContain('Change metadata through the metadata API');
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same body hook on an ordinary object saves as before', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveHookAsAdministrator(protocol, hookOn('hks_note'));
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. #21658 — the `hook` door refuses a `handler` name with no `body`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The same door as section 6, and the contrast to it: this refusal is NOT the
+// type schema's. `HookSchema` keeps accepting the string `handler`, because a
+// build artifact legitimately carries that form, and the artifact door never
+// reaches `saveMetaItem`. What this door stores ships with no code package,
+// and a `handler` name resolves only inside the hook's own package, so a hook
+// naming a function and carrying no `body` can never bind once stored. The
+// door refuses it with `VALIDATION_ERROR` / 400 — the envelope of the name
+// check every body passes — before anything is stored, in publish and in draft
+// mode. Rides this file's pinned engine double, as section 6 does.
+
+describe('[#21658] a hook naming a function in `handler` with no `body` is refused at the metadata door', () => {
+    const handlerOnly = () => ({
+        name: 'stamp_status',
+        object: 'hks_note',
+        events: ['beforeInsert'],
+        handler: 'x_stamp',
+    });
+    const body = { language: 'js', source: "ctx.input.status = 'seen';" };
+
+    it.each([
+        ['publish', undefined],
+        ['draft', 'draft'],
+    ] as const)('%s mode — VALIDATION_ERROR / 400, naming the hook and its handler, nothing stored', async (_label, mode) => {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await protocol.saveMetaItem({
+                type: 'hook',
+                name: 'stamp_status',
+                item: handlerOnly(),
+                writeFace: 'meta-envelope',
+                actor: 'usr_admin',
+                ...(mode ? { mode } : {}),
+            });
+        } catch (e) {
+            err = e;
+        }
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(err.message).toContain("'stamp_status'");
+        expect(err.message).toContain("'x_stamp'");
+        expect(err.message).toContain('Give it a `body`');
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same hook with a `body` saves', async () => {
+        const { protocol, rows } = makeProtocol();
+        const { handler: _dropped, ...withoutHandler } = handlerOnly();
+        const result = await saveHookAsAdministrator(protocol, { ...withoutHandler, body });
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
+    });
+
+    it('a `body` beside the `handler` saves: the binder runs the body and never consults the name', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveHookAsAdministrator(protocol, { ...handlerOnly(), body });
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
+    });
+
+    it('a malformed `body` beside the `handler` gets the schema\'s located 422, not "give it a body"', async () => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveHookAsAdministrator(protocol, { ...handlerOnly(), body: 'return;' });
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues as Array<{ path?: string }>).map((i) => i.path)).toContain('body');
+        expect(rows.size).toBe(0);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. #21689 — one predicate: the `hook` door refuses every hook with no `body`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Section 7's refusal, generalised. A hook this door stores ships with no code
+// package, so a `body` is the only code it can run: a hook with neither a
+// `body` nor a `handler` is never bound either (the binder skips it at every
+// re-sync). The door judges by one predicate — no `body` object — and section
+// 7's `handler` form is one case of it, with the same envelope. An empty
+// `handler` names no function, so it reads as no `handler`.
+
+describe('[#21689] a hook with no `body` and no function in `handler` is refused at the metadata door', () => {
+    const bare = (extra: Record<string, unknown> = {}) => ({
+        name: 'stamp_status',
+        object: 'hks_note',
+        events: ['beforeInsert'],
+        ...extra,
+    });
+
+    it.each([
+        ['publish', 'neither field', undefined, {}],
+        ['draft', 'neither field', 'draft', {}],
+        ['publish', 'an empty `handler`', undefined, { handler: '' }],
+    ] as const)('%s mode, %s — VALIDATION_ERROR / 400, naming the hook, prescribing a `body`, nothing stored', async (_label, _shape, mode, extra) => {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await protocol.saveMetaItem({
+                type: 'hook',
+                name: 'stamp_status',
+                item: bare(extra),
+                writeFace: 'meta-envelope',
+                actor: 'usr_admin',
+                ...(mode ? { mode } : {}),
+            });
+        } catch (e) {
+            err = e;
+        }
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(err.message).toContain("'stamp_status'");
+        expect(err.message).toContain('Give it a `body`');
+        expect(rows.size).toBe(0);
     });
 });

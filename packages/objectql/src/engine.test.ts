@@ -411,7 +411,7 @@ describe('ObjectQL Engine', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);
             await engine.init();
-            // [#13657] `stamped` is declared because this suite's own
+            // [commit b003cf2e8] `stamped` is declared because this suite's own
             // `beforeInsert` hook writes it, and the post-hook door now judges
             // the hook's output against this map. The subject — one dispatch
             // per row, single-record context shape — is untouched.
@@ -1406,6 +1406,10 @@ describe('ObjectQL Engine', () => {
                 name: 'invoice',
                 fields: {
                     amount: { type: 'number', readonlyWhen: 'record.locked == true' },
+                    // [#21613] Declared: the rules below read them, and a
+                    // write's prior read now carries the declared fields only.
+                    locked: { type: 'boolean' },
+                    limit: { type: 'number' },
                 },
                 validations: [{ type: 'cross_field', name: 'amount_cap', message: 'amount exceeds limit', condition: 'record.amount > record.limit', fields: ['amount'] }],
             } as any);
@@ -1466,7 +1470,9 @@ describe('ObjectQL Engine', () => {
         it('reports a readonlyWhen-locked field on a single-id update (reason readonly_when)', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'invoice',
-                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' } },
+                // [#21613] `locked` is declared: the prior read the rule
+                // reads carries the declared fields only.
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' } },
             } as any);
             vi.mocked(mockDriver.findOne).mockResolvedValue({ id: '1', locked: true, amount: 100 } as any);
 
@@ -1483,7 +1489,9 @@ describe('ObjectQL Engine', () => {
         it('reports bulk-path strips too (multi update — locked in ≥1 matched row)', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'invoice',
-                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' } },
+                // [#21613] `locked` is declared: the prior read the rule
+                // reads carries the declared fields only.
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' } },
             } as any);
             vi.mocked(mockDriver.find).mockResolvedValue([
                 { id: 'a', locked: false, amount: 10 },
@@ -2062,8 +2070,14 @@ describe('ObjectQL Engine', () => {
             expect(mockDriver.find).toHaveBeenCalledTimes(1); // No expand query
         });
 
-        it('should skip expand if schema is not registered', async () => {
-            vi.mocked(SchemaRegistry.getObject).mockReturnValue(undefined);
+        it('should skip expand if the referenced schema is not registered', async () => {
+            // [#21516] The read's own object must resolve through the registry
+            // (an in-process verb refuses a name it does not hold), so `task` is
+            // registered; the REFERENCED object is not, and expand leaves the
+            // raw id without a second driver read.
+            vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => (name === 'task'
+                ? { name: 'task', fields: { assignee: { type: 'lookup', reference: 'user' } } } as any
+                : undefined));
 
             vi.mocked(mockDriver.find).mockResolvedValueOnce([
                 { id: 't1', assignee: 'u1' },
@@ -2554,8 +2568,24 @@ describe('ObjectQL Engine', () => {
  * evidence cannot be read keeps writing rather than starting to reject.
  */
 describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
+  // [#20648] The flag read is a primary-key lookup through `findOne`, so the
+  // driver's `findOne` is what answers it in every case below.
   let engine: ObjectQL;
   let driver: IDataDriver;
+
+  // [#21571] The flag columns the real `sys_migration` declares
+  // (`platform-objects` sys-migration.object.ts). A read serves only declared
+  // columns, so a double declaring `id` alone would read every flag row as
+  // empty — the fixture declares what the production object declares.
+  const SYS_MIGRATION_DEF = {
+    name: 'sys_migration',
+    fields: {
+      id: { type: 'text' },
+      last_run_at: { type: 'datetime' },
+      verified_at: { type: 'datetime' },
+      blocking: { type: 'number' },
+    },
+  };
 
   const verifiedRow = {
     id: 'adr-0104-file-references',
@@ -2586,7 +2616,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
   const withMediaObject = () => {
     vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => {
       if (name === 'note') return { name: 'note', fields: { doc: { type: 'file' } } } as any;
-      if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
+      if (name === 'sys_migration') return SYS_MIGRATION_DEF as any;
       return undefined;
     });
   };
@@ -2594,28 +2624,28 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
 
   it('a verified flag makes a malformed media value reject', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await expect(engine.insert('note', { ...legacyBlob })).rejects.toThrow(/invalid file value/i);
   });
 
   it('no flag row → lenient (the write goes through)', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([]);
+    vi.mocked(driver.findOne).mockResolvedValue(null);
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
   });
 
   it('a failed run (verified_at cleared) → lenient', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([{ ...verifiedRow, verified_at: null, blocking: 3 }] as any);
+    vi.mocked(driver.findOne).mockResolvedValue({ ...verifiedRow, verified_at: null, blocking: 3 } as any);
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
   });
 
   it('an unreadable sys_migration → lenient, and the write is not failed by the probe', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockRejectedValue(new Error('no such table: sys_migration'));
+    vi.mocked(driver.findOne).mockRejectedValue(new Error('no such table: sys_migration'));
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
   });
@@ -2628,13 +2658,13 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
   it('costs no query for an object that declares no media field', async () => {
     vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => {
       if (name === 'invoice') return { name: 'invoice', fields: { amount: { type: 'number' } } } as any;
-      if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
+      if (name === 'sys_migration') return SYS_MIGRATION_DEF as any;
       return undefined;
     });
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await expect(engine.insert('invoice', { amount: 10 })).resolves.toBeDefined();
-    expect(vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration')).toHaveLength(0);
+    expect(vi.mocked(driver.findOne).mock.calls.filter((c) => c[0] === 'sys_migration')).toHaveLength(0);
   });
 
   /** No storage service → no sys_migration object → not even a query. */
@@ -2642,33 +2672,34 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
     vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) =>
       name === 'note' ? ({ name: 'note', fields: { doc: { type: 'file' } } } as any) : undefined,
     );
-    vi.mocked(driver.find).mockResolvedValue([]);
+    vi.mocked(driver.findOne).mockResolvedValue(null);
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
     expect(driver.find).not.toHaveBeenCalled();
+    expect(driver.findOne).not.toHaveBeenCalled();
   });
 
   it('reads the flag once per process, not once per write', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await expect(engine.insert('note', { doc: 'file_01' })).resolves.toBeDefined();
     await expect(engine.insert('note', { doc: 'file_02' })).resolves.toBeDefined();
     await expect(engine.insert('note', { doc: 'file_03' })).resolves.toBeDefined();
 
-    const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
+    const flagReads = vi.mocked(driver.findOne).mock.calls.filter((c) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(1);
   });
 
   it('invalidateDataMigrationFlags forces a re-read', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await engine.insert('note', { doc: 'file_01' });
     engine.invalidateDataMigrationFlags();
     await engine.insert('note', { doc: 'file_02' });
 
-    const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
+    const flagReads = vi.mocked(driver.findOne).mock.calls.filter((c) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(2);
   });
 
@@ -2727,7 +2758,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
       vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => objects[name]);
       vi.mocked((SchemaRegistry as any).getAllObjects).mockImplementation(() => Object.values(objects));
     };
-    const SYS_MIGRATION = { name: 'sys_migration', fields: { id: { type: 'text' } } };
+    const SYS_MIGRATION = SYS_MIGRATION_DEF;
     const lines = (info: any) => info.mock.calls.map((c: any[]) => String(c[0])).join('\n');
 
     it('names the command that closes an open value-shape gate', async () => {
@@ -2735,7 +2766,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         place: { name: 'place', fields: { spot: { type: 'location' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([]); // no flag row → gate open
+      vi.mocked(driver.findOne).mockResolvedValue(null); // no flag row → gate open
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();
@@ -2748,7 +2779,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         note: { name: 'note', fields: { doc: { type: 'file' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([]);
+      vi.mocked(driver.findOne).mockResolvedValue(null);
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();
@@ -2763,7 +2794,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         note: { name: 'note', fields: { doc: { type: 'file' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+      vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();
@@ -2782,6 +2813,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
 
       expect(lines(info)).not.toMatch(/os migrate/);
       expect(driver.find).not.toHaveBeenCalled();
+    expect(driver.findOne).not.toHaveBeenCalled();
     });
 
     it('announces once per process, not once per caller', async () => {
@@ -2789,7 +2821,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         place: { name: 'place', fields: { spot: { type: 'location' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([]);
+      vi.mocked(driver.findOne).mockResolvedValue(null);
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();

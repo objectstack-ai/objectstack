@@ -39,7 +39,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "操作者",
+        label: "ユーザー",
         help: "アクションを実行したユーザー（システム操作の場合は null）"
       },
       actor: {
@@ -122,7 +122,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       type: {
         label: "タイプ",
-        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive (maintainer ruling 2026-08-24, #11507).",
+        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive: the vocabulary is open by decision, not a gap awaiting enforcement.",
         options: {
           created: "作成",
           updated: "更新",
@@ -175,8 +175,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "アクティビティターゲットへのオプションのディープリンク"
       },
       environment_id: {
-        label: "プロジェクト",
-        help: "プロジェクトコンテキスト（マルチプロジェクトデプロイメント）"
+        label: "環境",
+        help: "環境コンテキスト（マルチ環境デプロイメント）"
       },
       metadata: {
         label: "メタデータ",
@@ -215,11 +215,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       mentions: {
         label: "メンション",
-        help: "@メンションオブジェクトの JSON 配列"
+        help: "コメント内で @メンションされたユーザー ID の JSON 配列"
       },
       reactions: {
         label: "リアクション",
-        help: "絵文字リアクションオブジェクトの JSON 配列"
+        help: "各絵文字を、リアクションしたユーザー ID のリストに対応付ける JSON オブジェクト"
       },
       is_edited: {
         label: "編集済み"

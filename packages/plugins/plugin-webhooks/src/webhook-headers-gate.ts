@@ -152,7 +152,7 @@ export class WebhookHeadersShapeError extends Error {
         + 'read path returns only the mask, so a stored value that can never be used is '
         + 'indistinguishable from one that works until the next delivery tries to send it — at '
         + 'which point the subscription parks and the report arrives an unbounded time later, in a '
-        + `different surface from the one it was typed into (#7986, #8558, #8566). ${HEADERS_REMEDY}`,
+        + `different surface from the one it was typed into. ${HEADERS_REMEDY}`,
     );
     this.name = 'WebhookHeadersShapeError';
     this.object = object;

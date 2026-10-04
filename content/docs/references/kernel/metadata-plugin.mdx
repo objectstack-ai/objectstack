@@ -1,5 +1,6 @@
 ---
-title: Metadata Plugin
+title: Metadata Plugin — Kernel Protocol reference
+navTitle: Metadata Plugin
 description: "Defines the specification for the Metadata Plugin — the central authority responsible for managing ALL metadata across the ObjectStack platform."
 ---
 
@@ -99,7 +100,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **storage** | `{ datasource?: string; tableName: string; fallback: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
+| **storage** | `{ datasource?: string; tableName?: string; fallback?: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
 | **customizationPolicies** | `never` | optional | [REMOVED] `config.customizationPolicies` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a customization policy, and the overlay protocol it configured was itself unreachable from any served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via `allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the REST meta write doors) and ADR-0126's packaged-metadata model (clone + ledger disable). |
 | **mergeStrategy** | `never` | optional | [REMOVED] `config.mergeStrategy` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever existed to read it, and package upgrades do not merge customizations (ADR-0126: upgrades rewrite the packaged base; customer choices live in the ledger and are never merged). Delete the key. There is no replacement — upgrade-vs-customization separation is the model, not a configurable strategy. |
 | **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
@@ -120,10 +121,10 @@ const result = MetadataBulkResultSchema.parse(data);
 | **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | optional (default: `["typescript","json","yaml"]`) | Enabled formats |
 | **cache** | `{ databaseLoader?: object }` | optional | Cache settings — only `databaseLoader` is read at runtime; the outer keys are retired |
 | **watch** | `boolean` | optional (default: `false`) | Enable file watching |
-| **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
-| **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
+| **watchOptions** | `{ ignored?: string[]; persistent?: boolean; ignoreInitial?: boolean }` | optional | File watcher options |
+| **validation** | `{ strict?: boolean; throwOnError?: boolean }` | optional | Validation settings |
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
-| **persistence** | `{ writable: boolean }` | optional | Persistence write gates |
+| **persistence** | `{ writable?: boolean }` | optional | Persistence write gates |
 
 
 ---
@@ -139,8 +140,8 @@ const result = MetadataBulkResultSchema.parse(data);
 | **version** | `string` | ✅ | Plugin version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1) |
 | **type** | `'standard'` | ✅ | Plugin type |
 | **description** | `string` | optional (default: `"Core metadata management service for ObjectStack platform"`) | Plugin description |
-| **capabilities** | `{ crud: boolean; query: boolean; overlay: boolean; watch: boolean; … }` | ✅ | Plugin capabilities |
-| **config** | `{ storage: object; enableEvents: boolean; validateOnWrite: boolean; enableVersioning: boolean; … }` | optional | Plugin configuration |
+| **capabilities** | `{ crud?: boolean; query?: boolean; overlay?: boolean; watch?: boolean; … }` | ✅ | Plugin capabilities |
+| **config** | `{ storage: object; enableEvents?: boolean; validateOnWrite?: boolean; enableVersioning?: boolean; … }` | optional | Plugin configuration |
 
 ### Nested Shape: `MetadataPluginManifest.capabilities`
 
@@ -159,7 +160,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **storage** | `{ datasource?: string; tableName: string; fallback: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
+| **storage** | `{ datasource?: string; tableName?: string; fallback?: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
 | **customizationPolicies** | `never` | optional | [REMOVED] `config.customizationPolicies` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a customization policy, and the overlay protocol it configured was itself unreachable from any served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via `allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the REST meta write doors) and ADR-0126's packaged-metadata model (clone + ledger disable). |
 | **mergeStrategy** | `never` | optional | [REMOVED] `config.mergeStrategy` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever existed to read it, and package upgrades do not merge customizations (ADR-0126: upgrades rewrite the packaged base; customer choices live in the ledger and are never merged). Delete the key. There is no replacement — upgrade-vs-customization separation is the model, not a configurable strategy. |
 | **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
@@ -178,7 +179,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -229,6 +230,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `hook`
 * `seed`
 * `mapping`
+* `picklist`
 * `view`
 * `page`
 * `dashboard`
@@ -261,7 +263,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| … +12 more>` | ✅ | Metadata type identifier |
+| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| … +13 more>` | ✅ | Metadata type identifier |
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
@@ -281,6 +283,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `hook`
 * `seed`
 * `mapping`
+* `picklist`
 * `view`
 * `page`
 * `dashboard`
@@ -327,7 +330,8 @@ const result = MetadataBulkResultSchema.parse(data);
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
 | **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
-| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message shown after the action succeeds. On a `type: 'api'` or `type: 'script'` action it may interpolate $`{result.*}` — the server response payload, the same scope `onSuccess.navigate` declares (e.g. $`{result.id}`). On a registered action that declares `outcomeMessages`, the entry named by the response's `outcome` is shown instead, and this message is the fallback. |
+| **outcomeMessages** | `Record<string, string \| Record<string, string>>` | optional | Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate $`{result.*}`, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome). |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set here, but `type: 'api'` is fulfilled by the console, which builds the undo envelope from `undoable` alone. Those two shapes — `operation: 'update'` and `type: 'api'` — are the whole fulfillable set; on a registered action `undoable` beside any other shape is refused, because nothing would anchor the capture. |
@@ -348,7 +352,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 | **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
 | **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating $`{param.*}`, $`{ctx.*}` and $`{result.*}` (the server response); `openIn` defaults 'self'. The handler-return convention (`{ redirectUrl }` without openIn) keeps its 17.0.0 new-tab behavior. |
-| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **aria** | `never` | optional | [REMOVED] `action.aria` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no action surface ever applied it: the button, icon, menu, group and bar renderers, the row and bulk action menus and the record quick-actions toolbar all take the accessible name from the action's `label` and never read this block, so ARIA attributes declared here parsed and then silently did not reach the DOM. Delete the key. The accessible name that IS applied is the action's required `label` — the visible button or menu-item text, and the `aria-label` of an icon-only action — so write the name you meant there. To name the region that PLACES the actions, author `ariaLabel` / `ariaDescribedBy` / `role` in the `aria` block of the placing node: `page.components[].aria` (the component that renders the actions) or the list view `aria`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

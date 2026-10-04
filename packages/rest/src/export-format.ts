@@ -24,39 +24,17 @@
  * is the PROCESS-LOCAL clock, not UTC — see {@link exportContentDisposition}
  * for why the two contracts deliberately differ, and {@link zonedWallClock}
  * for where that choice is left to each caller.
+ *
+ * Fourth contract, on the year (#20602): every `date` and `datetime` cell takes
+ * its day from core's `temporalStorageForm` `date` rule — see
+ * {@link calendarDay} — so the year keeps four digits and the export re-imports.
  */
 
-export interface ExportFieldMeta {
-  name: string;
-  type?: string;
-  label?: string;
-  options?: Array<{ label?: string; value?: unknown; color?: string }>;
-  /** Target object for lookup / master_detail / user fields. */
-  reference?: string;
-  /** Field on the referenced record to show as its label. */
-  displayField?: string;
-  /** Field holds multiple values (an array), e.g. a `multiple: true` lookup. */
-  multiple?: boolean;
-  // Every key above is a PRESENTATION key: each one is read to turn a storage
-  // value into a readable cell (or a readable cell back into a storage value).
-  //
-  // ── retired: the eight constraint keys (#6536) ──────────────────────
-  //
-  // `required` / `system` / `readonly` / `hasDefault` / `min` / `max` /
-  // `minLength` / `maxLength` used to sit here. They were added for the import
-  // dry run's hand-copied pre-check mirror (`firstMissingRequiredField` /
-  // `firstConstraintViolation`, framework#3956); #4633 ruling D retired that
-  // mirror (PR #6532) — the dry run now asks the engine for its verdict through
-  // `DataProtocol.validateData`, which reads the object's own schema. That left
-  // all eight computed on every import and read by nothing, so ADR-0049
-  // enforce-or-remove retires them rather than leaving a constraint vocabulary
-  // standing next to the presentation one with no enforcer behind it.
-  //
-  // They were never a source of truth: `buildFieldMetaMap` derived each one
-  // from the very `schema` its caller passed in, so a caller that wants a
-  // field's constraints reads them off that schema (`fields[name].required`, …)
-  // — the same place the engine reads them.
-}
+import { temporalStorageForm, type ExportFieldMeta } from '@objectstack/core';
+
+// `ExportFieldMeta` and `buildFieldMetaMap` live in `@objectstack/core`
+// (`utils/import-field-meta.ts`), beside the import runner that reads them.
+export { buildFieldMetaMap, type ExportFieldMeta } from '@objectstack/core';
 
 /**
  * Build the `Content-Disposition` header for an export download.
@@ -130,50 +108,6 @@ const NAME_KEY_FALLBACKS = [
   'name', 'title', 'label', 'full_name', 'fullName', 'display_name', 'username', 'email',
 ];
 
-/**
- * Build a field-name → metadata map from an object schema (best-effort).
- *
- * Accepts both shapes `fields` appears in across the stack: the runtime
- * `ObjectSchema.fields` is a `Record<fieldName, FieldDefinition>` object map
- * (the form served by the engine registry / `getMetaItem`), while some callers
- * and fixtures hand back a plain `FieldDefinition[]` array. A field's name is
- * taken from its own `name`, falling back to the map key.
- */
-export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta> {
-  const map = new Map<string, ExportFieldMeta>();
-  const fields = (schema as { fields?: unknown })?.fields;
-
-  // Normalize either shape to a list of [name, definition] entries.
-  let entries: Array<[string, any]>;
-  if (Array.isArray(fields)) {
-    entries = fields
-      .filter((f) => f && typeof f === 'object')
-      .map((f) => [typeof f.name === 'string' ? f.name : '', f] as [string, any]);
-  } else if (fields && typeof fields === 'object') {
-    entries = Object.entries(fields as Record<string, any>).map(
-      ([key, def]) => [
-        def && typeof def === 'object' && typeof def.name === 'string' ? def.name : key,
-        def,
-      ] as [string, any],
-    );
-  } else {
-    return map;
-  }
-
-  for (const [name, f] of entries) {
-    if (!name || !f || typeof f !== 'object') continue;
-    map.set(name, {
-      name,
-      type: typeof f.type === 'string' ? f.type : undefined,
-      label: typeof f.label === 'string' ? f.label : undefined,
-      options: Array.isArray(f.options) ? f.options : undefined,
-      reference: typeof f.reference === 'string' ? f.reference : undefined,
-      displayField: typeof f.displayField === 'string' ? f.displayField : undefined,
-      multiple: f.multiple === true,
-    });
-  }
-  return map;
-}
 
 /**
  * Reference-typed field names that should be `$expand`-ed so their stored ids
@@ -228,10 +162,29 @@ function zonedFormatter(timezone: string): Intl.DateTimeFormat | null {
   return fmt;
 }
 
+/**
+ * [#20602] The `YYYY-MM-DD` of `day`'s UTC calendar day, spelled by core's
+ * `temporalStorageForm` `date` rule, imported rather than mirrored: the
+ * storage form the write doors keep and the one `/import`'s reader
+ * (`parseDateCell`) spells an instant's day with. Every export `date` and
+ * `datetime` cell takes its day from here.
+ *
+ * The rule pads the year to four digits. `getUTCFullYear()` and `Intl`'s
+ * `year` part are unpadded numbers, so a `date` `0500-01-01` used to export as
+ * `500-01-01` and a `datetime` on that day as `500-01-01 10:00:00`, and
+ * `/import`, which reads a four-digit year only, refused the file's row as
+ * `invalid_date`. A year outside 0001..9999 has no `YYYY-MM-DD` form: the rule
+ * leaves it unpadded (`0-12-31`, `10000-01-01`), as the export always spelled
+ * it, and the import refuses it.
+ */
+function calendarDay(day: Date): string {
+  return String(temporalStorageForm(day, 'date'));
+}
+
 /** The UTC wall clock of an instant — `YYYY-MM-DD` + `HH:mm:ss`. */
 function utcWallClock(d: Date): { ymd: string; hms: string } {
   return {
-    ymd: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
+    ymd: calendarDay(d),
     hms: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`,
   };
 }
@@ -272,7 +225,20 @@ function zonedWallClock(d: Date, timezone?: string): { ymd: string; hms: string 
   const mi = get('minute');
   const s = get('second');
   if (!(y && mo && da && h && mi && s)) return null;
-  return { ymd: `${y}-${mo}-${da}`, hms: `${h}:${mi}:${s}` };
+  // [#20602] The zone's calendar day, spelled by the same rule as every other
+  // cell ({@link calendarDay}). Its year is NOT `Intl`'s `year` part, which is
+  // an ERA year: year 0 (1 BC) reads `1` there, so padding it would spell
+  // `0001-01-01T03:00Z` in New York as the last day of year 1, a day a year
+  // later than the instant's. An offset is under a day, so the zone's
+  // year is the instant's UTC year, one more when the zone has reached January
+  // and UTC is still in December, one less the other way round.
+  const month = Number(mo);
+  const utcMonth = d.getUTCMonth() + 1;
+  const year = d.getUTCFullYear() + (month === 1 && utcMonth === 12 ? 1 : month === 12 && utcMonth === 1 ? -1 : 0);
+  const day = new Date(0);
+  // `setUTCFullYear`, never `Date.UTC`, which reads a year 0..99 as 1900..1999.
+  day.setUTCFullYear(year, month - 1, Number(da));
+  return { ymd: calendarDay(day), hms: `${h}:${mi}:${s}` };
 }
 
 /**
@@ -319,13 +285,14 @@ function toDate(value: unknown): Date | null {
  *
  * `timezone` absent (or unknown to the platform) ⇒ UTC, i.e. exactly the
  * pre-#8373 output.
+ *
+ * Both branches spell the day through {@link calendarDay}, so the year keeps
+ * four digits (#20602).
  */
 function formatDate(value: unknown, withTime: boolean, timezone?: string): unknown {
   const d = toDate(value);
   if (!d) return value;
-  if (!withTime) {
-    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
-  }
+  if (!withTime) return calendarDay(d);
   const { ymd, hms } = wallClock(d, timezone);
   return `${ymd} ${hms}`;
 }

@@ -81,7 +81,7 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
                     label: 'Delete',
                     config: { objectName: 'deal', filter: { owner: '{record.ownr}' } },
                 },
-                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end' as const, label: 'End' },
             ],
             edges: [
@@ -136,8 +136,8 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script' as any, label: 'Risky' },
-                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'risky', type: 'script' as any, label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -178,7 +178,7 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
                     label: 'Delete',
                     config: { objectName: 'deal', filter: { status: 'closed' } },
                 },
-                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -218,8 +218,8 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script' as any, label: 'Risky' },
-                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'risky', type: 'script' as any, label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -252,8 +252,8 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script' as any, label: 'Risky' },
-                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'risky', type: 'script' as any, label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -325,9 +325,9 @@ describe('#3863 — a handled failure does not trigger flow-level retry', () => 
             errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 1 },
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'upstream', type: 'script' as any, label: 'Upstream' },
-                { id: 'risky', type: 'script' as any, label: 'Risky' },
-                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'upstream', type: 'script' as any, label: 'Upstream', config: { function: 'noop' } },
+                { id: 'risky', type: 'script' as any, label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [

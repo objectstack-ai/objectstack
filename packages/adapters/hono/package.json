@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/hono",
-  "version": "17.4.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/plugin-hono-server": "workspace:*",
@@ -26,7 +27,7 @@
   },
   "devDependencies": {
     "@objectstack/runtime": "workspace:*",
-    "hono": "^4.13.5",
+    "hono": "^4.13.9",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

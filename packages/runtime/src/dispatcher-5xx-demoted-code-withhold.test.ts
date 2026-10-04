@@ -40,9 +40,9 @@
  *
  * The MESSAGE. `errorResponseBase` still withholds on `declaresServerFault`
  * (which needs a string code) rather than on every declared 5xx; aligning it
- * to `/data` is the same ruling's prose axis and it is #12281's card, with its
+ * to `/data` is the same ruling's prose axis and it is commit 0783d7b80's change, with its
  * own measurement-first step. Section 4 pins the message behaviour AS IT
- * STANDS so that card's change is visible as a change rather than as a silent
+ * STANDS so that commit's change is visible as a change rather than as a silent
  * drift, and names what will move.
  */
 
@@ -53,6 +53,13 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import type { DomainHandlerDeps } from './domain-handler-registry.js';
 import { endpointErrorAnswer } from './endpoint-executor.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so this harness signs its caller in: an `auth` slot in the shape
+// `resolveExecutionContext` reads answers a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
 
 /** The REAL exit `domains/*.ts` calls, reached through the dispatcher's own seam. */
 const errorFromThrown: DomainHandlerDeps['errorFromThrown'] = (() => {
@@ -83,8 +90,8 @@ function makeCtx(fakeServer: any, analyticsError: unknown) {
         generateSql: async () => ({ sql: null }),
     };
     const kernel = {
-        getService: (n: string) => (n === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : undefined),
+        getService: (n: string) => (n === 'analytics' ? analytics : n === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : n === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     return {
         getKernel: () => kernel,
@@ -257,12 +264,12 @@ describe('[#12509] the exits read the shared rule, they do not restate it', () =
 });
 
 // ---------------------------------------------------------------------------
-// 4. The prose axis, pinned AS IT STANDS — #12281's card, not this one
+// 4. The prose axis, pinned AS IT STANDS — commit 0783d7b80's change, not this one
 // ---------------------------------------------------------------------------
 
 describe('[#12509] the MESSAGE axis — now widened by #12281, and the code axis is unaffected', () => {
     it('a declared 5xx WITH a code still has its prose withheld at errorResponseBase', async () => {
-        // Unchanged by #12281: this shape declared a 5xx, so it was withheld
+        // Unchanged by commit 0783d7b80: this shape declared a 5xx, so it was withheld
         // under `declaresServerFault` and is withheld under
         // `serverFaultProvenance`. Kept as the no-regression end of the band.
         const answer = await postAnalyticsQuery(
@@ -276,13 +283,13 @@ describe('[#12509] the MESSAGE axis — now widened by #12281, and the code axis
     });
 
     it('[#12281] a declared 5xx with NO code ALSO has its prose withheld now', async () => {
-        // ⚠️ FLIPPED, as this file said it would be. Until #12281 this asserted
+        // ⚠️ FLIPPED, as this file said it would be. Until commit 0783d7b80 this asserted
         // `'Data service not available'` on the wire, with the note: "When
-        // #12281 lands this expectation flips to the generic sentence —
+        // [commit 0783d7b80] lands this expectation flips to the generic sentence —
         // deliberately pinned so that lands as a CHANGE rather than as drift
         // nobody sees." This is that landing.
         //
-        // Ruled 2026-08-27 on #12509 (option D), propagated to #12281:
+        // Ruled 2026-08-27 on #12509 (option D), landed in commit 0783d7b80:
         // `errorResponseBase` adopts the structural withhold for EVERY declared
         // 5xx message. `serverFaultProvenance` reads `status ?? statusCode` and
         // does not consult `code`, so this shape — `action-execution.ts`'s
@@ -299,7 +306,7 @@ describe('[#12509] the MESSAGE axis — now widened by #12281, and the code axis
     it('[#12281] an UNDECLARED 5xx still keeps its prose — the two axes stay independent', async () => {
         // The control that keeps the flip above honest. This file's own subject
         // is `demotedDeclaredCode`, which withholds the CODE on an undeclared
-        // 5xx; #12281 withholds the MESSAGE on a DECLARED one. They read
+        // 5xx; commit 0783d7b80 withholds the MESSAGE on a DECLARED one. They read
         // opposite limbs of `serverFaultProvenance`, so an edit that collapsed
         // them into "5xx ⇒ withhold everything" would go red here.
         const answer = await postAnalyticsQuery(thrown('no strategy can handle query for cube "pipeline"', {}));

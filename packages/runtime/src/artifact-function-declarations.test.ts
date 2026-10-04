@@ -64,7 +64,7 @@ describe('mergeRuntimeModule — declared functions', () => {
 
     it('re-attaches into the ARRAY form without dropping what it declared (#6238)', async () => {
         // The array spelling reaches this seam for the first time now that
-        // #6238 lets it past the parse. Rebuilding it as a map would attach the
+        // commit c8d6f6e08 lets it past the parse. Rebuilding it as a map would attach the
         // callable and drop `effect` beside it — the same silent un-declaring
         // #4396 fixed for the map form, arriving by the other door.
         const bundle: any = {

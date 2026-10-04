@@ -6,7 +6,7 @@
  * (the constraint is logged as not-enforced and reported by the ADR-0120 D4
  * drift pre-flight) instead of taking the process down.
  *
- * ⚠️ Since #14902 that branch has two arms, not one: the NULL-safe organization
+ * ⚠️ Since commit 61821e54c that branch has two arms, not one: the NULL-safe organization
  * composite AND the plain unique (`tenancy: { enabled: false }`, or an explicit
  * `unique: 'global'`), which used to fall through to `throw e`. The
  * discriminator below is what BOTH arms judge with, so its blind spots are now
@@ -196,7 +196,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
     expect(errors[0]).toMatch(/cannot create NULL-safe unique index/);
     expect(errors[0]).toMatch(/uniq_product_organization_id_code/);
     expect(errors[0]).toMatch(/NOT enforced/);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
     expect(errors[0]).toMatch(/ADR-0120 D4/);
   });
 
@@ -205,7 +205,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     await expect(sync([NULL_SAFE_INDEX])).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
   });
 
   it('reads the violation through a driver `cause` wrapper', async () => {
@@ -215,7 +215,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     await expect(sync([NULL_SAFE_INDEX])).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
   });
 
   // ── Nothing the old regex caught may be narrowed ──────────────────────────
@@ -229,19 +229,19 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     await expect(sync([NULL_SAFE_INDEX])).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
   });
 
   // ── The site's own business logic, untouched by the migration ─────────────
 
   /**
-   * ⚠️ RETIRED PIN, re-authored — #14902.
+   * ⚠️ RETIRED PIN, re-authored — commit 61821e54c.
    *
    * This block used to assert the opposite: 「leaves the `nullSafe.size > 0`
    * guard intact — a plain unique still fails the sync」, on the reasoning that
    * absorbing it 「would silently ship an unenforced constraint **the drift
    * pre-flight was never told about**」. That reasoning was right, and its
-   * premise is exactly what #14902 removed: the ADR-0120 D4 pre-flight now
+   * premise is exactly what commit 61821e54c removed: the ADR-0120 D4 pre-flight now
    * probes the plain unique too, so the drift pass IS told, and `os migrate
    * plan` reports the blocked op `destructive` with the offending rows instead
    * of calling it `safe`.
@@ -286,7 +286,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
     expect(errors[0]).toMatch(/× 2 rows/);
     // ⛔ And it does not borrow the NULL-safe arm's story: no earlier index
     // admitted these rows, so #5030 is not what happened here.
-    expect(errors[0]).not.toMatch(/#5030/);
+    expect(errors[0]).not.toMatch(/NULL-distinct/);
     expect(errors[0]).not.toMatch(/NULL-safe/);
   });
 
@@ -301,7 +301,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     // A non-unique index exists for an ACCESS PATH — it cannot raise a
     // uniqueness violation, so a failure that reads as one while creating it is
-    // something else entirely. #14902's `unique` limb is what keeps that
+    // something else entirely. Commit 61821e54c's `unique` limb is what keeps that
     // failing loudly instead of being logged away as an unenforced constraint
     // that was never declared in the first place.
     const rejected: any = await sync([NON_UNIQUE_INDEX]).then(

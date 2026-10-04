@@ -118,14 +118,14 @@ export const SysComment = ObjectSchema.create({
     mentions: Field.textarea({
       label: 'Mentions',
       required: false,
-      description: 'JSON array of @mention objects',
+      description: 'JSON array of the user ids @mentioned in the comment',
       group: 'Body',
     }),
 
     reactions: Field.textarea({
       label: 'Reactions',
       required: false,
-      description: 'JSON array of emoji reaction objects',
+      description: 'JSON object mapping each emoji to the list of user ids who reacted',
       group: 'Body',
     }),
 

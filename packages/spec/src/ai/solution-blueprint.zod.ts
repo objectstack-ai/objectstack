@@ -186,7 +186,7 @@ export type BlueprintDashboard = z.input<typeof BlueprintDashboardSchema>;
 export const BlueprintNavItemSchema = lazySchema(() => z.object({
   type: z.enum(['object', 'dashboard']).default('object').describe('What this nav entry opens'),
   target: z.string().regex(SNAKE_CASE).describe('Object or dashboard machine name to surface (snake_case)'),
-  label: z.string().optional().describe('Nav entry label (defaults to the target label/name)'),
+  label: z.string().optional().describe('Nav entry label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time (a renamed target shows its new name); present ⇒ rendered verbatim, so never copy the target\'s label in as a default.'),
   icon: z.string().optional().describe('Lucide icon name for the nav entry'),
   viewName: z.string().optional()
     .describe('For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object\'s default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration.'),
@@ -369,7 +369,18 @@ const StrictDashboard = z.object({
 const StrictNavItem = z.object({
   type: z.enum(['object', 'dashboard']).describe('What this nav entry opens'),
   target: strictIdent('Object or dashboard machine name to surface (snake_case)'),
-  label: z.string().nullable().describe('Nav entry label, or null'),
+  // ⛔ Must state the SAME rule as the lenient `BlueprintNavItemSchema.label`
+  // (cloud#2021). THIS describe is the one the design model reads:
+  // `propose_blueprint`'s structured output is generated against this mirror,
+  // and strict mode makes `label` required, so the model decides on every
+  // entry. The blueprint tools strip its `null` to an absent label, which the
+  // renderer resolves to the target's CURRENT label on every render; a written
+  // string is rendered verbatim and never follows a rename. A describe that
+  // does not say which choice inherits steers the model to write a label on
+  // every entry. The nav `label` rule pin in `solution-blueprint.test.ts`
+  // (beside the `viewName` key-parity pin) fails if the two drift.
+  label: z.string().nullable()
+    .describe('Nav entry label, or null. null ⇒ the entry inherits the CURRENT label of what it opens at render time (a renamed target shows its new name); a string ⇒ rendered verbatim, so never copy the target\'s label in as a default. Write a label ONLY when the entry must read differently from what it opens; otherwise null.'),
   icon: z.string().nullable().describe('Lucide icon name, or null'),
   // ⛔ Must stay in lockstep with the lenient `BlueprintNavItemSchema.viewName`
   // (cloud#2150). THIS side is the one that decides whether the design step can

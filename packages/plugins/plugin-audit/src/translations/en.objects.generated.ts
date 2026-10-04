@@ -122,7 +122,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       type: {
         label: "Type",
-        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive (maintainer ruling 2026-08-24, #11507).",
+        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive: the vocabulary is open by decision, not a gap awaiting enforcement.",
         options: {
           created: "created",
           updated: "updated",
@@ -215,11 +215,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       mentions: {
         label: "Mentions",
-        help: "JSON array of @mention objects"
+        help: "JSON array of the user ids @mentioned in the comment"
       },
       reactions: {
         label: "Reactions",
-        help: "JSON array of emoji reaction objects"
+        help: "JSON object mapping each emoji to the list of user ids who reacted"
       },
       is_edited: {
         label: "Edited"

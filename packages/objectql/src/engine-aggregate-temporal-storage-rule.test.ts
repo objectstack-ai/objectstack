@@ -37,12 +37,19 @@ import {
   TEMPORAL_ROWS,
   TEMPORAL_TIME_CASES,
   TEMPORAL_TIME_ROWS,
+  lowerFilterCondition,
   type EngineAggregateOptions,
 } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
-import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.js';
+import {
+  aggregatedRowColumnClasses,
+  aggregatedRowColumnTypes,
+  applyHaving,
+  declaredFieldClasses,
+  matchesAggregationFilter,
+} from './having-filter.js';
 
 const OBJECT = 'ledger_order';
 
@@ -129,7 +136,6 @@ const FAMILY_ROWS: readonly Shape[] = [
   ['ISO instants as $between endpoints on a date field', () => ({ placed_on: { $between: ['2026-01-10T00:00:00Z', '2026-02-01T23:00:00Z'] } }), 4],
   ['an ISO instant $lt on a date field', () => ({ placed_on: { $lt: '2026-02-01T10:00:00.000Z' } }), 3],
   ['bare days as both $between endpoints on a datetime', () => ({ opened_at: { $between: ['2026-02-01', '2026-02-05'] } }), 2],
-  ['an epoch-ms string $gt on a datetime', () => ({ opened_at: { $gt: '1769940000000' } }), 3],
   ['an epoch-ms $lte on a datetime', () => ({ opened_at: { $lte: 1769940000000 } }), 3],
   ['an epoch-ms $eq on a datetime', () => ({ opened_at: { $eq: 1769940000000 } }), 1],
   ['an offset instant $gte on a datetime', () => ({ opened_at: { $gte: '2026-02-01T18:00:00+08:00' } }), 4],
@@ -186,6 +192,31 @@ describe('[#20176] a per-aggregation filter counts a temporal comparand by the c
     });
     expect(Object.fromEntries(rows.map((r: any) => [r.customer_id, r.m]))).toEqual({ c1: 0, c2: 2, c3: 1 });
   });
+});
+
+// [#20549] The family's epoch-ms STRING row counted 3 here, as its where twin
+// did. It is refused at both positions now, with every other bare integer
+// string: the storage rule reads one as epoch milliseconds, so `"2026"` meant
+// 1970-01-01T00:00:02.026Z and matched every later row, and the record
+// validator already refused it as a written value. Epoch milliseconds keep
+// counting as a NUMBER — row 5, and the family's `$lte` / `$eq` rows above.
+describe('[#20549] an epoch-ms STRING on a datetime is refused at the per-aggregation position, as on where', () => {
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e: any) => e);
+  for (const value of ['1769940000000', '2026']) {
+    it(`${JSON.stringify(value)}: INVALID_FILTER / 400 at both positions; the number of the same instant counts 3`, async () => {
+      for (const kind of ['rows', 'native'] as const) {
+        const engine = await makeEngine(kind, ROWS);
+        const agg = await refusal(engine.aggregate(OBJECT, perAggregation({ opened_at: { $gt: value } })));
+        expect(agg?.code, `${kind}, per-aggregation`).toBe('INVALID_FILTER');
+        expect(agg?.status, `${kind}, per-aggregation`).toBe(400);
+        const where = await refusal(engine.find(OBJECT, { where: { opened_at: { $gt: value } } }));
+        expect(where?.code, `${kind}, where`).toBe('INVALID_FILTER');
+        expect(where?.status, `${kind}, where`).toBe(400);
+      }
+      const engine = await makeEngine('rows', ROWS);
+      expect(await engine.aggregate(OBJECT, perAggregation({ opened_at: { $gt: 1769940000000 } }))).toEqual([{ n: 6, m: 3 }]);
+    });
+  }
 });
 
 /** `having` over customer groups: the aggregated columns the rows below name. */
@@ -322,5 +353,51 @@ describe('[#20176] where no class is known, a comparand is compared as written',
   it('an undeclared column keeps the #20148 instant reading of a Date', () => {
     const bound = { stamp: { $gte: D('2026-02-01T10:00:00.000Z') } };
     expect(matchesAggregationFilter(row, bound, 0, declaredFieldClasses(FIELDS))).toBe(true);
+  });
+});
+
+// [ADR-0053 D-D1 items 5 and 9, as amended] Neither position's walker applies
+// the whole-day upper bound of its own any more. The engine's seam lowers both
+// before the walker sees them (`lowerFilterCondition`, by the object's declared
+// `datetime` columns for the per-aggregation `filter` and by the aggregated
+// column's type for `having`): the `engine.aggregate` rows above — the card's
+// rows 3 and 4, the `having` rows on `min(datetime)` and the conformance kit —
+// hold that half. A caller that evaluates rows without the seam, such as
+// `applyInMemoryAggregation`, the package's public direct door, gets the
+// comparison it wrote: a bare day as an upper bound is that day's midnight.
+describe('[ADR-0053 D-D1 item 5] the walker compares a bare-day upper bound as written; the seam lowers it to the whole day', () => {
+  const classes = declaredFieldClasses(FIELDS);
+  const isDatetimeField = (column: string): boolean =>
+    (FIELDS as Record<string, { type: string } | undefined>)[column]?.type === 'datetime';
+  const counted = (filter: Record<string, unknown>): number =>
+    ROWS.filter((row) => matchesAggregationFilter(row, filter as any, 0, classes)).length;
+
+  const BOUNDS: ReadonlyArray<readonly [string, Record<string, unknown>, number, number]> = [
+    ['a bare day as the $lte of a datetime', { opened_at: { $lte: '2026-02-01' } }, 2, 3],
+    ['a bare day as the $between max of a datetime', { opened_at: { $between: ['2026-01-01', '2026-02-01'] } }, 2, 3],
+  ];
+  for (const [name, filter, asWritten, lowered] of BOUNDS) {
+    it(`per-aggregation filter, ${name}: ${asWritten} as written, ${lowered} once the seam lowers it`, () => {
+      expect(counted(filter), 'as written').toBe(asWritten);
+      expect(counted(lowerFilterCondition(filter, { isDatetimeColumn: isDatetimeField })), 'lowered').toBe(lowered);
+    });
+  }
+
+  it('applyInMemoryAggregation, called directly with the field map, counts the bound as written', () => {
+    const ast = { aggregations: [{ function: 'count' as const, alias: 'm', filter: { opened_at: { $lte: '2026-02-01' } } }] };
+    expect(applyInMemoryAggregation(ROWS, ast, undefined, FIELDS)).toEqual([{ m: 2 }]);
+  });
+
+  it('having on min(datetime): c1 as written; c1 and c2 once lowered by the aggregated column type', () => {
+    const groupBy = ['customer_id'];
+    const groups = applyInMemoryAggregation(ROWS, { groupBy, aggregations: HAVING_AGGREGATIONS }, undefined, FIELDS);
+    const having = { first_opened: { $lte: '2026-02-01' } };
+    const columnClasses = aggregatedRowColumnClasses(groupBy, HAVING_AGGREGATIONS, FIELDS);
+    const columnTypes = aggregatedRowColumnTypes(groupBy, HAVING_AGGREGATIONS, FIELDS);
+    const kept = (h: Record<string, unknown>) =>
+      applyHaving(groups, h as any, columnClasses).map((r: any) => r.customer_id).sort();
+    expect(kept(having), 'as written').toEqual(['c1']);
+    expect(kept(lowerFilterCondition(having, { isDatetimeColumn: (c) => columnTypes.get(c) === 'datetime' })), 'lowered')
+      .toEqual(['c1', 'c2']);
   });
 });

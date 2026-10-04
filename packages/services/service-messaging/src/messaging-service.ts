@@ -497,7 +497,7 @@ export class MessagingService {
      * receipt; the `read` filter (when given) is applied in-memory after the
      * join.
      *
-     * Two different bounds, deliberately (#6363):
+     * Two different bounds, deliberately (commit 17d095413):
      *
      *   * `notifications[]` is the fetched WINDOW — `limit` rows, defaulting to
      *     50 and hard-capped at 200, newest first. Unchanged: the Console
@@ -508,7 +508,7 @@ export class MessagingService {
      *     notifications"). Counting it over `rows` — the window — made the
      *     badge saturate at the window size forever: a user with 60 unread was
      *     told 50, and `?limit=10` told them 10. The declaration was right and
-     *     the implementation was wrong (maintainer ruling, #6363 Option A).
+     *     the implementation was wrong (maintainer ruling Option A, commit 17d095413).
      *
      * The `read` filter never moves `unreadCount`: asking for the read half of
      * the inbox does not mean the badge is zero. A `type` filter does — the
@@ -522,7 +522,7 @@ export class MessagingService {
      *
      * An IN-PROCESS caller has no such door in front of it, and for that
      * caller the parameter is simply a free string — the "any plugin can read
-     * any user's inbox" shape (#11452), the read-side sibling of the one
+     * any user's inbox" shape (closed by commit 3b5f0360c), the read-side sibling of the one
      * {@link markReadAsCaller} closed for writes. Plugins use
      * {@link listInboxAsCaller}, which derives the recipient from the
      * caller's execution context and has no target-user parameter to get
@@ -568,7 +568,7 @@ export class MessagingService {
         // truncated, so the window count already IS the total and the second
         // read would be a duplicate of the first. Only a saturated window
         // (`rows.length === limit`) can be hiding rows, and that is exactly the
-        // case #6363 is about. So the common inbox — fewer messages than the
+        // case commit 17d095413 fixed. So the common inbox — fewer messages than the
         // page size — costs precisely what it cost before this change.
         const unreadCount = rows.length < limit
             ? windowUnread
@@ -581,7 +581,7 @@ export class MessagingService {
     /**
      * List **the calling user's own inbox** — the plugin-facing counterpart to
      * {@link listInbox}, on the same authenticated-caller axis as
-     * {@link markReadAsCaller} / {@link markAllReadAsCaller} (#11452; the
+     * {@link markReadAsCaller} / {@link markAllReadAsCaller} (commit 3b5f0360c; the
      * write door is #10753).
      *
      * Takes no target user at all: the recipient is derived from the caller's
@@ -613,7 +613,7 @@ export class MessagingService {
 
     /**
      * Total unread across the user's whole matching inbox — the reverse join
-     * `unreadCount` is declared to answer (#6363).
+     * `unreadCount` is declared to answer (commit 17d095413).
      *
      * Read-state lives on `sys_notification_receipt`, not on the inbox row
      * (ADR-0030), so no single `count()` answers this: the predicate spans two
@@ -736,7 +736,7 @@ export class MessagingService {
      * cleared at most 200 receipts per call. Two ways that showed:
      *
      *   * 350 unread → `{ readCount: 200 }`, 150 still unread. Invisible while
-     *     `unreadCount` was itself window-scoped; since #6363 made the badge a
+     *     `unreadCount` was itself window-scoped; since commit 17d095413 made the badge a
      *     true total, one response pair states the contradiction on its own.
      *   * Worse, and the reason a paging loop is not the fix: that window is
      *     `created_at desc` over ALL rows, with the `read` filter applied in
@@ -747,7 +747,7 @@ export class MessagingService {
      *
      * So the sweep reads the unread SET instead of a page of the list, in a
      * FIXED two reads whatever the inbox size: the same one-column, unwindowed
-     * projection of `sys_inbox_message` that #6363's `countUnreadTotal` already
+     * projection of `sys_inbox_message` that commit 17d095413's `countUnreadTotal` already
      * issues to answer the badge, joined against the receipt spine that
      * `listInbox` already reads unbounded. No loop, no page count to bound, and
      * nothing asked of the data layer that the bell's poll does not ask on
@@ -760,7 +760,7 @@ export class MessagingService {
      *
      * No cap: a numeric safety valve is route C wearing a larger number — above
      * it, "all" would be a lie again, which is the reading the maintainer ruled
-     * against on #6363 (make the declaration true rather than document the
+     * against (commit 17d095413: make the declaration true rather than document the
      * shortfall). What bounds a pathological inbox instead is that the work is
      * idempotent and resumable — a failed receipt write is logged, skipped, and
      * picked up by the next sweep.

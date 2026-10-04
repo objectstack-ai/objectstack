@@ -33,11 +33,11 @@
  * `warn` for the `AuthManager` seams and `error` for the two `AuthPlugin`
  * seams, and the split is deliberate: `AuthManagerOptions.logger` is re-exported
  * from the package `index.ts` and declares no `error`, so #12981's ruling routes
- * that LEVEL question to #13398 and leaves the SILENCE here. `AuthPlugin` logs
- * through the kernel `Logger`, whose `error` is required, so those two get the
- * level AGENTS.md → "Degradation log levels" actually calls for. The assertions
- * below pin each site to the channel it ships on, so a later level change is a
- * deliberate edit here rather than a silent drift.
+ * that LEVEL question to the published-sink ruling (commit e238c79f0) and leaves
+ * the SILENCE here. `AuthPlugin` logs through the kernel `Logger`, whose `error`
+ * is required, so those two get the level AGENTS.md → "Degradation log levels"
+ * actually calls for. The assertions below pin each site to the channel it ships
+ * on, so a later level change is a deliberate edit here rather than a silent drift.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -45,7 +45,7 @@ import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objec
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import type { PluginContext } from '@objectstack/core';
-// [#14998] The two admin endpoint module graphs are loaded HERE, at module top,
+// [commit f1e91595f] The two admin endpoint module graphs are loaded HERE, at module top,
 // and NOT with an `await import(...)` inside each case — which is how batch 6's
 // seven cases used to reach them.
 //
@@ -59,7 +59,7 @@ import type { PluginContext } from '@objectstack/core';
 // `admin-import-users.ts` pulls in `@objectstack/rest` (`prepareImportRequest`,
 // `runImport`) — so under a loaded CI shard the first sibling's cold load ate
 // the 10 s and the case failed with `Test timed out in 10000ms`, reddening PRs
-// that touch nothing this file reads (#14998, #15603).
+// that touch nothing this file reads (the flake commit f1e91595f fixed, #15603).
 //
 // Loading at module top is not a widened budget, it removes the clock: vitest's
 // `collectTests()` awaits `runner.importFile(filepath, 'collect')` bare and only
@@ -524,9 +524,9 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
  * `export * from './admin-user-endpoints.js'` and `export *` for
  * `./admin-import-users.js`). Neither declares `error`, so raising the level
  * means widening a published sink — refused as actively harmful by the
- * maintainer's #13398 ruling, which routes that question there and leaves the
- * SILENCE here. The assertions below pin the channel, so a later level change
- * is a deliberate edit rather than a drift.
+ * maintainer's published-sink ruling (commit e238c79f0), which keeps that question
+ * and leaves the SILENCE here. The assertions below pin the channel, so a later
+ * level change is a deliberate edit rather than a drift.
  */
 describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead of vanishing', () => {
   const AUDIT_REFUSAL = new Error('write refused: no permission on sys_audit_log');

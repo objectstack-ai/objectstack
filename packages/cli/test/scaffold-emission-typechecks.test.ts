@@ -112,6 +112,7 @@ import {
   SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
 } from '../src/commands/init.js';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { probeBindings } from './helpers/scaffold-bindings.js';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -257,7 +258,10 @@ export default probe;
       fs.mkdirSync(dir, { recursive: true });
       // The file NAME is `generate-file-name-registry-parity.test.ts`'s axis,
       // not this one's; what is measured here is the SOURCE that lands in it.
-      fs.writeFileSync(path.join(dir, `${STEM}.ts`), generator.generate(STEM));
+      // [#21325] A binding scaffold renders against references resolved off the
+      // stack; the probe stack's stand in, since what is measured is the type
+      // of the file, not what it binds.
+      fs.writeFileSync(path.join(dir, `${STEM}.ts`), generator.generate(STEM, undefined, probeBindings(generator)));
 
       const { code, output } = typecheckProject(root);
 

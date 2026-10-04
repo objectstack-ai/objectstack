@@ -12,7 +12,7 @@
  * | Backend | Where |
  * |---|---|
  * | SQL compiler | `driver-sql` `applyFilterCondition` |
- * | In-memory matcher | `driver-memory` `memory-matcher` |
+ * | In-memory query path | `driver-memory` `normalizeFilterCondition`, then mingo (the reference matcher `memory-matcher` held this row until commit `8fec76a2b` retired it) |
  * | Record-at-a-time evaluator | `formula` `matchesFilterCondition` (RLS write-side `check`) |
  * | Read-scope SQL lowering | `service-analytics` `read-scope-sql` |
  * | MongoDB query translator | `driver-mongodb` `translateFilter` |
@@ -59,7 +59,8 @@
  *
  * The predicates are deliberately boring: string equality, `$in` / `$nin`,
  * `$ne`, `$gte` / `$lt` on lexicographic strings, `$notContains` over plain
- * substrings, and the value-presence pair `$null` / `$exists`. Dates, numeric
+ * substrings, the value-presence pair `$null` / `$exists`, and (since #20444)
+ * the emptiness flag `$empty` on the same nullable column. Dates, numeric
  * coercion, `LIKE` escaping and case sensitivity are still out — those
  * legitimately differ between a SQL engine and a JS matcher, and folding them
  * in would make the table unpassable rather than more useful. Keep it that way: a case belongs here only if
@@ -73,6 +74,28 @@
  * cross-backend answer and belongs to the standard like any other. The
  * {@link FilterLogicRow.d} column carries it, and the eight `d`-column cases
  * below enforce it on every backend.
+ *
+ * **`$empty` is IN, as of #20444, and its rows measure less than they look
+ * like.** The flag is answered by the field's DECLARED row of the ruled
+ * 「is empty」 table (text-like: null or `''`; multi-value: null or `[]`; every
+ * other type: null only — `expandEmptyOperator`, `./filter-empty-operator.ts`)
+ * on the faces that hold declarations, and by value (`isEmptyFilterValue`) on
+ * the ones that do not. This fixture stores neither `''` nor `[]`, so on it
+ * every row of the table and the by-value reading give ONE answer — which is
+ * what makes the rows below enrollable on every backend, and also why they do
+ * NOT pin the per-type rows: those are each face's own suite, over a text, a
+ * multi-value and a scalar column. What these rows DO pin is that every face
+ * has an arm (a face without one refuses, and the case goes red), that `$not`
+ * over it is total (no row lost to UNKNOWN), and that it composes with the
+ * combinators and with a sibling operator on the same field like any other
+ * predicate.
+ *
+ * ⚠️ A declared-type face REFUSES `$empty` on a field whose declaration it does
+ * not hold — there is no row to compile without one. So every harness must
+ * DECLARE the fixture's columns (any string type: `text` takes the text row,
+ * the driver-internal `string` the null-only row, and both answer this fixture
+ * identically); a harness that builds its table outside the driver's
+ * registration has to register the declaration beside it.
  *
  * ⚠️ That answer — the INCLUDE direction — was reversed by a ruling on
  * 2026-08-10 and RE-AFFIRMED the same day, once the reversal's full cost had
@@ -164,7 +187,7 @@
  * - **`$exists` means "has a value"** (`!= null`), never key-presence — cell 2,
  *   the leg of the 07:33Z ruling that was never in conflict with #5298 and had
  *   already shipped in PR #5962 on the surfaces the ruling named. It stands —
- *   and since PR #13529 (#13195) moved the last three key-presence exits, it
+ *   and since commit 9dac1ae01 (PR #13529) moved the last three key-presence exits, it
  *   is enforced here too: enrolled in {@link FILTER_LOGIC_CASES} in BOTH
  *   directions (#13531).
  *
@@ -223,8 +246,8 @@
  * path, its analytics face (a third divergent exit the earlier prose never
  * named; measured in PR #13420), and `driver-mongodb`'s `translateFilter`.
  * The #5499 investment freeze that once excused the lag dissolved on
- * 2026-08-11 (recorded in `./aggregation-conformance.ts`), and PR #13529
- * (#13195) moved all three to has-value — the gap is closed, the stated
+ * 2026-08-11 (recorded in `./aggregation-conformance.ts`), and commit
+ * 9dac1ae01 (PR #13529) moved all three to has-value — the gap is closed, the stated
  * blocker on enrolment is gone with it, and the two `$exists` rows below are
  * enrolled in BOTH directions (#13531).
  *
@@ -313,7 +336,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: 'multi-key $or branch ANDs its own keys',
     filter: { $or: [{ a: 'x', b: 'y' }] },
     expected: ['1'],
-    note: '#3774: compiled to `a = x OR b = y`, matching 1,2,3.',
+    note: 'A $or combines its branches, never the keys inside one: a driver that OR-ed a branch\'s own keys compiled this to `a = x OR b = y`, matching 1,2,3.',
   },
   {
     name: 'each $or branch ANDs independently',
@@ -336,7 +359,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: 'multiple operators on one field AND within a branch',
     filter: { $or: [{ a: { $ne: 'qq', $eq: 'x' }, b: 'y' }] },
     expected: ['1'],
-    note: '#3774: a single-key branch is miscompilable too — the operator map is looped with the same flag.',
+    note: 'A single-key branch is miscompilable too — that driver looped the operator map with the same OR flag.',
   },
   {
     name: 'an abutting $gte/$lt window ANDs its bounds',
@@ -394,25 +417,25 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: 'empty $and is TRUE — the AND identity',
     filter: { $and: [] },
     expected: ['1', '2', '3', '4'],
-    note: '#5322: a conjunction of zero conditions constrains nothing.',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity. A conjunction of zero conditions constrains nothing.',
   },
   {
     name: 'empty $or is FALSE — the OR identity',
     filter: { $or: [] },
     expected: [],
-    note: '#5322/#5134: a disjunction of zero conditions matches nothing. Fail-closed for an RLS scope — a disjunct list that loops to zero items hides every row instead of exposing the table.',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity. A disjunction of zero conditions matches nothing. Fail-closed for an RLS scope — a disjunct list that loops to zero items hides every row instead of exposing the table, as a SQL lowering that dropped the empty group once did.',
   },
   {
     name: 'a {} branch is a TRUE disjunct and absorbs its $or',
     filter: { $or: [{ a: 'x' }, {}] },
     expected: ['1', '2', '3', '4'],
-    note: '#5322: collapsing to the surviving branches instead compiles `a = x` — a silently NARROWED scope (#5297).',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity, so `{}` is a TRUE disjunct. Collapsing to the surviving branches instead compiles `a = x` — a silently NARROWED scope, the answer the RLS read-scope compiler gave until it was aligned.',
   },
   {
     name: '$not of {} is FALSE — NOT TRUE',
     filter: { $not: {} },
     expected: [],
-    note: '#5322: emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass (#5297).',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity, so NOT of `{}` is FALSE. Emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass, which the read-scope compiler was until it compiled this to an always-false clause.',
   },
 
   // ── NULL / no-value semantics (#5146, #5298) ──────────────────────────────
@@ -444,13 +467,13 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$ne returns the rows with no value',
     filter: { d: { $ne: 'v1' } },
     expected: ['2', '3', '4'],
-    note: '#5298: "not v1" is true of a row whose d is absent. A three-valued `d <> ?` drops rows 3-4 — half the table, silently.',
+    note: 'Ruled NULL-safe on every face: "not v1" is true of a row whose d is absent. A three-valued `d <> ?` drops rows 3-4 — half the table, silently.',
   },
   {
     name: '$not returns the rows with no value',
     filter: { $not: { d: 'v1' } },
     expected: ['2', '3', '4'],
-    note: '#5146: the same ruling reached through the combinator. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
+    note: 'The same NULL-safe ruling reached through the combinator, where it was first made for `$not` itself. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
   },
 
   // [#13540] The negated OPERATOR forms of the same ruling, enrollable since
@@ -477,13 +500,13 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$nin returns the rows with no value',
     filter: { d: { $nin: ['v1'] } },
     expected: ['2', '3', '4'],
-    note: '#5298 option A: the list form of `$ne` — "not one of [v1]" is true of a row whose d is absent. A three-valued `NOT IN` drops rows 3-4; the reference matcher answered this way on a stored null but not on a missing key until PR #13356.',
+    note: 'Ruled NULL-safe: the list form of `$ne` — "not one of [v1]" is true of a row whose d is absent. A three-valued `NOT IN` drops rows 3-4; the reference matcher answered this way on a stored null but not on a missing key until it was realigned to the ruling.',
   },
   {
     name: '$notContains returns the rows with no value',
     filter: { d: { $notContains: 'v1' } },
     expected: ['2', '3', '4'],
-    note: '#5298 option A: a row with no value satisfies the negated substring test. The reference matcher failed BOTH readings of this one on the type test (`null` is not a string) until PR #13356; the SQL faces reach it through `nullSafeNegative`.',
+    note: 'Ruled NULL-safe: a row with no value satisfies the negated substring test. The reference matcher failed BOTH readings of this one on the type test (`null` is not a string) until it was realigned to the ruling; the SQL faces reach it through `nullSafeNegative`.',
   },
   {
     name: '$null true selects exactly the no-value rows',
@@ -499,7 +522,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
   },
 
   // [#13531] The value-presence predicate, enrolled in BOTH directions once
-  // PR #13529 (#13195) moved the last three key-presence exits to has-value.
+  // commit 9dac1ae01 (PR #13529) moved the last three key-presence exits to has-value.
   // The stored-null seeding is what makes these rows discriminating: a
   // key-presence reading answers MATCH on rows 3-4 for `$exists: true`
   // precisely because every harness stores `d: null` with the key present —
@@ -513,13 +536,63 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$exists true selects exactly the valued rows',
     filter: { d: { $exists: true } },
     expected: ['1', '2'],
-    note: '#5299 cell 2 / #5962: `$exists` means HAS A VALUE, never key-presence. A key-presence reading returns all four rows here, because the fixture stores `d: null` with the key present — the reading every divergent exit failed on.',
+    note: 'Ruled: `$exists` means HAS A VALUE, never key-presence, because SQL cannot tell a missing key from a stored null. A key-presence reading returns all four rows here, because the fixture stores `d: null` with the key present — the reading every divergent exit failed on.',
   },
   {
     name: '$exists false selects exactly the no-value rows',
     filter: { d: { $exists: false } },
     expected: ['3', '4'],
     note: 'The direction the ruling called the hardest live harm: a key-presence reading returns NOTHING here, silently emptying every "field is not set" scope. Enrolled beside its twin so a single-direction blind spot cannot rebuild.',
+  },
+
+  // ── The emptiness flag `$empty` (#20444) ──────────────────────────────────
+  //
+  // Ruling A on #20399 (record 5865693155): `$empty: boolean`, answered by the
+  // field's declared row of the ruled table on the faces that hold field
+  // declarations and by value on the ones that do not. `d` stores a value or
+  // NULL and never `''` / `[]`, so every row of the table agrees here — see
+  // this file's header for what that does and does not pin. These cases reach
+  // each face directly; since #20446 `$empty` is in `FILTER_OPERATORS` and the
+  // view operators `is_empty` / `is_not_empty` lower to it.
+  {
+    name: '$empty true selects exactly the no-value rows',
+    filter: { d: { $empty: true } },
+    expected: ['3', '4'],
+    note: 'Every face answers `$empty` by the field\'s declared type, and null is empty under every type\'s arm. A face with no arm refuses, which is red here, never a silent answer.',
+  },
+  {
+    name: '$empty false selects exactly the valued rows',
+    filter: { d: { $empty: false } },
+    expected: ['1', '2'],
+    note: '`$empty: false` is the exact complement by ruling, so `$empty` is pinned as a partition of the table rather than one half of one.',
+  },
+  {
+    name: '$not over $empty true returns the valued rows',
+    filter: { $not: { d: { $empty: true } } },
+    expected: ['1', '2'],
+    note: 'The ruled `$empty` arms spell their NULL case out, so `$empty` is never UNKNOWN; a three-valued `NOT (d IS NULL OR …)` that dropped a row would fail here.',
+  },
+  {
+    name: '$not over $empty false returns the no-value rows',
+    filter: { $not: { d: { $empty: false } } },
+    expected: ['3', '4'],
+    note: 'Under the same declared-type arms, the negation of the complement is the empty partition, rows 3-4 — the rows an unguarded `NOT (d IS NOT NULL AND …)` loses to UNKNOWN.',
+  },
+  {
+    name: '$empty inside a $or branch OR-s with its sibling branch',
+    filter: { $or: [{ b: 'y' }, { d: { $empty: false } }] },
+    expected: ['1', '2', '3'],
+  },
+  {
+    name: '$empty inside a $and ANDs with its sibling',
+    filter: { $and: [{ b: 'zz' }, { d: { $empty: true } }] },
+    expected: ['4'],
+  },
+  {
+    name: '$empty ANDs with a sibling operator on the same field',
+    filter: { d: { $empty: false, $ne: 'v1' } },
+    expected: ['2'],
+    note: 'A face that lowers `$empty` to the field\'s declared-type arm beside the field\'s other operators must not let either overwrite the other.',
   },
 
   // ── Shapes read scopes are actually written in ────────────────────────────

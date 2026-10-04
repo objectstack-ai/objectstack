@@ -18,8 +18,9 @@ export const entry: SemanticMigration = {
     + '`@objectstack/metadata-fs` and `@objectstack/cli` — never in '
     + '`@objectstack/core` — so a host has a working model to copy.',
   reason:
-    'ADR-0049 enforce-or-remove, applied one symbol over from #12340 in the '
-    + 'same file and on the same per-key test. `HotReloadManager.startWatching` '
+    'ADR-0049 enforce-or-remove, applied one symbol over from the inert '
+    + "'disk' / 'distributed' state strategies retired in the same file, and on "
+    + 'the same per-key test. `HotReloadManager.startWatching` '
     + 'contained NO watcher: its whole body was a guard plus '
     + "`logger.info('File watching started', { patterns })` above an in-source "
     + 'note saying real watching "would require chokidar or similar / This is a '
@@ -31,15 +32,17 @@ export const entry: SemanticMigration = {
     + 'the same scan; `watchHandles.set` resolves nothing anywhere). So '
     + '`watchPatterns` had no reader that ACTED on it — its only two uses were '
     + 'log lines — and an author could declare a glob while no file change '
-    + 'could ever trigger a reload. This is the #3950 shape with the volume '
-    + 'turned up: #12340\'s inert fallback at least announced itself at DEBUG, '
+    + 'could ever trigger a reload. This is the shape of the plugin sandboxing '
+    + 'config that was never wired to anything, with the volume turned up: the '
+    + 'inert state-strategy fallback at least announced itself at DEBUG, '
     + 'whereas this said "File watching started" at INFO — positive '
     + 'confirmation of a capability that did not exist, which an operator, or '
     + 'an AI author (ADR-0033), reads as proof and stops looking. Neither of '
     + 'the other two ADR-0049 states was available: ENFORCE would build for a '
     + 'caller that does not exist (no runtime composes `HotReloadManager` — '
     + 'only its own unit test and `core/examples/phase2-integration.ts` '
-    + 'construct it, the same fact that decided #12340\'s route), and '
+    + 'construct it, the same fact that decided the state-strategy retirement\'s '
+    + 'route), and '
     + 'EXPERIMENTAL requires a roadmap, where a scan of every planning doc '
     + 'returned ZERO mentions of hot-reload file watching against 145 control '
     + 'hits in the same files. Route 3 again: `HotReloadConfig` is not an '
@@ -52,8 +55,10 @@ export const entry: SemanticMigration = {
     + 'than deleted, and the BUILD is what decided that: the plain deletion '
     + 'was tried first and `gen:schema` gate (a) refused it, because '
     + '`HotReloadConfigSchema` is not `.strict()` and a bare deletion would '
-    + 'be a silent strip (#3733, ADR-0104) — the very defect being retired, '
-    + 'one layer down. #12340 could take route 3 because what left there was '
+    + 'be a silent strip (the failure measured when a field key pruned from a '
+    + 'non-strict schema still parsed successfully and simply vanished, '
+    + 'ADR-0104) — the very defect being retired, one layer down. The '
+    + 'state-strategy retirement could take route 3 because what left there was '
     + 'a whole DEF; a key leaving a SURVIVING def has no such exit. This '
     + 'entry IS the declaration.',
   acceptanceCriteria:
@@ -74,7 +79,8 @@ export const entry: SemanticMigration = {
     + '`reloadPlugin` and state preservation are untouched, and '
     + '`stopWatching` keeps the half that always did something (it cancels a '
     + 'pending debounced reload; its unreachable `watchHandles` branch left '
-    + 'with the placeholder). The #11825 keep still stands: '
+    + 'with the placeholder). What the maintainer\'s 2026-08-25 ruling on the '
+    + 'advanced plugin-lifecycle config kept still stands: '
     + '`HotReloadConfigSchema` and `PluginStateSnapshotSchema` still export '
     + 'from `./kernel`, and `HotReloadManager` / `PluginHealthMonitor` still '
     + 'export from `@objectstack/core` with their tests green.',

@@ -1,7 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Storage-driver resolution for `objectstack serve`.
+ * Storage-driver resolution for `objectstack serve`'s LEGACY path — the CLI
+ * host of the driver vocabulary.
+ *
+ * Which boots reach it, measured rather than assumed: only a `serve` that does
+ * NOT boot through the runtime library — `OS_MODE=off|none|legacy`,
+ * `bootMode: 'off'`, or a host config carrying instantiated plugins
+ * (`shouldBootWithLibrary` in `utils/plugin-detection.ts`), and then only when
+ * no plugin already provides a driver. Every ordinary `os dev` / `os start` /
+ * `os serve` boot (over a config or an artifact) and every `os migrate`
+ * subcommand resolve their store in `@objectstack/runtime` instead
+ * (`resolveStandaloneDatabase`), which is the OTHER host
+ * `driver-vocabulary-parity.test.ts` holds this one equal to.
  *
  * Extracted from serve.ts so the driver dispatch is unit-testable in isolation
  * (mirrors utils/telemetry-datasource.ts and utils/plugin-detection.ts). Two
@@ -17,20 +28,34 @@
  *      the same connect path, failure verdict, and escape hatch as every other
  *      datasource.
  *
- * ## #3276 — the `memory` driver was advertised but had no dispatch branch
+ * ## #3276, and then the retirement — the `memory` driver is no longer a boot store
  *
- * `os dev` / `os start` / `os serve` all advertise a `memory` driver
- * (`--database-driver memory`, `OS_DATABASE_DRIVER=memory`, and a `memory://`
- * URL scheme). But the old inline dispatch had no `memory` case, so selecting it
- * silently fell through to the dev SQLite `:memory:` default — SQLite-in-memory,
- * a *different* engine — or, in production, registered no driver at all. The
- * URL-inference and construction branches below close that "declared ≠ enforced"
- * gap: `memory` now yields the mingo `InMemoryDriver`, in dev AND production,
- * exactly as requested.
+ * #3276 found the `memory` driver advertised (`--database-driver memory`,
+ * `OS_DATABASE_DRIVER=memory`, a `memory://` URL scheme) with no dispatch arm,
+ * so selecting it silently became SQLite's `:memory:` default — a *different*
+ * engine — or, in production, no driver at all. It closed that "declared ≠
+ * enforced" gap the honouring way: `memory` built the mingo `InMemoryDriver`, in
+ * dev AND production, and never SQLite `:memory:`.
  *
- * Note the deliberate distinction from SQLite's own `:memory:` pseudo-file:
- * `OS_DATABASE_URL=:memory:` stays `sqlite` (SQLite's in-memory mode), whereas
- * the `memory://` scheme and the `memory` driver select the mingo engine.
+ * The engine was later RETIRED as a boot store, the other way to close the same
+ * kind of gap. It refuses every tenant-scoped read by design, so a boot on it
+ * signed in a seeded admin and then answered 503 to every data request: a whole
+ * advertised mode that could not serve data, with no committed user to keep it
+ * for. The retirement lives at the DECLARATION, never at this consumer: the
+ * spec's driver table withdrew `memory`, `mingo` and `in-memory` from its
+ * selection face and kept them on the config-contract face (a stored
+ * `datasource.driver: memory` still parses), so the `--database-driver`
+ * allowlist and this resolver's selection lookup drop the spellings by
+ * derivation. What this file still owes is the refusal's WORDING and its two
+ * doors — {@link inferDriverTypeFromUrl} for the `memory://` / `mingo://`
+ * schemes, and {@link resolveStorageDefinition} for the spellings — both of
+ * which name the replacement instead of reading as a typo. The sentence itself
+ * is the runtime's (`retiredMemoryEngineMessage`), so the two hosts cannot
+ * describe the retirement differently.
+ *
+ * #3276's distinction survives as the replacement: `OS_DATABASE_URL=:memory:`
+ * was always `sqlite` (SQLite's in-memory mode), and it is now the way to ask
+ * for an in-memory database at all.
  *
  * ## #5602 — `libsql://` is now WIRED, through an optional package
  *
@@ -49,13 +74,13 @@
  * back to SQLite, which is the #3276 lesson kept intact: a silent step-down onto
  * a *different* engine writes an operator's data into the wrong database.
  *
- * ## #6268 — the loader itself lives in the runtime now
+ * ## Commit 68f5eccb1 — the loader itself lives in the runtime now
  *
  * That loader used to be written out twice: here, and in
  * `packages/runtime/src/turso-driver-factory.ts` (#5820, for `os migrate` /
  * `createStandaloneStack`). The two were kept equal BY HAND — one decision, two
  * implementations, which is the #3741 → #3758 shape that goes wrong three months
- * later. It had already started: #6345 moved this half onto `@objectstack/spec`'s
+ * later. It had already started: commit e2798fab7 moved this half onto `@objectstack/spec`'s
  * shared driver vocabulary and left the runtime half on a private
  * `Set(['turso', 'libsql'])`.
  *
@@ -77,6 +102,8 @@ import type {
 } from '@objectstack/service-datasource';
 import {
   loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
+  namesRetiredMemoryEngine,
+  retiredMemoryEngineMessage,
   type LoadTursoDriverFactoryOptions,
 } from '@objectstack/runtime';
 import {
@@ -88,7 +115,7 @@ import {
 
 /**
  * The libSQL/Turso loader's single-sourced surface, re-exported so this module
- * stays the CLI's one door to storage-driver concerns (#6268). These are the
+ * stays the CLI's one door to storage-driver concerns (commit 68f5eccb1). These are the
  * runtime's declarations, not copies of them — in particular
  * {@link MissingDriverPackageError} is ONE class across both packages.
  */
@@ -124,7 +151,7 @@ const MISSING_URL_EXAMPLES: Readonly<Partial<Record<BuiltinDriverId, string>>> =
 
 /**
  * The refusal for "you named a driver whose database lives somewhere I cannot
- * guess, and then did not tell me where" (#6345 fork 2).
+ * guess, and then did not tell me where" (commit e2798fab7's fork 2).
  *
  * Generalized from the wording `turso` has carried since #5602, because that
  * wording was already right for every one of these kinds — the maintainer's
@@ -146,17 +173,20 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
     + `URL was given, and ${kind} has no local default to fall back on — its database lives on a `
     + 'server or endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it — '
     + `e.g. ${example}. Booting on a guessed default instead would connect you `
-    + 'to a database you never named, and every write would land in the wrong place (#3276).'
+    + 'to a database you never named, and every write would land in the wrong place.'
   );
 }
 
 /**
  * Thrown by {@link resolveStorageDefinition} for a driver selection that cannot
- * become a datasource definition. Two cases since #6345:
+ * become a datasource definition. Two cases since commit e2798fab7:
  *
  *  - a spelling no builtin claims (`--database-driver sqlite3`), which used to
  *    fall through to the dev SQLite default while `os migrate` refused the same
- *    value by name;
+ *    value by name. A spelling of the retired in-memory engine (`memory`,
+ *    `mingo`, `in-memory`) is this case too, with the retirement's own wording,
+ *    and so is its `memory://` / `mingo://` scheme, which
+ *    {@link inferDriverTypeFromUrl} refuses;
  *  - a recognized kind with **no local default** selected with **no URL**
  *    (`postgres` / `mysql` / `mongodb` / `turso`). Only `turso` refused before;
  *    the other three guessed — `url: undefined` into `pg`, an invented
@@ -193,7 +223,7 @@ export class UnsupportedDriverError extends Error {
    *
    * That consumer is real: `commands/database-driver-allowlist.pin.test.ts`
    * (#6860) derives the canonical kinds by using {@link resolveStorageDefinition}
-   * as its oracle and reading `driverType` out of this error. When #6345 taught
+   * as its oracle and reading `driverType` out of this error. When commit e2798fab7 taught
    * the resolver to refuse unknown spellings too, that oracle started reporting
    * every stray string literal in this file (`safe`, `on-disconnect`, `factory`)
    * as a driver kind. This flag is what keeps the two answers apart.
@@ -203,7 +233,7 @@ export class UnsupportedDriverError extends Error {
     super(message);
     this.name = 'UnsupportedDriverError';
     this.driverType = driverType;
-    // Defaults to `true` so the pre-#6345 call sites (turso with no URL) keep
+    // Defaults to `true` so the call sites predating commit e2798fab7 (turso with no URL) keep
     // their meaning without restating it.
     this.recognized = opts.recognized ?? true;
   }
@@ -213,6 +243,13 @@ export class UnsupportedDriverError extends Error {
  * Infer a canonical driver kind from an `OS_DATABASE_URL` scheme.
  * Returns `''` when the URL is absent or its scheme is unrecognized (the caller
  * then falls back to the dev default / registers nothing in production).
+ *
+ * Throws {@link UnsupportedDriverError} for `memory://` and `mingo://`: they name
+ * the in-memory engine, which is no longer a boot store. Returning `''` instead
+ * would let a dev boot fall through to the SQLite default in silence — the
+ * #3276 shape again — and returning a kind would leave the refusal to
+ * {@link resolveStorageDefinition}, whose spelling refusal names
+ * `OS_DATABASE_DRIVER`, a variable this operator never set.
  */
 export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (!url) return '';
@@ -230,11 +267,20 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (/^libsql:\/\//i.test(u)) return 'turso';
   if (/^https?:\/\//i.test(u) && /\.turso\./i.test(u)) return 'turso';
   if (/^wasm-sqlite:\/\//i.test(u) || /\.wasm\.db$/i.test(u)) return 'sqlite-wasm';
-  // #3276: the mingo in-memory engine has its own URL scheme (`memory://`,
-  // advertised in `os dev` / `os start` help). Kept ABOVE the sqlite test so it
-  // is not shadowed, and deliberately distinct from sqlite's `:memory:`
-  // pseudo-file below (which stays SQLite's own in-memory mode).
-  if (/^(memory|mingo):\/\//i.test(u)) return 'memory';
+  // The retired in-memory engine's two schemes — character-for-character the
+  // runtime's `detectDriverFromUrl` arm, so the two hosts recognise and refuse
+  // the same URLs. Kept ABOVE the sqlite test so it is not shadowed, and
+  // deliberately distinct from sqlite's `:memory:` pseudo-file below, which is
+  // the replacement this refusal names.
+  if (/^(memory|mingo):\/\//i.test(u)) {
+    throw new UnsupportedDriverError(
+      u,
+      retiredMemoryEngineMessage(`OS_DATABASE_URL "${u}"`),
+      // Not a kind this resolver can produce — `database-driver-allowlist.pin`
+      // reads `recognized` to tell the two apart.
+      { recognized: false },
+    );
+  }
   if (/^file:/i.test(u) || /^sqlite:/i.test(u) || u === ':memory:' || /\.(db|sqlite|sqlite3)$/i.test(u)) return 'sqlite';
   return '';
 }
@@ -295,7 +341,7 @@ export interface StorageDefinitionResolution {
   trackName: string;
   /** Human label for the startup banner's "driver" row (requested engine). */
   label: string;
-  /** Display-shaped database URL for the startup banner (e.g. `(in-memory)`). */
+  /** Display-shaped database URL for the startup banner (e.g. `:memory:`). */
   displayUrl: string | undefined;
   /** On-disk sqlite path the telemetry datasource is provisioned next to. */
   sqliteFilePath?: string;
@@ -323,30 +369,39 @@ export function resolveStorageDefinition(
   // kinds. Never in production, never destructive.
   const autoMigrate = isDev ? ({ autoMigrate: 'safe' } as const) : {};
 
-  // ONE vocabulary since #6345 (`@objectstack/spec`'s driver table). The arms
+  // ONE vocabulary since commit e2798fab7 (`@objectstack/spec`'s driver table). The arms
   // below therefore branch on the CANONICAL id and never on a spelling: the
   // hand-written `driverType === 'pg' || driverType === 'postgresql'` chains
   // were half of the fork this card closes — the standalone stack's enum had
   // its own answer, and 10 of 21 spellings disagreed.
   const kind = resolveDatabaseDriverId(driverType);
 
-  // An EXPLICIT selection nothing claims is refused, loudly (#6345 fork 1).
+  // An EXPLICIT selection nothing claims is refused, loudly (commit e2798fab7's fork 1).
   //
   // `driverType` is `explicit || inferDriverTypeFromUrl(url)`, and the inferring
   // half only ever yields a canonical id or `''` — so a non-empty value that
   // resolves to nothing can only have come from an operator naming a driver.
   // It used to fall through to the trailing dev default, i.e. `os dev
   // --database-driver sqlite3` silently booted SQLite while `os migrate` refused
-  // the same value by name. #6344 killed that silent fallback on the standalone
+  // the same value by name. Commit cfb549db8 killed that silent fallback on the standalone
   // side; this is its mirror, and it is what makes the two hosts answer the same
   // question the same way for EVERY input rather than only for the legal ones.
+  if (driverType && !kind && namesRetiredMemoryEngine(driverType)) {
+    // The retired in-memory engine: not a typo, so not "Supported drivers: …" —
+    // the operator is told what replaced it, in the sentence every host uses.
+    throw new UnsupportedDriverError(
+      driverType,
+      retiredMemoryEngineMessage(`OS_DATABASE_DRIVER / --database-driver "${driverType}"`),
+      { recognized: false },
+    );
+  }
   if (driverType && !kind) {
     throw new UnsupportedDriverError(
       driverType,
       `Unsupported driver "${driverType}" (OS_DATABASE_DRIVER / --database-driver). `
         + `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. `
         + 'Booting on the SQLite default instead would silently ignore the driver you asked for '
-        + 'and write into a local database (#3276). Fix the value, or leave the driver unset to '
+        + 'and write into a local database. Fix the value, or leave the driver unset to '
         + 'let the database URL scheme select it.',
       // NOT a driver kind — `driverType` here is the operator's raw token, and a
       // caller enumerating kinds must not count it as one.
@@ -354,7 +409,7 @@ export function resolveStorageDefinition(
     );
   }
 
-  // Fork 2 (#6345): a kind with NO local default, selected with no URL. Every
+  // Fork 2 (commit e2798fab7): a kind with NO local default, selected with no URL. Every
   // such selection used to be answered by a guess, differently on each side:
   // postgres/mysql got `config.url === undefined` and the `pg`/`mysql2` client
   // then connected to ITS own localhost; mongodb got an invented
@@ -455,19 +510,6 @@ export function resolveStorageDefinition(
     };
   }
 
-  // #3276: explicit in-memory (mingo) driver. Honored in dev AND production — an
-  // operator asking for `memory` gets the mingo InMemoryDriver (ephemeral, not
-  // real SQL), never the SQLite `:memory:` default.
-  if (kind === 'memory') {
-    return {
-      driverId: 'memory',
-      config: {},
-      trackName: 'MemoryDriver',
-      label: 'InMemoryDriver',
-      displayUrl: '(in-memory)',
-    };
-  }
-
   // Default (no driver configured): dev prefers native SQLite for production-like
   // SQL at native speed; the factory's step-down (#2229) degrades to wasm then
   // in-memory when the native binary is unavailable. Production returns null so
@@ -491,7 +533,7 @@ export function resolveStorageDefinition(
  * Load the OPTIONAL libSQL/Turso driver package and wrap it as the host driver
  * factory `DefaultDatasourcePlugin` accepts (#5602).
  *
- * A thin delegation to the runtime's single owner since #6268 — the loading, the
+ * A thin delegation to the runtime's single owner since commit 68f5eccb1 — the loading, the
  * error class, the install command, the missing-package wording and the handle
  * shape all live in `@objectstack/runtime`'s `turso-driver-factory.ts`. What this
  * wrapper supplies is the two things that are genuinely the CLI's, and would be a
@@ -511,7 +553,7 @@ export function resolveStorageDefinition(
  *     written here, in the package that peer-declares it, and is typed rather
  *     than `as any` for the same reason.
  *  2. **{@link UnsupportedDriverError} for a url-less turso config.** CLI-only
- *     semantics by the #6268 ruling — `serve.ts` re-throws it as a fatal boot
+ *     semantics by the ruling commit 68f5eccb1 landed — `serve.ts` re-throws it as a fatal boot
  *     error. Only the error TYPE is chosen here; the message comes from the
  *     runtime, so the wording is not duplicated.
  */

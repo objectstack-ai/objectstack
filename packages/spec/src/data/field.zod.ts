@@ -10,7 +10,12 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 // `shared/visibility.ts`, which imports nothing at runtime.
 import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { SystemIdentifierSchema } from '../shared/identifiers.zod';
+// The ADR-0078 completeness predicate the choice door below applies, read
+// rather than restated: one notion of "a choice with no option source" for
+// the author-time finding and the parse refusal. No cycle: that module
+// imports nothing at runtime.
+import { checkFieldCompleteness, FIELD_CHOICE_WITHOUT_OPTIONS } from '../kernel/functional-completeness';
+import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
@@ -27,7 +32,7 @@ import {
   discriminateDefaultValueShape,
   suggestDefaultValueToken,
 } from './default-value-shape';
-import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from './field-value.zod';
+import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES, SINGLE_OPTION_TYPES } from './field-value.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
 
 /**
@@ -367,7 +372,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * Options resolve through `resolveCascadingOptions` against that scope
    * (ADR-0068 / objectui#2284), while field- and section-level rules go through
    * `evalFieldPredicate` — a different evaluator, but since objectui#6010 (field)
-   * and objectui#6110 + #6111 (section) it is handed the same host scope, so
+   * and objectui#6110 + objectui#6111 (section) it is handed the same host scope, so
    * `current_user` resolves on those surfaces too. What still separates this one
    * is ENFORCEMENT, not vocabulary: per-option `visibleWhen` is the only
    * VISIBILITY predicate the SERVER also evaluates — the rule validator refuses
@@ -903,11 +908,11 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
     hidden: 'defaultHidden',
   },
 }, {
-  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.'),
-  label: z.string().optional().describe("Column header; defaults to the child field's label via hydration."),
-  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself."),
-  width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).'),
-  required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.'),
+  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.').meta({ title: 'Name' }),
+  label: z.string().optional().describe("Column header; defaults to the child field's label via hydration.").meta({ title: 'Label' }),
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
+  width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).').meta({ title: 'Width' }),
+  required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.').meta({ title: 'Required' }),
   options: z.array(strictObject({
     surface: 'this inline grid column option',
     history: INLINE_GRID_COLUMN_HISTORY,
@@ -915,21 +920,21 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`."),
+  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the
   // renderer no longer has.
-  prefix: z.string().optional().describe("Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's."),
-  step: z.number().positive().optional().describe('Input step for numeric cells.'),
-  reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`."),
-  displayField: z.string().optional().describe('Label field shown for a picked lookup record.'),
-  idField: z.string().optional().describe('Id field stored for a picked lookup record.'),
-  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.'),
-  accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything."),
-  defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden."),
-  computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.'),
-  expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here."),
+  prefix: z.string().optional().describe("Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's.").meta({ title: 'Prefix' }),
+  step: z.number().positive().optional().describe('Input step for numeric cells.').meta({ title: 'Step' }),
+  reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`.").meta({ title: 'Reference' }),
+  displayField: z.string().optional().describe('Label field shown for a picked lookup record.').meta({ title: 'Display Field' }),
+  idField: z.string().optional().describe('Id field stored for a picked lookup record.').meta({ title: 'ID Field' }),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything.").meta({ title: 'Accept' }),
+  defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden.").meta({ title: 'Default Hidden' }),
+  computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.').meta({ title: 'Computed' }),
+  expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here.").meta({ title: 'Expression' }),
   // #18972 — the upper bound is the SAME platform ceiling as `FieldSchema.scale`
   // below, reached by a different primitive: this key is the one objectui's
   // `computeRow` hands to `Number(v.toFixed(scale))`, which throws above 100.
@@ -937,10 +942,10 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // `type: 'currency'` by the `.superRefine` below (ruling B carried to this
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.'),
-  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
-  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
-  requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
+    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
+  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
+  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
+  requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
 }).superRefine((column, ctx) => {
   // #20045 — ruling B (5791803339) on #19629 retired `scale` from the currency
   // FIELD type; triage read this card as inherited from that ruling and from
@@ -971,7 +976,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
  * therefore a NESTED key, and `aliases` renames onto a flat one — the same
  * reason `currency` is answered in prose a few lines below.
  *
- * ## Why it may not rename onto `required` (#16867)
+ * ## Why it may not rename onto `required` (commit 0ee32edef)
  *
  * It used to: `notNull: 'required'` sat in the alias table beside `isRequired`
  * and `mandatory`, and because `aliases` is consulted only AFTER this channel
@@ -1037,7 +1042,10 @@ export const FieldSchema = lazySchema(() => {
     // WRITE contract, and ADR-0113 moved neither.
     isRequired: 'required', mandatory: 'required',
     isUnique: 'unique',
-    values: 'options', choices: 'options', picklist: 'options', selectOptions: 'options',
+    // `picklist` is not here: it is a declared key — the reference to a shared
+    // option list, mutually exclusive with `options` (see the key below).
+    values: 'options', choices: 'options', selectOptions: 'options',
+    valueSet: 'picklist', globalValueSet: 'picklist', optionSet: 'picklist',
     relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
     onDelete: 'deleteBehavior', deleteRule: 'deleteBehavior', cascade: 'deleteBehavior',
     formula: 'expression', calculation: 'expression', compute: 'expression',
@@ -1234,7 +1242,15 @@ export const FieldSchema = lazySchema(() => {
   // (#19992) and its `decimals` / `scale` spellings are refused with the same
   // prescription — see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE. Do not
   // conflate this total-digit count with a currency's decimal places.
-  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
+  // #19992 (triage ENFORCE on the #18900 ④ criterion, SQL DECIMAL(p, s) /
+  // Salesforce Length + Decimal Places) — the count is ENFORCED at the
+  // write seam: `packages/objectql`'s record validator refuses a value whose
+  // digit count exceeds it (`max_precision`), after the `max_scale` branch and
+  // on the same stored-value basis. ⛔ Not a column size: every numeric column
+  // stays the fixed exact decimal of NUMERIC_COLUMN_REPRESENTATION. The
+  // describe states the counting rule because the field reference page is
+  // generated from it, and that page is what an author reads.
+  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer) — the `p` of a DECIMAL(p, s): the digits of the value, integer and fraction together, counted at the field\'s decimal places, so `precision: 5, scale: 2` holds up to 999.99 and refuses 1234.5 (1234.50 is 6 digits). Enforced on writes of `number`, `currency`, `percent`, `rating` and `slider` fields: a value that needs more digits is refused with field code `max_precision`, never rounded. Counted on the STORED value: at the declared `scale` when one applies, else at the value\'s own decimal places (leading zeros never count) — so on a `currency` field, where `scale` is refused, an amount\'s written decimals count toward the total; a fraction-stored `percent` is counted two places further right (`scale + 2`, or 2 with no `scale`), which makes the count that of the percentage-point value as displayed. Not decimal places (that is `scale`; a currency\'s are its ISO 4217 minor unit) and not a column size: every numeric column keeps the platform\'s fixed exact decimal whatever this declares. Not read on any other field type.'),
   // #18972 — and an UPPER bound, for the same declared=enforced reason one
   // axis over: `scale` is unrenderable above 100 at every consumer, so a
   // larger declaration could only ever crash a reader. See
@@ -1266,10 +1282,10 @@ export const FieldSchema = lazySchema(() => {
    * Presentation hint (#7768): whether a `number` field renders with digit
    * grouping (`Intl.NumberFormat`'s `useGrouping`, e.g. `2,026` vs `2026`).
    * `scale` was the ONLY presentation-adjacent property `number` had, and it
-   * governs decimal places, not grouping — console renderers construct
+   * governs decimal places, not grouping — console renderers constructed
    * `Intl.NumberFormat` with grouping unconditionally ON, so an
    * ordinal/identifier integer stored as `Field.number({ scale: 0, min: 1900
-   * })` (a year) renders `2,026` everywhere it is shown. Downstream apps hit
+   * })` (a year) rendered `2,026` everywhere it was shown. Downstream apps hit
    * this three times (hotcrm-heimao#35/#40/#59) and each time converted the
    * field to `Field.text` to escape the comma — trading away numeric
    * semantics (range validation, sort-as-number, arithmetic) for a display
@@ -1278,9 +1294,10 @@ export const FieldSchema = lazySchema(() => {
    * Three-valued, and the absent case is deliberately NOT "grouping off":
    *   - **absent** (default state) — the author has not judged whether this
    *     number reads as a quantity or an identifier; the RENDERER decides.
-   *     Today that is an interim heuristic (objectui#4033, e.g. `scale: 0`
-   *     + no upper bound reads as a plain count and keeps grouping, a small
-   *     bounded integer range reads as ordinal-shaped and drops it);
+   *     Today that is an interim heuristic (objectui#4033: a declared
+   *     `scale: 0` reads as a discrete integer, a year or an ordinal, and
+   *     drops grouping, while any other `scale`, or none, keeps it — no
+   *     bound is read);
    *     eventually the locale's own default. Neither contract lives here —
    *     this key only carries the author's EXPLICIT override when they have
    *     one, exactly like `min`/`max`/`scale` carry constraints without
@@ -1297,8 +1314,9 @@ export const FieldSchema = lazySchema(() => {
    * number renderers are expected to pass it straight through. No default is
    * declared here on purpose — unlike `autonumberFormat`'s JSON-Schema
    * `default` annotation, there is no single grouping behavior every
-   * `number` field should present until the renderer half of this contract
-   * (objectui#4033) lands and retires the interim heuristic.
+   * `number` field should present: the renderer half of this contract has
+   * landed (objectui's `shouldGroupDisplayNumber` reads an authored value
+   * first) and keeps the interim heuristic for an absent key.
    */
   useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
@@ -1328,8 +1346,40 @@ export const FieldSchema = lazySchema(() => {
     + 'the stored file size, not just checked in the browser.',
   ),
 
-  /** Selection Options */
-  options: z.array(SelectOptionSchema).optional().describe('Static options for select/multiselect'),
+  /**
+   * Selection Options — the field's own inline option list.
+   *
+   * A `select` / `radio` field needs an option source: a non-empty `options`
+   * list here, or a `picklist` reference below. With neither (an empty
+   * `options: []` included) it is refused at parse — the form control would
+   * offer nothing and server-side value validation would be off. The
+   * free-form option types (`multiselect`, `tags`) and `checkboxes` may omit
+   * both.
+   */
+  options: z.array(SelectOptionSchema).optional().describe(
+    'Static options for the option types. A `select` / `radio` field needs a non-empty list here or a '
+    + '`picklist` — with neither (or `options: []`) it is refused at parse.',
+  ),
+
+  /**
+   * Reference to a shared option list — a `picklist` item, by name — in place
+   * of inline `options` (`data/picklist.zod.ts`).
+   *
+   * Mutually exclusive with `options`, refused at this door when both are
+   * written: the field's options come from exactly one source. Valid only on
+   * the option types (`select`, `radio`, `multiselect`, `checkboxes`,
+   * `tags`), the types whose value is an option code. A `select` / `radio`
+   * must declare one of the two: with neither it is refused at parse.
+   *
+   * `PicklistServedFieldSchema` declares the served form.
+   * Option labels translate under `picklists.<name>.options.<value>`, which
+   * every referencing field inherits.
+   */
+  picklist: SnakeCaseIdentifierSchema.optional().describe(
+    'Name of a shared `picklist` whose options this field offers — instead of `options`, never with it. '
+    + 'Option types only (select, radio, multiselect, checkboxes, tags). A select / radio declares this or a '
+    + 'non-empty `options`; with neither it is refused at parse.',
+  ),
 
   /**
    * Relationship Config
@@ -2002,7 +2052,7 @@ export const FieldSchema = lazySchema(() => {
    * on `autonumber`, so no other type's parse output moves.
    */
   autonumberFormat: z.string().optional().meta({
-    description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555).',
+    description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}`, which every driver and the engine fallback read, so one field numbers alike on every backend.',
     default: DEFAULT_AUTONUMBER_FORMAT,
   }),
   // `index` (field-level bool) removed in the 16.x line (#2377, ADR-0049): the
@@ -2067,7 +2117,7 @@ export const FieldSchema = lazySchema(() => {
   // `Field.masterDetail()` take the target as their first positional
   // argument, so helper-authored fields cannot miss it.
   //
-  // [#16126] The emptiness test is applied to the TRIMMED value, so a
+  // [commit 859ded3ec] The emptiness test is applied to the TRIMMED value, so a
   // whitespace-only `reference` joins `undefined` and `''` under this one
   // issue and this one message. It names no object either: the declared
   // grammar for an object name is `/^[a-z_][a-z0-9_]*$/` (`ObjectSchema`'s
@@ -2094,6 +2144,77 @@ export const FieldSchema = lazySchema(() => {
         'resolve, and no relationship index can be built. Declare `reference`, or use a ' +
         'non-relationship type if this field does not link records.',
     });
+  }
+
+  // A single-choice field (`select` / `radio`) with NO option source — neither
+  // a non-empty `options` list nor a `picklist` reference — is a choice with
+  // nothing to choose: the form control offers nothing, and server-side value
+  // validation is off (`record-validator.ts` checks membership only against a
+  // non-empty allowed list), so any value writes through the API. ADR-0078's
+  // author-time gate has always graded this an error
+  // (`field/choice-without-options`), and the registry warns on it at boot;
+  // this door is one more gate beside those two, not a replacement for either,
+  // on the `reference` precedent above (ruling record 5910124148): the
+  // publish seam was the one door that let the hole through, exactly where
+  // AI-authored metadata that omits the list would otherwise parse cleanly.
+  //
+  // The predicate is the completeness module's own, applied rather than
+  // restated (`checkFieldCompleteness`, its error-severity finding), so the
+  // two gates cannot drift apart. That fixes three facts: `options: []` is
+  // the same hole spelled out, as `''` is for `reference`; a `picklist`
+  // reference IS a source; and the types are exactly `select` / `radio` —
+  // `checkboxes` is a warning there (it degrades to free-form) and
+  // `multiselect` / `tags` are free-form by design (the module's NON-rule), so
+  // all three keep parsing with neither key.
+  //
+  // A stored row carrying the hole is not rewritten by anything — no migration
+  // can invent the options an author meant. It is still read and named
+  // (`_diagnostics.valid: false`, `/meta/diagnostics`, the boot log's
+  // `field/choice-without-options` line), and a later save of its object is
+  // refused here until a source is added.
+  if (
+    checkFieldCompleteness(field).some(
+      (finding) => finding.rule === FIELD_CHOICE_WITHOUT_OPTIONS && finding.severity === 'error',
+    )
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['options'],
+      message:
+        `A \`${field.type}\` field needs its choices: declare a non-empty \`options\` list ` +
+        "(e.g. `options: [{ label: 'Open', value: 'open' }]`), or `picklist: '<name>'` to offer a shared " +
+        'list. Without either it is a choice with nothing to choose: the form control is empty and ' +
+        'server-side value validation is off, so any value writes through. An empty `options: []` is the ' +
+        'same gap. Declare `options` or `picklist`, or use a `text` field if any value is meant to be allowed.',
+    });
+  }
+
+  // A field's options come from exactly ONE source: inline `options`, or the
+  // shared list `picklist` names (`data/picklist.zod.ts`). Both is refused —
+  // two sources, one of them silently ignored. Neither, on a single-choice
+  // type, is refused by the check directly above.
+  if (field.picklist !== undefined) {
+    if (!SINGLE_OPTION_TYPES.has(field.type) && !MULTI_OPTION_TYPES.has(field.type)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['picklist'],
+        message:
+          `\`picklist\` is only valid on an option type — select, radio, multiselect, checkboxes or ` +
+          `tags (this field is \`${field.type}\`): it names the shared list the field's value is ` +
+          'chosen from, and this type stores no option code. Change the type, or remove `picklist`.',
+      });
+    }
+    if (field.options !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['options'],
+        message:
+          '`picklist` and `options` cannot both be declared — a field takes its options from exactly ' +
+          "one source. Keep `picklist: '<name>'` and delete `options`: the picklist holds them " +
+          '(to offer a new value, add it to the picklist, or through `picklistExtensions` when another ' +
+          'package owns it). Or delete `picklist` to keep an inline list of this field\'s own.',
+      });
+    }
   }
 
   // ADR-0113: `storage.notNull` × `requiredWhen` is a contradiction, rejected
@@ -2348,7 +2469,7 @@ export const FieldSchema = lazySchema(() => {
   // rows to be KEPT and gets them DELETED — data loss relative to the declared
   // intent, silently, at the moment the parent goes away. Honoring it is ruled
   // out (a detail row whose master reference is nulled becomes an unreachable
-  // orphan — the outcome #8772/#9138 exist to prevent). `field.deleteBehavior`
+  // orphan — the outcome commit 75b7c240a (#9138) prevents). `field.deleteBehavior`
   // here is pre-`.overwrite`, so `undefined` means "not authored" — a bare
   // `master_detail` (the overwhelmingly common spelling) never fires this.
   if (field.type === 'master_detail' && field.deleteBehavior === 'set_null') {
@@ -2548,6 +2669,53 @@ export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
  */
 export type FieldInput = Omit<Partial<Field>, 'type'>;
 
+/** `Field.select` with inline options — the array or `{ options }` forms. */
+function selectWithOptions(optionsOrConfig: Array<SelectOption | string> | Omit<FieldInput, 'options'> & { options: Array<SelectOption | string> }, config?: FieldInput) {
+  // Helper function to convert string to lowercase snake_case
+  const toSnakeCase = (str: string): string => {
+    return str
+      .toLowerCase()
+      .replace(/\s+/g, '_')  // Replace spaces with underscores
+      .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
+  };
+
+  // Support both old and new signatures:
+  // Old: Field.select(['a', 'b'], { label: 'X' })
+  // New: Field.select({ options: [{label: 'A', value: 'a'}], label: 'X' })
+  let options: SelectOption[];
+  let finalConfig: FieldInput;
+  
+  if (Array.isArray(optionsOrConfig)) {
+    // Old signature: array as first param
+    options = optionsOrConfig.map(o => 
+      typeof o === 'string' 
+        ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
+        : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
+    );
+    finalConfig = config || {};
+  } else {
+    // New signature: config object with options
+    options = (optionsOrConfig.options || []).map(o => 
+      typeof o === 'string' 
+        ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
+        : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
+    );
+    // Remove options from config to avoid confusion
+    const { options: _, ...restConfig } = optionsOrConfig;
+    finalConfig = restConfig;
+  }
+  
+  return { type: 'select', options, ...finalConfig } as const;
+}
+
+/**
+ * `Field.select` bound to a shared picklist — no `options` of its own: the
+ * picklist supplies them, and `FieldSchema` refuses the two together.
+ */
+function selectFromPicklist<const C extends FieldInput & { picklist: string; options?: undefined }>(config: C) {
+  return { type: 'select', ...config } as const;
+}
+
 export const Field = {
   text: (config: FieldInput = {}) => ({ type: 'text', ...config } as const),
   textarea: (config: FieldInput = {}) => ({ type: 'textarea', ...config } as const),
@@ -2615,44 +2783,18 @@ export const Field = {
    * @example Multi-word values - converts to snake_case
    * Field.select(['In Progress', 'Closed Won'], { label: 'Status' })
    * // Results in: [{ label: 'In Progress', value: 'in_progress' }, { label: 'Closed Won', value: 'closed_won' }]
+   *
+   * @example Shared picklist — the options come from the named `picklist` item
+   * Field.select({ picklist: 'industry', label: 'Industry' })
+   * // Results in: { type: 'select', picklist: 'industry', label: 'Industry' } — no `options`
    */
-  select: (optionsOrConfig: SelectOption[] | string[] | FieldInput & { options: SelectOption[] | string[] }, config?: FieldInput) => {
-    // Helper function to convert string to lowercase snake_case
-    const toSnakeCase = (str: string): string => {
-      return str
-        .toLowerCase()
-        .replace(/\s+/g, '_')  // Replace spaces with underscores
-        .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
-    };
-
-    // Support both old and new signatures:
-    // Old: Field.select(['a', 'b'], { label: 'X' })
-    // New: Field.select({ options: [{label: 'A', value: 'a'}], label: 'X' })
-    let options: SelectOption[];
-    let finalConfig: FieldInput;
-    
-    if (Array.isArray(optionsOrConfig)) {
-      // Old signature: array as first param
-      options = optionsOrConfig.map(o => 
-        typeof o === 'string' 
-          ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
-          : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
-      );
-      finalConfig = config || {};
-    } else {
-      // New signature: config object with options
-      options = (optionsOrConfig.options || []).map(o => 
-        typeof o === 'string' 
-          ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
-          : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
-      );
-      // Remove options from config to avoid confusion
-      const { options: _, ...restConfig } = optionsOrConfig;
-      finalConfig = restConfig;
-    }
-    
-    return { type: 'select', options, ...finalConfig } as const;
-  },
+  select: ((optionsOrConfig: unknown, config?: FieldInput) =>
+    !Array.isArray(optionsOrConfig)
+      && typeof (optionsOrConfig as { picklist?: unknown }).picklist === 'string'
+      && (optionsOrConfig as { options?: unknown }).options === undefined
+      ? selectFromPicklist(optionsOrConfig as FieldInput & { picklist: string; options?: undefined })
+      : selectWithOptions(optionsOrConfig as Parameters<typeof selectWithOptions>[0], config)
+  ) as typeof selectWithOptions & typeof selectFromPicklist,
 
   
   /**

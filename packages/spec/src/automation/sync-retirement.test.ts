@@ -46,6 +46,15 @@ import {
 //     bare name is now published by NOBODY, and sections 3 and 5 below were
 //     rewritten to pin that instead. The #4738 rename stands: freeing a word is
 //     not a reason to rename the connector vocabulary back.
+//
+//     ⚠️ Protocol 18 SUPERSEDED the integration half too: connector-attached
+//     sync was retired from the connector (ADR-0049 — `syncConfig` parsed and
+//     was never executed; the definition moved to the target `mapping`'s
+//     `connectorSource`), and `DataSyncConfig(Schema)` and
+//     `ConnectorConflictResolution(Schema)` left `./integration` whole with it.
+//     Sections 2 and 4 below were rewritten to pin that ALL the sync names are
+//     now published by nobody; `connector-sync-retirement.test.ts` owns the
+//     retirement itself.
 //   - `@objectstack/spec/api`'s `ConflictResolutionStrategy` (route conflicts)
 //     is a FOURTH relative under a different name; it is outside the baseline
 //     and must not be touched by any of this.
@@ -56,7 +65,7 @@ import {
 // anti-vacuity guards; sabotage-verified in the PR (re-adding an automation
 // export, re-introducing a bare-name re-export on ./integration, and renaming
 // the ui side each turn it red).
-describe('[#4738] sync/conflict dual-source retirement', () => {
+describe('sync/conflict dual-source retirement', () => {
   it('resolves the export surface: one owner per name, across every public entry', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`
@@ -92,10 +101,13 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     // keeping it would have asserted the survival of a layer this repo
     // deliberately removed. Re-pointing it at another `automation/` export
     // would have preserved the line and lost the meaning. What survives as the
-    // "did not over-reach" witness is `StateMachineSchema` plus the >50 export
+    // "did not over-reach" witness is `FlowSchema` plus the >50 export
     // floor above — and, one layer out, the surviving sync surfaces are
-    // asserted by name in section 4 below.
-    expect(automationNames).toContain('StateMachineSchema');
+    // asserted by name in section 4 below. (The witness was `StateMachineSchema`
+    // until #21320 retired that family with `agent.lifecycle`; `FlowSchema` is
+    // the `/automation` export least likely to ever leave, which is the only
+    // property a non-over-reach witness needs.)
+    expect(automationNames).toContain('FlowSchema');
     for (const alsoRetired of [
       'ETLPipeline', 'ETLPipelineSchema', 'ETLPipelineRun', 'ETLPipelineRunSchema',
       'ETLSource', 'ETLSourceSchema', 'ETLDestination', 'ETLDestinationSchema',
@@ -105,20 +117,19 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     ]) {
       expect(
         automationNames,
-        `./automation must not export ${alsoRetired} (#6414, L2 retired on L1's reading)`,
+        `./automation must not export ${alsoRetired} (L2 retired on L1's reading)`,
       ).not.toContain(alsoRetired);
     }
 
-    // 2. The renamed side: `ConnectorConflictResolution(Schema)` originates in
-    //    integration/connector.zod.ts and is exported by ./integration alone
-    //    (plus nothing else — the rename must not fan out).
+    // 2. The renamed side: `ConnectorConflictResolution(Schema)` was the
+    //    connector vocabulary's name from #4738 until protocol 18 retired it
+    //    whole with `connector.syncConfig` (ADR-0049). Published by nobody now —
+    //    and in particular not re-homed onto another entry.
     for (const name of ['ConnectorConflictResolution', 'ConnectorConflictResolutionSchema']) {
-      const holders = holderOriginsOf(name);
-      expect(holders.length, `${name} must be exported (by ./integration)`).toBeGreaterThan(0);
-      for (const h of holders) {
-        expect(h.sub, `${name} must only be exported by ./integration`).toBe('./integration');
-        expect(originFile(h.origin)).toBe('src/integration/connector.zod.ts');
-      }
+      expect(
+        holderOriginsOf(name).map((h) => `${h.sub} (${h.origin})`),
+        `${name} left with connector.syncConfig — no entry may publish it`,
+      ).toEqual([]);
     }
 
     // 3. The bare `ConflictResolution(Schema)` is now published by NOBODY.
@@ -144,18 +155,22 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
       const holders = holderOriginsOf(name);
       expect(
         holders.map((h) => `${h.sub} (${h.origin})`),
-        `${name} was retired with ui/offline.zod.ts at #4988 — no entry may re-adopt the bare name`,
+        `${name} was retired with ui/offline.zod.ts — no entry may re-adopt the bare name`,
       ).toEqual([]);
     }
 
-    // 4. `DataSyncConfig(Schema)` likewise: ./integration alone, declared in
-    //    integration/connector.zod.ts — it kept its bare name because it is on
-    //    the live `ConnectorSchema.syncConfig` parse path.
+    // 4. `DataSyncConfig(Schema)` likewise: it kept its bare name on
+    //    ./integration while `ConnectorSchema.syncConfig` parsed it, and left
+    //    whole with that key in protocol 18. Published by nobody now.
     for (const name of ['DataSyncConfig', 'DataSyncConfigSchema']) {
-      const holders = holderOriginsOf(name);
-      expect(holders.map((h) => h.sub), `${name} must be owned by ./integration alone`).toEqual(['./integration']);
-      expect(originFile(holders[0].origin)).toBe('src/integration/connector.zod.ts');
+      expect(
+        holderOriginsOf(name).map((h) => `${h.sub} (${h.origin})`),
+        `${name} left with connector.syncConfig — no entry may publish it`,
+      ).toEqual([]);
     }
+    // Anti-vacuity for 2 and 4: ./integration still resolves, and still
+    // publishes the connector itself.
+    expect(exportNamesOf('./integration')).toContain('ConnectorSchema');
 
     // 5. The fourth relative is untouched: `ConflictResolutionStrategy` (route
     //    conflict handling) still exists on ./api under its own distinct name.
@@ -187,14 +202,12 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     // Anti-vacuity: the namespace we just probed is real and non-trivial.
     expect('FlowSchema' in automation).toBe(true);
 
-    // Renamed side — the connector vocabulary, byte-for-byte unchanged.
+    // Renamed side — retired with `connector.syncConfig` in protocol 18, so
+    // gone at runtime too, and the connector itself still resolves.
     expect('ConflictResolutionSchema' in integration).toBe(false);
-    expect('ConnectorConflictResolutionSchema' in integration).toBe(true);
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('target_wins')).not.toThrow();
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('latest_wins')).not.toThrow();
-    // The retired automation-side vocabulary was disjoint precisely here:
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('destination_wins')).toThrow();
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('merge')).toThrow();
+    expect('ConnectorConflictResolutionSchema' in integration).toBe(false);
+    expect('DataSyncConfigSchema' in integration).toBe(false);
+    expect('ConnectorSchema' in integration).toBe(true);
 
     // ui side — RETIRED at #4988 with `ui/offline.zod.ts`. The runtime half of
     // section 3: the bare name is absent from all three namespaces rather than
@@ -204,28 +217,32 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     }
     // Anti-vacuity: the ui namespace we just probed is real and non-trivial —
     // otherwise a broken import would satisfy the three absences above.
-    // (`ThemeSchema` was the probe until #10485 retired it — ADR-0049.)
+    // (`ThemeSchema` was the probe until commit 35ad101bc retired it — ADR-0049.)
     expect('PageSchema' in ui).toBe(true);
   });
 
-  it('still parses authored connector syncConfig through the renamed enum — the live path', async () => {
+  it('refuses an authored connector `syncConfig` whatever its conflict value — the path is retired', async () => {
+    // Was "still parses authored connector syncConfig through the renamed enum
+    // — the live path", asserting `target_wins` parsed and `destination_wins`
+    // did not. Protocol 18 retired `syncConfig` (ADR-0049): the value domain no
+    // longer decides anything, because the KEY is refused with its
+    // prescription. Both former outcomes now read the same, which is the proof
+    // that the refusal is about the key and not the value.
     const { ConnectorSchema } = await import('../integration/connector.zod');
     const connectorWith = (conflictResolution: string) => ({
       name: 'sap_erp',
       label: 'SAP ERP',
       type: 'saas',
-      syncConfig: {
-        strategy: 'incremental',
-        direction: 'bidirectional',
-        conflictResolution,
-        batchSize: 500,
-      },
+      syncConfig: { strategy: 'incremental', direction: 'bidirectional', conflictResolution, batchSize: 500 },
     });
-    const parsed = ConnectorSchema.parse(connectorWith('target_wins'));
-    expect(parsed.syncConfig?.conflictResolution).toBe('target_wins');
-    // The authored VALUE domain did not move an inch with the TS rename; the
-    // SAME document differing only in this one value stays illegal (so this
-    // negative cannot pass for an unrelated reason):
-    expect(() => ConnectorSchema.parse(connectorWith('destination_wins'))).toThrow();
+    for (const value of ['target_wins', 'destination_wins']) {
+      const result = ConnectorSchema.safeParse(connectorWith(value));
+      expect(result.success, `${value} must be refused`).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'syncConfig');
+      expect(issue!.message).toMatch(/^`connector\.syncConfig` was removed/);
+    }
+    // CONTROL: the same connector without the key parses.
+    const { syncConfig: _dropped, ...rest } = connectorWith('target_wins');
+    expect(ConnectorSchema.safeParse(rest).success).toBe(true);
   });
 });

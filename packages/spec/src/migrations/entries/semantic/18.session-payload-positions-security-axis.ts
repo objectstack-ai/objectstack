@@ -40,8 +40,8 @@ export const entry: SemanticMigration = {
     + 'published unchanged as `user.role` — the single exception ADR-0090 D3\'s "role" word '
     + 'ban carves out for third-party schema. Minting a `roles` array would revive the exact '
     + 'banned identifier `check:role-word` ratchets against, to publish information the '
-    + 'payload already carries. Maintainer ruling 2026-09-05 (#15136, director decision '
-    + 'batch #39 item 2, verbatim 「同意」): option A, one name, one meaning. ADR-0068 D1/D2, '
+    + 'payload already carries. Maintainer ruling 2026-09-05: option A, one name, one meaning '
+    + '— `current_user.positions` means the security positions everywhere. ADR-0068 D1/D2, '
     + 'ADR-0090 D3/D5, ADR-0057 D4.',
   acceptanceCriteria:
     'No predicate and no client reader treats `current_user.positions` / '

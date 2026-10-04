@@ -26,6 +26,17 @@ import {
   PREDICATE_RHS_PATH_SHAPED,
 } from './validate-predicate-path-refs.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
+// The published barrel is loaded HERE, at module top, and not by a dynamic
+// import inside the case that reads the id off it. That import loads the whole
+// `@objectstack/lint` index graph, and inside a case the load is charged to
+// vitest's per-case budget (5000ms by default), so the case's verdict would
+// turn on how loaded the machine is. At module top the same load is charged to
+// the COLLECT phase, where no per-case budget applies. The case loses nothing:
+// it asserts an id's value and identity only. `lazy-deps.test.ts` is the one
+// file here that keeps its barrel load inside a case, because that load is its
+// subject. Same reasoning as the core precedent
+// `packages/core/src/service-resolution-discriminator.contract.test.ts`.
+import * as barrel from './index.js';
 
 // ── A miniature target schema, so the traversal is pinned against a shape the
 // test fully controls rather than against whatever `FieldSchema` happens to
@@ -372,8 +383,7 @@ describe('validatePredicatePathRefs — path-shaped right-hand side (#7659)', ()
     expect(rhs('data.name == $b')).toEqual([]);
   });
 
-  it('emits the id the published barrel exports', async () => {
-    const barrel = await import('./index.js');
+  it('emits the id the published barrel exports', () => {
     expect(barrel.PREDICATE_RHS_PATH_SHAPED).toBe('predicate-rhs-path-shaped');
     expect(rhs('data.name == data.type')[0].rule).toBe(barrel.PREDICATE_RHS_PATH_SHAPED);
   });
@@ -596,7 +606,31 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // refuses one, so the form offers the control only where it draws. The same
     // card REMOVED the joined-block `chart` repeater column, which carried no
     // predicate, so it leaves this census untouched.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(73);
+    // It is 81 today, an ADDITION of EIGHT: #19332 (flight G1b) gave sixteen
+    // live structured field and action keys a form row each, and eight of those
+    // rows carry a meaningfulness gate — the key is read only for some field
+    // types or action shapes. Measured, not inferred: the shipped corpus was
+    // differenced against the merge base `789b2ae54` by
+    // `<form>::<field>::<source>`, 73 → 81, eight added and NONE removed —
+    // `field :: accept | currencyConfig | dependsOn | lookupColumns |
+    // lookupFilters | relatedListColumns`, plus `action :: patch` and
+    // `action :: bodyExtra`. The other eight rows carry no predicate.
+    // It is 82 today, an ADDITION of ONE: #19332 (flight G2b) gave four live
+    // structured keys a form row each, and one of them carries a meaningfulness
+    // gate — the field form's `inlineColumns` repeater, read only on a
+    // `master_detail` field, like its `inlineTitle` / `inlineAmountField`
+    // siblings. Measured, not inferred: the shipped corpus was differenced
+    // against the merge base `e956924e` by `<form>::<field>::<source>`,
+    // 81 → 82, `field :: inlineColumns :: data.type == 'master_detail'` added
+    // and NONE removed. The other three rows and all their sub-rows carry no
+    // predicate.
+    // It is 83 today, an ADDITION of ONE: the field form's `useGrouping` row,
+    // offered once the key was enforced, carries `scale`'s gate — the key is a
+    // display hint for `number` fields only. Measured, not inferred: the
+    // shipped `*.form.ts` corpus differenced against the merge base
+    // `d78a0bda07` adds exactly `field :: useGrouping :: data.type == 'number'`
+    // and removes none.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(83);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -687,7 +721,17 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // quoted literal and is not rewritten.
     // It is 53 today: #20161's `report :: chart` gate is `data.type != 'joined'`,
     // a `!=` against a single-quoted literal.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(53);
+    // It is 56 today: three of #19332 G1b's eight new predicates compare
+    // against a single-quoted literal (`field :: currencyConfig` on
+    // `data.type == 'currency'`, `action :: patch` on
+    // `data.operation == 'update'`, `action :: bodyExtra` on
+    // `data.type == 'api'`); the other five are `in`-list gates.
+    // It is 57 today: #19332 G2b's one new predicate, `field :: inlineColumns`
+    // on `data.type == 'master_detail'`, compares against a single-quoted
+    // literal.
+    // It is 58 today: the field form's `useGrouping` row is gated on
+    // `data.type == 'number'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(58);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

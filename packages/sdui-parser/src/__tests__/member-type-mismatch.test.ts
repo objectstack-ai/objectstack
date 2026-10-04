@@ -67,7 +67,8 @@ describe('a declared member kind is READ', () => {
   it('names every offending position in ONE diagnostic, not one per member', () => {
     const [diagnostic] = diags(manifest, { actions: ['clone', 42, {}, 'convert'] });
     expect(diagnostic.code).toBe('member-type-mismatch');
-    expect(diagnostic.severity).toBe('warning');
+    // a member of a materialized literal is a literal: certain, so `error`
+    expect(diagnostic.severity).toBe('error');
     expect(diagnostic.message).toBe(
       '<probe> prop "actions" expected every member to be a string — [1], [2] are not',
     );

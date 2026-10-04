@@ -12,6 +12,7 @@ import type {
   ReferenceResolutionError,
   SeedLoadResultParsed,
   Seed,
+  EngineQueryOptions,
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
@@ -348,6 +349,28 @@ function localeScopeLabel(dataset: Seed): string {
 }
 
 /**
+ * [#21665] The id a seed row authored as `authoredId` holds in `organizationId`
+ * when a per-organization replay cannot give it the authored id itself.
+ *
+ * A primary key is global, so an authored `id` names exactly ONE row in the
+ * whole database. A per-organization replay writes every seed row once per
+ * organization, so from the second organization on, the authored id is
+ * already taken. The replay then gives the row this id instead.
+ *
+ * It is DERIVED, not minted, and that is load-bearing. The replay keys each
+ * row by its `externalId` within the organization, and a dataset whose
+ * `externalId` is `id` (the showcase's `sys_business_unit` tree) has no
+ * other column to find its own row by. A random id would make every replay
+ * into the same organization insert the set again; a derived one is found
+ * again by the same lookup, so the replay stays idempotent. Deriving from the
+ * organization id itself rather than from a hash of it means two
+ * organizations can never be given the same id.
+ */
+function perOrganizationSeedRowId(authoredId: string, organizationId: string): string {
+  return `${authoredId}__${organizationId}`;
+}
+
+/**
  * SeedLoaderService — Runtime implementation of ISeedLoaderService
  *
  * Provides metadata-driven seed data loading with:
@@ -362,13 +385,18 @@ function localeScopeLabel(dataset: Seed): string {
  * - Topological dependency ordering (parents before children)
  * - Multi-pass loading for circular references — pass 2 writes a deferred
  *   reference back through the source row's INTERNAL id captured at insert
- *   time (#11674), so it heals KEYLESS datasets (`mode: 'insert'`, no
+ *   time (commit 9a884c6e4), so it heals KEYLESS datasets (`mode: 'insert'`, no
  *   `externalId`) the same as keyed ones
  * - Dry-run validation mode
  * - Upsert support honoring SeedSchema mode
  * - Idempotent replay: an upsert/update whose declared fields already match
  *   the existing row is skipped (no update_at churn, no re-validation) —
  *   seeds replay on every dev-server boot and package re-publish
+ * - Per-organization row identity (#21665): on a per-organization replay
+ *   (`config.organizationId`), a row whose authored `id` another organization
+ *   already holds gets an id of its own for this organization, and every
+ *   reference in the same replay that names the authored id follows it — see
+ *   {@link assignReplayRowIds}
  * - Actionable error reporting
  *
  * Replay safety invariant: a reference that cannot be resolved is NEVER
@@ -438,7 +466,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private seedExternalIdByObject = new Map<string, string | string[]>();
   /**
-   * [#11674] Per seeded object, the fields the WRITE CONTRACT requires a value
+   * [commit 1cba33f16] Per seeded object, the fields the WRITE CONTRACT requires a value
    * for **on insert** — the subset a pass-1 deferral cannot survive.
    *
    * Pass 1 defers an unresolvable reference by DELETING the column from the
@@ -463,6 +491,29 @@ export class SeedLoaderService implements ISeedLoaderService {
    * nothing about `required` there and stays silent rather than guessing.
    */
   private requiredOnInsertByObject = new Map<string, Set<string>>();
+  /**
+   * [#21665] Per seeded object, authored seed `id` → the id that row LANDED
+   * with in this load, for every row a per-organization replay could not give
+   * its authored id (see {@link assignReplayRowIds}).
+   *
+   * This is what re-points the replay's own references. A sibling row that
+   * names `parent_business_unit_id: 'bu_acme'` means "the row this seed
+   * authored as `bu_acme`", and in the second organization that row is not
+   * called `bu_acme`. {@link resolveReferenceItem} reads this map first, so
+   * such a reference resolves to this organization's row, in pass 1 and in
+   * pass 2 alike, whatever shape the authored id has.
+   *
+   * Only rows the replay actually re-identified are entered, and only once
+   * they have landed. A replay that keeps every authored id (the first
+   * organization's) enters nothing and resolves exactly as it did before; a
+   * row whose write failed is never entered, so a reference to it is reported
+   * unresolved instead of pointing at a row that does not exist.
+   *
+   * An instance field for the same reason {@link pointerRefsByObject} is one:
+   * pass 2 reads it several parameters away from where pass 1 fills it.
+   * Reset per `load`.
+   */
+  private replayIdByAuthoredId = new Map<string, Map<string, string>>();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -560,6 +611,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     // [#9071] Same per-load lifetime, same reason: a publish between two loads
     // can add (or drop) the `name` column this memo answers about.
     this.declaresNameColumnCache.clear();
+    // [#21665] One replay's ids belong to one organization: a reused service
+    // instance must never re-point the next load's references with them.
+    this.replayIdByAuthoredId.clear();
 
     // When the caller pinned no target org (an in-process publish has no active
     // user session — the AI build agent's publish path), BUSINESS seed rows
@@ -613,7 +667,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // `referenceVia` on other types at authoring, and metadata at rest that
     // predates that check must not have non-text columns resolved as ids.
     //
-    // [#11674] The same pass also records which fields the write contract
+    // [commit 1cba33f16] The same pass also records which fields the write contract
     // requires on insert — the subset a deferral cannot survive. One
     // definition read answers both questions, so the early signal costs no
     // extra metadata round-trip. See {@link requiredOnInsertByObject}.
@@ -832,7 +886,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     const summariesStaleAtStart = this.summariesStale;
     const errors: ReferenceResolutionError[] = [];
     /**
-     * [#11674] The early signal's state, for this dataset only.
+     * [commit 1cba33f16] The early signal's state, for this dataset only.
      *
      * `requiredOnInsert` is what the write contract requires a value for on
      * insert (see {@link SeedLoaderService.requiredOnInsertByObject}); an
@@ -865,6 +919,28 @@ export class SeedLoaderService implements ISeedLoaderService {
       );
     }
 
+    // [#21665] Per-organization row identity. On a per-organization replay,
+    // decide which id each row authored with an `id` holds in THIS
+    // organization before anything is written: the authored id while no other
+    // row holds it, else this organization's own derived id. Dry runs write
+    // nothing and never probe the database, so they keep the authored ids.
+    const replayIds = config.organizationId && !config.dryRun
+      ? await this.assignReplayRowIds(objectName, dataset.records, config.organizationId)
+      : undefined;
+    /** Record index → the authored id that row was re-identified FROM. */
+    const authoredIdByRecordIndex = new Map<number, string>();
+    if (replayIds) {
+      const reidentified = [...replayIds].filter(([authored, assigned]) => authored !== assigned).length;
+      if (reidentified > 0) {
+        this.logger.info(
+          `[SeedLoader] ${reidentified} ${objectName} seed row(s) carry an authored id a row outside organization ` +
+            `${config.organizationId} already holds; this organization gets ids of its own for them, and references ` +
+            `in this replay that name the authored ids follow them.`,
+          { object: objectName, organizationId: config.organizationId, reidentified },
+        );
+      }
+    }
+
     // Get reference resolutions for this object
     const objectRefs = refMap.get(objectName) || [];
 
@@ -888,7 +964,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // logical/validation failure. See framework#2678.
     const pendingInserts: Array<{ recordIndex: number; externalIdValue: string; record: Record<string, unknown> }> = [];
     const opts = SeedLoaderService.SEED_OPTIONS as any;
-    // [#11674] Internal ids captured at write time, keyed by record index.
+    // [commit 9a884c6e4] Internal ids captured at write time, keyed by record index.
     // Every write site below records the id it learned here — unconditionally,
     // unlike the `insertedRecords` registrations, which need a non-empty
     // natural key. Once the dataset has fully written, the deferred updates it
@@ -901,6 +977,24 @@ export class SeedLoaderService implements ISeedLoaderService {
     // dropped the link ("empty externalId, so no internal id").
     const deferredStart = deferredUpdates.length;
     const internalIdByRecordIndex = new Map<number, string>();
+    /**
+     * Record the id row `recordIndex` landed with. Every write site below goes
+     * through here, so a re-identified row (#21665) enters
+     * {@link SeedLoaderService.replayIdByAuthoredId} exactly when it lands and
+     * never before: a later row of this dataset, a later dataset and pass 2
+     * then resolve its authored id to the row that is really there.
+     */
+    const noteLanded = (recordIndex: number, landedId: string): void => {
+      internalIdByRecordIndex.set(recordIndex, landedId); // [commit 9a884c6e4]
+      const authored = authoredIdByRecordIndex.get(recordIndex);
+      if (authored === undefined) return;
+      let byAuthored = this.replayIdByAuthoredId.get(objectName);
+      if (!byAuthored) {
+        byAuthored = new Map();
+        this.replayIdByAuthoredId.set(objectName, byAuthored);
+      }
+      byAuthored.set(authored, landedId);
+    };
     const extIdOf = (rec: Record<string, unknown>) => this.externalIdKey(rec, externalId);
     // bulkWrite is at-least-once: a retry (or a mismatch-driven degradation)
     // may re-run a write whose prior attempt already committed. Guard against
@@ -990,7 +1084,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (res.ok) {
           inserted++;
           const internalId = this.extractId(res.record);
-          if (internalId) internalIdByRecordIndex.set(recordIndex, internalId); // [#11674]
+          if (internalId) noteLanded(recordIndex, internalId); // [commit 9a884c6e4]
           if (externalIdValue && internalId) {
             insertedRecords.get(objectName)!.set(externalIdValue, internalId);
           }
@@ -1077,7 +1171,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
       /**
-       * [#11674] Deferrals this row took on a column the write contract
+       * [commit 1cba33f16] Deferrals this row took on a column the write contract
        * requires on insert. Collected during resolution, reported once the
        * write ACTION for this row is known (below) — the deferral itself is
        * harmless on an update, where the deleted column is simply an omitted
@@ -1120,6 +1214,17 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (tenantOrg && record['organization_id'] == null) {
         record['organization_id'] = tenantOrg;
         stampedTenantOrg = true;
+      }
+
+      // [#21665] Give the row the id it holds in THIS organization (decided
+      // above, before the loop). Written onto the record before the write
+      // decision, so a dataset keyed on `id` looks its own row up under that
+      // id: the next replay into this organization finds and skips it.
+      const authoredId = typeof record['id'] === 'string' ? (record['id'] as string) : undefined;
+      const replayId = authoredId !== undefined ? replayIds?.get(authoredId) : undefined;
+      if (authoredId !== undefined && replayId !== undefined && replayId !== authoredId) {
+        record['id'] = replayId;
+        authoredIdByRecordIndex.set(i, authoredId);
       }
 
       // Resolve references
@@ -1351,7 +1456,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               recordIndex: i,
             });
             referencesDeferred++;
-            // [#11674] Deferring DELETED a column the write contract requires
+            // [commit 1cba33f16] Deferring DELETED a column the write contract requires
             // on insert. Note it now; the signal is emitted once this row's
             // write action is known — see `signalRequiredDeferrals` below.
             if (requiredOnInsert?.has(ref.field)) {
@@ -1416,7 +1521,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
 
-      // [#11674] EARLY SIGNAL — emitted here, before this row reaches the
+      // [commit 1cba33f16] EARLY SIGNAL — emitted here, before this row reaches the
       // engine, for the deferrals it took on columns the write contract
       // requires on INSERT.
       //
@@ -1476,7 +1581,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
             const externalIdValue = this.externalIdKey(record, externalId);
             const internalId = result.id;
-            if (internalId) internalIdByRecordIndex.set(i, String(internalId)); // [#11674]
+            if (internalId) noteLanded(i, String(internalId)); // [commit 9a884c6e4]
             if (externalIdValue && internalId) {
               insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
             }
@@ -1487,7 +1592,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // mapping alive for downstream reference resolution.
             const externalIdValue = this.externalIdKey(record, externalId);
             const existingId = this.extractId(existingRecords?.get(externalIdValue));
-            if (existingId) internalIdByRecordIndex.set(i, existingId); // [#11674]
+            if (existingId) noteLanded(i, existingId); // [commit 9a884c6e4]
             if (externalIdValue && existingId) {
               insertedRecords.get(objectName)!.set(externalIdValue, existingId);
             }
@@ -1510,7 +1615,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
           if (decision.action === 'skip') {
             skipped++;
-            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [#11674]
+            if (decision.id) noteLanded(i, decision.id); // [commit 9a884c6e4]
             if (decision.id && externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
@@ -1522,7 +1627,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // sever downstream natural-key resolution — that cascade is what
             // turned one legitimate validation error into NULLed-out child
             // references on every dev-server restart.
-            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [#11674] same rationale
+            if (decision.id) noteLanded(i, decision.id); // [commit 9a884c6e4] same rationale
             if (externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
@@ -1567,7 +1672,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       await flushPendingInserts();
     }
 
-    // [#11674] Annotate this dataset's deferred updates with the internal id
+    // [commit 9a884c6e4] Annotate this dataset's deferred updates with the internal id
     // their source row got when it was written — the id pass 2 writes the
     // resolved reference back through. Runs after the final flush so batched
     // inserts have reported their ids; datasets load sequentially, so the
@@ -1624,7 +1729,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         return id ? String(id) : undefined;
       }
     } catch (error) {
-      // [#12852] Discriminate by error TYPE, the same repair PR #9817 made to
+      // [#12852] Discriminate by error TYPE, the same repair commit 855591fe7 made to
       // `ObjectQL.probeInstallOrganizations` — the sibling probe with this
       // exact shape, on the other side of the engine boundary. This site was
       // missed by that pass.
@@ -1649,12 +1754,24 @@ export class SeedLoaderService implements ISeedLoaderService {
       // makes below — never a hand-rolled message test, so one vocabulary of
       // "benign driver error" serves every seam that needs one.
       //
+      // [#21516] The same absence in a composition that registers no
+      // `sys_organization` object at all (a single-tenant/lean runtime): the
+      // engine's in-process verbs now refuse an unresolved name with
+      // `OBJECT_NOT_FOUND` before any driver is asked, rather than reaching a
+      // table by that raw name. It is the not-provisioned case the missing-table
+      // arm already covers — no organization object here, so "no sole
+      // organization" is the truth and the historical NULL is right. Attributed
+      // on the error's own `object`, like the predicate above: a refusal naming
+      // a different object is not evidence about `sys_organization`.
+      //
       // Everything else (connection loss, a timeout, a permission denial, a
       // driver fault) means organizations may well exist and simply were not
       // seen. It propagates, envelope intact: the seed run fails loudly instead
       // of writing a batch of rows nobody will be able to see. No new error code
       // and no new result field — the caller receives the read's own failure.
-      if (!isMissingTableError(error, 'sys_organization')) throw error;
+      const refused = error as { code?: unknown; object?: unknown } | null | undefined;
+      const refusedThisObject = refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_organization';
+      if (!isMissingTableError(error, 'sys_organization') && !refusedThisObject) throw error;
     }
     return undefined;
   }
@@ -1689,6 +1806,15 @@ export class SeedLoaderService implements ISeedLoaderService {
             ? ` Pass the natural key directly: ${ref.field}: ${JSON.stringify(wrapped)}.`
             : ` Pass the target's ${ref.targetField} value as a plain string.`,
       };
+    }
+
+    // [#21665] An authored id of a row this replay re-identified names that
+    // row, in THIS organization. Asked BEFORE the internal-id short-circuit
+    // below on purpose: a UUID-shaped authored id would otherwise be kept
+    // verbatim and link this organization's row to another organization's.
+    if (typeof value === 'string') {
+      const replayed = this.replayIdByAuthoredId.get(ref.targetObject)?.get(value);
+      if (replayed !== undefined) return { status: 'resolved', value: replayed };
     }
 
     // Not a natural key (an internal id, or a non-string the engine will
@@ -1827,7 +1953,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     organizationId?: string,
   ): Promise<void> {
     for (const deferred of deferredUpdates) {
-      // [#16488] How the messages below NAME this record. `recordExternalId`
+      // [commit 460d4b807] How the messages below NAME this record. `recordExternalId`
       // is a map KEY joined with `\u0000` (see {@link externalIdKey}) and stays
       // one — the `insertedRecords` fallback lookup below depends on it — but a
       // raw NUL in a log line turns the whole log binary for `grep`, so every
@@ -1863,7 +1989,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       const resolvedValue: unknown = deferred.multiple ? resolvedItems : resolvedItems[0];
 
       if (!stillUnresolved && resolvedItems.length > 0) {
-        // [#11674] Write back through the internal id captured at insert time
+        // [commit 9a884c6e4] Write back through the internal id captured at insert time
         // — the handle that exists for every row this load actually wrote,
         // keyed or KEYLESS, so the declared deferral property ("pass 2 heals
         // an out-of-order reference") holds without requiring the dataset to
@@ -1936,15 +2062,15 @@ export class SeedLoaderService implements ISeedLoaderService {
               `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${quotableSeedFailureDetail(err) ?? WITHHELD_WRITE_REASON}`);
           }
         } else {
-          // THE TARGET RESOLVED BUT THE SOURCE ROW HAS NO ID (#5127, #11674).
+          // THE TARGET RESOLVED BUT THE SOURCE ROW HAS NO ID (#5127, commit 9a884c6e4).
           //
           // Pass 2 did its job — `resolvedValue` is a real internal id — and
-          // then found no internal id to write it ONTO. Since #11674 captures
+          // then found no internal id to write it ONTO. Since commit 9a884c6e4 captures
           // the internal id AT INSERT TIME for every row this load writes
           // (keyed or keyless), the one way left to get here is that the
           // source row NEVER LANDED: its pass-1 write failed (already
           // reported at `error` by the write site, #4729) or returned no id.
-          // The pre-#11674 "pure silent loss" — row written fine but its key
+          // The "pure silent loss" before commit 9a884c6e4 — row written fine but its key
           // evaluated empty, so pass 2's externalId re-resolution had no
           // handle — no longer exists: such a row now heals through its
           // captured internal id.
@@ -2394,7 +2520,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * from the seed declaration and the record, never from the caught error, so
    * "which record, which key" is untouched by the withhold. For a single-field
    * key the authored prefix is unchanged byte for byte too (two runtime pins
-   * read it); #16488 renders the VALUE side of a COMPOSITE key — see
+   * read it); commit 460d4b807 renders the VALUE side of a COMPOSITE key — see
    * {@link externalIdDisplay} — so its `\u0000` joiner cannot reach the log.
    * What #8442 changes is only what follows the colon: a DECLARED refusal — a 4xx, or the data
    * engine's `VALIDATION_FAILED` shape, which is where "which field and why"
@@ -2417,7 +2543,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       field: '(write)',
       targetObject: objectName,
       targetField: label,
-      // [#16488] The STRUCTURED key keeps the real key — a datum a machine
+      // [commit 460d4b807] The STRUCTURED key keeps the real key — a datum a machine
       // reads, and JSON / util.inspect escape a control character rather than
       // emitting it. Only the message is rendered.
       attemptedValue: keyValue || null,
@@ -2724,6 +2850,85 @@ export class SeedLoaderService implements ISeedLoaderService {
     return map;
   }
 
+  /**
+   * [#21665] Decide, for every row of a dataset authored with an `id`, which
+   * id that row holds in `organizationId`. Returns authored id → assigned id,
+   * or `undefined` when no row of the dataset authors an id.
+   *
+   * A seeded row on a tenant-scoped object belongs to the organization the
+   * replay writes it for (ADR-0131: a seeded business unit is the
+   * organization's business unit), and the seed contract keys rows by
+   * `externalId` within that organization. An authored `id` is therefore the
+   * row's identity INSIDE one organization, never across them. A primary key
+   * is global, though, so the replay assigns:
+   *
+   *   1. the id this organization's row already has — the authored id or the
+   *      derived one, whichever it finds — so a replay into the same
+   *      organization matches its own row instead of inserting another;
+   *   2. otherwise the authored id, while no row anywhere holds it. The first
+   *      organization a seed is replayed into keeps exactly the ids the seed
+   *      authored, byte for byte what it got before this rule existed;
+   *   3. otherwise {@link perOrganizationSeedRowId}: the authored id is
+   *      another organization's row (or an organization-less one), and is
+   *      never reused.
+   *
+   * Two reads, both under the system context like every other seed read: this
+   * organization's own ids (the same scoped read the upsert pre-load does),
+   * and an unscoped probe per authored id this organization does not hold yet.
+   * Rows without an authored `id` are untouched: the engine mints theirs.
+   */
+  private async assignReplayRowIds(
+    objectName: string,
+    records: ReadonlyArray<Record<string, unknown>>,
+    organizationId: string,
+  ): Promise<Map<string, string> | undefined> {
+    const authoredIds = new Set<string>();
+    for (const record of records) {
+      const id = record['id'];
+      if (typeof id === 'string' && id.length > 0) authoredIds.add(id);
+    }
+    if (authoredIds.size === 0) return undefined;
+
+    const heldHere = await this.loadExistingRecords(objectName, 'id', organizationId);
+    const assigned = new Map<string, string>();
+    for (const authoredId of authoredIds) {
+      const derivedId = perOrganizationSeedRowId(authoredId, organizationId);
+      if (heldHere.has(authoredId)) assigned.set(authoredId, authoredId);
+      else if (heldHere.has(derivedId)) assigned.set(authoredId, derivedId);
+      else assigned.set(authoredId, (await this.isRowIdHeld(objectName, authoredId)) ? derivedId : authoredId);
+    }
+    return assigned;
+  }
+
+  /**
+   * [#21665] Does ANY row of `objectName` hold `id`, in any organization or
+   * none? The question {@link assignReplayRowIds} must answer before it may
+   * hand a replayed row its authored id.
+   *
+   * A read that FAILED is not a "no": answering "free" would hand the replay
+   * an id that may well be taken, and the insert would collide, which is the
+   * defect this rule removes. So only the benign cause is absorbed — the
+   * object's table is not provisioned yet, which holds no row by definition —
+   * asked through the shared `isMissingTableError` predicate like
+   * {@link loadExistingRecords}; everything else propagates with its envelope
+   * intact.
+   */
+  private async isRowIdHeld(objectName: string, id: string): Promise<boolean> {
+    try {
+      const probe: EngineQueryOptions = {
+        where: { id },
+        fields: ['id'],
+        limit: 1,
+        context: { isSystem: true },
+      };
+      const rows = await this.engine.find(objectName, probe);
+      return Array.isArray(rows) && rows.length > 0;
+    } catch (error) {
+      if (!isMissingTableError(error, objectName)) throw error;
+      return false;
+    }
+  }
+
   private async loadExistingRecords(
     objectName: string,
     externalId: string | string[],
@@ -2857,7 +3062,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * `grep` classify the whole server log as binary, so every later `grep -n` /
    * `grep -c` over it silently returns nothing until the reader remembers
    * `-a`: the reader's main instrument disabled by one byte, at the moment
-   * someone is diagnosing a failed boot (#16488, measured while investigating
+   * someone is diagnosing a failed boot (commit 460d4b807, measured while investigating
    * objectstack-ai/ats#20).
    *
    * A key with no `\u0000` in it — every single-field key — is returned
@@ -2966,7 +3171,7 @@ interface DeferredUpdate {
   objectName: string;
   /**
    * The source record's INTERNAL id, captured at the moment its pass-1 write
-   * landed (#11674). This is the handle pass 2 writes the resolved reference
+   * landed (commit 9a884c6e4). This is the handle pass 2 writes the resolved reference
    * back through: it exists for every row this load actually wrote —
    * including rows of a KEYLESS dataset (`mode: 'insert'`, no `externalId`)
    * and rows whose composite key evaluated to the empty string — so the
@@ -2986,13 +3191,13 @@ interface DeferredUpdate {
    * when {@link internalId} is absent, and the name error messages call the
    * record by. It is the KEY, `\u0000` joiner and all; the messages render it
    * through {@link SeedLoaderService.externalIdDisplay} rather than pasting it
-   * (#16488).
+   * (commit 460d4b807).
    *
    * May legitimately be `''`: `externalIdKey` returns the empty string when the
    * dataset declares no `externalId` and the row carries no `name`, when the
    * key field is absent or blank, and when ANY ONE component of a composite
    * externalId is. An empty key is never registered in `insertedRecords`, so
-   * it can never find a record — since #11674 that only matters when
+   * it can never find a record — since commit 9a884c6e4 that only matters when
    * `internalId` is ALSO absent (the row never landed). Carried verbatim (not
    * normalised to `undefined`) so pass 2 can address the record by index
    * rather than by a key it does not have.

@@ -101,7 +101,7 @@ describe('default permission sets', () => {
       'owner_only_writes',
       'sys_account_self',
       'sys_api_key_self',
-      // [#8839] The one DELETE-class per-object policy, and the only entry here
+      // [commit c25b2d52a] The one DELETE-class per-object policy, and the only entry here
       // that widens rather than narrows. `owner_only_deletes` above is a
       // parent-blind second implementation of "who may remove this row", and on
       // `sys_comment` it was answering ahead of plugin-audit's

@@ -38,8 +38,9 @@
     // direction is SILENT: a `dist` merely BEHIND the source type-checks GREEN
     // against old declarations. This app is the fixture for a brand-new spec
     // surface (ADR-0130 D4's `packages[]`), which makes that exactly the
-    // reading it must not be able to give. `pnpm check:type-source-resolution`
-    // is the gate; it wants the `paths` rule, not a registry entry.
+    // reading it must not be able to give. `check:type-source-resolution` was
+    // the gate, and it wanted the `paths` rule, not a registry entry, until it
+    // was retired on 2026-09-18 (#18373); no gate checks this rule now.
     //
     // Two keys, and the star follows a separator: a tsconfig `paths` key
     // without a star is an EXACT match, and the `@objectstack/spec*` spelling

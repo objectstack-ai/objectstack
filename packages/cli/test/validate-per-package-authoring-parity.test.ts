@@ -74,6 +74,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run {
   code: number;
@@ -161,18 +162,24 @@ const ordersObjects = [{
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
   },
 }];
+// [#20331] Each container's name IS the object it binds to: the boot registrar
+// refuses a container whose own name disagrees with that key, and os validate
+// now refuses it too, so a *_list name here would make this a stack the
+// server cannot load.
 const ordersViews = [
   {
-    name: 'pp_account_list', label: 'Account List', object: 'pp_account',
+    name: 'pp_account', label: 'Account List', object: 'pp_account',
     list: { label: 'Account List', columns: ['name', 'industry'] },
   },
   {
-    name: 'pp_order_list', label: 'Order List', object: 'pp_order',
+    name: 'pp_order', label: 'Order List', object: 'pp_order',
     list: { label: 'Order List', columns: ['name', 'account'] },
   },
 ];
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   // The ARTIFACT's own identity: \`preserve\` is additive, so the singular
   // manifest is still picked by the default 'last' rule (ADR-0019 D1) and
   // carries manifest fields ONLY — \`ManifestSchema\` is strict, and a
@@ -189,7 +196,7 @@ export default {
     { manifest: { ...ordersManifest, objects: ordersObjects, views: ordersViews } },
     { manifest: { ...coreManifest, objects: coreObjects, apps: coreApps } },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -200,7 +207,9 @@ export default {
  * anything.
  */
 const CONFIG_SINGLE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: {
     id: 'com.example.ppsingle', name: 'ppsingle', namespace: 'ps',
     version: '1.0.0', type: 'app', engines: { protocol: '^17' },
@@ -216,7 +225,7 @@ export default {
     name: 'ps_app', label: 'PS App',
     navigation: [{ id: 'nav_things', type: 'object', objectName: 'ps_thing', label: 'Things' }],
   }],
-};
+}, { strict: false });
 `;
 
 const dirs = { multi: '', single: '' };
@@ -225,6 +234,7 @@ function plant(config: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-ppparity-'));
   mkdirSync(join(dir, 'src'), { recursive: true });
   writeFileSync(join(dir, 'objectstack.config.ts'), config, 'utf8');
+  linkSpec(dir);
   writeFileSync(
     join(dir, 'package.json'),
     JSON.stringify({ name: 'ppparity-fixture', private: true, type: 'module' }, null, 2),

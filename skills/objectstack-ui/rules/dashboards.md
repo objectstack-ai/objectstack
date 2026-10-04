@@ -67,7 +67,7 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 |:--|:--|
 | one base object + **to-one** joins (`include`, ≤3 hops) | a join that **changes grain** / a **to-many** rollup onto the parent |
 | 0..N dimensions; date-bucket `day/week/month/quarter/year` | a **computed dimension** / CASE bucket / numeric bin |
-| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) or any custom-SQL metric |
+| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) |
 | **derived measures** — `ratio/sum/difference/product` of other measures | scalar math on raw fields (`amount*0.8`), aggregate-of-aggregate |
 | WHERE (`$and/$or/$not` on the base object) + measure-scoped filters | **HAVING** (filtering the aggregate result) |
 | `compareTo` (previous period/year) + `totals` (matrix subtotals) | **window** (rank, running total, lag/lead, %-of-total); **union**; reshaping params |
@@ -75,10 +75,10 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 > **The iron rule:** a dataset is a governed, *narrow* semantic layer — NOT a
 > general analytics escape hatch (no raw SQL, no hand-authored joins, no
 > window/having). If the need is in the right column, a dataset **cannot** express
-> it — escalate to a hand-authored **Cube** (raw SQL / explicit joins), a **stored
-> rollup or formula field** on the object (to-many rollups, computed columns), or
-> app code. Do not force it into a dataset: it fails to compile or renders an empty
-> series.
+> it — escalate to a **stored field** on the object (a `summary` rollup, or a field
+> holding the computed value or bucket) or app code, not to a **Cube**: a cube
+> member's `sql` is a column reference. Do not force it into a dataset: it fails to
+> compile or renders an empty series.
 
 Standardized answers to the recurring ambiguous cases:
 
@@ -182,7 +182,7 @@ export const SalesDashboard: Dashboard = {
       dataset: 'opportunity_metrics', values: ['total_amount'],
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       layout: { x: 0, y: 0, w: 3, h: 2 },
-      options: { icon: 'DollarSign' },   // the measure's own `format` drives the number
+      colorVariant: 'success',   // the accent; the measure's own `format` + `currency` drive the number
       // Period-over-period: renderer fetches the prior quarter and
       // surfaces a secondary value + delta arrow automatically.
       compareTo: { kind: 'previousPeriod' },
@@ -252,14 +252,14 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 * **Metric widgets** — the prior-period value renders as a small caption
   beneath the headline number, alongside a green/red delta arrow and an
   i18n trend label resolved from the comparison kind (e.g. `vs previous
-  period`, `vs previous year`). Authors should *not*
-  hand-author `options.trend` when `compareTo` is set; the renderer wins
-  and overwrites it.
+  period`, `vs previous year`). Authors do *not*
+  hand-author a trend: `options.trend` reaches no renderer on a
+  dataset-bound widget; `compareTo` is the trend.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
-  line/area only; reduced opacity on all). Override per-series with
-  `series.dashArray` / `series.opacity`.
+  line/area only; reduced opacity on all). That muting is the renderer's
+  default; `chartConfig.colors` is the one palette channel that remains.
 * **Pie / donut / funnel** — `compareTo` is silently ignored; there is no
   meaningful "two-period" composition for part-of-whole charts.
 * **Requirements** — a comparison needs a **dated window** to shift. When the
@@ -318,14 +318,14 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
 | `dateGranularity` | Rendered bucket label |
 |:--|:--|
 | `'day'` | `YYYY-MM-DD` |
-| `'week'` | ISO date of the bucket (`YYYY-MM-DD`) |
+| `'week'` | ISO week `YYYY-Www` |
 | `'month'` | `YYYY-MM` |
 | `'quarter'` | `YYYY-Qn` |
 | `'year'` | `YYYY` |
 
-* **Engine support** — Postgres `date_trunc`, MySQL `date_format`, SQLite
-  `strftime`, MongoDB `$dateTrunc`, in-memory fallback. All emitted by the
-  analytics service, not the client.
+* **Engine support** — drivers emit the bucket as a label (`2026-01`), not
+  an instant: Postgres `to_char`, MySQL `date_format`, SQLite `strftime`,
+  MongoDB `$dateToString`, in-memory `bucketDateKey`.
 * **Human labels are automatic** — the analytics layer formats the bucket value
   to the label above, and resolves `select`/`lookup` dimension values to their
   option label / related-record name. Measures carry their `label` + `format`
@@ -338,10 +338,10 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
 
 ### Widget `options` — the five declared keys
 
-`options` is an open bag — presentation extras (`icon`, `trend`, `density`, …)
-pass through untouched. These five are **declared** because they change the SQL
-the dataset query compiles to, so a typo (`sortDirection`, `granularity`) is an
-author-time type error rather than an option that silently does nothing.
+`options` is an open bag, but a dataset-bound widget reads no other key: `icon`,
+`trend`, `format`, `color` style nothing, and `os validate` warns on each (`unconsumed-widget-option`).
+Presentation lives on the measure (`format` / `currency`), `colorVariant` and `chartConfig`.
+These five change the dataset SQL; a typo (`sortDirection`) parses too, and draws that warning.
 
 | Key | Value | Effect |
 |:--|:--|:--|
@@ -447,15 +447,15 @@ export const opportunityCube = defineCube({
   sql: 'opportunity',            // underlying object name (snake_case)
   public: true,
   measures: {
-    count:  { name: 'count',  label: 'Count',        type: 'count', sql: '*' },
-    amount: { name: 'amount', label: 'Total Amount', type: 'sum',   sql: 'amount', format: 'currency' },
+    count:  { label: 'Count',        type: 'count', sql: '*' },
+    amount: { label: 'Total Amount', type: 'sum',   sql: 'amount', format: 'currency' },
   },
   dimensions: {
-    stage:            { name: 'stage',            label: 'Stage',    type: 'string', sql: 'stage' },
-    close_date:       { name: 'close_date',       label: 'Close',    type: 'time',   sql: 'close_date',
+    stage:            { label: 'Stage',    type: 'string', sql: 'stage' },
+    close_date:       { label: 'Close',    type: 'time',   sql: 'close_date',
                         granularities: ['day', 'week', 'month', 'quarter', 'year'] },
-    account_industry: { name: 'account_industry', label: 'Industry', type: 'string', sql: 'account.industry' },
-    owner:            { name: 'owner',            label: 'Owner',    type: 'string', sql: 'owner' },
+    account_industry: { label: 'Industry', type: 'string', sql: 'account.industry' },
+    owner:            { label: 'Owner',    type: 'string', sql: 'owner' },
   },
 });
 ```

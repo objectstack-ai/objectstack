@@ -6,7 +6,7 @@
  *
  * ## The ruling this suite pins
  *
- * #11152 (maintainer 2026-08-28, applied in its comment 5448627494, ruling
+ * #11152 (maintainer 2026-08-28, landed as commit f6fa22ce1, ruling
  * verbatim and untranslated: 「12745 A回，其他同意。」 — option A on that
  * card) adopted, superseding #11249's `false`/`true` for the order
  * statistics:
@@ -16,7 +16,7 @@
  *   — the same numeric domain `sum` / `avg` answer in, so one column's five
  *   aggregates answer in one domain rather than three-numbers-two-booleans.
  * - **`sum` / `avg` answer arithmetic** (`3` / `0.5` on the 3-true/3-false
- *   fixture) — the settled #11065 family shape, unchanged.
+ *   fixture) — the settled commit 20950404c family shape, unchanged.
  *
  * ## The two measured gaps this suite exists to keep closed
  *

@@ -31,7 +31,7 @@
  * - `NOW()` / `TODAY()` with an optional `± N` day offset — closed, two names.
  * - `$User.<path>` — closed prefix.
  * - `round` / `floor` / `ceil` / `abs` / `min` / `max` in CALL position —
- *   closed by maintainer ruling on #11060 ("exactly … every name and semantic
+ *   closed by the maintainer ruling commit 815585513 records ("exactly … every name and semantic
  *   mirrored **1:1 from the CEL stdlib**, ⛔ no second semantics invented").
  * - a bare or dotted identifier (`{recordId}`, `{record.id}`, `{status}`) —
  *   **OPEN**: it addresses the run's `VariableMap`, which holds the flow's
@@ -101,7 +101,7 @@ export const FLOW_TEMPLATE_DATE_FUNCTIONS: readonly string[] = ['NOW', 'TODAY'];
 
 /**
  * The value-expression function table — the CEL stdlib's numeric six, by the
- * #11060 ruling. Mirrors `EXPRESSION_FUNCTION_ARITY`'s key set.
+ * ruling commit 815585513 records. Mirrors `EXPRESSION_FUNCTION_ARITY`'s key set.
  */
 export const FLOW_TEMPLATE_VALUE_FUNCTIONS: readonly string[] = [
   'round', 'floor', 'ceil', 'abs', 'min', 'max',

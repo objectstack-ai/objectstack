@@ -30,8 +30,8 @@
  * whose translations live in a bundle under the key this walk emits, and an
  * inline locale map — `{ en: 'Members', 'zh-CN': '成员' }` — which the author
  * writes out in place and the renderer picks from (`pickLocalized` /
- * `resolveI18nLabel`). Rulings #5728, #10926 and #14412 make the map the ONE
- * localisation route for the props that have no bundle key at all
+ * `resolveI18nLabel`). Rulings #5728 and #14412, and the ruling commit d173125fb landed,
+ * make the map the ONE localisation route for the props that have no bundle key at all
  * (`element:text`'s `content` among them), so a page localised that way is
  * fully localised.
  *
@@ -83,11 +83,13 @@
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
+ *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
+ *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
@@ -96,6 +98,8 @@
  *   datasets.<dataset>.label / .description
  *   datasets.<dataset>.dimensions.<dim>.label
  *   datasets.<dataset>.measures.<measure>.label
+ *   picklists.<picklist>.label
+ *   picklists.<picklist>.options.<value>   (a `picklistExtensions` entry's options too)
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
@@ -202,6 +206,7 @@ export interface ExpectedEntry {
     | 'dashboard'
     | 'widget'
     | 'dataset'
+    | 'picklist'
     | 'page'
     | 'flow'
     | 'metadataType'
@@ -246,7 +251,7 @@ export interface ExtractOptions extends ExpectedEntryOptions {
    * The `<locale>.source-hashes.generated.ts` tables already committed beside
    * the bundles, keyed by locale.
    *
-   * This is the mechanism's ONLY memory (#11671 / #12069 Option A): a leaf that
+   * This is the mechanism's ONLY memory (commit 09b4f4e4e, ruling #12069 Option A): a leaf that
    * is a byte copy of a source revision keeps its record across runs, which is
    * what makes the drift detectable after the source moves. Passing nothing
    * makes the run behave like a first extract — every record is re-derived from
@@ -341,8 +346,8 @@ function viewObjectName(view: any): string | undefined {
  *     named one keeps the author's `list.name`;
  *  2. a default list whose STRUCTURE merely restates a `listViews` entry is
  *     **collapsed into that entry** and has no key of its own — the
- *     `examples/app-crm` shape, where `list` is signature-identical to
- *     `listViews.all` and the live key is therefore `all`. This returns `all`
+ *     `examples/app-crm` shape, where `list` restates `listViews.all` key for
+ *     key and the live key is therefore `all`. This returns `all`
  *     there, and the caller skips the emit because the `listViews` loop
  *     already covered it. Emitting a second key for the collapsed view would
  *     scaffold a translation no lookup can reach — the same defect one shape
@@ -677,6 +682,28 @@ function pushActionParams(
  * LITERAL result-field path (`"user.email"`) — the dot stays inside a single
  * path segment, matching how resolvers index the record without splitting.
  */
+/**
+ * Emit `outcomeMessages.<outcome>` entries under an action's translation root —
+ * one per outcome the action declares (`ActionSchema.outcomeMessages`, #21095),
+ * beside `successMessage`, at the address `translateAction` overlays
+ * (`spec/system/i18n-resolver.ts`). Each message is optional-not-derived like
+ * `successMessage`: an outcome with no entry falls back at render time, so
+ * nothing is seeded for an outcome the author did not write.
+ */
+function pushActionOutcomeMessages(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const messages = action?.outcomeMessages;
+  if (!messages || typeof messages !== 'object' || Array.isArray(messages)) return;
+  for (const [outcome, message] of Object.entries<unknown>(messages)) {
+    pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], message, kind, { objectName });
+  }
+}
+
 function pushActionResultDialog(
   out: ExpectedEntry[],
   actionRoot: string[],
@@ -929,9 +956,10 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   // private copy. That walk exists precisely because duplicating it produced a
   // dead rule once already (#3583): components hang off `regions[].components`
   // AND `slots.<slot>` (which may be a bare component, not an array), sub-trees
-  // live inside the untyped `properties` bag (`page:tabs` →
-  // `properties.items[].children`, `page:card` → `properties.body`/`.footer`),
-  // and source-authored pages (`kind: 'html' | 'react' | 'jsx'`) hold only a
+  // live inside the untyped `properties` bag at the positions spec's
+  // `pageComponentSlotPositions()` derives (`page:tabs` →
+  // `properties.items[].children`, `page:card` → `properties.footer`, every
+  // container → `properties.children`), and source-authored pages (`kind: 'html' | 'react' | 'jsx'`) hold only a
   // DERIVED region cache that the author never wrote — scaffolding translation
   // keys off that cache would invent an authoring surface.
   //
@@ -1055,16 +1083,18 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
  * `i18n/missing-*` family. Under `--i18n-strict` the demand side is an error,
  * so a project could be *forced* to author keys it is then warned for.
  *
- * ⛔ The warn side is not the bug and must not be softened: no shipped runner
- * reads the group, so a translated wizard string really is stored and never
- * shown. The demand is the half that is premature.
+ * ⛔ The warn side is not the bug and must not be softened. Only part of the
+ * group is read: the console's screen-flow runner reads `screens`, but the
+ * flow's own `label` is read by nothing yet (#20318), so a translated flow
+ * label really is stored and never shown. The warn is group-level, so it still
+ * covers the whole group. The demand is the half that is premature.
  *
  * ## Shape
  *
  * Group-general, not `flows`-specific, and read from the ledger rather than a
- * switch of our own: the day the objectui screen-flow runner lands and the row
- * flips to `live` (dropping its `authorWarn`), the bucket turns itself back on
- * with no edit here — and any FUTURE group that acquires a warn is covered on
+ * switch of our own: the day the row flips to `live` (dropping its
+ * `authorWarn`; for `flows` that waits on #20318), the bucket turns itself back
+ * on with no edit here — and any FUTURE group that acquires a warn is covered on
  * the day it is marked, rather than re-opening this collision one group at a
  * time.
  *
@@ -1087,16 +1117,18 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
 
 /**
  * Write `pages.<page>.components.<id>.<key>` for every component
- * `translatePage` addresses — and only those (#13109).
+ * `translatePage` addresses — and only those (commit 8b236c826).
  *
  * BOTH halves of that sentence are imported from `@objectstack/spec`, so
  * neither can drift. The KEY list is {@link PAGE_COMPONENT_COPY_KEYS}; the
  * WALK — which components carry those keys — is `walkAddressedPageComponents`,
- * the same traversal `translatePage` itself runs (#13218, completing the key
+ * the same traversal `translatePage` itself runs (commit c45d8e6b4, completing the key
  * list's precedent). The walk owns the roots (`regions[].components[]` AND
- * `slots.<slot>`), the descent (`properties.children` AND a panel's
- * `properties.items[].children`, depth-capped, cycle-guarded) and the ruled
- * collision arbitration (#12961: root level wins outright; among nested
+ * `slots.<slot>`), the descent (the authorable slot positions spec derives
+ * from the component rows — `properties.children`, a card's
+ * `properties.footer`, a panel's `properties.items[].children` — depth-capped,
+ * cycle-guarded) and the ruled
+ * collision arbitration (commit 901355c3b: root level wins outright; among nested
  * components, document-order first sighting) — this function used to
  * hand-mirror all five and now owns none of them. What it still owns:
  *
@@ -1108,15 +1140,14 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
  *   - the `label` either/or: `label` may be authored on the component itself
  *     or in its props — the same either/or `translatePage` resolves back onto.
  *
- * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`, which is
- * WIDER than the resolver in two ways (`properties.body`, `properties.footer`
- * — `page:card`'s slots, which the resolver leaves undescended as a renderer
- * back-compat fallback rather than an authorable spelling; `slots.<slot>`
- * roots and `properties.items[].children` were the other two until #16772
- * brought both into the shared walk) and NARROWER in one (it skips
- * `kind: 'html' | 'react' | 'jsx'` pages, which `translatePage` walks) —
- * either direction of that mismatch is one half of the failure pair
- * `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
+ * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`. Its descent
+ * is no longer WIDER than the resolver's — since #20940 both read spec's one
+ * derived slot list, and `page:card`'s `properties.body` / `.footer` were the
+ * last positions lint walked and the resolver did not (`slots.<slot>` roots
+ * and `properties.items[].children` closed at #16772) — but it is still
+ * NARROWER in one way (it skips `kind: 'html' | 'react' | 'jsx'` pages, which
+ * `translatePage` walks), and a mismatch in either direction is one half of
+ * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
  */
 function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): void {
   walkAddressedPageComponents(page, (component, { id, nested, addressed }) => {
@@ -1248,6 +1279,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
+        pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
@@ -1330,6 +1362,7 @@ export function collectExpectedEntries(
     pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
+    pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
   }
@@ -1390,6 +1423,9 @@ export function collectExpectedEntries(
   // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
   walkDatasets(config, out);
 
+  // ── Shared option lists (`picklists.<name>.…`) ────────────────────
+  walkPicklists(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1428,7 +1464,7 @@ export function collectExpectedEntries(
     // addressed by page name above, and emitting it here too would offer one
     // string under two keys. A NESTED `page:header` is a different component —
     // `translatePage`'s page-name route stops at region level, so a nested one
-    // is reachable by the id route ONLY and must be offered here (#13109).
+    // is reachable by the id route ONLY and must be offered here (commit 8b236c826).
     emitPageComponentCopy(out, page, name);
   }
 
@@ -1572,6 +1608,58 @@ function walkDatasets(config: any, out: ExpectedEntry[]): void {
         pushOptional(out, ['datasets', name, group, memberName, 'label'], member.label, 'dataset');
       }
     }
+  }
+}
+
+// ─── Shared option lists (`picklists.<name>.…`) ────────────────────────
+
+/**
+ * Emit the picklist copy surface:
+ *
+ *   picklists.<name>.label
+ *   picklists.<name>.options.<value>
+ *
+ * A picklist is translated ONCE: every field that references it inherits the
+ * option labels (`translateObject`), so the keys live under the list and not
+ * under each field. A picklist-bound field declares no `options` of its own,
+ * so the field walk above emits nothing for it — this walk is the only
+ * producer of those keys. A `picklistExtensions` entry adds options to a list
+ * another package owns, and they are served as that list's options, so their
+ * labels are keyed under the extended list's name.
+ *
+ * Both labels are plain strings at the authoring site, so `pushEntry` — with
+ * the #8543 derived rule a field option follows: an option whose label is
+ * absent or equals its own machine value is seeded from the value and never
+ * demanded as a translation.
+ */
+function walkPicklists(config: any, out: ExpectedEntry[]): void {
+  const walkOptions = (name: string, options: unknown): void => {
+    if (!Array.isArray(options)) return;
+    for (const option of options) {
+      if (!option || typeof option !== 'object' || typeof option.value !== 'string') continue;
+      const path = ['picklists', name, 'options', option.value];
+      const authored = inlineText(option.label);
+      if (authored !== undefined && authored !== option.value) {
+        pushEntry(out, path, authored, 'picklist');
+      } else {
+        pushDerived(out, path, option.value, inlineLocaleMap(option.label) ? option.label : undefined, 'picklist');
+      }
+    }
+  };
+  const picklists: any[] = Array.isArray(config?.picklists) ? config.picklists : [];
+  for (const picklist of picklists) {
+    if (!picklist || typeof picklist !== 'object') continue;
+    const name = picklist.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushEntry(out, ['picklists', name, 'label'], picklist.label, 'picklist');
+    walkOptions(name, picklist.options);
+  }
+  const extensions: any[] = Array.isArray(config?.picklistExtensions) ? config.picklistExtensions : [];
+  for (const extension of extensions) {
+    if (!extension || typeof extension !== 'object') continue;
+    const name = extension.extend;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    walkOptions(name, extension.options);
   }
 }
 
@@ -2289,7 +2377,7 @@ export function renderSourceHashModule(
   lines.push(' *');
   lines.push(" * Each entry is the digest of the SOURCE REVISION that this locale's leaf at");
   lines.push(' * that path is still a byte copy of — provenance for the generated half of the');
-  lines.push(' * bundles (#11671, maintainer ruling #12069 Option A, extending #8765 Option B).');
+  lines.push(' * bundles (commit 09b4f4e4e): a leaf whose digest no longer matches its source is stale and serves the source text instead.');
   lines.push(' *');
   lines.push(' * An entry exists only while the leaf IS such a copy. Re-translate the leaf in');
   lines.push(' * `<locale>.objects.generated.ts` and the next extract drops its entry by');

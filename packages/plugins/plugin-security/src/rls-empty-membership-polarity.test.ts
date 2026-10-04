@@ -99,7 +99,10 @@ describe('[#13552] emptied membership under negation — the guard must fire (de
   it('NON-empty membership under `$not` keeps working — the `not in` feature', () => {
     const ctx: any = { userId: 'u_me', tenantId: 'org-1', positions: [], org_user_ids: ['u_other', 'u_third'] };
     const filter = compiler.compileFilter([policy('!(owner in current_user.org_user_ids)')], ctx);
-    expect(filter).toEqual({ $not: { owner: { $in: ['u_other', 'u_third'] } } });
+    // [ADR-0053 D-D1, amended — #5930] The `$not` operand leaves the RLS seam
+    // totalised by the shared lowering (#5146): the positive `$in` leaf takes a
+    // `$null: false` requirement. The admitted rows below do not move.
+    expect(filter).toEqual({ $not: { $and: [{ owner: { $null: false } }, { owner: { $in: ['u_other', 'u_third'] } }] } });
     // r1 (u_me), r4 (null owner — $in over null is false, $not inverts), r5 (u_fourth).
     expect(admitted(filter as Record<string, unknown>)).toBe(3);
   });

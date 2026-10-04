@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14423 (a) — the AGREEMENT, where this file used to pin the divergence.
+ * Commit a56baa2bd — the AGREEMENT, where this file used to pin the divergence.
  *
- * The two sites the card names:
+ * The two sites that diverged:
  *  - the AUDIT, `runActionGovernanceInventory` (`packages/objectql/src/
  *    action-governance.ts`), whose metadata-plane sources are now
  *    `loadStandaloneActionsKeyed = () => meta.loadManyKeyed('action')` and the
@@ -13,7 +13,7 @@
  *    whose third rung is `meta.loadDiagnosed('action', name)` — resolved per
  *    request off `deps.resolveService(requestContext, 'metadata', envId)`.
  *
- * PR #14421 closed the registry rung. This file measured the remaining one and
+ * Commit bd8795ea1 closed the registry rung. This file measured the remaining one and
  * reproduced it four ways; the measurement is now the fix's pin, case for
  * case, with the same harness. **C1 and C5 are unchanged controls** — they
  * were green before and must stay green, because a "fix" that simply stopped
@@ -184,7 +184,7 @@ function auditAccused(warnings: Array<{ message: string; meta?: Record<string, u
  * ONE handler registered and NO object-embedded declaration and NO registry
  * item — so the metadata plane is the only source that can clear it.
  *
- * [#14423] Transcribed from the plugin's wiring after the fix, including its
+ * [commit a56baa2bd] Transcribed from the plugin's wiring after the fix, including its
  * fallbacks: the keyed plural read when the plane offers one, the unkeyed one
  * otherwise, and the by-name rung preferring `loadDiagnosed` over `load`
  * exactly as `resolveRouteActionDeclaration` does. Keeping the branches rather
@@ -206,7 +206,7 @@ async function runAudit(meta: any) {
         loadStandaloneActionsKeyed: meta && typeof loadManyKeyed === 'function'
             ? () => loadManyKeyed.call(meta, 'action')
             : undefined,
-        lookupRegistryAction: () => undefined, // rung 2 holds nothing — #14421's rung is not the one under test
+        lookupRegistryAction: () => undefined, // rung 2 holds nothing — commit bd8795ea1's rung is not the one under test
         lookupMetadataAction: meta && typeof loadDiagnosed === 'function'
             ? async (name: string) => (await loadDiagnosed.call(meta, 'action', name))?.data
             : (meta && typeof load === 'function' ? (name: string) => load.call(meta, 'action', name) : undefined),
@@ -323,7 +323,7 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
         // The keyed enumeration is short for the same reason — keying is not a
         // cure for an unreachable loader, and does not claim to be.
         expect(await meta.loadManyKeyed<any>('action')).toEqual([]);
-        // [#14423 item 1] ...and the sibling enumeration no longer THROWS where
+        // [commit a56baa2bd] ...and the sibling enumeration no longer THROWS where
         // its two siblings merely came back short.
         await expect(meta.listNames('action')).resolves.toEqual([]);
 
@@ -335,7 +335,7 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
     });
 
     /**
-     * C4 — a BOUNDARY, not a defect, and pinned as one. NARROWER since #16610.
+     * C4 — a BOUNDARY, not a defect, and pinned as one. NARROWER since commit 316a20fc5.
      *
      * `metadata` is registered `SCOPED`, so `PluginLoader.getService` mints one
      * instance per `scopeId`. The kernel's RAW SYNCHRONOUS accessor
@@ -348,7 +348,7 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
      * plane. That asymmetry is what every assertion below exercises — the
      * accessor, directly, never the plugin's wiring around it.
      *
-     * ## What the PLUGIN does with that accessor, after #16610
+     * ## What the PLUGIN does with that accessor, after commit 316a20fc5
      *
      * `ObjectQLPlugin.resolveGovernanceMetadataService` no longer calls the
      * synchronous accessor alone, so the throw is no longer swallowed into
@@ -363,7 +363,7 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
      * ⚠ So do NOT read the paragraph above as a live defect in `plugin.ts`.
      * It describes the rung the plugin now reaches for SECOND, and this case
      * pins that rung's behaviour — which is why its assertions stay green and
-     * stay true across #16610.
+     * stay true across commit 316a20fc5.
      *
      * ## Why this stays accused, and why that is CORRECT
      *

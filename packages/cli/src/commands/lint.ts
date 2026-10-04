@@ -1,9 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { dirname } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
-import { normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
+import { normalizeStackInput, stackConversionsOf, type ConversionNotice } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { GLOBAL_ACTION_OBJECT_KEY } from '@objectstack/objectql';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
@@ -253,7 +254,7 @@ function duplicateNameIssues(stack: any, pathPrefix = ''): LintIssue[] {
     // of the same name collide for real — and are reported, as they must be.
     // It is spelled as the imported constant rather than a bare `'global'`
     // literal so this reader cannot part from the engine's writer in silence
-    // the day the constant moves — the same divergence #14667 removed from the
+    // the day the constant moves — the same divergence commit dc7c226b9 removed from the
     // plugin's own copy.
     //
     // Only `objectName` is read. `object`/`entity` are rejected outright by
@@ -583,7 +584,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
     }
   }
 
-  // ── Hook/action bodies that cannot be lowered to metadata (#13651) ──
+  // ── Hook/action bodies that cannot be lowered to metadata (commit ada3834ad) ──
   // `os build` catches every extraction refusal, warns, and bundles the closure
   // at exit 0 — so an app can stop being shippable as pure metadata with nothing
   // red anywhere. This rule is the "no" to that recorded array. It runs the SAME
@@ -908,10 +909,10 @@ export default class Lint extends Command {
       printStep('Loading configuration...');
     }
 
-    // [#12297] The ADR-0087 D2 conversion notices this command raises.
+    // [commit 9fd45a952] The ADR-0087 D2 conversion notices this command raises.
     //
     // ⛔ This is the #3782 PARITY class, NOT the "computed, then dropped"
-    // family (#11643 / #11391 / #11772 / #12047 / #12125). Nothing was computed
+    // family (#11643 / #11391 / #11772 / #12047 / commit 79cf692b0). Nothing was computed
     // and discarded here: `normalizeStackInput` was called with no options
     // object at all, so no sink existed and the notices were never PRODUCED —
     // in either face. `os lint` is the third of the three authoring commands
@@ -927,15 +928,17 @@ export default class Lint extends Command {
     //
     // Declared above the `try` so the catch-all exit can read it, under the
     // maintainer's 2026-08-25 ruling (#11772/#12047, applied to this field by
-    // #12125): every failure exit carries the lists the run has ALREADY
+    // commit 79cf692b0): every failure exit carries the lists the run has ALREADY
     // COMPUTED, so the field means the same thing on every exit. The CALL that
     // fills it stays below, at the step that owns it — a throw in `loadConfig`,
-    // above it, reports `[]` honestly.
+    // above it, reports `[]` honestly, unless what it threw is a stack
+    // producer's refusal: that carries the conversions the producer applied
+    // before refusing, and the catch-all folds them (#20583).
     //
     // ⛔ NOT FOLDED INTO `issues`. Whether an auto-converted key should become
     // a `LintIssue` — or, on the sibling commands, whether `warnings` and
     // `conversions` should become one field — is an open question raised on
-    // #12125, left unsettled by the ruling there and explicitly withheld by
+    // the card behind commit 79cf692b0, left unsettled by its ruling and explicitly withheld by
     // that card's implementer. This change had no authority to settle it, so it
     // mirrors the shipped sibling shape rather than merging: `issues` keeps
     // meaning "something to fix", the notice keeps its structured
@@ -945,7 +948,27 @@ export default class Lint extends Command {
     const conversionNotices: ConversionNotice[] = [];
 
     try {
-      const { config, absolutePath } = await loadConfig(configPath);
+      const loaded = await loadConfig(configPath);
+      const { config, absolutePath } = loaded;
+      // [#20583] The ADR-0087 D2 conversions the stack PRODUCER applied — the
+      // fold `os validate` / `os build` make at their step 1b, one command over.
+      // `defineStack` converts at load (either mode), so the `config` this
+      // command received is already canonical and the pass below has nothing
+      // of the default export left to convert: without this fold `conversions`
+      // read `[]` on every `defineStack` config carrying a retiring spelling,
+      // and the notice reached stderr alone. Read by `loadConfig` off the
+      // default export before its named-export merge (`stackConversionsOf`,
+      // beside the provenance mark). ⛔ Folded, never recomputed.
+      //
+      // ⛔ NOT the one-authoring-shape rule: there is no `refuseUnbuiltStack`
+      // here, and none is implied. An unbuilt default export carries no record,
+      // so `stackConversionsOf` answers `[]` for it and the pass below converts
+      // it exactly as before — this command accepts what it accepted, and only
+      // the conversions it reports grow. The two sources do not overlap: the
+      // producer's output is canonical wherever it converted, so the pass finds
+      // only what no producer saw — an unbuilt export, or a key `loadConfig`
+      // merged from a NAMED export after the producer ran.
+      conversionNotices.push(...loaded.stackConversions);
 
       if (!flags.json) {
         printInfo(`Config: ${chalk.white(absolutePath)}`);
@@ -953,6 +976,7 @@ export default class Lint extends Command {
 
       // The ADR-0087 D2 conversion layer runs here, inside `normalizeStackInput`
       // — it always did. Passing the sink is what makes the rewrites SAYABLE.
+      // After the fold above, what it can still find is what no producer saw.
       const normalized = normalizeStackInput(config as Record<string, unknown>, {
         onConversionNotice: (n) => conversionNotices.push(n),
       });
@@ -976,7 +1000,9 @@ export default class Lint extends Command {
       // reaches that function without a manifest and must not score a notice
       // about the filesystem. A project manifest that exists but cannot be
       // used is refused instead (already reported on stderr; exit 1).
-      const jsxGate = resolveJsxGateManifest(normalized as Record<string, unknown>);
+      // [#20166] Read beside the config this run was given, never in the
+      // invoker's working directory.
+      const jsxGate = resolveJsxGateManifest(normalized as Record<string, unknown>, dirname(absolutePath));
       const issues = lintConfig(normalized, { sduiManifest: jsxGate.sduiManifest });
       issues.push(...jsxGate.notices.map(authoringFindingToLintIssue));
 
@@ -1045,7 +1071,7 @@ export default class Lint extends Command {
           ...(hiddenPlatform > 0 ? { hiddenPlatform } : {}),
           ...(score ? { score: score.score, grade: score.grade } : {}),
           issues,
-          // [#12297] The notices computed at `normalizeStackInput` above. Its
+          // [commit 9fd45a952] The notices computed at `normalizeStackInput` above. Its
           // own key, unconditionally present — the same `conversions` key
           // `os validate --json` and `os build --json` publish, carrying the
           // same structured notice objects, so one consumer reads all three
@@ -1146,11 +1172,25 @@ export default class Lint extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        // [#12297] Whatever the run had reached before the throw, under the
+        // [#20583] The ADR-0087 D2 conversions a stack PRODUCER applied before
+        // it REFUSED — the fold right after `loadConfig` above, for the run
+        // whose load threw, and the same catch-all fold `os validate` /
+        // `os build` make. A refusing `defineStack` / `composeStacks` returns
+        // no stack, so that fold never ran; the producer stamps what it had
+        // applied on the ADR-0112 refusal it throws. `stackConversionsOf`
+        // answers `[]` for any other throw, so nothing moves for an unbuilt
+        // default export, which no producer built and none refused (the
+        // one-authoring-shape rule stays off this command). ⛔ Folded, never
+        // recomputed, never read off stderr. Cannot double-count: this command
+        // calls no producer itself, so only the config module's load can raise
+        // a stamped refusal, and a throwing load precedes both other fillers.
+        conversionNotices.push(...stackConversionsOf(error));
+        // [commit 9fd45a952] Whatever the run had reached before the throw, under the
         // same 2026-08-25 ruling: `[]` for a throw in `loadConfig` — the
-        // normalize step never ran — and the notices in hand for any later one.
+        // normalize step never ran — except a producer's refusal, folded just
+        // above, and the notices in hand for any later one.
         // Wiring the producer without this exit would ship a fresh instance of
-        // the #12125 defect one command over, on the day it was closed.
+        // the defect commit 79cf692b0 fixed, one command over, on the day it was closed.
         await emitJson(
           { error: error.message, ...errorCodeFields(error), conversions: conversionNotices },
           0,

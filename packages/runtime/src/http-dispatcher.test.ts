@@ -35,8 +35,22 @@ type ContractMock<T> = Partial<Record<keyof T, unknown>>;
  * (`{ request: {} }` is the smallest context that compiles). Anonymity itself
  * is pinned in `domains/anonymous-gate-actions-automation.test.ts`; giving
  * these a session keeps each file testing the thing it is named after.
+ *
+ * [#21061] `/analytics` joined the same floor, so its routing cases take the
+ * same caller; its anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
  */
 const AUTHED_CALLER = () => ({ request: {}, executionContext: { userId: 'u_test', isSystem: false, positions: [], permissions: [], systemPermissions: [] } }) as any;
+
+/**
+ * [#21061] The `dispatch()` half of `AUTHED_CALLER`: `dispatch()` re-resolves
+ * the caller from the request, and this fixture's kernel carries no identity
+ * source, so a dispatch-path analytics case signs its caller in by stubbing
+ * that one resolution seam — the move `dispatcher-validation-error.test.ts`
+ * already makes. Only identity is stubbed; routing and expectations are not.
+ */
+const signInDispatchCaller = (d: HttpDispatcher) => {
+    (d as any).timedResolveExecutionContext = async () => AUTHED_CALLER().executionContext;
+};
 
 /**
  * [#7019] The same move as `AUTHED_CALLER` above, one rung up: the dispatcher's
@@ -79,7 +93,7 @@ const PKG_ADMIN = () => ({ request: {}, executionContext: { userId: 'u_pkg_admin
  * destroys. Only the caller changes; the gate itself is pinned in
  * `domains/automation-write-capability-gate.test.ts`.
  *
- * [#10243] `POST /:name/toggle` uses this caller too, since the 2026-08-23
+ * [commit 266436a7f] `POST /:name/toggle` uses this caller too, since the 2026-08-23
  * ruling put enablement in the same write set. The EXECUTION routes on the
  * domain (trigger / resume) keep `AUTHED_CALLER`, deliberately — that half of
  * the line did not move.
@@ -141,7 +155,7 @@ describe('HttpDispatcher', () => {
                 type: 'objects',
                 name: 'my_obj',
                 item: body,
-                // [#10888] Server-stated, and asserted here rather than relaxed
+                // [commit d806081dd] Server-stated, and asserted here rather than relaxed
                 // to `objectContaining`: this door's whole claim to the face is
                 // that it answers through `errorFromThrown`, which carries a
                 // refusal's `issues[]` in `details` (pinned below). If the face
@@ -179,10 +193,10 @@ describe('HttpDispatcher', () => {
             // name='views/all_leads' — the dispatcher's own compound arity,
             // folding every trailing segment into one slash-bearing key.
             //
-            // #12176 retired compound metadata item names (maintainer ruling
-            // 2026-08-25); #12194 refuses every slash-bearing name at the
+            // Commit 7986d973f retired compound metadata item names (maintainer ruling
+            // 2026-08-25); commit 311433f6b refuses every slash-bearing name at the
             // publish door, so the fold could only address names that can no
-            // longer be created; #12195 removes it. The domain now DECLINES,
+            // longer be created; commit 7986d973f removes it. The domain now DECLINES,
             // and nothing is written.
             const path = '/lead/views/all_leads';
 
@@ -202,7 +216,7 @@ describe('HttpDispatcher', () => {
             // nothing decodes for it, so `%2F` keeps the path at two segments
             // and `decodeMetaNameSegment` restores the stored key — which is
             // what keeps a pre-grammar residue row addressable here, per
-            // #12194's "any stored junk name remains listable and clearable".
+            // commit 311433f6b: any stored junk name stays listable and clearable.
             const result = await dispatcher.handleMetadata('/lead/views%2Fall_leads', context, 'PUT', body);
 
             expect(result.handled).toBe(true);
@@ -424,7 +438,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should toggle a flow via POST /:name/toggle', async () => {
-            // [#10243] `FLOW_AUTHOR`, not `AUTHED_CALLER`: toggle joined the
+            // [commit 266436a7f] `FLOW_AUTHOR`, not `AUTHED_CALLER`: toggle joined the
             // `manage_metadata` write set by ruling. This case is about ROUTING
             // — which service method the path reaches, with which arguments —
             // so only the caller changes.
@@ -823,6 +837,9 @@ describe('HttpDispatcher', () => {
     describe('Async service resolution (Promise-based injection)', () => {
 
         describe('handleAnalytics with async service', () => {
+            // [#21061] The dispatch-path cases below need a signed-in caller too.
+            beforeEach(() => signInDispatchCaller(dispatcher));
+
             it('should resolve analytics service from Promise (async factory)', async () => {
                 const mockAnalytics = {
                     query: vi.fn().mockResolvedValue({ rows: [{ id: 1 }], total: 1 }),
@@ -835,7 +852,7 @@ describe('HttpDispatcher', () => {
                     return null;
                 });
 
-                const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't1', measures: ['count'] }, { request: {} });
+                const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't1', measures: ['count'] }, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(mockAnalytics.query).toHaveBeenCalled();
@@ -872,7 +889,7 @@ describe('HttpDispatcher', () => {
                 };
                 (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
 
-                const result = await dispatcher.handleAnalytics('sql', 'POST', { cube: 'test', measures: ['count'] }, { request: {} });
+                const result = await dispatcher.handleAnalytics('sql', 'POST', { cube: 'test', measures: ['count'] }, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(mockAnalytics.generateSql).toHaveBeenCalled();
@@ -884,7 +901,7 @@ describe('HttpDispatcher', () => {
                 };
                 (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
 
-                const result = await dispatcher.handleAnalytics('meta', 'GET', {}, { request: {} });
+                const result = await dispatcher.handleAnalytics('meta', 'GET', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(result.response?.body?.data?.tables).toEqual(['users', 'orders']);
@@ -905,7 +922,7 @@ describe('HttpDispatcher', () => {
                 expect(mockAnalytics.getMeta).toHaveBeenCalledWith('leads');
 
                 mockAnalytics.getMeta.mockClear();
-                await dispatcher.handleAnalytics('meta', 'GET', undefined, { request: {} }, { cube: '' });
+                await dispatcher.handleAnalytics('meta', 'GET', undefined, AUTHED_CALLER(), { cube: '' });
                 expect(mockAnalytics.getMeta).toHaveBeenCalledWith(undefined);
             });
 
@@ -913,7 +930,7 @@ describe('HttpDispatcher', () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();
 
-                const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+                const result = await dispatcher.handleAnalytics('query', 'POST', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(false);
             });
 
@@ -933,7 +950,7 @@ describe('HttpDispatcher', () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(stub);
 
                 for (const [sub, method] of [['query', 'POST'], ['meta', 'GET'], ['sql', 'POST']] as const) {
-                    const result = await dispatcher.handleAnalytics(sub, method, { cube: 'leads', measures: ['count'] }, { request: {} });
+                    const result = await dispatcher.handleAnalytics(sub, method, { cube: 'leads', measures: ['count'] }, AUTHED_CALLER());
                     expect(result.handled, `${method} /analytics/${sub}`).toBe(false);
                 }
                 expect(stub.query).not.toHaveBeenCalled();
@@ -953,12 +970,12 @@ describe('HttpDispatcher', () => {
 
                 const stub = make({ status: 'stub', message: 'dev fake' });
                 (kernel as any).getService = vi.fn().mockResolvedValue(stub);
-                expect((await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads', measures: ['count'] }, { request: {} })).handled).toBe(false);
+                expect((await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads', measures: ['count'] }, AUTHED_CALLER())).handled).toBe(false);
                 expect(stub.query).not.toHaveBeenCalled();
 
                 const degraded = make({ status: 'degraded' });
                 (kernel as any).getService = vi.fn().mockResolvedValue(degraded);
-                expect((await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads', measures: ['count'] }, { request: {} })).handled).toBe(true);
+                expect((await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads', measures: ['count'] }, AUTHED_CALLER())).handled).toBe(true);
                 expect(degraded.query).toHaveBeenCalled();
             });
 
@@ -966,7 +983,7 @@ describe('HttpDispatcher', () => {
                 const mockAnalytics = { query: vi.fn() };
                 (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
 
-                const result = await dispatcher.handleAnalytics('unknown', 'POST', {}, { request: {} });
+                const result = await dispatcher.handleAnalytics('unknown', 'POST', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(false);
             });
 
@@ -1408,7 +1425,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1439,7 +1456,7 @@ describe('HttpDispatcher', () => {
                 throw new Error("Service 'analytics' is async - use await");
             });
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(asyncAnalytics.query).toHaveBeenCalled();
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('analytics');
@@ -1507,7 +1524,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1519,7 +1536,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1626,7 +1643,7 @@ describe('HttpDispatcher', () => {
             (kernel as any).getService = vi.fn().mockResolvedValue(badAnalytics);
 
             await expect(
-                dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} })
+                dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, AUTHED_CALLER())
             ).rejects.toThrow('Query timeout');
         });
 
@@ -3034,7 +3051,9 @@ describe('HttpDispatcher', () => {
             expect(info.services.analytics.status).toBe('stub');
             expect(info.services.analytics.handlerReady).toBe(false);
             // …and the advertisement matches what the route actually does:
-            // `handled: false`, which the caller answers with the 404.
+            // `handled: false`, which the caller answers with the 404 — for a
+            // signed-in caller; an anonymous one is refused first (#21061).
+            signInDispatchCaller(dispatcher);
             const result = await dispatcher.dispatch('POST', '/analytics/query', { cube: 'leads', measures: ['count'] }, {}, { request: {} });
             expect(result.handled).toBe(false);
         });
@@ -4291,6 +4310,13 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     });
     const ql: any = {
       executeAction,
+      // [#21321] The engine's enumeration of the handlers `executeAction`
+      // answers above — `list_actions` advertises a script action only when
+      // one of its handler keys is registered here.
+      listRegisteredActions: () => [
+        { objectName: 'todo_task', actionName: 'completeTask' },
+        { objectName: 'todo_task', actionName: 'issueLicense' },
+      ],
       registry: { getObject: (n: string) => (n === 'todo_task' ? todoObject : null) },
       insert: vi.fn(),
       update: vi.fn(),
@@ -4566,6 +4592,12 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     });
     const ql: any = {
       executeAction,
+      // [#21321] The handlers `executeAction` answers above, enumerated.
+      listRegisteredActions: () => [
+        { objectName: 'todo_task', actionName: 'archive_task' },
+        { objectName: 'global', actionName: 'nightly_cleanup' },
+        { objectName: 'todo_task', actionName: 'completeTask' },
+      ],
       registry: { getObject: (n: string) => (n === 'todo_task' ? todoObject : null) },
       insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
       find: vi.fn(async () => []),

@@ -447,6 +447,8 @@ Wait for the refreshed PR's CI, then merge it. That merge is still the decision 
 release, and the `release` environment approval is still the authorisation — neither
 is changed by where the refresh came from.
 
+**After a stable `@objectstack/spec` publish, refresh the retired-after census** (#20390): run `pnpm --filter @objectstack/spec exec tsx scripts/build-retired-after-census.ts` (prefix `NODE_USE_ENV_PROXY=1` behind a proxy) and commit the rewritten `packages/spec/src/conversions/retired-after.census.json` in an ordinary PR — until it lands, the census test holds an unpublished entry's `retiredAfter` only to the range from the last censused release to the label, not to the label exactly.
+
 ## Drift guard
 
 `scripts/check-release-notes.mjs` (run in CI as `pnpm check:release-notes`) fails the

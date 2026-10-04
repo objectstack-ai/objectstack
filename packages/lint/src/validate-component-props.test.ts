@@ -65,7 +65,7 @@ describe('validateComponentProps — undeclared keys', () => {
   it('is silent on a fully declared props bag', () => {
     const findings = validateComponentProps(
       stackWith([
-        { type: 'page:header', properties: { title: 'T', subtitle: 'S', breadcrumb: true } },
+        { type: 'page:header', properties: { title: 'T', subtitle: 'S', recordChrome: false } },
         {
           type: 'record:related_list',
           properties: { objectName: 'task', relationshipField: 'project_id', limit: 5 },
@@ -73,6 +73,48 @@ describe('validateComponentProps — undeclared keys', () => {
       ]),
     );
     expect(findings).toEqual([]);
+  });
+
+  // #20758 — `PageHeaderProps.breadcrumb` is a retiredKey tombstone. A page is
+  // never hard-refused for carrying it: this rule is the door where an author
+  // meets the prescription, and every finding it files is a WARNING.
+  it('reports a retired page-header `breadcrumb` as a warning carrying the prescription, for `true` and `false`', () => {
+    for (const breadcrumb of [true, false]) {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'page:header', properties: { title: 'T', breadcrumb } }]),
+      );
+      expect(findings, `breadcrumb: ${breadcrumb}`).toHaveLength(1);
+      const [f] = findings;
+      expect(f.severity).toBe('warning');
+      expect(f.path).toBe('pages[0].regions[0].components[0].properties.breadcrumb');
+      expect(f.message).toContain('`page:header` property `breadcrumb` was removed in @objectstack/spec 17');
+    }
+  });
+
+  // #21589 — an `object-master-detail-form` detail entry's `sortField` is a
+  // retiredKey tombstone, one array level down. The same door, the same
+  // warning: the finding names the entry's key, and the page is never refused.
+  it('reports a retired detail-entry `sortField` as a warning carrying the prescription, at the entry\'s key', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'object-master-detail-form',
+          properties: {
+            objectName: 'invoice',
+            details: [
+              { title: 'Payments', childObject: 'invoice_payment' },
+              { title: 'Lines', childObject: 'invoice_line', sortField: 'line_no' },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('warning');
+    expect(f.rule).toBe(COMPONENT_PROPS_INVALID);
+    expect(f.path).toBe('pages[0].regions[0].components[0].properties.details.1.sortField');
+    expect(f.message).toContain('`object-master-detail-form` property `details[].sortField` was removed in @objectstack/spec 17');
   });
 
   it('walks components nested inside `properties` (tabs items → children)', () => {
@@ -225,6 +267,58 @@ describe('validateComponentProps — value verdicts', () => {
     // would be indistinguishable from the rule never looking).
     const without = validateComponentProps(
       stackWith([{ type: 'element:record_picker', properties: { labelField: 'name' } }]),
+    );
+    expect(invalid(without).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.object',
+    ]);
+  });
+
+  /**
+   * The waiver above covers a MISSING `object` only — no key, or `undefined`.
+   * A present value the row rejects is the author's own, and the binding
+   * supplies nothing in its place, so the row's verdict on it must reach the
+   * author exactly as it does with no binding at all. Each case is judged
+   * twice, beside the binding and without it, and the two answers must be the
+   * same finding: equality rather than wording, so the pin measures that the
+   * waiver lets the row's issue through unchanged.
+   */
+  it.each([
+    ['a number', 7],
+    ['null', null],
+  ])('reports a present-but-wrong `object` (%s) beside a `dataSource` binding, as it does without one', (_label, value) => {
+    const component = { type: 'element:number', properties: { object: value, aggregate: 'count' } };
+    const withBinding = validateComponentProps(
+      stackWith([{ ...component, dataSource: { object: 'contact' } }]),
+    );
+    const without = validateComponentProps(stackWith([component]));
+
+    // Control first: with nothing supplying `object`, the row reports it.
+    expect(without.map((f) => [f.rule, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].properties.object'],
+    ]);
+    // The binding does not silence it.
+    expect(withBinding.map((f) => [f.rule, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].properties.object'],
+    ]);
+    expect(withBinding).toEqual(without);
+  });
+
+  it('still waives `object: undefined` beside a binding — an explicit undefined is a missing value', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:number',
+          dataSource: { object: 'contact' },
+          properties: { object: undefined, aggregate: 'count' },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+
+    // …and the same bag with no binding is reported, so the silence above is
+    // the waiver and not the row accepting `undefined`.
+    const without = validateComponentProps(
+      stackWith([{ type: 'element:number', properties: { object: undefined, aggregate: 'count' } }]),
     );
     expect(invalid(without).map((f) => f.path)).toEqual([
       'pages[0].regions[0].components[0].properties.object',
@@ -422,9 +516,10 @@ describe('validateComponentProps — unregistered types are skipped', () => {
   // section header), so it is the family's own living proof the skip survives.
   // `record:quick_actions` left it at #8744 for the same reason — it has a row
   // now, and its dispatch is pinned in the #8744 suite at the end of this
-  // file. `record:line_items` stays: still row-less, still the corpus's own
-  // specimen.
-  it.each(['record:line_items', 'flex', 'object-chart'])(
+  // file. `record:line_items` left it at #21142, the last registered `record:*`
+  // renderer to get a row; its dispatch is pinned in the #21142 suite below.
+  // `flex` stays as the corpus's own row-less specimen.
+  it.each(['flex', 'object-chart'])(
     'says nothing about `%s`, whatever its props carry',
     (type) => {
       const findings = validateComponentProps(
@@ -868,6 +963,59 @@ describe('validateComponentProps — mcp:connect-agent is dispatched (#12344)', 
   it('stays silent on the empty bag the plugin-shipped page authors', () => {
     const findings = validateComponentProps(
       stackWith([{ type: 'mcp:connect-agent', properties: {} }]),
+    );
+    expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * #21142 — `record:line_items` gets its row, so the gate's dispatch reaches it.
+ *
+ * The pre-fix state this pins against: the type had no `ComponentPropsMap`
+ * row (it was the string-arm registration ledger's one entry), so the
+ * walker's unregistered-type skip swallowed the whole props bag — the
+ * showcase project page's five `field`-keyed columns produced ZERO findings
+ * while the grid drew every cell empty. Remove the map row and the first test
+ * here goes back to that silence.
+ */
+describe('validateComponentProps — record:line_items is dispatched (#21142)', () => {
+  /** The showcase project page's block as it was authored before the fix (copied, not imported). */
+  const fieldKeyed = {
+    type: 'record:line_items',
+    properties: {
+      childObject: 'showcase_task',
+      relationshipField: 'project',
+      amountField: 'estimate_hours',
+      title: 'Tasks',
+      columns: [
+        { field: 'title', label: 'Title', type: 'text', required: true },
+        { field: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
+      ],
+    },
+  };
+
+  it('reports a `field`-keyed column at its own path, with the rename to `name`', () => {
+    const findings = validateComponentProps(stackWith([fieldKeyed]));
+    const unknown = unknownKeys(findings);
+    expect(unknown.map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.columns.0.field',
+      'pages[0].regions[0].components[0].properties.columns.1.field',
+    ]);
+    for (const f of unknown) {
+      expect(f.where).toBe('page "probe_page" · record:line_items');
+      expect(f.message).toContain('`name`');
+    }
+    // The column's identity is missing too: the value half names it.
+    expect(invalid(findings).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.columns.0.name',
+      'pages[0].regions[0].components[0].properties.columns.1.name',
+    ]);
+  });
+
+  it('stays silent on the same block keyed by `name` — the fixed showcase shape', () => {
+    const columns = fieldKeyed.properties.columns.map(({ field, ...rest }) => ({ name: field, ...rest }));
+    const findings = validateComponentProps(
+      stackWith([{ ...fieldKeyed, properties: { ...fieldKeyed.properties, columns } }]),
     );
     expect(findings).toEqual([]);
   });

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * stdout reservation — `--json` payloads (#6217) and `os serve`'s protocol
+ * stdout reservation — `--json` payloads (commit 2b641ddd4) and `os serve`'s protocol
  * channel (#7915).
  *
  * ## The invariant
@@ -39,7 +39,7 @@
  *
  * ## Why this shape
  *
- * Three routes were on the table (issue #6217):
+ * Three routes were on the table (commit 2b641ddd4 took route 1):
  *
  * 1. redirect the kernel's output to **stderr** for the duration of a `--json`
  *    run — this module;

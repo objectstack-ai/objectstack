@@ -16,7 +16,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `plugin-auth/src/scim-connection-service.ts`.
  *
  * Deliberately NOT a resurrection of `sys_scim_provider` (which retires under
- * #11757): a row here is one bearer credential FOR a connection, not the
+ * commit 4d25d22d4): a row here is one bearer credential FOR a connection, not the
  * connection itself. Several rows may authenticate the same `connection_id`
  * (staged rotation); the connection's durable lifecycle state lives in
  * `sys_scim_connection_binding`, written by the library.
@@ -47,7 +47,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   // ADR-0010 §3.7 — platform-managed identity table; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'ObjectStack-owned SCIM credential store (#3653) — see ADR-0134.',
+    reason: 'ObjectStack-owned SCIM credential store — see ADR-0134.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Bearer credentials (one-way digests) that authenticate SCIM provisioning connections',
@@ -106,10 +106,15 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // [#21197] `internal: true` — the list view already leaves this column out
+    // (above); the declaration is what keeps it off the generic data path and
+    // out of the compliance ledger's CRUD mirror. The verifier only FILTERS by
+    // it (`scim-connection-service.ts`), so it needs no readback.
     token_digest: Field.text({
       label: 'Token Digest',
       required: true,
       readonly: true,
+      internal: true,
       maxLength: 255,
       description: 'HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored.',
       group: 'Secret',

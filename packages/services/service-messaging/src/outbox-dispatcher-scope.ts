@@ -53,7 +53,7 @@ import type { EngineUpdateOptions } from '@objectstack/spec/data';
  * {@link dispatcherAckOptions} carries the sweep warrant to the deprecated
  * credential-less arity of `SqlHttpOutbox.ack`, and
  * {@link dispatcherAckCasOptions} carries it to `SqlNotificationOutbox.ack` (a
- * `multi: true` compare-and-set since #11453) and to `SqlHttpOutbox.ack` handed
+ * `multi: true` compare-and-set since commit 1a47a5368) and to `SqlHttpOutbox.ack` handed
  * a claim credential (since #17634), while `SqlHttpOutbox.redeliver`
  * — request-reachable — carries a threaded tenant and no bypass at all.
  *
@@ -79,7 +79,7 @@ export function dispatcherSweepOptions(
  * (`multi: false`) write that records one delivery attempt's outcome on
  * `SqlHttpOutbox.ack`.
  *
- * [#11453] `SqlNotificationOutbox.ack` no longer uses this helper: its ack
+ * [commit 1a47a5368] `SqlNotificationOutbox.ack` no longer uses this helper: its ack
  * grew a status precondition, and a precondition on the by-id path is silently
  * discarded (#11009), so it rides {@link dispatcherAckCasOptions} instead.
  *
@@ -139,7 +139,7 @@ export function dispatcherAckOptions(
 
 
 /**
- * [#11453] The write options for **`SqlNotificationOutbox.ack`** — and, since
+ * [commit 1a47a5368] The write options for **`SqlNotificationOutbox.ack`** — and, since
  * #17634, for **`SqlHttpOutbox.ack`** handed a claim credential — the same
  * warrant as {@link dispatcherAckOptions} above, spelled as a PREDICATE write
  * because each of those acks is a compare-and-set.
@@ -177,7 +177,7 @@ export function dispatcherAckOptions(
  * `redeliver` stays the one request-reachable write on `sys_http_delivery`, and
  * it threads the caller's tenant.
  *
- * ## [#11859] Ownership joined the predicate
+ * ## [commit d9cf78eaa] Ownership joined the predicate
  *
  * `status = 'in_flight'` can prove a claim EXISTS but not WHOSE: after a
  * visibility-timeout reap plus a re-claim, the row is `in_flight` again under

@@ -115,12 +115,13 @@ describe('[#14328] the engine takes its trigger kind from spec.resolveFlowTrigge
         },
         {
             case: "type: 'api'",
-            flow: flowWith('api_type', {}, 'api'),
+            // An `api` flow registers only with its per-flow secret (ADR-0041).
+            flow: flowWith('api_type', { secret: 'hook-secret' }, 'api'),
             expected: 'api',
         },
         {
             case: "triggerType: 'api'",
-            flow: flowWith('api_token', { triggerType: 'api' }),
+            flow: flowWith('api_token', { triggerType: 'api', secret: 'hook-secret' }),
             expected: 'api',
         },
     ];

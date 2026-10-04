@@ -1,9 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
-import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 
@@ -11,8 +9,8 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * Connector Protocol - LEVEL 3: Enterprise Connector
  * 
  * Defines the standard connector specification for external system integration.
- * Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
- * and message queues through a unified protocol.
+ * Connectors enable ObjectStack to call SaaS apps, databases, file storage and
+ * message queues through a unified protocol.
  * 
  * **Positioning in the sync/integration layering** — this file is now the ONLY
  * layer. Both layers above it were retired under ADR-0049 for the same measured
@@ -20,14 +18,15 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * (`automation/sync.zod.ts`) in #4738, and L2 "ETL Pipeline"
  * (`automation/etl.zod.ts`) in #6414. See
  * `packages/spec/docs/SYNC_ARCHITECTURE.md`:
- * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
+ * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration
  * 
  * **SCOPE: Most comprehensive integration layer.**
- * Includes authentication, webhooks, field mapping, bidirectional sync,
- * retry policies, and complete lifecycle management.
+ * Includes authentication, actions, retry policies and lifecycle management.
  *
- * This protocol supports multiple authentication strategies, bidirectional sync,
- * field mapping, webhooks, and comprehensive retry and resilience policies.
+ * This protocol supports multiple authentication strategies and an executed
+ * retry policy. It declares no health probe, no circuit breaker, no authored
+ * status, no webhooks, no triggers and no sync of its own — see "What this
+ * layer does NOT provide" below.
  *
  * ## What this layer does NOT provide
  *
@@ -58,10 +57,26 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * spaces out the calls you already made, it does not cap the rate, so the
  * sentence above about rate limiting stands unchanged.
  *
- * ⛔ **One exception remains, still inert and still `dead` in
- * `packages/spec/liveness/connector.json`:** `health.circuitBreaker` — every
- * sub-key is unread and no breaker ever opens; implement circuit breaking in
- * the connector provider.
+ * **There is no connector health probe and no circuit breaker.** The
+ * `health` block (`healthCheck` and `circuitBreaker`) was removed in
+ * `@objectstack/spec` 17 (ADR-0049 enforce-or-remove) together with the
+ * authored `status` and the nested `webhooks` array: nothing ever scheduled a
+ * probe, opened a breaker, read an authored status or delivered a webhook
+ * declared inside a connector. Implement probes and circuit breaking in the
+ * connector provider or an upstream gateway; whether a registered connector can
+ * be dispatched is the computed `state` (`ready` / `degraded`) that
+ * `GET /api/v1/automation/connectors` reports; and a webhook that is actually
+ * delivered is declared in the stack's top-level `webhooks:` collection. The
+ * "REMOVED: `health`, `status` and the nested `webhooks`" section below records
+ * the measurement.
+ *
+ * **There are no connector triggers.** The `triggers` array (`polling` /
+ * `webhook`) was removed in `@objectstack/spec` 17 (ADR-0049 enforce-or-remove):
+ * nothing ever registered, polled or received one, so a declared trigger never
+ * started a flow. Work starts from a FLOW that calls the connector's action in a
+ * `connector_action` node — an `api` flow for an external event, a `schedule`
+ * flow for a scheduled pull. The "REMOVED: `triggers`" section below records the
+ * measurement.
  *
  * `connectionTimeoutMs` used to be the second exception and is now **removed**
  * (ADR-0049, the narrower second decision that surface was owed): it was
@@ -73,19 +88,15 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * `connectionTimeoutMs`" and "REMOVED: outbound rate limiting" blocks in
  * `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
  *
- * **Field mapping does not transform values.** This header used to offer "field
- * mapping and transformations"; only the first half was ever true.
- * `ConnectorFieldMappingSchema` extends the base mapping with exactly three keys —
- * `dataType`, `required` and `syncMode`. `FieldMapping.transform` was removed in
- * `@objectstack/spec` 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform`
- * union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no
- * runtime ever executed any of the five**. An L3 connector mapping moves a value from
- * `source` to `target`; it does not compute one. **Value conversion belongs on a
- * surface that runs it:** the import mapping's own `mapping.fieldMapping[].transform`
- * (`data/mapping.zod.ts` — a string enum,
- * `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
- * applied row by row by the REST import path — or an ETL transformation step
- * (L2 above). Already authored the retired key? `os migrate meta --from 16` lists the mechanical edits for existing sources — the key itself is removed.
+ * **There is no connector-attached sync and no connector field mapping.**
+ * `syncConfig` and `fieldMappings` were removed in `@objectstack/spec` 17
+ * (ADR-0049 enforce-or-remove): no engine ever ran a sync or moved a value
+ * through a connector field mapping. A sync is defined on its TARGET — a
+ * `mapping` (`data/mapping.zod.ts`) whose `connectorSource` names the
+ * connector it pulls from, with a `job` for the cadence; per-field value
+ * conversion is that mapping's `fieldMapping[].transform`, applied row by row
+ * by the REST import path. The "REMOVED: connector-attached sync" section
+ * below records the measurement.
  *
  * ## Runtime contract — descriptor vs. registered connector (#2612)
  *
@@ -115,13 +126,11 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * **Use Enterprise Connector when:**
  * - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
  * - Complex OAuth2/SAML authentication required
- * - Bidirectional sync with field mapping (`dataType` / `syncMode` per field — it moves values, it does not transform them)
- * - Webhook management required
- * - Full CRUD operations and data synchronization
+ * - Full CRUD operations through the connector's actions
  * - Need comprehensive retry strategies and error handling
- * 
+ *
  * **Examples:**
- * - Full Salesforce integration with webhooks
+ * - Full Salesforce integration
  * - SAP ERP connector with CDC (Change Data Capture)
  * - Microsoft Dynamics 365 connector
  * 
@@ -155,237 +164,106 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 // Use ConnectorAuthConfigSchema from shared/connector-auth.zod.ts
 // ============================================================================
 
-// ============================================================================
-// Field Mapping Schema
-// Uses the canonical field mapping protocol from shared/mapping.zod.ts
-// Extended with connector-specific features
-// ============================================================================
-
-/**
- * Connector Field Mapping Configuration
- *
- * Extends the base field mapping ({@link BaseFieldMappingSchema}, declared in
- * `shared/mapping.zod.ts`) with connector-specific features like bidirectional
- * sync modes and data type mapping.
- *
- * Renamed from `FieldMappingSchema` / `FieldMapping` (#4703, ADR-0112 D9a):
- * THREE entry points published that name for three declarations — `./shared`
- * (this schema's base, 4 keys), `./integration` (this one, 7 keys) and
- * `./data` (`ImportFieldMappingSchema`, a CSV/table column mapping that is not
- * a connector mapping at all). Which type an importer got depended only on the
- * import path — the #4411 trap. Prefixing the domain-specific sides keeps the
- * base name for the base, matching `ConnectorErrorCategory` and
- * `ConnectorRetryStrategy` in this same file (`ConnectorRateLimitConfig`,
- * #4684, was the fourth until its whole shape was retired in #4911), and
- * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which
- * extended the same base and, precisely because it carried a domain prefix,
- * never entered the dual-source baseline (the external-lookup family was
- * itself retired whole in #8075 — ADR-0049, zero consumers).
- */
 import { lazySchema } from '../shared/lazy-schema';
-export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend({
-  /**
-   * Data type mapping (connector-specific)
-   */
-  dataType: z.enum([
-    'string',
-    'number',
-    'boolean',
-    'date',
-    'datetime',
-    'json',
-    'array',
-  ]).optional().describe('Target data type'),
-  
-  /**
-   * Is this field required?
-   */
-  required: z.boolean().default(false).describe('Field is required'),
-  
-  /**
-   * Bidirectional sync mode (connector-specific)
-   */
-  syncMode: z.enum([
-    'read_only',      // Only sync from external to ObjectStack
-    'write_only',     // Only sync from ObjectStack to external
-    'bidirectional',  // Sync both ways
-  ]).default('bidirectional').describe('Sync mode'),
-}));
-
-export type ConnectorFieldMapping = z.input<typeof ConnectorFieldMappingSchema>;
-/** Post-parse shape of {@link ConnectorFieldMapping} — defaults applied, transforms run (ADR-0122). */
-export type ConnectorFieldMappingParsed = z.infer<typeof ConnectorFieldMappingSchema>;
 
 // ============================================================================
-// Data Synchronization Configuration
+// REMOVED: connector-attached sync — `syncConfig` and `fieldMappings`
+// (ADR-0049 enforce-or-remove; ADR-0087 D2/D3)
 // ============================================================================
+//
+// `DataSyncConfigSchema` (`strategy`, `direction`, `realtimeSync`,
+// `timestampField`, `conflictResolution`, `batchSize`, `deleteMode`,
+// `filters`), its `SyncStrategySchema` and `ConnectorConflictResolutionSchema`
+// enums, and `ConnectorFieldMappingSchema` (the shared base `FieldMapping`
+// extended with `dataType`, `required` and `syncMode`) used to live here,
+// authorable only through `ConnectorSchema.syncConfig` and
+// `ConnectorSchema.fieldMappings`. Fourteen keys, and NOTHING executed any of
+// them. Measured on `origin/main` before the removal: outside `packages/spec`
+// the word `syncConfig` appeared only in two comments and `fieldMappings` not
+// at all; the automation service's declared-connector item and its
+// re-materialization fingerprint carry neither key, and the def a provider
+// registers is the provider's own, so neither ever reached the connector
+// registry; and no engine ran a strategy, a direction, a batch, a watermark, a
+// conflict policy or a delete policy. The defaults read as configured policy
+// and did nothing: `latest_wins` resolved no conflict, and `soft_delete` named
+// a mode the platform does not have — every delete is a hard delete.
+//
+// The capability is mainstream, so it was ruled ENFORCE rather than RETIRE —
+// but not on the connector. Every mainstream platform binds a sync definition
+// to its TARGET (the table it writes), never to the connection it reads
+// through, and the target side already had a live, executed half: the
+// `mapping` type's `targetObject`, `fieldMapping`, `mode` and `upsertKey`,
+// which the REST import path runs row by row with upsert-by-match-key. So the
+// definition moved there: `mapping.connectorSource` (`data/mapping.zod.ts`)
+// names the connector a mapping pulls from, and the cadence is a `job` — the
+// 2026-09-10 ruling that deleted `syncConfig.schedule` stands, and no schedule
+// key returns to the connector. The policy values with no runtime
+// (`deleteMode`, `conflictResolution`) have no counterpart on the binding:
+// version 1 is a one-way pull, full or timestamp-incremental.
+//
+// `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+// strip (ADR-0104): both keys are `retiredKey()` tombstones on
+// `ConnectorBaseSchema` below, inherited by `DeclarativeConnectorEntrySchema`.
+// The four defs leave whole (`RETIRED_DEFS_BY_MAJOR[18]`), because an exported
+// value schema with no carrier reads as a capability. Registered as
+// `integration/Connector:{syncConfig,fieldMappings}` and
+// `integration/DeclarativeConnectorEntry:{syncConfig,fieldMappings}` in
+// `RETIRED_KEYS_BY_MAJOR[18]`; authored sources and stored rows are rewritten
+// by the D2 conversion `connector-sync-keys-removed`, which STRIPS both keys
+// and never writes a `mapping` (a mapping that is pulled would START writes
+// that never happened), and the family's judgement lives in the D3 entry
+// `connector-sync-keys-retired`. The `integration/ConnectorFieldMapping:transform`
+// registration of the earlier `transform` retirement stays as its record.
 
 /**
- * Sync Strategy Schema
+ * The prescription an author meets when they write `syncConfig` on a
+ * connector — in `tsc` (the key's input type is `never`) and at parse (this
+ * string is the issue message).
  */
-export const SyncStrategySchema = lazySchema(() => z.enum([
-  'full',           // Full refresh (delete all and re-import)
-  'incremental',    // Only sync changes since last sync
-  'upsert',         // Insert new, update existing
-  'append_only',    // Only insert new records
-]).describe('Synchronization strategy'));
-
-export type SyncStrategy = z.input<typeof SyncStrategySchema>;
+const SYNC_CONFIG_RETIRED =
+  '`connector.syncConfig` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'no engine ever ran a connector-attached sync: nothing read `strategy`, `direction`, '
+  + '`realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode` or '
+  + '`filters`, so the `latest_wins` and `soft_delete` defaults resolved and deleted nothing. '
+  + 'Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: '
+  + 'a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` '
+  + 'names the `rest` or `openapi` connector it pulls from, the read action and an optional '
+  + 'timestamp `watermark`, with a `job` for the cadence. Its pull runs when a `job` drives it — '
+  + 'a `job` whose `pull: { mapping }` names that mapping; the binding alone moves no rows. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
- * Connector Conflict Resolution Strategy
- *
- * Renamed from `ConflictResolution` (#4738, ADR-0112 D9a — the C9/C12
- * prefixing lineage): that bare name was published by three entry points for
- * three different declarations (#4411 trap). The connector-sync strategy takes
- * the domain prefix; the bare `ConflictResolution` went to
- * `@objectstack/spec/ui` (offline client/server sync — a different concept with
- * a disjoint vocabulary). #4988 then retired `ui/offline.zod.ts` whole under
- * ADR-0049, so the bare name is now published by nobody. This name STAYS as it
- * is: it is the connector vocabulary's real name, and un-renaming it to reclaim
- * a freed word would be a second breaking change for no gain.
- * The enum VALUES here are unchanged — authored `syncConfig.conflictResolution`
- * metadata parses byte-for-byte the same. Note `@objectstack/spec/api` also
- * exports `ConflictResolutionStrategy` (route conflicts) — a fourth, distinct
- * name; unrelated to this rename.
+ * The prescription an author meets when they write `fieldMappings` on a
+ * connector. It points at the TARGET-side field map, which the REST import
+ * path executes.
  */
-export const ConnectorConflictResolutionSchema = lazySchema(() => z.enum([
-  'source_wins',    // External system data takes precedence
-  'target_wins',    // ObjectStack data takes precedence
-  'latest_wins',    // Most recently modified wins
-  'manual',         // Flag for manual resolution
-]).describe('Conflict resolution strategy'));
-
-export type ConnectorConflictResolution = z.input<typeof ConnectorConflictResolutionSchema>;
-
-/**
- * Data Synchronization Configuration
- */
-export const DataSyncConfigSchema = lazySchema(() => z.object({
-  /**
-   * Sync strategy
-   */
-  strategy: SyncStrategySchema.optional().default('incremental'),
-  
-  /**
-   * Sync direction
-   */
-  direction: z.enum([
-    'import',         // External → ObjectStack
-    'export',         // ObjectStack → External
-    'bidirectional',  // Both ways
-  ]).optional().default('import').describe('Sync direction'),
-  
-  /*
-   * `syncConfig.schedule` was DELETED here in @objectstack/spec 17 (ADR-0049
-   * enforce-or-remove, #16320). The cron slot on connector-attached sync was
-   * declared, parsed into the `{ dialect: 'cron', source }` envelope and read by
-   * nothing: `syncConfig` has no reader outside `packages/spec`, no engine schedules
-   * a connector sync, and `@objectstack/formula`'s cronEngine has zero consumers
-   * outside its own package. Deleted outright — no `retiredKey()` tombstone, no D2
-   * conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the retirement
-   * PR). `realtimeSync` is unchanged; sync on a cadence is a `job`
-   * (`Job.schedule.expression`, the one cron slot the platform evaluates) whose
-   * handler drives the connector.
-   */
-  
-  /**
-   * Enable real-time sync via webhooks
-   */
-  realtimeSync: z.boolean().optional().default(false).describe('Enable real-time sync'),
-  
-  /**
-   * Field to track last sync timestamp
-   */
-  timestampField: z.string().optional().describe('Field to track last modification time'),
-  
-  /**
-   * Conflict resolution strategy
-   */
-  conflictResolution: ConnectorConflictResolutionSchema.optional().default('latest_wins'),
-  
-  /**
-   * Batch size for bulk operations
-   */
-  batchSize: z.number().min(1).max(10000).optional().default(1000).describe('Records per batch'),
-  
-  /**
-   * Delete handling
-   */
-  deleteMode: z.enum([
-    'hard_delete',    // Permanently delete
-    'soft_delete',    // Mark as deleted
-    'ignore',         // Don't sync deletions
-  ]).optional().default('soft_delete').describe('Delete handling mode'),
-  
-  /**
-   * Filter criteria for selective sync
-   */
-  filters: z.record(z.string(), z.unknown()).optional().describe('Filter criteria for selective sync'),
-}));
-
-export type DataSyncConfig = z.input<typeof DataSyncConfigSchema>;
-/** Post-parse shape of {@link DataSyncConfig} — defaults applied, transforms run (ADR-0122). */
-export type DataSyncConfigParsed = z.infer<typeof DataSyncConfigSchema>;
-
+const FIELD_MAPPINGS_RETIRED =
+  '`connector.fieldMappings` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'no engine ever moved a value through a connector field mapping: nothing read `source`, '
+  + '`target`, `defaultValue`, `dataType`, `required` or `syncMode`. Delete the key; the '
+  + '`ConnectorFieldMapping` shape leaves with it. Map fields on the sync\'s TARGET instead: a '
+  + '`mapping`\'s `fieldMapping` (`source` → `target`, with a `transform` the import path '
+  + 'executes), which its `connectorSource` pulls through. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 // ============================================================================
-// Webhook Configuration
+// REMOVED: the connector-nested webhook shape (ADR-0049 enforce-or-remove)
 // ============================================================================
-
-/**
- * Webhook Event Schema
- */
-export const WebhookEventSchema = lazySchema(() => z.enum([
-  'record.created',
-  'record.updated',
-  'record.deleted',
-  'sync.started',
-  'sync.completed',
-  'sync.failed',
-  'auth.expired',
-  'rate_limit.exceeded',
-]).describe('Webhook event type'));
-
-export type WebhookEvent = z.input<typeof WebhookEventSchema>;
-
-/**
- * Webhook Signature Algorithm
- */
-export const WebhookSignatureAlgorithmSchema = lazySchema(() => z.enum([
-  'hmac_sha256',
-  'hmac_sha512',
-  'none',
-]).describe('Webhook signature algorithm'));
-
-export type WebhookSignatureAlgorithm = z.input<typeof WebhookSignatureAlgorithmSchema>;
-
-/**
- * Webhook Configuration Schema
- *
- * Extends the canonical WebhookSchema with connector-specific event types.
- * This allows connectors to subscribe to both data events and connector lifecycle events.
- *
- * ⚠️ NOT YET ENFORCED — declared but ignored at registration (#3197).
- * `AutomationEngine.registerConnector` reads only `actions`; a connector's
- * `webhooks` (including `events`) parse and are stored, but no runtime
- * dispatches, emits, or filters on them.
- */
-export const WebhookConfigSchema = lazySchema(() => WebhookSchema.extend({
-  /**
-   * Events to listen for
-   * Connector-specific events like sync completion, auth expiry, etc.
-   */
-  events: z.array(WebhookEventSchema).optional().describe('Connector events to subscribe to '),
-  
-  /**
-   * Signature algorithm for webhook security
-   */
-  signatureAlgorithm: WebhookSignatureAlgorithmSchema.optional().default('hmac_sha256'),
-}));
-
-export type WebhookConfig = z.input<typeof WebhookConfigSchema>;
-/** Post-parse shape of {@link WebhookConfig} — defaults applied, transforms run (ADR-0122). */
-export type WebhookConfigParsed = z.infer<typeof WebhookConfigSchema>;
+//
+// `WebhookConfigSchema` (the canonical `WebhookSchema` `.extend()`ed with
+// `events` and `signatureAlgorithm`), its `WebhookEventSchema` event vocabulary
+// (`record.*`, `sync.*`, `auth.expired`, `rate_limit.exceeded`) and the
+// `WebhookSignatureAlgorithmSchema` enum used to live here, authorable only
+// through `ConnectorSchema.webhooks`. They left whole with that key: a webhook
+// nested inside a connector was never registered as a `webhook` metadata item
+// (the stack decomposition registers a connector entry WHOLE), so
+// `@objectstack/plugin-webhooks` never materialized it into `sys_webhook` and
+// nothing ever delivered it — and no code path emits a connector lifecycle
+// event (`sync.completed`, `auth.expired`, …) for `events` to have subscribed
+// to. The three defs are declared in `RETIRED_DEFS_BY_MAJOR[18]`; the carrier
+// key is the `webhooks` tombstone on `ConnectorBaseSchema` below, and the
+// section "REMOVED: `health`, `status` and the nested `webhooks`" records the
+// measurement. A webhook that is actually delivered is declared in the stack's
+// top-level `webhooks:` collection (`automation/webhook.zod.ts`).
 
 // ============================================================================
 // Retry Configuration
@@ -646,79 +524,203 @@ const CONNECTION_TIMEOUT_MS_RETIRED =
  * `15000`, `1000` — keeps the tombstone's refusal with the prescription
  * byte-for-byte. Only the emitted default is accepted, and it is STRIPPED, so a
  * parse → serialize round-trip converges on the clean shape.
+ *
+ * ⭐ `status: 'inactive'` joined the stage when `status` was retired, for the
+ * same measured reason and by the same class rule: the key was declared
+ * `.optional().default('inactive')`, so the same 17.x parse above emitted
+ * `status: 'inactive'` into every connector too (it is in that emitted key
+ * list), and a def built by a released toolchain carries it back to
+ * `registerConnector`. `'active'`, `'error'` and `'configuring'` were never
+ * materialized by anything but an author (or a plugin's own literal), so they
+ * keep the tombstone's refusal with the prescription.
  */
 const CONNECTOR_RETIRED_KEY_RESIDUE = {
   connectionTimeoutMs: 30000,
+  status: 'inactive',
 } as const;
 
 // ============================================================================
-// Health Check & Circuit Breaker Configuration
+// REMOVED: `health`, `status` and the nested `webhooks` (ADR-0049)
 // ============================================================================
+//
+// Sixteen authorable keys on this schema, in three families, that NOTHING read —
+// retired together under ADR-0049 enforce-or-remove, by the maintainer's
+// criterion for a declared-but-unenforced family: does the mainstream platform
+// offer this capability? Yes ⇒ build the consumer once, correctly; no ⇒ retire.
+// Measured on `origin/main` before the removal, with a lit control beside each
+// zero:
+//
+//  - `health.healthCheck` (`enabled`, `intervalMs`, `timeoutMs`, `endpoint`,
+//    `method`, `expectedStatus`, `unhealthyThreshold`, `healthyThreshold`) and
+//    `health.circuitBreaker` (`enabled`, `failureThreshold`, `resetTimeoutMs`,
+//    `halfOpenMaxRequests`, `monitoringWindowMs`, `fallbackStrategy`): zero
+//    reads outside `packages/spec`. No loop ever polled a connector endpoint,
+//    counted consecutive failures or crossed a threshold, and no state machine
+//    ever opened, half-opened or closed a breaker; `fallbackStrategy` named four
+//    behaviours none of which was implemented. The only `healthCheck` code
+//    outside this package is the KERNEL's plugin health contract — a different
+//    shape on a different subject. (Control: `retryConfig`, the executed
+//    sibling policy, is read in the same scope.) Mainstream connector metadata
+//    (Salesforce Named Credentials, Power Platform custom connectors,
+//    Retool / Appsmith resources) carries no author-configured probe or
+//    breaker; breakers live in API-gateway infrastructure.
+//  - `status` (`active` / `inactive` / `error` / `configuring`, defaulted
+//    `'inactive'`): zero reads. `GET /api/v1/automation/connectors` publishes
+//    `state` (`ready` / `degraded`), which the runtime COMPUTES and no authored
+//    value can set — two names one letter apart on one payload, only one of
+//    them real. What decides participation is `enabled` (and `provider` on a
+//    declarative instance). The four shipped connector packages and the
+//    automation service's degraded husk WROTE the key (`'active'` / `'error'`)
+//    and nothing read it back; those writes were deleted with it.
+//  - `webhooks` (the nested `WebhookConfig[]`): zero reads of a connector's own
+//    array. The stack decomposition registers a connector entry WHOLE, so a
+//    webhook nested in it never became a `webhook` item, never reached
+//    `@objectstack/plugin-webhooks`' materializer and was never delivered — the
+//    top-level `webhooks:` collection is the delivered one.
+//
+// `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+// strip (ADR-0104): each carrier key is a `retiredKey()` tombstone below,
+// inherited by `DeclarativeConnectorEntrySchema` because both published
+// carriers wrap the same private `ConnectorBaseSchema`. The shapes behind them
+// leave whole — `integration/ConnectorHealth`, `integration/HealthCheckConfig`,
+// `integration/CircuitBreakerConfig`, `integration/ConnectorStatus`,
+// `integration/WebhookConfig`, `integration/WebhookEvent` and
+// `integration/WebhookSignatureAlgorithm` in `RETIRED_DEFS_BY_MAJOR[18]` —
+// because an exported value schema with no consumer reads as a capability.
+// Registered as `integration/Connector:{health,status,webhooks}` and
+// `integration/DeclarativeConnectorEntry:{health,status,webhooks}` in
+// `RETIRED_KEYS_BY_MAJOR[18]`; authored sources and stored rows are rewritten
+// by the D2 conversion `connector-resilience-keys-removed`, and the family's
+// judgement lives in the D3 entry `connector-resilience-keys-retired`.
+//
+// `circuitBreaker.monitoringWindow` → `monitoringWindowMs` was renamed earlier
+// in this same unreleased protocol step; the rename's breaker half is ABSORBED
+// by this removal (`spec-property-retirement` §0): a renamed key that is then
+// stripped with its whole block is unobservable, and the conversion table's
+// disjoint-fixture contract cannot hold both. The same rename's other half,
+// `triggers[].interval` → `intervalSeconds`, was a different family and was
+// left standing here; it was absorbed in turn when the whole `triggers` array
+// was retired — see "REMOVED: `triggers`" below.
 
 /**
- * Health Check Configuration
- * 
- * Configures periodic health checks for connector endpoints.
+ * The prescription an author meets when they write `health` — in `tsc` (the
+ * key's input type is `never`) and at parse (this string is the issue
+ * message). It IS the migration doc for whoever hits it, including the author
+ * who still holds the pre-rename `monitoringWindow` spelling; the closing
+ * sentence is the house `os migrate meta` form pinned by
+ * `shared/retired-key-migrate-sentence.test.ts`.
  */
-export const HealthCheckConfigSchema = lazySchema(() => z.object({
-  enabled: z.boolean().describe('Enable health checks'),
-  intervalMs: z.number().optional().default(60000).describe('Health check interval in milliseconds'),
-  timeoutMs: z.number().optional().default(5000).describe('Health check timeout in milliseconds'),
-  endpoint: z.string().optional().describe('Health check endpoint path'),
-  method: z.enum(['GET', 'HEAD', 'OPTIONS']).optional().describe('HTTP method for health check'),
-  expectedStatus: z.number().optional().default(200).describe('Expected HTTP status code'),
-  unhealthyThreshold: z.number().optional().default(3).describe('Consecutive failures before marking unhealthy'),
-  healthyThreshold: z.number().optional().default(1).describe('Consecutive successes before marking healthy'),
-}).describe('Health check configuration'));
-
-export type HealthCheckConfig = z.input<typeof HealthCheckConfigSchema>;
-/** Post-parse shape of {@link HealthCheckConfig} — defaults applied, transforms run (ADR-0122). */
-export type HealthCheckConfigParsed = z.infer<typeof HealthCheckConfigSchema>;
+const HEALTH_RETIRED =
+  '`connector.health` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'no connector health probe or circuit breaker ever existed: nothing scheduled a '
+  + '`healthCheck` request, counted consecutive failures against a threshold, or opened, '
+  + 'half-opened or closed a `circuitBreaker`, and no `fallbackStrategy` was ever applied, so '
+  + 'every key in the block configured nothing. That includes `circuitBreaker.monitoringWindowMs` '
+  + 'and the `monitoringWindow` spelling it was renamed from: the renamed key is removed with the '
+  + 'rest. Delete the key; the whole shape leaves with it (`ConnectorHealth`, '
+  + '`HealthCheckConfig`, `CircuitBreakerConfig`). Whether a connector can be dispatched is '
+  + 'computed, not authored: `GET /api/v1/automation/connectors` reports each connector\'s '
+  + '`state` (`ready` or `degraded`). Put health probes and circuit breaking in the connector '
+  + 'provider or an upstream gateway. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
- * Circuit Breaker Configuration
- * 
- * Implements the circuit breaker pattern to prevent cascading failures.
+ * The prescription an author meets when they write `status` — in `tsc` and at
+ * parse. Only a NON-default value reaches it at parse: the emitted default
+ * `'inactive'` is accepted and stripped as inert residue by
+ * {@link CONNECTOR_RETIRED_KEY_RESIDUE}.
  */
-export const CircuitBreakerConfigSchema = lazySchema(() => z.object({
-  enabled: z.boolean().describe('Enable circuit breaker'),
-  failureThreshold: z.number().optional().default(5).describe('Failures before opening circuit'),
-  resetTimeoutMs: z.number().optional().default(30000).describe('Time in open state before half-open'),
-  halfOpenMaxRequests: z.number().optional().default(1).describe('Requests allowed in half-open state'),
-  // Renamed from `monitoringWindow` (#15680, ruling B on #14478): the unit lived
-  // only in the describe prose, one key below `resetTimeoutMs`, which already
-  // spelled ITS unit. One shape carrying both conventions — the suffixed one was
-  // the honest half.
-  monitoringWindowMs: z.number().optional().default(60000).describe('Rolling window for failure count in ms'),
-
-  /** Tombstone for the rename above (#15680, ruling B on #14478). */
-  monitoringWindow: retiredKey(
-    '`CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs` in '
-    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
-    + 'only in the describe prose. Rename the key to `monitoringWindowMs`; the value '
-    + '(milliseconds) and the 60000 default are unchanged. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
-  ),
-  fallbackStrategy: z.enum(['cache', 'default_value', 'error', 'queue']).optional().describe('Fallback strategy when circuit is open'),
-}).describe('Circuit breaker configuration'));
-
-export type CircuitBreakerConfig = z.input<typeof CircuitBreakerConfigSchema>;
-/** Post-parse shape of {@link CircuitBreakerConfig} — defaults applied, transforms run (ADR-0122). */
-export type CircuitBreakerConfigParsed = z.infer<typeof CircuitBreakerConfigSchema>;
+const STATUS_RETIRED =
+  '`connector.status` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + "nothing ever read it: `status: 'active'` neither enabled nor advertised a connector, and "
+  + "`'error'` or `'configuring'` changed nothing either. Delete the key; the "
+  + '`ConnectorStatus` enum leaves with it. On a declarative entry, `enabled: false` is what '
+  + 'withdraws a materialized instance or marks a catalog-only descriptor, and whether a '
+  + 'registered connector can be dispatched is computed by the runtime and reported as `state` '
+  + '(`ready` or `degraded`) on `GET /api/v1/automation/connectors` — no authored value sets it. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
- * Connector Health Configuration
- * 
- * Combines health check and circuit breaker for connector resilience.
+ * The prescription an author meets when they write `webhooks` on a connector —
+ * in `tsc` and at parse.
  */
-export const ConnectorHealthSchema = lazySchema(() => z.object({
-  healthCheck: HealthCheckConfigSchema.optional().describe('Health check configuration'),
-  circuitBreaker: CircuitBreakerConfigSchema.optional().describe('Circuit breaker configuration'),
-}).describe('Connector health configuration'));
+const WEBHOOKS_RETIRED =
+  '`connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'a webhook nested inside a connector was never registered as a `webhook` item, so it was '
+  + 'never materialized into `sys_webhook` and never delivered, and nothing emits the connector '
+  + 'events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete '
+  + 'the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, '
+  + '`WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack\'s '
+  + 'top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on '
+  + 'record events — note that doing so STARTS deliveries this connector never made. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
-export type ConnectorHealth = z.input<typeof ConnectorHealthSchema>;
-/** Post-parse shape of {@link ConnectorHealth} — defaults applied, transforms run (ADR-0122). */
-export type ConnectorHealthParsed = z.infer<typeof ConnectorHealthSchema>;
+// ============================================================================
+// REMOVED: `triggers` (ADR-0049)
+// ============================================================================
+//
+// `connector.triggers` — the `ConnectorTrigger` shape (`key`, `label`,
+// `description`, `type: 'polling' | 'webhook'`, `intervalSeconds`) — declared a
+// connector-owned way to start an automation, and NOTHING ever read it. Its own
+// docblock said so ("NOT YET ENFORCED — declared but never read by the
+// runtime"). Measured on `origin/main` before the removal:
+// `AutomationEngine.registerConnector` walks `parsed.actions` only and stores the
+// rest of the def unread; the engine's trigger registry holds FLOW trigger kinds
+// (`record_change`, `time_relative`, `schedule`, `api` — a closed set) and no
+// connector trigger ever entered it; no polling loop read `intervalSeconds`; no
+// receiver was driven by a `webhook` trigger; and no connector package, provider
+// or example declared one. The only runtime touch was a REFUSAL on a
+// provider-bound declarative instance, whose reason ("the provider derives them
+// from the upstream at boot") was itself untrue — no provider derives a trigger.
+//
+// Retired rather than built, by ruling on the maintainer's criterion for a
+// declared-but-unenforced family: the accepted ADR-0041 places connector-event
+// triggers (webhook-subscribe and poll) in its third tier, as their own trigger
+// package, promoted only when real projects ask for it. When that happens the
+// family returns in the mainstream shape — a subscribe / unsubscribe lifecycle,
+// signature verification, a dedupe cursor — which these five keys could not
+// carry. What works today, and what the prescription below names, is a FLOW that
+// calls the connector's action: an external event starts an `api` flow, and a
+// scheduled pull is a `schedule` flow.
+//
+// `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent strip
+// (ADR-0104): `triggers` is a `retiredKey()` tombstone below, inherited by
+// `DeclarativeConnectorEntrySchema` because both published carriers wrap the same
+// private `ConnectorBaseSchema`. That made the provider-bound refusal unreachable
+// (every carrier now refuses the key outright, with the prescription), so the
+// rule and its untrue reason left with it. `integration/ConnectorTrigger` leaves
+// whole (`RETIRED_DEFS_BY_MAJOR[18]`), because an exported value schema with no
+// consumer reads as a capability. Registered as `integration/Connector:triggers`
+// and `integration/DeclarativeConnectorEntry:triggers` in
+// `RETIRED_KEYS_BY_MAJOR[18]`; authored sources and stored rows are rewritten by
+// the D2 conversion `connector-triggers-removed`, and the family's judgement
+// lives in the D3 entry `connector-triggers-retired`.
+//
+// `triggers[].interval` → `intervalSeconds` was renamed earlier in this same
+// unreleased protocol step; that rename is ABSORBED by this removal
+// (`spec-property-retirement` §0), as its breaker half was by the `health`
+// removal above: a key renamed and then stripped with its whole array is
+// unobservable, and the conversion table's disjoint-fixture contract cannot hold
+// both. The `integration/ConnectorTrigger:interval` registration stays — it is
+// still the record that the bare `interval` spelling was retired.
+
+/**
+ * The prescription an author meets when they write `triggers` on a connector —
+ * in `tsc` (the key's input type is `never`) and at parse (this string is the
+ * issue message). It serves the author who still holds the pre-rename
+ * `interval` spelling too; the closing sentence is the house `os migrate meta`
+ * form pinned by `shared/retired-key-migrate-sentence.test.ts`.
+ */
+const TRIGGERS_RETIRED =
+  '`connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'a connector trigger never started anything: `AutomationEngine.registerConnector` registers '
+  + 'a connector\'s actions only, no polling loop read `intervalSeconds` (or the `interval` '
+  + 'spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete '
+  + 'the key; the `ConnectorTrigger` shape leaves with it. To start work from an external '
+  + 'system, write a flow that calls the connector\'s action in a `connector_action` node: for '
+  + 'an external event, an `api` flow that the event\'s sender calls; for a scheduled pull, a '
+  + '`schedule` flow. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 // ============================================================================
 // Base Connector Schema
@@ -738,17 +740,11 @@ export const ConnectorTypeSchema = lazySchema(() => z.enum([
 
 export type ConnectorType = z.input<typeof ConnectorTypeSchema>;
 
-/**
- * Connector Status
- */
-export const ConnectorStatusSchema = lazySchema(() => z.enum([
-  'active',         // Connector is active and syncing
-  'inactive',       // Connector is configured but disabled
-  'error',          // Connector has errors
-  'configuring',    // Connector is being set up
-]).describe('Connector status'));
-
-export type ConnectorStatus = z.input<typeof ConnectorStatusSchema>;
+// `ConnectorStatusSchema` / `ConnectorStatus` (`active` / `inactive` / `error` /
+// `configuring`) used to be declared here. It left whole with the `status` key
+// it was the only carrier of — see "REMOVED: `health`, `status` and the nested
+// `webhooks`" above; the runtime's dispatchability answer is the computed
+// `ConnectorState` (`ready` / `degraded`) in `connector-descriptor.ts`.
 
 /**
  * What one connector action does **upstream** (#4395).
@@ -818,35 +814,10 @@ export const ConnectorActionSchema = lazySchema(() => z.object({
 }));
 export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 
-/**
- * Connector Trigger Definition
- *
- * ⚠️ NOT YET ENFORCED — declared but never read by the runtime (#3197).
- * `AutomationEngine.registerConnector` ignores a connector's `triggers`; the
- * only runtime touch is the authoring-time reject rule that forbids triggers
- * on provider-bound declarative instances (ADR-0097 §5). No polling loop or
- * webhook receiver is driven by these definitions.
- */
-export const ConnectorTriggerSchema = lazySchema(() => z.object({
-  key: z.string().describe('Trigger key'),
-  label: z.string().describe('Trigger label'),
-  description: z.string().optional(),
-  type: z.enum(['polling', 'webhook']).describe('Trigger type'),
-  // Renamed from `interval` (#15680, ruling B on #14478): the unit lived only in
-  // the describe prose, and a polling cadence is exactly the number a reader
-  // guesses at — the same bare `interval` means MILLISECONDS elsewhere in this
-  // spec, so the identical name carried two units a thousandfold apart.
-  intervalSeconds: z.number().optional().describe('Polling interval in seconds'),
-
-  /** Tombstone for the rename above (#15680, ruling B on #14478). */
-  interval: retiredKey(
-    '`ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — '
-    + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
-    + 'prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
-  ),
-}));
-export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
+// `ConnectorTriggerSchema` / `ConnectorTrigger` (`key`, `label`, `description`,
+// `type: 'polling' | 'webhook'`, `intervalSeconds`, and the `interval` tombstone
+// of its unit rename) used to be declared here. It left whole with the
+// `triggers` key it was the only carrier of — see "REMOVED: `triggers`" above.
 
 /**
  * Base Connector Schema
@@ -938,23 +909,47 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
 
   /** Zapier-style Capabilities */
   actions: z.array(ConnectorActionSchema).optional(),
-  triggers: z.array(ConnectorTriggerSchema).optional().describe('Trigger definitions '),
-  
+
   /**
-   * Data synchronization configuration
+   * `triggers` — RETIRED (ADR-0049 enforce-or-remove). A connector trigger never
+   * started anything: `registerConnector` registers actions only, no polling
+   * loop or receiver was driven by one, and no provider derives one. What starts
+   * work from an external system is a flow calling the connector's action — an
+   * `api` flow for an external event, a `schedule` flow for a scheduled pull.
+   * `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+   * strip (ADR-0104); the tombstone makes the removal audible in `tsc` and at
+   * parse. See "REMOVED: `triggers`" above.
    */
-  syncConfig: DataSyncConfigSchema.optional().describe('Data sync configuration'),
-  
-  
+  triggers: retiredKey(TRIGGERS_RETIRED),
+
   /**
-   * Field mappings
+   * `syncConfig` — RETIRED (ADR-0049 enforce-or-remove). No engine ever ran a
+   * connector-attached sync; a sync is defined on its TARGET, a `mapping`
+   * whose `connectorSource` names this connector, and a `job` sets its
+   * cadence. `ConnectorSchema` is NOT `.strict()`, so a plain delete would be
+   * a silent strip (ADR-0104); the tombstone makes the removal audible in
+   * `tsc` and at parse. See "REMOVED: connector-attached sync" above.
    */
-  fieldMappings: z.array(ConnectorFieldMappingSchema).optional().describe('Field mapping rules'),
-  
+  syncConfig: retiredKey(SYNC_CONFIG_RETIRED),
+
   /**
-   * Webhook configuration
+   * `fieldMappings` — RETIRED (ADR-0049 enforce-or-remove), with `syncConfig`:
+   * nothing moved a value through it. The target-side field map is
+   * `mapping.fieldMapping`. Tombstoned rather than deleted (non-strict
+   * schema, ADR-0104). See "REMOVED: connector-attached sync" above.
    */
-  webhooks: z.array(WebhookConfigSchema).optional().describe('Webhook configurations '),
+  fieldMappings: retiredKey(FIELD_MAPPINGS_RETIRED),
+
+  /**
+   * `webhooks` — RETIRED (ADR-0049 enforce-or-remove). A webhook nested in a
+   * connector was never registered as a `webhook` item, so it was never
+   * materialized into `sys_webhook` and never delivered; the delivered surface
+   * is the stack's top-level `webhooks:` collection. `ConnectorSchema` is NOT
+   * `.strict()`, so a plain delete would be a silent strip (ADR-0104); the
+   * tombstone makes the removal audible in `tsc` and at parse. See "REMOVED:
+   * `health`, `status` and the nested `webhooks`" above.
+   */
+  webhooks: retiredKey(WEBHOOKS_RETIRED),
   
   /**
    * REMOVED (#4911) — outbound rate limiting. See the block above
@@ -997,9 +992,16 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
   requestTimeoutMs: z.number().min(1000).max(300000).optional().default(30000).describe('Request timeout in ms'),
   
   /**
-   * Connector status
+   * `status` — RETIRED (ADR-0049 enforce-or-remove). Declared with a
+   * `.default('inactive')` and read by nothing: the runtime's dispatchability
+   * answer is the COMPUTED `state` (`ready` / `degraded`) that
+   * `GET /api/v1/automation/connectors` publishes, and participation is
+   * `enabled` below. Tombstoned rather than deleted (non-strict schema,
+   * ADR-0104); its emitted default `'inactive'` is accepted and stripped as
+   * inert residue by {@link CONNECTOR_RETIRED_KEY_RESIDUE}, every other value
+   * meets the prescription.
    */
-  status: ConnectorStatusSchema.optional().default('inactive').describe('Connector status'),
+  status: retiredKey(STATUS_RETIRED),
   
   /**
    * Enable connector. On a declarative `connectors:` stack entry, `false`
@@ -1032,9 +1034,13 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
   errorMapping: retiredKey(ERROR_MAPPING_RETIRED),
   
   /**
-   * Health check and circuit breaker configuration
+   * `health` — RETIRED (ADR-0049 enforce-or-remove). The `healthCheck` probe
+   * and the `circuitBreaker` blocks (fourteen keys) had no engine: nothing
+   * polled, counted or tripped. Tombstoned rather than deleted (non-strict
+   * schema, ADR-0104); the three shapes behind it left whole. See "REMOVED:
+   * `health`, `status` and the nested `webhooks`" above.
    */
-  health: ConnectorHealthSchema.optional().describe('Health and resilience configuration'),
+  health: retiredKey(HEALTH_RETIRED),
   
   /**
    * Custom metadata
@@ -1043,7 +1049,7 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   //
-  // [#6362, split out of #6245] Declared for the reason `webhook.zod.ts` and
+  // [commit b5404f496, the connector half #6245 left] Declared for the reason `webhook.zod.ts` and
   // `sharing.zod.ts` state for their own spreads: BOTH metadata load paths call
   // `applyProtection` on EVERY type, so a package-loaded connector already
   // carries these keys by the time anything re-parses it — and `/meta/connector`
@@ -1080,9 +1086,10 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
  * read-through `shape` so the schema walkers and shape-reading consumers see
  * the inner authorable truth, but the `ZodObject` combinators do NOT survive
  * it. Measured on the built entry against a plain-object control
- * (`WebhookConfigSchema`, which keeps all nine): `.extend()`, `.omit()`,
- * `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()` and
- * `.safeExtend()` are gone.
+ * (`RetryConfigSchema`, which keeps all nine — the control was
+ * `WebhookConfigSchema` until that shape was retired with the nested
+ * `webhooks`): `.extend()`, `.omit()`, `.pick()`, `.partial()`, `.merge()`,
+ * `.strict()`, `.keyof()` and `.safeExtend()` are gone.
  *
  * ⚠️ `.superRefine()` is the exception and the trap — it lives on zod's base
  * type, so it is still CALLABLE here and silently returns a schema with no
@@ -1121,7 +1128,8 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * it was quoted verbatim downstream: both published exports are now
  * `z.preprocess` PIPES (the ADR-0049 retired-default residue stage), and a pipe
  * is not a `ZodObject`. Measured on the built entry, against a plain-object
- * control (`WebhookConfigSchema`) that keeps all nine: `.extend()`, `.omit()`,
+ * control (`RetryConfigSchema`; `WebhookConfigSchema` until its retirement)
+ * that keeps all nine: `.extend()`, `.omit()`,
  * `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()` and
  * `.safeExtend()` are all gone from `ConnectorSchema` and from this schema.
  * `.superRefine()` is the one that survives — it lives on zod's base type — but
@@ -1145,9 +1153,17 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * The remaining rules key off `provider` — instance vs. catalog descriptor:
  *  - `providerConfig` / `auth` require a `provider`; on a pure descriptor they
  *    are meaningless materialization inputs, so they are rejected.
- *  - A provider-bound instance must NOT author `actions` / `triggers` — the
- *    provider derives them from the upstream (OpenAPI document / MCP `tools/list`);
- *    authoring both the instance and its actions reintroduces drift (§5 non-goals).
+ *  - A provider-bound instance must NOT author `actions` — the provider derives
+ *    them from the upstream (OpenAPI document / MCP `tools/list`); authoring both
+ *    the instance and its actions reintroduces drift (§5 non-goals).
+ *
+ * `triggers` used to be the second key of that last rule, refused with the
+ * reason that the provider derives triggers too. That reason was untrue — no
+ * provider ever derived a trigger — and the rule is gone rather than corrected:
+ * `triggers` is now a `retiredKey()` tombstone on the shared base, so every
+ * carrier — descriptor and instance alike — refuses any value with the
+ * retirement prescription, and a provider-bound refusal could only ever repeat
+ * that verdict with a wrong reason (see "REMOVED: `triggers`" above).
  */
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
   // [#12840 precedent] The ADR-0097 refusals ride on the BASE, INSIDE the
@@ -1196,13 +1212,6 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         code: 'custom',
         path: ['actions'],
         message: `Provider-bound connector instance '${entry.name}' must not author \`actions\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
-      });
-    }
-    if (entry.triggers && entry.triggers.length > 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['triggers'],
-        message: `Provider-bound connector instance '${entry.name}' must not author \`triggers\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
       });
     }
   }), CONNECTOR_RETIRED_KEY_RESIDUE),

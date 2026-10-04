@@ -1,0 +1,1186 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#8682] Keep the CALLER'S VALUES out of the server log when a driver-level
+ * write fault is logged.
+ *
+ * ## The exposure this closes
+ *
+ * A SQL driver builds its error message by prefixing the offending statement —
+ * fully bound, values inlined — to the database's own diagnostic. knex's shape
+ * is `<statement> - <native message>`. The engine's write paths log that error,
+ * and `Logger` serializes exactly two of its fields (`message`, `stack`), so a
+ * single mistyped field name in a client request wrote an entire row's values
+ * to disk at ERROR level, twice:
+ *
+ * ```
+ * WARN Insert operation failed {"object":"crm_account","error":{"message":
+ *   "insert into `crm_account` (`account_number`, …, `zzz_nonexistent_field`)
+ *    values ('ACC-000011', …, 'SENSITIVE-CANARY-9f3a2b') returning *
+ *    - table crm_account has no column named zzz_nonexistent_field", "stack":
+ *   "SqliteError: insert into `crm_account` (…) values (…) returning * - …"}}
+ * ```
+ *
+ * Measured with planted canaries: the row's values, the organization id and
+ * the acting user id all landed in the log, and `stack` re-opened with the
+ * whole statement a second time — so redacting `message` alone would have
+ * moved the leak rather than closed it. Both fields are rebuilt here.
+ *
+ * ## What is KEPT, deliberately
+ *
+ * The driver's own diagnostic — the tail — is the half that names the failing
+ * column and the condition (`table crm_account has no column named
+ * zzz_nonexistent_field`, `NOT NULL constraint failed: sys_team.name`). It is
+ * kept, and the log site keeps the `object` it already carried. ⛔ The
+ * remedy for this exposure is NOT to drop the entry: a driver-level fault that
+ * logs nothing is a fault nobody can debug, which is strictly worse than one
+ * logged too loudly. This narrows WHAT is written; the message and the entry
+ * are untouched.
+ *
+ * [#17052] The LEVEL has since moved to `warn` on the three write doors — not
+ * as a remedy for THIS exposure, which it would not have fixed, but because
+ * those catches rethrow and AGENTS.md rules a failure handed to the caller is
+ * not a degradation report. The specimen above therefore reads `WARN` today.
+ * Nothing else about it moved: the same redacted `message`/`stack` reach the
+ * same `error` key of the same meta bag (`ObjectQL.writeFailureLogMeta`).
+ *
+ * ## [commit 4dfa369a9] …but "the tail names identifiers" is not true of every dialect
+ *
+ * The paragraph above was written with a premise attached: that whatever the
+ * database prints after the separator names IDENTIFIERS — a column, a table, a
+ * constraint. That premise was checked against SQLite and Postgres, and it is
+ * false on MySQL for one family. MySQL's `ER_DUP_ENTRY` (1062) puts the
+ * conflicting value in the diagnostic itself rather than in the statement:
+ *
+ * ```
+ * mysql  unknown column   => "Unknown column 'zzz' in 'field list' […]"
+ * mysql  duplicate entry  => "Duplicate entry 'acme@example.com' for key 'crm_account.email' […]"
+ * sqlite unique violation => "UNIQUE constraint failed: crm_account.email […]"
+ * pg     unique violation => "duplicate key value violates unique constraint "crm_account_email_key" […]"
+ * ```
+ *
+ * Three keep an identifier; the second keeps a caller's value. Measured through
+ * this function, not predicted — and re-measured byte-identical after commit 27a567dd8
+ * taught the shared leak predicate this phrasing, which moves the VERDICT but
+ * not the cut.
+ *
+ * Postgres is not saved by the cut here — it is saved by an unrelated fact:
+ * its conflicting value lives on `error.detail`, a field `Logger` never
+ * serializes (it writes `message` and `stack`, nothing else). That is a
+ * coincidence, not a defence, and nothing below makes `detail` reachable.
+ *
+ * So the tail is kept, minus the spans a dialect's own template documents as a
+ * VALUE — see {@link redactDiagnosticValues}. Identifier-bearing tails are
+ * untouched, which is the property #8682 paid for on purpose: MySQL's
+ * `for key '…'` names an INDEX (`uniqueViolationColumn` in
+ * `@objectstack/types` refuses to read a column out of it for exactly that
+ * reason), and an operator debugging a duplicate needs that index name.
+ *
+ * ⛔ This is a server LOG. [#21274] The rethrown error is cut too, at the
+ * engine boundary, by the same templates; every HTTP answer is unaffected (see
+ * "The thrown error is redacted too" below).
+ *
+ * ## [#9160] The list is now MEASURED, and there is a way to notice a gap
+ *
+ * Commit 4dfa369a9 left one entry and no instrument: nothing measured whether a diagnostic
+ * a driver produced carried a value, so the next entry needed the same accident
+ * that found the first. `sql-driver-diagnostic-value-probe.test.ts` is that
+ * instrument. It plants a canary value, raises each candidate family against
+ * the live MySQL 8.0 / PostgreSQL 16 services the `Temporal Conformance (live
+ * PG + MySQL)` job stands up, and asserts of EVERY family — value-bearing or
+ * not — whether the canary reaches `error.message`. A family that starts
+ * inlining a value it did not inline before is a named red, not a silent leak.
+ *
+ * What it measured (MySQL 8.0.46, PostgreSQL 16.13), verbatim:
+ *
+ * ```
+ * mysql 1062  Duplicate entry 'CANARY-abc' for key 'probe.uq'              VALUE
+ * mysql 1366  Incorrect integer value: 'CANARY-abc' for column 'age' at row 1   VALUE
+ * mysql 1292  Incorrect datetime value: 'CANARY' for column 'when_at' at row 1  VALUE
+ * mysql 1264  Out of range value for column 'age' at row 1                 identifier only
+ * mysql 1406  Data too long for column 'label' at row 1                    identifier only
+ * mysql 1054  Unknown column 'zzz_nonexistent_field' in 'field list'        identifier only
+ * pg    22P02 invalid input syntax for type integer: "CANARY-abc"           VALUE
+ * pg    22007 invalid input syntax for type timestamp with time zone: "…"   VALUE
+ * pg    22003 value "99999999999" is out of range for type integer          VALUE
+ * pg    23505 duplicate key value violates unique constraint "…_key"        identifier only¹
+ * pg    23502 null value in column "id" of relation "t" violates not-null…  identifier only¹
+ * pg    22001 value too long for type character varying(20)                 identifier only
+ * ```
+ *
+ * ¹ on `error.message`. Both put the caller's row on `error.detail`, which
+ * `ObjectLogger.write` does not serialize — the coincidence commit 4dfa369a9 recorded, and
+ * it is still only a coincidence. **The three Postgres families marked VALUE put
+ * the caller's value on `message`, the field that IS serialized**, so nothing
+ * covers them but the entries below. That was the open question #9160 asked and
+ * the answer is the one the card feared.
+ *
+ * ## [#9275] The residue #9160 left, and the amendment to the cut that closes it
+ *
+ * #9160 recorded a residue it did not close: when the caller's value itself
+ * contains ` - `, the statement cut lands INSIDE that value and eats the
+ * template head. Families with a right anchor recover via their `tail` pattern,
+ * but the ones whose value runs to end of message have nothing to recover from
+ * and leave a suffix of the caller's value standing in the log. Re-measured at
+ * HEAD on the same live servers, canary `SENSITIVE-CANARY-9275 - 2026 - Q3`:
+ *
+ * ```
+ * raised:  insert into "t" ("age") values ($1)
+ *            - invalid input syntax for type integer: "…CANARY… - 2026 - Q3"
+ * logged:  Q3" [statement and bound values redacted]     ← `Q3` is caller data
+ * ```
+ *
+ * Closing it needs the cut itself to become template-aware, which is an
+ * amendment to #8682's contract rather than another row in a list. **Ruled by
+ * the maintainer on 2026-08-17 (#9275): take it, with the trade stated.** See
+ * the section below.
+ *
+ * The re-measurement also moved the COUNT. #9160 named two families here; three
+ * leave a value suffix, and the third wants the other remedy:
+ *
+ * ```
+ * pg 22P02/22007  value runs to end of message   → head-anchored cut (below)
+ * mysql 1292      value runs to end of message   → head-anchored cut (below)
+ * pg 22003        value "…" is out of range …    → `tail`, the commit 4dfa369a9 mechanism
+ * ```
+ *
+ * `22003` was assumed unreachable on the reasoning that its value slot holds a
+ * number, which cannot contain ` - `. Measured through the driver's own bind
+ * path, that is false: Postgres' integer parser detects the OVERFLOW before it
+ * rejects the trailing junk, so it echoes the whole caller string back —
+ * `insert({ age: '99999999999 - 2026 - Q3' })` prints `value "99999999999 -
+ * 2026 - Q3" is out of range for type integer` and logged `Q3` as caller data.
+ * It has a right anchor, so it takes a `tail` row and needs no cut change.
+ *
+ * ## Why the cut is at the separator, and not at a statement keyword
+ *
+ * "Is this a driver dump?" already has ONE owner in this repo —
+ * {@link looksLikeInternalErrorLeak} in `@objectstack/types`, applied by both
+ * HTTP boundaries and tested from both directions (it catches dialect codes,
+ * bare statements and constraint dumps; it deliberately does NOT fire on
+ * ordinary business or validation prose). Re-deriving a second statement-head
+ * keyword list here is exactly the drift that module exists to prevent, so this
+ * asks it the verdict and adds only the one thing it does not answer: WHERE the
+ * statement ends.
+ *
+ * That answer is structural, not lexical. Every value a driver inlines sits in
+ * the statement, and the statement always comes FIRST — so the last ` - ` in a
+ * message the shared predicate has already called a driver dump separates the
+ * part that may carry values from the part that may not. The cut takes the
+ * LAST separator rather than the first on purpose: a bound value may itself
+ * contain ` - ` (`'2026 - Q3 plan'`), and cutting at the first would leave a
+ * fragment of that value standing in the tail. Cutting at the last can only
+ * ever discard MORE than necessary, which is the safe direction — and when a
+ * native message legitimately contains ` - `, what is lost is a prefix of the
+ * diagnostic, never the failing identifier the database names at the end.
+ *
+ * ### [#9275] …except when a KNOWN head says where the diagnostic really began
+ *
+ * "Discard more is safe" holds for the STATEMENT half, and it is exactly wrong
+ * for the DIAGNOSTIC half. When the value the database inlined into its own
+ * message contains ` - `, the last separator sits inside that value, so the cut
+ * discards the template head and keeps the value's suffix — it discards the
+ * half that could not leak and keeps the half that does.
+ *
+ * So the cut asks one more question first: does a separator in this message
+ * stand immediately before a diagnostic head this file has MEASURED (see
+ * `head` in {@link VALUE_BEARING_TEMPLATES})? If one does, that separator is
+ * the true one whatever its position, the head survives, and the value after it
+ * — ` - ` and all — is dropped whole by the template that owns it.
+ *
+ * ⛔ This DOES mean a template is matched before the cut, which the note here
+ * previously forbade in terms: "a bound value can contain anything, this file's
+ * own template included, and matching before the cut would let a value in the
+ * STATEMENT steer what survives". That prohibition is not deleted, it is
+ * AMENDED, and the trade it was protecting is now stated instead of avoided.
+ *
+ * The steering is real and it is BOUNDED TO OVER-REDACTION. A hostile value
+ * that spells a known head makes the cut land inside the statement, at that
+ * head — and ONE property, not several, makes what follows unleakable rather
+ * than exposed: only a template whose value runs to END OF MESSAGE may declare
+ * a `head` (the invariant on {@link EndOfMessageTemplate.head}). Whatever the
+ * head-anchored cut leaves — the rest of the statement it cut into included —
+ * is consumed whole by that template's own `whole` pattern.
+ *
+ * ⚠️ That invariant is the WHOLE of the argument, so do not let a second
+ * plausible-sounding reason stand next to it. This note first claimed the cut
+ * was also protected by taking the LAST matching head rather than the first,
+ * "because a value that mimics a head is then cut at the mimic". Ablated: with
+ * the cut changed to take the FIRST head, all 50 cases in this file's suite
+ * stayed GREEN. The reason is mechanical — an end-of-message pattern matches
+ * only ONCE, from its earliest position, so {@link lastMatch} returns that
+ * first match and the output is identical wherever between two heads the cut
+ * landed. Last-head is retained as a tie-break (it discards the most statement,
+ * and reports the head nearest the database's own words, consistent with the
+ * last-separator rule above) — it is NOT what prevents the leak, and a future
+ * reader must not treat it as a second line of defence.
+ *
+ * What a hostile value CAN do is suppress a real diagnostic: craft `- invalid
+ * input syntax for type integer: "` into a value and the operator reads that
+ * head plus `[value redacted]` instead of the `Unknown column …` the server
+ * actually replied. That costs debuggability on a crafted input and is the
+ * price of closing a leak on ordinary ones. **Ruled deliberately by the
+ * maintainer on 2026-08-17 (#9275)**, against the alternatives of inferring
+ * from unbalanced quotes (a new inference rule, over-match risk) and of
+ * accepting the residue as best-effort (caller data at ERROR level, which is
+ * the thing this neighbourhood exists to prevent).
+ *
+ * ⛔ The escape hatch this is NOT: a head is not a licence to cut anywhere a
+ * template appears. No head may be declared for a template whose diagnostic
+ * continues past the value — cutting into a statement on such a head would keep
+ * whatever follows the template's right anchor, which is statement, which is
+ * values. That is the one way this amendment could leak, and the invariant
+ * above is what forecloses it.
+ *
+ * [#9359] ⭐ And since the ablation recorded just above proves that a claim in
+ * this very note about this very mechanism can read as true for weeks, the
+ * invariant is no longer left to the note. It is held in two places that a
+ * future author cannot write past: the TYPE ({@link AnchoredTemplate.head} is
+ * `never`, so no row can carry a `head` and a `tail` at once) and
+ * {@link assertHeadBearingTemplatesAreEndAnchored}, which throws at module load
+ * on a head-bearing row whose `whole` is not end-anchored.
+ *
+ * A driver dump with no separator carries no statement to cut (`UNIQUE
+ * constraint failed: sys_user.email`, `SQLITE_CONSTRAINT_NOTNULL: …`) and is
+ * returned untouched — there is nothing there but the diagnostic already.
+ *
+ * ## [#21274] The thrown error is redacted too, once, where it leaves the engine
+ *
+ * The paragraphs above were written for ONE consumer, the engine's own log
+ * line, and they left the error the engine rethrows untouched. That error has
+ * other consumers: every in-process caller that logs what it caught. The auth
+ * library's logger was measured printing a failed auth-table write's statement
+ * and bound values, through three carriers (its error line, its server-error
+ * line and the error object's properties), while the engine's own line for the
+ * same failure was redacted. A per-consumer patch would leave the class open
+ * for the next logger, so the cut now also runs at the ENGINE BOUNDARY, on the
+ * error itself: {@link redactPropagatedDriverFault}.
+ *
+ * It is the same cut, with two differences, both MEASURED rather than chosen:
+ *
+ *  1. **Where the marker goes.** The log line appends it. The propagated
+ *     message keeps the statement's POSITION and its leading verb instead
+ *     (`<verb> [statement and bound values redacted] - <diagnostic>`). The
+ *     propagated message is READ by classifiers the log line never feeds:
+ *     `mapDataError` withholds a driver dump as `DATABASE_ERROR`, and for
+ *     several families (Postgres 22P02 and 22001, MySQL 1366 and 1406) the
+ *     shared leak predicate recognises the dump only by its leading statement
+ *     verb. The appended form would move those answers to `INTERNAL_ERROR`,
+ *     and SQLite's unique-violation column reader, which reads to end of line,
+ *     would lose the column. Measured on SQLite, live PostgreSQL 16 and live
+ *     MySQL 8.0 across nine families: the verb-head form keeps every status,
+ *     code, `field` and leak verdict, and the appended form moved six of them.
+ *     The verb names the statement's KIND, never its target or its values.
+ *  2. **More properties.** The log line serializes `message` and `stack`
+ *     only; the thrown error carries the driver's own statement-bearing
+ *     properties as well. Measured per driver: mysql2 puts the bound statement
+ *     on `sql` and value-bearing diagnostics on `sqlMessage`; node-postgres
+ *     puts the caller's row on `detail` (unique and not-null violations), and
+ *     its `where` carries a bound value whenever the server enables
+ *     `log_parameter_max_length_on_error`; better-sqlite3 carries nothing
+ *     beyond `message` and `stack`. Each is cut by its own rule (see
+ *     {@link redactPropagatedDriverFault}).
+ *
+ * What survives is what callers branch on: the error's class (its prototype),
+ * `name`, `code`, `errno`, `sqlState`, Postgres' identifier fields, and the
+ * database's own diagnostic. The engine's log line is unchanged: it is computed
+ * from the raw error, before the boundary.
+ *
+ * ## [#21345] The raw-statement door cuts because it SENT a statement, not because one reads like it
+ *
+ * The cut above runs on `message` and `stack` only when the shared leak
+ * predicate calls the text a driver dump, and the predicate reads a bound
+ * statement by four leading verbs. Every statement the engine composes itself
+ * opens with one of them. A RAW statement handed to `ObjectQL.execute` need
+ * not: a common-table-expression form, or a dialect's own upsert or merge
+ * verb, opens with a word the predicate does not list, and when the
+ * database's diagnostic matches none of its dialect phrasings either, the
+ * message was not cut at all. Measured on better-sqlite3, live PostgreSQL 16
+ * and live MySQL 8.0 with a synthetic sentinel bound into such a statement:
+ * the driver's declared `DATABASE_ERROR` envelope composed its own message,
+ * and the sentinel survived on its `cause`'s `message` and `stack`, so every
+ * logger that renders an error's cause chain printed it. The same statement
+ * opening with a listed verb left no carrier.
+ *
+ * ⛔ The predicate's list is frozen (its header records the ruling), so the
+ * remedy is not a fifth verb. The door is the producer here: it handed the
+ * driver a statement, so it KNOWS, without reading the text, that a statement
+ * may lead every message on the fault's chain. It says so
+ * (`{ statementSent: true }`), and the cut then runs on every message on the
+ * chain as if the predicate had answered yes. Nothing else changes: the same
+ * split, the same structural cut at the separator, the same value templates
+ * and the same property rules. A statement whose leading verb is not one of
+ * the four leaves the bare marker, with no verb kept.
+ *
+ * Why the door asserts the dump rather than cutting out the text it sent:
+ * measured, the text it sent is not in the message. knex prefixes the
+ * statement COMPILED with the bound values inlined (better-sqlite3, mysql2),
+ * so removing the sent text, placeholders and all, would match nothing and
+ * leave the values standing. What the door knows by construction is that the
+ * message LEADS with a statement, and the structural cut needs nothing more.
+ * Over-redaction is the only direction this can err in: a message on that
+ * chain that carries a separator and no statement loses the text before it.
+ *
+ * ## [#21385] One cutter for every log face, the driver's own lines included
+ *
+ * Everything above stopped at the engine, and the driver underneath wrote
+ * first. `driver-sql`'s refusal terminals log the dialect's own message on the
+ * way to composing their envelope: the read terminal, the raw-statement
+ * terminal (which also logged the statement it ran), and the three refusals
+ * for a WHERE, groupBy / aggregation or listed-distinct column the backend
+ * could not resolve. Their design text said that message was "kept
+ * server-side" for an operator. Measured on better-sqlite3, live PostgreSQL 16
+ * and live MySQL 8.0 with a synthetic sentinel: all five lines carried it on
+ * SQLite and MySQL, where knex inlines the bound values into the statement it
+ * prefixes, and the read and raw terminals carried it on PostgreSQL, through a
+ * value-bearing diagnostic and through the raw statement's own text.
+ *
+ * Ruled by the maintainer on 2026-10-02 (letter A): a server log leaves the
+ * data's trust boundary at every layer, so those lines call THIS module. It
+ * moved here from `@objectstack/objectql` so that the driver, which does not
+ * depend on the engine, imports the same function the engine calls. Nothing
+ * about the cut changed in the move: the same split, the same structural cut,
+ * the same value templates. The engine keeps calling
+ * {@link redactBoundStatement} and {@link redactPropagatedDriverFault}, now
+ * from `@objectstack/types`.
+ *
+ * Why `@objectstack/types`, and not a package above it: it is the LOWEST home
+ * every face of this family can reach. `driver-sql`, `objectql` and `core` all
+ * depend on it; and the family's fourth position, `operatorFacingErrorText`
+ * (`driver-error-classification.ts`, #21418), lives inside it, so a cutter
+ * placed in any package above `types` is one that helper could never call.
+ * The module needs nothing new to live here: its one import, the shared leak
+ * predicate, is a sibling module of this package, and the package depends on
+ * `@objectstack/spec` alone. It is edge-safe like the rest of this entry:
+ * regular expressions and `Error`, no `node:` builtin.
+ *
+ * The driver's lines take the LOG face, {@link redactStatementFromMessage},
+ * with the same `{ statementSent: true }` the engine's raw door passes. Every
+ * one of them writes the text of a fault raised by a statement the driver
+ * itself sent, so a statement may lead that text whatever word it opens with,
+ * exactly as at the raw door. Each line keeps its code, the class of fault it
+ * reports and the dialect's own diagnostic, minus the value slots the
+ * templates above own. The caller-facing envelopes those terminals compose
+ * still carry no dialect text.
+ */
+
+import { looksLikeInternalErrorLeak } from './error-leak.js';
+
+/**
+ * knex joins the bound statement to the database's own message with this
+ * separator. It is the only structural marker the shape offers, and it is
+ * stable across the dialects this repo runs (`driver-sql`, `driver-turso`,
+ * `driver-sqlite-wasm` all reach knex).
+ */
+const STATEMENT_SEPARATOR = ' - ';
+
+/** What replaces a statement that carried nothing but values. */
+const REDACTED_STATEMENT = '[statement and bound values redacted]';
+
+/** [commit 4dfa369a9] What replaces one caller value inlined in the database's own diagnostic. */
+const REDACTED_VALUE = '[value redacted]';
+
+/**
+ * [commit 4dfa369a9] MySQL/MariaDB `ER_DUP_ENTRY` (1062), whole: the template's own head,
+ * the conflicting VALUE, and the `for key <index>` tail that anchors it.
+ *
+ * `Duplicate entry '%-.192s' for key '%-.192s'` — the first slot is whatever the
+ * caller tried to write, the second is the index name. MySQL escapes neither,
+ * so the value's own closing quote is not distinguishable on sight
+ * (`Duplicate entry 'O'Brien' for key 'i'` is a real shape) and only the
+ * ` for key '…'` anchor bounds it. The key token requires quotes because that
+ * is what separates this template from prose that merely contains the words.
+ *
+ * The value is matched GREEDILY, so an ambiguous message resolves to the LAST
+ * anchor — `Duplicate entry 'a' for key 'b' for key 't.n'` reads as the value
+ * `a' for key 'b`, not as a short value with a fragment left standing. Same
+ * reasoning as the statement cut taking the last separator: when the shape is
+ * ambiguous, discarding more is the only direction that cannot leak. Safe to be
+ * greedy here precisely because this runs AFTER the cut, where no statement is
+ * left for a match to reach across.
+ *
+ * The quote class and the key token deliberately mirror the `ER_DUP_ENTRY` limb
+ * `DIALECT_LEAK_PHRASINGS` carries in `@objectstack/types` — two files reading
+ * one dialect's one template should not disagree about its shape.
+ */
+const DUPLICATE_ENTRY = /(duplicate entry\s+)["'`][\s\S]*["'`](\s+for key\s+["'`][^"'`]+["'`])/gi;
+
+/**
+ * [commit 4dfa369a9] The same template with its head already gone — what the statement cut
+ * leaves behind when the conflicting VALUE itself contained ` - `.
+ *
+ * Measured: `insert into … values ('2026 - Q3 plan') - Duplicate entry '2026 -
+ * Q3 plan' for key 't.label'` cuts at the separator INSIDE the value and logs
+ * `Q3 plan' for key 't.label'`. Same exposure, one shape further on, so it is
+ * closed here rather than left for the next reader to rediscover. Everything
+ * before the anchor is value residue by construction and is dropped whole.
+ */
+const DUPLICATE_ENTRY_TAIL = /["'`](\s+for key\s+["'`][^"'`]+["'`])/gi;
+
+/**
+ * [#9160] MySQL `ER_TRUNCATED_WRONG_VALUE_FOR_FIELD` (1366) and the
+ * column-bound spelling of `ER_TRUNCATED_WRONG_VALUE` (1292).
+ *
+ * `Incorrect %-.32s value: '%-.128s' for column %.192s at row %ld` — slot one is
+ * a TYPE name, slot two is the caller's value, and the `for column '…' at row N`
+ * tail names the identifier an operator needs. Measured off a thrown error on
+ * live MySQL 8.0.46 (see `sql-driver-diagnostic-value-probe.test.ts`), three
+ * type spellings, byte-identical to the manual's template:
+ *
+ * ```
+ * Incorrect integer value: 'CANARY-abc' for column 'age' at row 1
+ * Incorrect decimal value: 'CANARY-notanum' for column 'amount' at row 1
+ * Incorrect datetime value: 'CANARY-notadate' for column 'when_at' at row 1
+ * ```
+ *
+ * Greedy for the same reason `DUPLICATE_ENTRY` is: MySQL escapes the value's
+ * quotes no more here than there, so a value that mimics the anchor resolves to
+ * the LAST one. Measured: a value spelled `CANARY' for column 'x' at row 1`
+ * really does print two anchors, and the greedy read discards both.
+ *
+ * ⛔ The neighbouring identifier-only families — `Out of range value for column
+ * 'age' at row 1` (1264) and `Data too long for column 'label' at row 1` (1406)
+ * — were raised by the same probe and carry NO caller value. They must not
+ * match: the anchor here requires the value's closing quote immediately before
+ * ` for column`, which those two do not have.
+ */
+const MYSQL_INCORRECT_VALUE = /(incorrect \w+ value:\s+)'[\s\S]*'(\s+for column\s+'[^']*'\s+at row\s+\d+)/gi;
+
+/** [#9160] {@link MYSQL_INCORRECT_VALUE} with its head cut away by a value containing ` - `. */
+const MYSQL_INCORRECT_VALUE_TAIL = /'(\s+for column\s+'[^']*'\s+at row\s+\d+)/gi;
+
+/**
+ * [#9160] Postgres `invalid_text_representation` (22P02) and the datetime
+ * spelling `invalid_datetime_format` (22007).
+ *
+ * `invalid input syntax for type %s: "%s"` — the type name is Postgres' own
+ * word, the quoted tail is the caller's value. Measured on live PostgreSQL
+ * 16.13 across `integer`, `numeric`, `boolean`, `uuid` and `timestamp with time
+ * zone`, hence the space-tolerant type class:
+ *
+ * ```
+ * invalid input syntax for type integer: "CANARY-abc"
+ * invalid input syntax for type timestamp with time zone: "CANARY-notadate"
+ * ```
+ *
+ * **This is the family the commit 4dfa369a9 note was waiting for.** Postgres' unique
+ * violation is saved only because its value sits on `error.detail`, which
+ * `ObjectLogger.write` does not serialize — recorded there as "coincidence, not
+ * a defence". Here the value is on `error.message`, the field that IS
+ * serialized, so the coincidence does not cover it and the cut alone does not
+ * either.
+ *
+ * The value runs to END OF MESSAGE with no right anchor, so everything from the
+ * opening quote onward is dropped. The valueless spelling
+ * `invalid input syntax for type json` (whose token sits on `detail`) has no
+ * `: "` and is deliberately left untouched.
+ */
+const PG_INVALID_INPUT_SYNTAX = /(invalid input syntax for type [a-z0-9 ]+?:\s+)"[\s\S]*$()/gi;
+
+/**
+ * [#9275] {@link PG_INVALID_INPUT_SYNTAX}'s head, through the value's opening
+ * quote — what the statement cut looks for so a value containing ` - ` cannot
+ * eat it. Mirrors group 1 of the pattern above plus the `"` that follows it;
+ * the two must not drift, and `head implies whole matches there` is asserted
+ * directly rather than left as a comment.
+ */
+const PG_INVALID_INPUT_SYNTAX_HEAD = /invalid input syntax for type [a-z0-9 ]+?:\s+"/gi;
+
+/**
+ * [#9160] Postgres `numeric_value_out_of_range` (22003).
+ *
+ * `value "%s" is out of range for type %s` — measured live as
+ * `value "99999999999" is out of range for type integer`. The out-of-range
+ * value is the caller's own, and the type after the anchor is Postgres' word.
+ *
+ * ⛔ Must not reach `duplicate key value violates unique constraint "…"`: that
+ * one has no ` is out of range for type` anchor, and the anchor is what
+ * discriminates. The sibling spelling `numeric field overflow` carries no
+ * caller value on `message` at all (its precision note is on `detail`).
+ */
+const PG_VALUE_OUT_OF_RANGE = /(value\s+)"[\s\S]*"(\s+is out of range for type [a-z0-9 ]+)/gi;
+
+/**
+ * [#9275] {@link PG_VALUE_OUT_OF_RANGE} with its head cut away by a value
+ * containing ` - ` — the row #9160 did not know this family needed.
+ *
+ * It was left out on the reasoning that an out-of-range value is a NUMBER and a
+ * number cannot contain the separator. Measured through the driver's own bind
+ * path on live PostgreSQL 16.13, that reasoning is wrong: Postgres' integer
+ * parser detects the overflow while scanning digits, BEFORE it rejects the
+ * trailing junk, so it echoes the caller's whole string rather than a number.
+ *
+ * ```
+ * insert({ age: '99999999999 - 2026 - Q3' })
+ *   raised:  … values ($1) - value "99999999999 - 2026 - Q3" is out of range for type integer
+ *   logged:  Q3" is out of range for type integer          ← `Q3` is caller data
+ * ```
+ *
+ * This family keeps its right anchor, so it takes the commit 4dfa369a9 recovery and NOT a
+ * `head`: everything before ` is out of range for type` is value residue by
+ * construction and is dropped whole. ⛔ It must not be given a `head` — its
+ * diagnostic continues past the value, which is exactly the shape the head
+ * invariant forbids.
+ */
+const PG_VALUE_OUT_OF_RANGE_TAIL = /"(\s+is out of range for type [a-z0-9 ]+)/gi;
+
+/**
+ * [#9160] MySQL `ER_TRUNCATED_WRONG_VALUE` (1292), the spelling that names no
+ * column: `Truncated incorrect %-.32s value: '%-.128s'`.
+ *
+ * Measured live as `Truncated incorrect INTEGER value: 'CANARY-xyz'`, raised by
+ * an explicit `cast(… as signed)`. Recorded as a real negative about REACH as
+ * well as a positive about shape: the probe could only provoke this spelling
+ * through raw SQL, never through the driver's own bind path, which reaches the
+ * column-bound 1366/1292 wording above instead. It is listed because it was
+ * measured, not because a write path is known to produce it.
+ *
+ * Value runs to end of message; no right anchor exists to recover a head-gone
+ * residue, which is why this family takes a `head` instead (#9275).
+ */
+const MYSQL_TRUNCATED_INCORRECT_VALUE = /(truncated incorrect \w+ value:\s+)'[\s\S]*$()/gi;
+
+/**
+ * [#9275] {@link MYSQL_TRUNCATED_INCORRECT_VALUE}'s head, through the value's
+ * opening quote. Mirrors group 1 of the pattern above plus the `'` after it.
+ *
+ * The type token really does vary in case — `INTEGER`, `DOUBLE` and `time` were
+ * all raised on live MySQL 8.0.46 — so the `i` flag here is load-bearing, not
+ * decoration.
+ */
+const MYSQL_TRUNCATED_INCORRECT_VALUE_HEAD = /truncated incorrect \w+ value:\s+'/gi;
+
+/**
+ * [#9160] Every dialect template MEASURED to inline a caller's value in the
+ * database's own diagnostic, in the order they are tried.
+ *
+ * ⛔ The standing rule (`unique-violation.ts`) governs this list: a row goes in
+ * once its phrasing has been raised off a THROWN error, never from a reading of
+ * the manual. Every row below cites the live server that produced it, and
+ * `sql-driver-diagnostic-value-probe.test.ts` re-raises each one against the
+ * MySQL/Postgres services the `Temporal Conformance (live PG + MySQL)` job
+ * stands up — so a row whose phrasing drifts, or a NEW family that starts
+ * inlining a value, becomes a named red instead of a silent leak. That probe is
+ * the answer to "how would anyone notice a second entry is missing"; this list
+ * is only half of the pair and must not be extended without it.
+ *
+ * `whole` matches head + value + kept tail (group 1 kept before the value,
+ * group 2 kept after). `tail` is the same template after the statement cut has
+ * eaten its head — which happens when the VALUE itself contained ` - ` — and
+ * drops everything before the anchor, because an anchor is evidence about the
+ * value, not licence to assert which template printed it.
+ */
+interface ValueBearingTemplateBase {
+  /** Dialect and the server's own error code, as the probe raises it. */
+  readonly id: string;
+  /**
+   * Head + value + anchor. Group 1 is kept before the value, group 2 after —
+   * {@link redactDiagnosticValues} reads both by index, so every row needs
+   * exactly two.
+   */
+  readonly whole: RegExp;
+}
+
+/**
+ * A family whose diagnostic continues PAST the value, through a right anchor.
+ *
+ * ⛔ Such a family may NOT declare a `head`, and `head?: never` is what makes
+ * that unrepresentable instead of merely forbidden: the head-anchored cut can
+ * land inside the STATEMENT (a hostile value may spell a head), and a right
+ * anchor would then keep whatever follows it — which on such a cut is
+ * statement, which is caller values. It takes {@link tail} instead, which
+ * recovers the same residue with no cut change at all.
+ */
+interface AnchoredTemplate extends ValueBearingTemplateBase {
+  /** The head-gone residue, recovered through the family's right anchor. */
+  readonly tail?: RegExp;
+  readonly head?: never;
+}
+
+/**
+ * A family whose value runs to END OF MESSAGE, so it has no right anchor and no
+ * residue to recover — it takes a {@link head} instead.
+ */
+interface EndOfMessageTemplate extends ValueBearingTemplateBase {
+  /**
+   * [#9275] The template's head through the value's OPENING QUOTE — what the
+   * statement cut looks for so a value containing ` - ` cannot eat it.
+   *
+   * ⛔ INVARIANT, and the only thing standing between this and a leak: a `head`
+   * may be declared ONLY on a template whose value runs to END OF MESSAGE, i.e.
+   * whose `whole` is `$`-anchored and whose group 2 is empty. The head-anchored
+   * cut can land inside the STATEMENT (a hostile value may spell a head), and
+   * what makes that over-redaction rather than exposure is that `whole` then
+   * swallows everything after the head — statement remainder included. A
+   * template with a right anchor would instead keep whatever follows that
+   * anchor, which on such a cut is statement, which is caller values.
+   *
+   * [#9359] That invariant is no longer carried by this note. The `tail` half is
+   * held by the type ({@link AnchoredTemplate.head} is `never`); the anchoring
+   * half is held by
+   * {@link assertHeadBearingTemplatesAreEndAnchored}, which runs at module load
+   * over the table below. A doc comment is not a guard — a claim this very note
+   * once made about this very mechanism (that last-match was a second line of
+   * defence) read as true for weeks and fell only to an ablation.
+   */
+  readonly head: RegExp;
+  readonly tail?: never;
+}
+
+type ValueBearingTemplate = AnchoredTemplate | EndOfMessageTemplate;
+
+export const VALUE_BEARING_TEMPLATES: readonly ValueBearingTemplate[] = [
+  { id: 'mysql/1062 ER_DUP_ENTRY', whole: DUPLICATE_ENTRY, tail: DUPLICATE_ENTRY_TAIL },
+  { id: 'mysql/1366 ER_TRUNCATED_WRONG_VALUE_FOR_FIELD', whole: MYSQL_INCORRECT_VALUE, tail: MYSQL_INCORRECT_VALUE_TAIL },
+  { id: 'mysql/1292 ER_TRUNCATED_WRONG_VALUE', whole: MYSQL_TRUNCATED_INCORRECT_VALUE, head: MYSQL_TRUNCATED_INCORRECT_VALUE_HEAD },
+  { id: 'pg/22P02 invalid_text_representation', whole: PG_INVALID_INPUT_SYNTAX, head: PG_INVALID_INPUT_SYNTAX_HEAD },
+  { id: 'pg/22003 numeric_value_out_of_range', whole: PG_VALUE_OUT_OF_RANGE, tail: PG_VALUE_OUT_OF_RANGE_TAIL },
+];
+
+/**
+ * [#9359] What a head-bearing `whole` must END with: `$` — end of INPUT, since
+ * JavaScript's `$` means end-of-line only under `m`, which is why the guard
+ * rejects that flag — immediately followed by the EMPTY group 2 that
+ * {@link redactDiagnosticValues} reads as "nothing is kept after the value".
+ */
+const END_OF_MESSAGE_ANCHOR = '$()';
+
+/**
+ * [#9359] The head invariant, ENFORCED at module load rather than described.
+ *
+ * ## What it forecloses
+ *
+ * Only an end-of-message template may declare a `head`. That single property is
+ * what bounds a hostile value's influence over the statement cut to
+ * OVER-REDACTION: a value that spells a known head makes the cut land inside
+ * the statement, and `whole` then swallows the remainder whole. Give a `head`
+ * to a family with a RIGHT ANCHOR and the same cut keeps everything after that
+ * anchor — statement, which is caller values. That is the one way #9275's
+ * amendment can leak, and this function is what stops it being written.
+ *
+ * ## Why a load-time throw is the right shape here
+ *
+ * The precedent is `assertMetaUrlSpellingsAgree()` in `packages/spec`, and the
+ * property that makes a boot-path throw safe is the same in both: this reads
+ * NOTHING but literals declared in this file. It cannot depend on install
+ * state, environment or import order, so it is deterministic per build — it
+ * fires on the author's first import, never at a deployment that imported the
+ * same bytes successfully yesterday. ⛔ If a future row is ever computed from
+ * anything outside this module, that reasoning lapses and this belongs in a
+ * gate script instead.
+ *
+ * ## The checks, and why each is the invariant rather than a proxy for it
+ *
+ * 1. **No `m` flag.** Under `m`, `$` is end-of-LINE, so an end-anchored
+ *    template would stop at the first newline of a multi-line dump and leave
+ *    the rest standing. Then `whole` is spelled end-anchored while not being
+ *    end-anchored — the exact silent shape this card exists to end.
+ * 2. **`whole.source` ends with {@link END_OF_MESSAGE_ANCHOR}.** This is the
+ *    invariant's own wording ("`$`-anchored and group 2 empty") in one token.
+ * 3. **Exactly two capture groups.** {@link redactDiagnosticValues} reads
+ *    `whole[1]` and `whole[2]` by index; a third group would silently reassign
+ *    what is kept after the value.
+ *
+ * Checks 2 and 3 are SYNTACTIC — they read the pattern, not its behaviour — and
+ * so they reject spellings they cannot prove end-anchored even where a human
+ * can see the pattern is fine. That is the safe direction: a novel spelling
+ * gets a loud, named throw and its author amends this guard deliberately,
+ * rather than the invariant quietly acquiring an exception.
+ *
+ * Exported for `driver-fault-redaction.test.ts` beside this file (not on the
+ * package entry), which calls it with synthetic rows to prove it FIRES — a
+ * guard nobody has watched fail is the same prose this replaced.
+ *
+ * @param templates - the table to check; the shipped one is checked at load.
+ * @throws when a row declares a `head` whose `whole` is not end-anchored.
+ */
+export function assertHeadBearingTemplatesAreEndAnchored(
+  templates: readonly ValueBearingTemplate[],
+): void {
+  for (const template of templates) {
+    if (template.head === undefined) continue;
+    const { source, flags } = template.whole;
+
+    if (flags.includes('m')) {
+      throw new Error(
+        "[driver-fault-redaction] Template '" + template.id + "' declares a head, but its 'whole' carries the "
+        + "'m' flag, under which '$' matches end of LINE rather than end of MESSAGE. Only a template whose "
+        + 'value runs to end of message may declare a head.',
+      );
+    }
+
+    if (!source.endsWith(END_OF_MESSAGE_ANCHOR)) {
+      throw new Error(
+        "[driver-fault-redaction] Template '" + template.id + "' declares a head, but its 'whole' does not end "
+        + "with '" + END_OF_MESSAGE_ANCHOR + "', so its value does not run to end of message. Only an "
+        + 'end-of-message template may declare a head: the head-anchored statement cut can land inside the '
+        + "statement, and what bounds that to over-redaction is that 'whole' then swallows the remainder. A "
+        + 'template with a right anchor keeps whatever follows that anchor, which on such a cut is statement, '
+        + "which is caller values. Give this row a 'tail' instead.",
+      );
+    }
+
+    // `new RegExp(source + '|')` always matches the empty string through its
+    // empty alternative, so the result is the group count without needing an
+    // input the pattern accepts.
+    const probe = new RegExp(source + '|').exec('');
+    const groupCount = probe === null ? 0 : probe.length - 1;
+    if (groupCount !== 2) {
+      throw new Error(
+        "[driver-fault-redaction] Template '" + template.id + "' has " + groupCount + " capture group(s); "
+        + "exactly 2 are required, because redactDiagnosticValues reads 'whole[1]' and 'whole[2]' by index.",
+      );
+    }
+  }
+}
+
+assertHeadBearingTemplatesAreEndAnchored(VALUE_BEARING_TEMPLATES);
+
+/**
+ * [#9275] Every known diagnostic head, as the separator that stands before it.
+ *
+ * A lookahead, so the match is the SEPARATOR alone and its index is where the
+ * cut goes. Built once from the table above: a row that declares a `head` is
+ * enrolled here automatically, and one that does not cannot be enrolled by
+ * hand.
+ */
+const HEAD_ANCHORED_CUTS: readonly RegExp[] = VALUE_BEARING_TEMPLATES
+  .filter((template): template is EndOfMessageTemplate => template.head !== undefined)
+  .map((template) => new RegExp(`${STATEMENT_SEPARATOR}(?=${template.head.source})`, 'gi'));
+
+/**
+ * The first stack FRAME line (`    at …`). Everything above it is the header
+ * that repeats `name: message` — and therefore repeats the statement.
+ */
+const FIRST_STACK_FRAME = /^[ \t]*at\s/m;
+
+/**
+ * Strip the bound statement from a driver error's `message` and `stack`,
+ * keeping the database's own diagnostic.
+ *
+ * Returns the input UNCHANGED (same reference) when there is nothing to
+ * redact — not a driver dump, or a dump that carries no statement — so a
+ * validation error, a hook's business error and a bare `Error` from our own
+ * code all reach the log exactly as before, stack frames included.
+ *
+ * Otherwise returns a NEW `Error` carrying the redacted text and the original
+ * frames. It must be a real `Error`: `ObjectLogger.error` routes its second
+ * argument by `instanceof Error`, and a plain object would silently land in
+ * the meta slot instead.
+ *
+ * @param error - the thrown value, of any shape.
+ */
+export function redactBoundStatement(error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const redactedMessage = redactStatementFromMessage(error.message);
+  if (redactedMessage === error.message) return error;
+
+  const redacted = new Error(redactedMessage);
+  redacted.name = error.name;
+  redacted.stack = redactStack(error.stack, error.name, redactedMessage);
+  return redacted;
+}
+
+/**
+ * The message half: the LOG face of the cut. The engine's own log line reaches
+ * it through {@link redactBoundStatement}; [#21385] `driver-sql`'s refusal
+ * lines call it directly, with `{ statementSent: true }`, because each of them
+ * writes the text of a fault its own statement raised (see the module
+ * header). Returns the input string unchanged when nothing is cut.
+ *
+ * @param message - the text the log line would otherwise write.
+ * @param origin - what the caller knows about where the text came from.
+ */
+export function redactStatementFromMessage(message: string, origin: DriverFaultOrigin = {}): string {
+  const dump = splitDriverDump(message, origin.statementSent === true);
+  if (dump === undefined) return message;
+  // No statement to cut — but a dialect may still have inlined a value in the
+  // diagnostic itself, and since commit 27a567dd8 taught the shared predicate this
+  // phrasing, a BARE `Duplicate entry …` now reaches this line instead of
+  // being turned away above.
+  if (dump.statement === undefined) return dump.diagnostic;
+  // A dump whose tail is empty still had its head removed: report the
+  // redaction rather than an empty message, so the entry never reads as a
+  // fault with no detail at all.
+  return dump.diagnostic.length > 0
+    ? `${dump.diagnostic} ${REDACTED_STATEMENT}`
+    : REDACTED_STATEMENT;
+}
+
+/**
+ * [#21274] The cut BOTH faces share — the log line's
+ * {@link redactStatementFromMessage} and the propagated error's
+ * {@link redactPropagatedDriverFault} — so "the same redaction" is one
+ * function rather than two that agree.
+ *
+ * Returns `undefined` when the shared predicate does not call the message a
+ * driver dump (nothing is cut). Otherwise the bound statement, or `undefined`
+ * when the dump carries none, and the database's diagnostic with the values a
+ * dialect inlines in it already dropped.
+ *
+ * [#21345] `statementSent` replaces the predicate's verdict with the door's
+ * own knowledge (see the module header): the message is a dump by
+ * construction, whatever word it opens with. [#21385] Both faces take it now:
+ * the engine's raw door on the propagated face, and `driver-sql`'s refusal
+ * lines on the log face. The engine's own log line still asks the predicate.
+ */
+function splitDriverDump(
+  message: string,
+  statementSent = false,
+): { statement: string | undefined; diagnostic: string } | undefined {
+  if (!message) return undefined;
+  if (!statementSent && !looksLikeInternalErrorLeak(message)) return undefined;
+  const cut = statementCut(message);
+  if (cut === -1) return { statement: undefined, diagnostic: redactDiagnosticValues(message) };
+  return {
+    statement: message.slice(0, cut),
+    diagnostic: redactDiagnosticValues(message.slice(cut + STATEMENT_SEPARATOR.length).trim()),
+  };
+}
+
+/**
+ * [#21274] The leading verbs the shared leak predicate reads a bound statement
+ * by (`looksLikeInternalErrorLeak`'s `startsWith` limbs), spelled exactly as
+ * it reads them: at offset 0, followed by a space.
+ */
+const STATEMENT_KIND = /^(insert into|update|select|delete from) /i;
+
+/**
+ * [#21274] What a cut statement becomes on the PROPAGATED error: its kind, then
+ * the marker. The kind is kept because classifiers downstream read a driver
+ * dump by it (see the module header, "The thrown error is redacted too"); it
+ * carries no identifier and no value. A statement that opens with any other
+ * word leaves the marker alone.
+ */
+function redactedStatement(statement: string): string {
+  const kind = STATEMENT_KIND.exec(statement);
+  return kind ? `${kind[1]} ${REDACTED_STATEMENT}` : REDACTED_STATEMENT;
+}
+
+/**
+ * [#21274] The propagated face of {@link redactStatementFromMessage}: the same
+ * cut, with the statement's POSITION and kind kept rather than the marker
+ * appended. Returns the input unchanged when nothing is cut.
+ */
+function redactPropagatedMessage(message: string, statementSent: boolean): string {
+  const dump = splitDriverDump(message, statementSent);
+  if (dump === undefined) return message;
+  if (dump.statement === undefined) return dump.diagnostic;
+  const statement = redactedStatement(dump.statement);
+  return dump.diagnostic.length > 0
+    ? `${statement}${STATEMENT_SEPARATOR}${dump.diagnostic}`
+    : statement;
+}
+
+/** [#21274] What replaces a Postgres `DETAIL` line that is not key-shaped. */
+const REDACTED_DETAIL = '[detail redacted]';
+
+/** [#21274] What replaces a Postgres `CONTEXT` line. */
+const REDACTED_CONTEXT = '[context redacted]';
+
+/**
+ * [#21274] Postgres' key-shaped `DETAIL`, through the opening parenthesis of
+ * the VALUES: `Key (<columns>)=(` — the unique (23505), foreign-key (23503) and
+ * exclusion (23P01) families. Group 1 is the identifier half, which is kept,
+ * because `uniqueViolationColumn` in `@objectstack/types` reads the
+ * conflicting column from exactly that half and REST's 409 names it. The
+ * values after it are the caller's and are dropped whole, with everything that
+ * follows them: a value may contain `)`, so no right anchor bounds it.
+ *
+ * An expression index (`Key (lower(email))=(…)`) does not match, because the
+ * column class forbids `)`, and so takes the whole-line cut instead — the same
+ * answer the column reader gives it (not a column).
+ */
+const PG_KEY_DETAIL = /^(key \([^)]*\)=\()/i;
+
+/**
+ * [#21274] Cut a Postgres `DETAIL` line. A key-shaped one keeps its identifier
+ * half; any other (`Failing row contains (…)`, measured carrying the whole
+ * row on a not-null violation) is replaced whole, because its contents are
+ * the caller's row.
+ */
+function redactPgDetail(detail: string): string {
+  const key = PG_KEY_DETAIL.exec(detail);
+  return key ? `${key[1]}${REDACTED_VALUE})` : REDACTED_DETAIL;
+}
+
+/**
+ * [#21274] One rule per statement-bearing property a shipped driver attaches,
+ * as MEASURED off thrown errors (better-sqlite3 13, node-postgres 8 against
+ * PostgreSQL 16, mysql2 3 against MySQL 8.0). Each rule returns the cut value,
+ * or the input unchanged.
+ *
+ * `appliesTo` keeps a property name that is generic (`detail`, `where`) to the
+ * driver that defines it: a Postgres error always carries its `severity`.
+ * mysql2's two names are its own and are cut wherever they appear.
+ *
+ * ⛔ Not listed, deliberately: `code`, `errno`, `sqlState` (what callers branch
+ * on), Postgres' `severity`, `routine`, `file`, `line`, `position`, `schema`,
+ * `table`, `column`, `dataType`, `constraint` (identifiers and positions,
+ * measured value-free) and `hint`.
+ */
+const STATEMENT_BEARING_PROPERTIES: ReadonlyArray<{
+  readonly key: string;
+  readonly appliesTo: (error: Error) => boolean;
+  readonly cut: (value: string) => string;
+}> = [
+  // mysql2: the statement as sent, bound values inlined.
+  { key: 'sql', appliesTo: () => true, cut: redactedStatement },
+  // mysql2: the server's own message — value-bearing for 1062 and 1366.
+  { key: 'sqlMessage', appliesTo: () => true, cut: redactDiagnosticValues },
+  // node-postgres: the caller's row (23505 key, 23502 failing row).
+  { key: 'detail', appliesTo: isPostgresError, cut: redactPgDetail },
+  // node-postgres: CONTEXT — a bound value once the server enables
+  // `log_parameter_max_length_on_error`, and PL/pgSQL statement text.
+  { key: 'where', appliesTo: isPostgresError, cut: () => REDACTED_CONTEXT },
+  // node-postgres: the text of an internally generated statement.
+  { key: 'internalQuery', appliesTo: isPostgresError, cut: () => REDACTED_STATEMENT },
+];
+
+/** node-postgres' `DatabaseError` always carries the server's `severity`. */
+function isPostgresError(error: Error): boolean {
+  return typeof (error as { severity?: unknown }).severity === 'string';
+}
+
+/**
+ * How far the boundary follows `cause` — the same depth the shared predicates
+ * (`isUniqueViolationError`, `isMissingTableError`) read to, so nothing they
+ * can still see is left uncut.
+ */
+const MAX_CAUSE_DEPTH = 4;
+
+/**
+ * [#21274] Cut the bound statement and the caller's values out of an error
+ * that is about to LEAVE THE ENGINE — on `message`, `stack`, every
+ * statement-bearing property a shipped driver attaches, and down the `cause`
+ * chain — keeping what callers branch on.
+ *
+ * Applied once, at the engine boundary (`ObjectQL`'s middleware seam and the
+ * few public methods that reach a driver outside it), so every consumer that
+ * logs a propagated error gets the cut without a patch of its own.
+ *
+ * ## Contract
+ *
+ *  - **Nothing to cut ⇒ the same reference.** A validation error, a hook's
+ *    business error and a policy refusal leave exactly as before.
+ *  - **Otherwise a NEW error** — the input is never mutated. It is a native
+ *    `Error` (so `util.types.isNativeError` and every `instanceof Error`
+ *    router still recognise it) whose prototype is the input's, so
+ *    `instanceof SqliteError` / `instanceof DuplicateRecordError` hold. Every
+ *    own property is carried — symbol-keyed ones included, with their
+ *    enumerability — except the ones cut, which carry the cut value.
+ *  - **`cause` is cut the same way**, recursively, so an envelope that wraps a
+ *    driver error (`DuplicateRecordError`, the driver's `DATABASE_ERROR`)
+ *    leaves with its own fields intact and a redacted `cause`.
+ *  - **Idempotent.** A propagated error that crosses a second boundary (an
+ *    engine call made from inside a hook) is returned unchanged.
+ *  - **[#21345] A door that SENT a raw statement says so** with
+ *    `{ statementSent: true }`, and every message on the chain is then cut
+ *    without asking the shared leak predicate (see the module header). Only
+ *    `ObjectQL.execute` passes it: every other door reaches a driver through a
+ *    statement the driver composes, and those open with a verb the predicate
+ *    lists.
+ *
+ * @param error - the thrown value, of any shape.
+ * @param origin - what the calling door knows about where the fault came from.
+ */
+export function redactPropagatedDriverFault(error: unknown, origin: DriverFaultOrigin = {}): unknown {
+  return redactFaultAt(error, 0, origin.statementSent === true);
+}
+
+/**
+ * [#21345] What the door that rethrows a driver fault knows about its origin.
+ * [#21385] Also what a driver's own log line knows about the text it writes.
+ */
+export interface DriverFaultOrigin {
+  /**
+   * A statement was sent, and the text being cut is what came back: the
+   * engine's door handed the driver a raw statement it did not compose, or a
+   * driver's log line is writing the fault its own statement raised. Either
+   * way a statement may lead that text whatever word it opens with, so the
+   * cut runs without the shared leak predicate's verdict.
+   */
+  readonly statementSent?: boolean;
+}
+
+function redactFaultAt(error: unknown, depth: number, statementSent: boolean): unknown {
+  if (!(error instanceof Error) || depth > MAX_CAUSE_DEPTH) return error;
+  const replacements = new Map<PropertyKey, unknown>();
+
+  const message = redactPropagatedMessage(error.message, statementSent);
+  if (message !== error.message) {
+    replacements.set('message', message);
+    replacements.set('stack', redactStack(error.stack, error.name, message));
+  }
+
+  for (const property of STATEMENT_BEARING_PROPERTIES) {
+    const value = ownValue(error, property.key);
+    if (typeof value !== 'string' || !property.appliesTo(error)) continue;
+    const cut = property.cut(value);
+    if (cut !== value) replacements.set(property.key, cut);
+  }
+
+  const cause = ownValue(error, 'cause');
+  if (cause !== undefined) {
+    const redactedCause = redactFaultAt(cause, depth + 1, statementSent);
+    if (redactedCause !== cause) replacements.set('cause', redactedCause);
+  }
+
+  return replacements.size === 0 ? error : copyWithReplacements(error, replacements);
+}
+
+/** An OWN property's value, read through its getter when it has one. */
+function ownValue(target: object, key: PropertyKey): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(target, key);
+  if (descriptor === undefined) return undefined;
+  if ('value' in descriptor) return descriptor.value;
+  try {
+    return (target as Record<PropertyKey, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A native `Error` with `error`'s prototype and own properties, `replacements`
+ * written over the ones they name. `stack` is rebuilt as an own, non-enumerable
+ * data property, which is what V8 gives every error.
+ */
+function copyWithReplacements(error: Error, replacements: ReadonlyMap<PropertyKey, unknown>): Error {
+  const message = replacements.has('message') ? String(replacements.get('message')) : error.message;
+  const copy = new Error(message);
+  Object.setPrototypeOf(copy, Object.getPrototypeOf(error));
+  for (const key of Reflect.ownKeys(error)) {
+    if (key === 'message' || key === 'stack') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(error, key);
+    if (descriptor === undefined) continue;
+    if (!replacements.has(key) && 'value' in descriptor) {
+      Object.defineProperty(copy, key, descriptor);
+      continue;
+    }
+    Object.defineProperty(copy, key, {
+      value: replacements.has(key) ? replacements.get(key) : ownValue(error, key),
+      writable: true,
+      enumerable: descriptor.enumerable,
+      configurable: true,
+    });
+  }
+  Object.defineProperty(copy, 'stack', {
+    value: replacements.has('stack') ? replacements.get('stack') : error.stack,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return copy;
+}
+
+/**
+ * [#9275] Where the bound statement ends — the index of its separator, or `-1`
+ * when the message carries no statement at all.
+ *
+ * The LAST separator that stands immediately before a MEASURED diagnostic head
+ * wins, because a head is positive evidence about where the database's own
+ * words began; only when no head appears does this fall back to the last
+ * separator in the message, which is #8682's original structural answer.
+ *
+ * A head beats the last separator even though it keeps MORE text. That is sound
+ * only because of the head invariant — the extra text is swallowed whole by the
+ * template that owns the head — and the invariant is the entire safety argument
+ * (see the head note; taking the last head rather than the first is a tie-break
+ * that was ABLATED and changes no output).
+ */
+function statementCut(message: string): number {
+  let headCut = -1;
+  for (const separator of HEAD_ANCHORED_CUTS) {
+    const match = lastMatch(separator, message);
+    if (match && match.index > headCut) headCut = match.index;
+  }
+  return headCut !== -1 ? headCut : message.lastIndexOf(STATEMENT_SEPARATOR);
+}
+
+/**
+ * [commit 4dfa369a9] Drop the caller values a dialect inlines into its OWN diagnostic,
+ * keeping every identifier around them.
+ *
+ * Runs on the tail the statement cut already produced, never on the whole
+ * message: after the cut there is nothing left but the database's words, so the
+ * templates below can be read literally. ⛔ The one exception is deliberate and
+ * bounded — {@link statementCut} matches a template's `head` BEFORE the cut, so
+ * that a value containing ` - ` cannot eat it. That amendment, the steering it
+ * admits and the invariant that keeps the steering to over-redaction rather
+ * than exposure are argued in the head note (#9275); nothing here reads a
+ * template earlier than the cut on its own account.
+ *
+ * ⛔ Add a dialect's spelling to {@link VALUE_BEARING_TEMPLATES} only once it has
+ * been measured off a THROWN error, never from a reading of the manual — the
+ * standing rule in this neighbourhood (`unique-violation.ts`). Since #9160 that
+ * measurement has a home: add the family to the live probe, read what the server
+ * actually printed, and let the recording be the warrant. Over-matching is still
+ * the expensive direction — it deletes the diagnostic an operator came for — so
+ * a row that the probe cannot raise does not go in.
+ */
+function redactDiagnosticValues(diagnostic: string): string {
+  // Every INTACT template first, then every head-gone residue. Whole-before-tail
+  // is global rather than per-template on purpose: a diagnostic that still
+  // carries a recognisable head should be reported with that head, whichever
+  // family it belongs to, rather than collapsed into a bare anchor by an
+  // earlier row's tail pattern.
+  for (const template of VALUE_BEARING_TEMPLATES) {
+    const whole = lastMatch(template.whole, diagnostic);
+    if (whole) {
+      // The template's head survived, so keep it and the database's own wording
+      // around it — only the value slot is replaced.
+      return diagnostic.slice(0, whole.index)
+        + whole[1] + REDACTED_VALUE + whole[2]
+        + diagnostic.slice(whole.index + whole[0].length);
+    }
+  }
+
+  for (const template of VALUE_BEARING_TEMPLATES) {
+    if (!template.tail) continue;
+    const tail = lastMatch(template.tail, diagnostic);
+    if (tail) {
+      // Head gone: everything before the anchor is what is left of the value.
+      // The words are NOT reconstructed — an anchor is evidence about the value,
+      // not licence to assert which template printed it.
+      return REDACTED_VALUE + tail[1] + diagnostic.slice(tail.index + tail[0].length);
+    }
+  }
+
+  return diagnostic;
+}
+
+/**
+ * The LAST match of a sticky-free global pattern, or `undefined`.
+ *
+ * Last, not first, for the reason the statement cut takes the last separator:
+ * a value may itself contain the anchor, and the later match is the one the
+ * database printed. `lastIndex` is reset so the shared `RegExp` objects above
+ * carry no state between calls.
+ */
+function lastMatch(pattern: RegExp, text: string): RegExpExecArray | undefined {
+  pattern.lastIndex = 0;
+  let found: RegExpExecArray | undefined;
+  for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
+    found = m;
+    if (m[0].length === 0) break;
+  }
+  pattern.lastIndex = 0;
+  return found;
+}
+
+/**
+ * Rebuild `stack` so its header carries the redacted message instead of the
+ * statement, keeping every frame.
+ *
+ * The header is located by the first FRAME line, not by matching the message:
+ * a bound statement can contain newlines, so the header is not reliably one
+ * line and a `replace(message, …)` would leave the remainder standing.
+ */
+function redactStack(stack: string | undefined, name: string, redactedMessage: string): string | undefined {
+  const header = `${name}: ${redactedMessage}`;
+  if (stack === undefined) return undefined;
+  const frame = FIRST_STACK_FRAME.exec(stack);
+  if (!frame) return header;
+  return `${header}\n${stack.slice(frame.index)}`;
+}

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #17568 — a refusal for a MISSING required key must also name the UNEXPECTED
+ * Commit 9c9e6d08f — a refusal for a MISSING required key must also name the UNEXPECTED
  * key the caller actually sent.
  *
  * THE DEFECT, measured on a real Claude Code client against a real service

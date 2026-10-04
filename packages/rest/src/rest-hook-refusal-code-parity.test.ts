@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#10345] A sandboxed hook refusal keeps its ADR-0112 `code` on the
+// [commit cad8b42f0] A sandboxed hook refusal keeps its ADR-0112 `code` on the
 // `/api/v1/data` write path — at 409 and 403 exactly as at 400.
 //
 // ---------------------------------------------------------------------------

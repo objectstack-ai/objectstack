@@ -23,11 +23,14 @@
  * would have run on a private `:memory:` database: in a local or replica mode,
  * a url that is none of those (a bare path, an unsupported scheme); a remote
  * url beside `syncUrl` or under `mode: 'local'` / `'replica'`; and a replica
- * whose url names an in-memory database.
+ * whose url names an in-memory database. A forced `mode: 'replica'` with no
+ * `syncUrl` is refused too, because nothing would ever sync it, and so is a
+ * forced `mode: 'local'` beside a `syncUrl`, because it would sync anyway.
  */
 
 import {
   SqlDriver,
+  GLOBAL_TENANT,
   type IntrospectedSchema,
   type ManagedDriftEntry,
   type SqlDriverConfig,
@@ -37,7 +40,7 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
-import { RemoteTransport } from './remote-transport.js';
+import { RemoteTransport, type RemoteTenantScope } from './remote-transport.js';
 import {
   backfillRemoteCanonicalColumns,
   type RemoteBackfillClient,
@@ -123,11 +126,19 @@ export interface TursoDriverConfig {
    * `url` or `:memory:` the constructor refuses it (`VALIDATION_ERROR` / 400):
    * there is no local file for the replica to live in, so the local engine
    * would run on a private in-memory database. For a remote database, drop
-   * `syncUrl` and keep the remote `url`.
+   * `syncUrl` and keep the remote `url`. Under a forced `mode: 'remote'` it is
+   * refused too (`VALIDATION_ERROR` / 400): the remote client never receives
+   * it, so no sync would ever run. Under a forced `mode: 'local'` it is
+   * refused as well (`VALIDATION_ERROR` / 400): the driver would sync the
+   * database with it anyway and the declared local mode would be ignored.
    */
   syncUrl?: string;
 
-  /** Sync configuration for embedded replica mode (requires `syncUrl`) */
+  /**
+   * Sync configuration for embedded replica mode. Requires `syncUrl`: without
+   * one the constructor refuses it (`VALIDATION_ERROR` / 400), in any mode,
+   * because nothing would read it.
+   */
   sync?: {
     /** Periodic sync interval in seconds (0 = manual only). Default: 60 */
     intervalSeconds?: number;
@@ -139,7 +150,7 @@ export interface TursoDriverConfig {
    * Operation timeout in milliseconds for remote operations.
    * Effective in replica and remote modes; `0` or unset means no bound.
    *
-   * What it bounds, per arm (measured against `@libsql/client@0.17.4`):
+   * What it bounds, per arm (measured against `@libsql/client@0.18.0`):
    *
    * - **Remote mode over HTTP** (`libsql://`, `https://`, `http://`): every
    *   request the client's HTTP transport makes, when THIS driver creates the
@@ -183,6 +194,18 @@ export interface TursoDriverConfig {
    * `:memory:` (`VALIDATION_ERROR` / 400), and `'replica'` is refused on an
    * in-memory url too. The engine would otherwise run on a private in-memory
    * database.
+   *
+   * A forced `'replica'` also needs {@link TursoDriverConfig.syncUrl}, the
+   * remote it replicates from: without one (or with an empty one) the
+   * constructor refuses it (`VALIDATION_ERROR` / 400), because nothing would
+   * ever sync and the datasource would run as a plain local database. For a
+   * local database, drop `mode`; for a replica, set `syncUrl`.
+   *
+   * A forced `'local'` is refused beside a (non-empty)
+   * {@link TursoDriverConfig.syncUrl} (`VALIDATION_ERROR` / 400): the driver
+   * syncs whenever `syncUrl` is set, so the datasource would run as an
+   * embedded replica under a `local` label. For a replica, drop `mode`; for a
+   * local database, drop `syncUrl` (and `sync`).
    */
   mode?: TursoTransportMode;
 
@@ -210,7 +233,9 @@ export interface TursoDriverConfig {
 // ── Autonumber on the remote face ────────────────────────────────────────────
 
 /**
- * [#6944] A record number this face cannot issue — refused, not written as NULL.
+ * [#6944 → #21113] A record number this face ISSUES — from the same persistent
+ * `_objectstack_sequences` counter the other two faces draw from, atomically
+ * in the database, over the remote transport.
  *
  * # What was measured, and where the knowledge lives
  *
@@ -218,9 +243,9 @@ export interface TursoDriverConfig {
  * inherit `SqlDriver.create`, which calls `fillAutoNumberFields` and issues the
  * number from the persistent `_objectstack_sequences` table. Remote overrides
  * the write path to `RemoteTransport`, which builds its own `INSERT` and never
- * enters that method — so on this face `auto_number` was only a column mapped to
- * `TEXT`, and the slot the engine deliberately left empty stayed empty. Measured
- * on `main` @ `2f3e79351`, remote, `case_number: { type: 'autonumber' }`:
+ * entered that method — so on this face `auto_number` was only a column mapped
+ * to `TEXT`, and the slot the engine deliberately left empty stayed empty.
+ * Measured on `main` @ `2f3e79351`, remote, `case_number: { type: 'autonumber' }`:
  *
  * ```
  * create      -> RESOLVED case_number=null
@@ -232,73 +257,137 @@ export interface TursoDriverConfig {
  * The engine cannot catch this for the caller: `supports.autonumber` is `true`
  * here (inherited through `...super.supports`), so `engine.ts` defers generation
  * to the driver entirely and never runs its own fallback — see the driver table
- * in its `generateAutoNumbers` docblock, which already records `driver-turso` as
+ * in its `generateAutoNumbers` docblock, which records `driver-turso` as
  * "inherited, no fallback path". A declared capability that boots and quietly
- * delivers nothing is the shape #3724 ruled on, and triage applied that ruling
- * here (2026-08-09): **disposition B, explicit refusal**. Implementing autonumber
- * on this transport (A) stays behind the appetite door for want of measured
- * demand — it is deferred, not overlooked.
+ * delivers nothing is the shape #3724 ruled on; triage applied that ruling here
+ * (2026-08-09) as **disposition B, explicit refusal** (`NOT_IMPLEMENTED`/501,
+ * raised on this driver), and left **A, implement autonumber on remote**,
+ * behind the appetite door "for want of measured demand", recording that the
+ * capability bit "flips *with* the implementation, not before it".
  *
- * ⚠️ The refusal is raised HERE, on the driver, and not inside
- * `RemoteTransport`, because the transport cannot see what it would need to
- * decide: `RemoteTransport.create(object, data)` takes no schema, caches none
- * (`syncSchema` reads one and keeps nothing), and so cannot tell an
- * `auto_number` column from any other `TEXT` one. The driver can:
+ * The demand was then measured: a published app on the hosted product, in a
+ * release check (objectstack-ai/cloud#2531 — `POST /api/v1/data/crm_account`
+ * answered `501 NOT_IMPLEMENTED` on a hosted tenant, whose database is on this
+ * transport, so no object declaring an `auto_number` field could get a new
+ * record there). The door's own condition was met, and A shipped: the refusal
+ * became generation, and `supports.autonumber: true` on this face became TRUE
+ * rather than knowingly false.
+ *
+ * ⚠️ Generation happens HERE, on the driver, and not inside `RemoteTransport`,
+ * for the reason the refusal was raised here: the transport cannot see what it
+ * would need to decide. `RemoteTransport.create(object, data)` takes no schema
+ * and caches none (`syncSchema` reads one and keeps nothing), so it cannot tell
+ * an `auto_number` column from any other `TEXT` one. The driver can:
  * `registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject` classifies
- * every field at remote schema-sync time and keys `autoNumberFields` strictly by
- * OBJECT name — measured populated in remote mode, tenant field and all. So the
- * knowledge exists exactly one layer above the statement builder, and that is
- * the layer that refuses.
+ * every field at remote schema-sync time and keys `autoNumberFields` by object
+ * name — measured populated in remote mode, tenant field and all. So the slots
+ * are filled one layer above the statement builder, and the transport receives
+ * a row that already carries its number, exactly as it receives a caller-
+ * supplied one.
  *
- * # Why NOT_IMPLEMENTED / 501 rather than 400
+ * # One semantics, not two — what is SHARED with the other faces
  *
- * The same two-class taxonomy this package already applies to aggregate
- * functions (#5907) and date buckets (#6212), and ADR-0112 for the vocabulary:
- * `autonumber` is a field type `@objectstack/spec` declares and this very
- * driver's other faces generate, so the caller's object definition is spelled
- * correctly and the request contains no mistake. The gap is the backend's.
+ * An embedded-replica face and a remote face can point at ONE database, so a
+ * second copy of any of these would hand out colliding numbers on it:
  *
- * # What is deliberately NOT refused
+ *  - the format rendering and precedence — `resolveAutonumberFormat` at
+ *    registration, `renderAutonumber` / `missingFieldValues` in
+ *    `fillAutoNumberFields`, which this face now CALLS for every write (the
+ *    empty-slot predicate, the `{field}` refusal, the tenant resolution, the
+ *    scope / prefix / suffix of the probe, the reservation report: all its);
+ *  - the counter identity — `SqlDriver.sequenceKeyHash` over
+ *    `(table, tenant, field, scope)` and `resolveSequenceTenantId`;
+ *  - the table — `SqlDriver.defineSequencesTable`, compiled to text by the
+ *    connection-less Knex this face already holds (#20054) and sent as-is;
+ *  - the bootstrap — `SqlDriver.maxAutonumberCounter`, the one reading of the
+ *    data table's MAX, suffix included (#6468), over rows this face fetches;
+ *  - the collision re-seed (#5495) — `collidingAutoNumberReservations` with
+ *    this face's `autoNumberValueExists` and `resyncSequenceToDataMax`.
+ *
+ * What is this face's own is only HOW the counter moves, because a Knex
+ * transaction (`SqlDriver.getNextSequenceValue`: lock the row, read, update) is
+ * an interactive transaction held across HTTP round trips here, and `forUpdate`
+ * is a no-op on SQLite anyway. The remote face moves it in ONE statement:
+ *
+ * ```
+ * warm:  UPDATE _objectstack_sequences SET last_value = last_value + 1
+ *        WHERE key_hash = ? RETURNING last_value
+ * cold:  (scan the data table's MAX, in JS, by the shared reading) then
+ *        INSERT … VALUES (…, max + 1) ON CONFLICT (key_hash)
+ *        DO UPDATE SET last_value = last_value + 1 RETURNING last_value
+ * ```
+ *
+ * Each is a single SQLite statement, serialised by the database's write lock
+ * whoever holds the connection — two processes cannot both read `last_value`
+ * before either writes it, which is the property an in-process counter or the
+ * engine's in-memory fallback cannot have, and the one the hosted runtime
+ * (several containers, one tenant database) needs. Two cold writers racing on
+ * the first row both scan, both INSERT, one wins the row and the other's
+ * `ON CONFLICT` arm increments the winner's value: distinct numbers, no lost
+ * seed. Measured on two processes, each holding its own `@libsql/client`
+ * connection to one database file (`turso-remote-autonumber-concurrency.test.ts`).
+ * The seed is NOT folded into the statement as a SQL `MAX(…)`: the bootstrap
+ * reading strips a declared suffix and reads the digit run after the prefix
+ * (`readAutonumberCounter`), which a dialect expression would be a second copy
+ * of, and that copy is the collision this section exists to prevent.
+ *
+ * # The legacy table shape — refused, not migrated
+ *
+ * `SqlDriver.ensureSequencesKeyHashShape` rebuilds a pre-`key_hash` table in
+ * place through a live Knex connection. This face has none, and a raw-SQL
+ * rewrite of that rebuild would be a second copy of a migration. So a table
+ * found WITHOUT `key_hash` is refused here, loudly and actionably, instead of
+ * being keyed by the legacy `(object, tenant_id, field)` rule — which would be
+ * a second keying rule beside the shared one. It cannot arise on a database
+ * this face created (it creates the current shape), only on one a pre-`key_hash`
+ * local face wrote first; the remedy is to open that database once through the
+ * local or embedded-replica face, whose `initObjects` migrates it.
+ *
+ * # What is deliberately left as it was
  *
  * A record that ALREADY carries a value in the slot. `fillAutoNumberFields`
- * skips exactly those (`undefined` / `null` / `''` is its own generate
- * predicate, reused verbatim below rather than re-derived), and on this face
- * they are written through unchanged and correctly — measured. That is the
- * `isSystem` seed replay and the `preserveAudit` historical import, which
- * `engine.ts` exempts from its strip on purpose (#5503); refusing them would
- * break a path that works today and would take the two faces further apart, not
- * closer (#6203).
+ * skips exactly those (`undefined` / `null` / `''` is its generate predicate),
+ * and on this face they are written through unchanged — the `isSystem` seed
+ * replay and the `preserveAudit` historical import, which `engine.ts` exempts
+ * from its strip on purpose (#5503). And on `upsert`, a row that MERGES keeps
+ * the number already in its column (#7011): the autonumber columns are named
+ * to the transport as insert-only, so the fresh reservation lands only on the
+ * insert leg — the leg #7099 recorded as writing NULL, which now gets a number.
  */
+
 /**
- * `SqlDriver.fillAutoNumberFields`'s own generate predicate: a slot holding
- * `undefined` / `null` / `''` is one the driver would have had to fill.
- *
- * Stated once, read twice — by the pre-write refusal below and by the
- * post-write report on the one leg that refusal provably cannot classify
- * (#7099). Two spellings of "empty" would be two answers to one question, and
- * the second one would drift.
+ * The refusal for a pre-`key_hash` sequences table this face cannot migrate —
+ * see the section above for why it refuses rather than keys by the legacy
+ * rule. `DATABASE_ERROR`/500: the request is spelled correctly, the backend's
+ * own state is what blocks the write, and a `StandardErrorCode` member so there
+ * is no new code.
  */
-function isEmptyAutoNumberSlot(held: unknown): boolean {
-  return held === undefined || held === null || held === '';
+function refuseLegacyRemoteSequencesTable(table: string): never {
+  const err = new Error(
+    `The sequence-counter table "${table}" on this database predates the key_hash shape, and the ` +
+    `Turso REMOTE transport does not migrate it (the local and embedded-replica transports do, ` +
+    `in place, when they initialise objects). No record number was issued and no row was written. ` +
+    `Open this database once through the local or embedded-replica transport (a \`file:\` URL, with ` +
+    `\`syncUrl\` for a replica) and let it initialise the objects that declare autonumber fields; ` +
+    `the rebuilt table then serves every transport.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  throw err;
 }
 
-function refuseRemoteAutonumber(object: string, fields: string[], path: string): never {
-  const err = new Error(
-    `Object "${object}" declares auto_number field(s) [${fields.join(', ')}] left empty for this ` +
-    `${path}, and the Turso REMOTE transport does not generate record numbers. ` +
-    `Generated here: none — remote writes go through \`RemoteTransport\`, which builds its own ` +
-    `INSERT and never enters \`SqlDriver.fillAutoNumberFields\`, so on this face \`auto_number\` ` +
-    `is only a column mapped to TEXT. The object is spelled correctly and @objectstack/spec ` +
-    `declares \`autonumber\` as a field type this driver's local and embedded-replica faces do ` +
-    `generate — this is a capability gap in the remote transport, not a mistake in the request, ` +
-    `which is why it answers NOT_IMPLEMENTED/501 rather than a 400. Use the local or ` +
-    `embedded-replica transport for objects that carry record numbers, or supply the value ` +
-    `explicitly (a seed replay or \`preserveAudit\` import keeps its own numbers and is written ` +
-    `unchanged). Until this change the same call RESOLVED and wrote NULL into the slot (#6944).`,
-  ) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
-  err.status = 501;
-  throw err;
+/**
+ * A table, field or tenant column interpolated into a sequence statement,
+ * spelled the way the transport spells a table it does not own
+ * (`RemoteTransport.tableSql`): double-quoted, any embedded quote doubled, so
+ * nothing inside the name can close the quoting and continue as grammar. Not
+ * held to the bare-identifier shape, because a federated object's
+ * `external.remoteName` is authored as any string and the local face reads
+ * such a table through Knex's own quoting — the counter must bootstrap from
+ * the same table on this face.
+ */
+function quoteSequenceName(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 // ── Remote transactions: refused, never decorative ───────────────────────────
@@ -646,10 +735,108 @@ function refuseRemoteInheritedMember(
   throw err;
 }
 
+// ── Federated objects on the remote face ─────────────────────────────────────
+
+/**
+ * [#20107] The refusal for a federated object whose `external.columnMap`
+ * renames a column, on any REMOTE data door.
+ *
+ * # Why the table is answered and the column map is refused
+ *
+ * The two halves of an ADR-0015 binding reach the local face through one
+ * registration, `SqlDriver.registerExternalObject`, and are read there in two
+ * different places. The TABLE (`external.remoteName`) is read wherever a
+ * statement is built, which on this face is one argument per data door:
+ * {@link TursoDriver.remoteTableFor} hands it to `RemoteTransport`, and every
+ * door now answers from the mapped table. The COLUMN map is read inside the
+ * local compiler itself. `SqlDriver` translates each WHERE and ORDER BY key and
+ * each write key to the remote column, and keeps the type coercion keyed by the
+ * local field. `RemoteTransport` compiles its own WHERE, projection, ORDER BY,
+ * aggregate and write statements and addresses every column by field name. So
+ * this face could reach the right table and still name columns it does not
+ * have. Measured on the remote face with the table resolved and the map
+ * ignored, a filter on a renamed field answered an empty list: the transport
+ * then read the backend's `no such column` as "no rows". A write failed with the
+ * backend's own error. (Since #20424 that read is refused `INVALID_FILTER` /
+ * 400 instead, which is loud but still wrong for a field the author declared:
+ * the refusal below stays the answer.)
+ *
+ * Translating the map here would be a second copy of the local compiler's
+ * column rule inside the transport's compiler. That is the second
+ * implementation ADR-0053 D-A1 exists to prevent, so it is not written. Until
+ * it is, the object is refused before any statement is built. An empty answer
+ * that is really a missing column is the shape a caller cannot see.
+ *
+ * # Only a map that renames something
+ *
+ * An entry whose remote column equals its local field is a no-op on the local
+ * face as well: `formatOutput` skips it and the column resolver answers the
+ * same name. Refusing it would refuse a binding this face serves correctly, so
+ * it is not refused.
+ *
+ * # Why NOT_IMPLEMENTED / 501
+ *
+ * The binding is spelled correctly, `@objectstack/spec` declares it, and the
+ * local and embedded-replica faces of this driver honour it. The gap is this
+ * transport's, which is the class this file answers with 501 everywhere else
+ * ({@link refuseRemoteInheritedMember}). `NOT_IMPLEMENTED` is a
+ * {@link StandardErrorCode} member, so there is no new code.
+ */
+function refuseRemoteColumnMap(object: string, door: string, renamed: string[]): never {
+  const err = new Error(
+    `\`${door}()\` on object "${object}" is not supported by the Turso REMOTE transport (this ` +
+    `datasource's transport mode is \`remote\`): the object's \`external.columnMap\` renames ` +
+    `field(s) [${renamed.join(', ')}] to other remote columns, and this transport does not ` +
+    'translate that map. It builds its own statements and addresses every column by the field ' +
+    'name, so a filter on a renamed field would read a column the remote table does not have, ' +
+    'and a write would name one. Nothing was read or written. The object\'s remote table ' +
+    '(`external.remoteName`) is honoured on this face; only the column translation is missing. ' +
+    'The binding is spelled correctly and the local and embedded-replica faces of this driver ' +
+    'translate it, so this is a capability gap of the remote transport rather than a mistake in ' +
+    'the request, which is why it answers NOT_IMPLEMENTED/501 and not a 400. Use the local or ' +
+    'embedded-replica transport for an object whose remote columns are renamed, or name the ' +
+    'fields after the remote columns and drop the renaming entries.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 /** The sentence the Knex-bound refusals below share. */
 const REMOTE_HAS_NO_KNEX_CONNECTION =
   'Remote mode builds the SQL driver\'s Knex with no connection and sends every statement to the ' +
   'remote database through the libSQL client instead.';
+
+// ── The tenant scope on the remote face ──────────────────────────────────────
+
+/**
+ * [#21226] What Knex's SQLite compiler answers for the bare probe
+ * {@link TursoDriver.remoteTenantScope} hands the tenant-scope chokepoint:
+ * `select *` when the chokepoint added nothing (no tenant context, or no
+ * tenant column), and `select * where <predicate>` when it scoped the call.
+ */
+const REMOTE_SCOPE_PROBE_UNSCOPED = 'select *';
+const REMOTE_SCOPE_PROBE_PREFIX = 'select * where ';
+
+/**
+ * [#21226] The refusal for a tenant-scoped remote call whose scope compiled to
+ * a shape {@link TursoDriver.remoteTenantScope} does not read: anything beside
+ * `where` terms (a limit, an order, a join), or a statement that does not open
+ * with the probe's own prefix. Unreachable while `SqlDriver.applyTenantScope`
+ * only adds a `where` group. It exists so a change there fails a call instead
+ * of sending it without the scope, or with a fragment that is not a predicate:
+ * fail toward isolation, never toward exposure.
+ */
+function refuseUnreadableRemoteTenantScope(object: string): never {
+  const err = new Error(
+    `The tenant scope for "${object}" could not be put on the remote statement: the SQL driver's ` +
+      'tenant-scope chokepoint compiled to a shape the remote face does not read, so the call is ' +
+      'refused rather than sent without the scope. This is a defect in the driver, not in the request.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INTERNAL_ERROR;
+  err.status = 500;
+  throw err;
+}
 
 /** How the REMOTE face answers one public `SqlDriver` member. */
 export type RemoteFaceAnswer =
@@ -695,7 +882,8 @@ export const REMOTE_FACE_ANSWERS = {
   aggregate: 'remote',
   execute: 'remote',
   // `SELECT DISTINCT`, compiled by the transport. A tenant-scoped call is
-  // refused: no remote read applies the tenant scope.
+  // refused: this door's statement carries no tenant scope (the other read
+  // doors carry it since #21226).
   distinct: 'remote',
   // Transactions: none on this face (ADR-0119 D1).
   beginTransaction: 'refused',
@@ -723,7 +911,8 @@ export const REMOTE_FACE_ANSWERS = {
   supportsRotation: 'remote',
   rotateShards: 'refused',
   // In-memory bookkeeping with no Knex; the remote schema doors call it
-  // themselves (`registerRemoteFieldMetadata`).
+  // themselves (`registerRemoteFieldMetadata`). Every remote data door reads
+  // the table it records (`remoteTableFor`), as `getBuilder` does locally.
   registerExternalObject: 'inherited',
   // In-memory bookkeeping with no Knex, by its own contract (`skipSchemaSync`).
   registerObjectMetadata: 'inherited',
@@ -751,6 +940,11 @@ export const REMOTE_FACE_ANSWERS = {
   // Pure functions of the registries the remote arms read themselves.
   temporalFilterValue: 'inherited',
   temporalFilterColumnSql: 'inherited',
+  // The SQLite bucket expression, rendered by Knex's compiler, which needs no
+  // connection; libSQL runs it. The remote `aggregate` buckets nothing (its
+  // `queryDateGranularity` is empty), so the engine buckets in memory, on the
+  // UTC calendar whose keys this expression answers.
+  dateBucketSql: 'inherited',
 } as const satisfies Record<keyof SqlDriver, RemoteFaceAnswer>;
 
 // ── Remote operation timeout ─────────────────────────────────────────────────
@@ -777,7 +971,7 @@ function remoteOperationTimedOut(what: string, timeoutMs: number): Error & { cod
  * set.
  *
  * Why this seam and not `Config.timeout`: measured against
- * `@libsql/client@0.17.4` (`@libsql/core@0.17.4`), that option is the BUSY
+ * `@libsql/client@0.18.0` (`@libsql/core@0.18.0`), that option is the BUSY
  * timeout for lock contention on local `file:` databases — its own docblock
  * says "remote clients ignore it" — so forwarding the driver's key to it would
  * have left remote mode exactly as inert as before while giving replica mode a
@@ -838,7 +1032,7 @@ function timeoutWindow(config: TursoDriverConfig): number | undefined {
  * `wss` / `ws` → its ws client, `https` / `http` → its HTTP client), but it
  * never sees the url as the author spelled it: the node entry is
  * `_createClient(expandConfig(config, true))`, and `expandConfig` has ALREADY
- * lowercased the scheme by then — `@libsql/core@0.17.4`,
+ * lowercased the scheme by then — `@libsql/core@0.18.0`,
  * `lib-esm/config.js`: `const originalUriScheme = uri.scheme.toLowerCase();`.
  * Executed against that version:
  * `expandConfig({ url: 'WSS://db.example.turso.io' }, true).scheme === 'wss'`
@@ -869,7 +1063,7 @@ function ridesWebSocketTransport(url: string): boolean {
 /**
  * `timeout` beside a `wss://` / `ws://` url — refused at construction.
  *
- * On those two schemes the window reaches nothing. `@libsql/client@0.17.4`'s
+ * On those two schemes the window reaches nothing. `@libsql/client@0.18.0`'s
  * WebSocket client (`lib-esm/ws.js` → `hrana.openWs(url, authToken)`) consults
  * neither `Config.fetch` — the seam {@link fetchBoundedBy} rides — nor any
  * timeout option of its own: over `@libsql/hrana-client@0.10.0`'s
@@ -907,7 +1101,7 @@ function refuseWebSocketTimeout(url: string, timeoutMs: number): never {
   const err = new Error(
     `\`TursoDriverConfig.timeout\` (${timeoutMs} ms) is set beside a \`${scheme}\` url, and on that ` +
       `scheme it bounds nothing: a \`${scheme}\` url rides @libsql/client's WebSocket transport, which ` +
-      `takes no fetch and no timeout option (measured against @libsql/client 0.17.4), so the window would ` +
+      `takes no fetch and no timeout option (measured against @libsql/client 0.18.0), so the window would ` +
       `be accepted and never delivered. Either omit \`timeout\` and run this remote unbounded, or keep it ` +
       `and spell the url \`libsql://\` or \`https://\` — the client resolves \`libsql://\` to HTTPS — ` +
       `where every request IS bounded and a stalled endpoint fails as TIMEOUT / 504.`,
@@ -967,13 +1161,145 @@ function refuseSuppliedClientTimeout(timeoutMs: number): never {
     `\`TursoDriverConfig.timeout\` (${timeoutMs} ms) is set beside \`TursoDriverConfig.client\` in remote ` +
       `mode, and on that pair it bounds nothing: the window is the \`fetch\` this driver hands ` +
       `@libsql/client while CREATING the remote client, and a pre-configured client is already built — ` +
-      `its transport is not the driver's to replace (measured against @libsql/client 0.17.4), so the ` +
+      `its transport is not the driver's to replace (measured against @libsql/client 0.18.0), so the ` +
       `window would be accepted and never delivered. Either drop \`client\` and let the driver create the ` +
       `remote client, where every request IS bounded and a stalled endpoint fails as TIMEOUT / 504, or ` +
       `keep \`client\` and omit \`timeout\`, building the bound into that client yourself when you call ` +
       `\`createClient({ fetch })\`. Replica mode is unaffected: there \`sync()\` is bounded whatever ` +
       `client is in use.`,
   ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
+// ── Sync keys the driver would ignore — refused, in the contract's own words ──
+
+/**
+ * [#20200] `syncUrl` under a forced `mode: 'remote'` — refused at construction.
+ *
+ * Remote mode sends every read and write straight to `url` through the client
+ * {@link createRemoteClient} builds, and that builder forwards no `syncUrl`; no
+ * sync interval is started on the remote arm either. Measured on the built
+ * driver before this refusal (`url: 'libsql://…'` or a `file:` url, forced
+ * `mode: 'remote'`, `syncUrl`, `sync: { intervalSeconds: 60 }`): it constructed
+ * and connected, `isSyncEnabled()` answered `true`, no interval started, and
+ * `sync()` rejected with `SYNC_NOT_SUPPORTED` (`SyncNotSupported("File")` on
+ * the `file:` url). A declared replica the runtime never runs, reported as
+ * enabled: the declared-but-not-enforced shape ADR-0049 does not ship.
+ *
+ * Only a FORCED remote mode reaches this: a remote url beside `syncUrl` with no
+ * `mode` is classified `replica` by {@link TursoDriver.detectMode} and refused
+ * on its own grounds by `localEngineDefect`.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `syncUrl`,
+ * byte for byte, so a datasource hears the same sentence at authoring and at
+ * boot. The spec keeps it module-local and this package does not grow the
+ * spec's published surface for one string (the ruling on #20200), so it is a
+ * copy here, held equal to the schema's issue by
+ * `spec/turso-config-constructor-parity.test.ts`. Edit it there first, then
+ * here, never here alone.
+ */
+const REMOTE_MODE_SYNC_URL_REFUSAL =
+  "`syncUrl` configures an embedded replica, but `mode: 'remote'` sends every read and write " +
+  'straight to `url` and builds no replica: the turso driver refuses this configuration when ' +
+  'it starts. For a remote database, drop `syncUrl` (and `sync`). For an embedded replica, drop ' +
+  "`mode` and point `url` at a local file beside `syncUrl`: `url: 'file:./data/replica.db'`.";
+
+/**
+ * [#20200] `sync` with no `syncUrl` — refused at construction, in every mode.
+ *
+ * `sync` configures the embedded-replica sync, and `connect()` reads it only
+ * inside the `syncUrl` arm: without `syncUrl` no sync client is built, no
+ * interval is started, and `sync()` returns without doing anything, whatever
+ * `intervalSeconds` / `onConnect` say (measured on the built driver in local,
+ * forced-replica and remote mode). Same ADR-0049 shape as the `syncUrl` refusal
+ * above.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `sync`, byte
+ * for byte, held equal by the same parity test. Edit it there first.
+ */
+const SYNC_WITHOUT_SYNC_URL_REFUSAL =
+  '`sync` configures embedded-replica syncing, which only runs when `syncUrl` names the ' +
+  'remote to replicate from. Set `syncUrl`, or remove `sync` — on its own it configures ' +
+  'nothing.';
+
+/**
+ * [#20437] A forced `mode: 'replica'` with no `syncUrl` — refused at construction.
+ *
+ * An embedded replica is a local file kept in sync with the remote named in
+ * `syncUrl`. Forced with no `syncUrl` (or an empty one), the driver used to
+ * build it with `transportMode = 'replica'` and then run it as a plain local
+ * database: `connect()` builds the sync client only inside its `syncUrl` arm,
+ * so no sync ever ran, no interval started, `isSyncEnabled()` answered `false`
+ * and `sync()` returned without doing anything, while reads and writes went to
+ * the local file (measured on the built driver before this refusal, with and
+ * without `sync: { intervalSeconds: 60 }`). A declared mode the runtime never
+ * runs: the declared-but-not-enforced shape ADR-0049 does not ship. The
+ * datasource is not re-classified as local instead, for the same reason
+ * `localEngineDefect` gives: that would accept the declaration and ignore it.
+ *
+ * Only a FORCED replica reaches this: with no `mode`, {@link TursoDriver.detectMode}
+ * answers `replica` only beside a `syncUrl`. A forced replica on a url the local
+ * engine cannot open met `localEngineDefect` first, and one with `sync` met the
+ * `sync` refusal first, so this fires on a `file:` url alone.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `mode`,
+ * byte for byte, held equal by `spec/turso-config-constructor-parity.test.ts`.
+ * Edit it there first.
+ */
+const REPLICA_MODE_WITHOUT_SYNC_URL_REFUSAL =
+  "`mode: 'replica'` makes this datasource an embedded replica, a local file kept in sync with " +
+  'the remote named in `syncUrl`, but no `syncUrl` is set: nothing would ever sync, so it would ' +
+  'run as a plain local database that never replicates — the turso driver refuses this ' +
+  'configuration when it starts. For an embedded replica, name the remote in `syncUrl` beside ' +
+  "the local file: `url: 'file:./data/replica.db'` with `syncUrl` set to the `libsql://` or " +
+  "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.";
+
+/**
+ * [#20586] A forced `mode: 'local'` beside a `syncUrl` — refused at construction.
+ *
+ * The same defect as the replica refusal above, the other way round. The
+ * driver used to build it with `transportMode = 'local'` and then run it as an
+ * embedded replica: `connect()` builds the sync client whenever `syncUrl` is
+ * set in a non-remote mode, whatever `mode` says. Measured on this package's
+ * source before this refusal (a `file:` url, forced `mode: 'local'`,
+ * `syncUrl`, `sync: { intervalSeconds: 1 }`, a sync-counting client): one sync
+ * on connect, `isSyncEnabled()` answered `true`, the interval started and
+ * synced again — exactly what the same config with no `mode` (a replica) did,
+ * while the same `file:` url with no `syncUrl` synced nothing. A declared mode
+ * the runtime ignores: the declared-but-not-enforced shape ADR-0049 does not
+ * ship. The datasource is not honoured as local by skipping the sync instead:
+ * that would ignore a declared `syncUrl`, the same defect with the keys
+ * swapped.
+ *
+ * Only a FORCED local mode reaches this: with no `mode`,
+ * {@link TursoDriver.detectMode} answers `replica` beside a `syncUrl`. A forced
+ * local mode on a url the local engine cannot open met `localEngineDefect`
+ * first, so this fires on a `file:` url or `:memory:`. An empty `syncUrl` is
+ * unset, as everywhere in this driver, and is not refused.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `mode`
+ * for this shape, byte for byte, held equal by
+ * `spec/turso-config-constructor-parity.test.ts`. Edit it there first.
+ */
+const LOCAL_MODE_WITH_SYNC_URL_REFUSAL =
+  "`mode: 'local'` makes this datasource a plain local database, but `syncUrl` names a remote to " +
+  'replicate from: the database would still be synced with that remote as an embedded replica, ' +
+  'so the declared local mode would be ignored — the turso driver refuses this configuration ' +
+  'when it starts. For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: ' +
+  "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).";
+
+/**
+ * Throw one of the four sync-key refusals above as the ADR-0112 envelope.
+ *
+ * Raised BEFORE `super()`, AFTER the three refusals above it in the
+ * constructor, so no configuration those already refuse changes which message
+ * it gets. ⛔ The messages carry no url and no internal issue id: they reach an
+ * operator's boot log and Studio's datasource form.
+ */
+function refuseIgnoredSyncKey(message: string): never {
+  const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
   throw err;
@@ -986,7 +1312,7 @@ function refuseSuppliedClientTimeout(timeoutMs: number): never {
  * comparing the scheme's letters in any case?
  *
  * A url's scheme is case-insensitive, and `@libsql/client` reads it that way:
- * `@libsql/core@0.17.4` `lib-esm/config.js` routes on
+ * `@libsql/core@0.18.0` `lib-esm/config.js` routes on
  * `uri.scheme.toLowerCase()`. Executed against that version, `expandConfig`
  * answers `https` for `LIBSQL://…`, `wss` for `Wss://…` and `file` for
  * `FILE:./x.db`, and `createClient` opens each of them. Every reader of the url
@@ -1018,7 +1344,7 @@ function isFileUrl(url: string): boolean {
 /**
  * Does this url name an in-memory database, by `@libsql/client`'s own reading?
  *
- * `@libsql/core@0.17.4` `lib-esm/config.js` expands a bare `:memory:` to
+ * `@libsql/core@0.18.0` `lib-esm/config.js` expands a bare `:memory:` to
  * `file::memory:`, and `isInMemoryConfig` then answers true for a `file` scheme
  * whose path is `:memory:` or starts with `:memory:?`. Mirrored here so the
  * replica refusal below covers exactly the urls the client's own embedded
@@ -1062,7 +1388,7 @@ type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica'
  * `URL_INVALID` ("Embedded replica must use file for local db"). So:
  *
  * - `'remote-url'`: a url {@link TursoDriver.detectMode} would call remote, in
- *   a local or replica mode. `@libsql/client@0.17.4` builds no embedded replica
+ *   a local or replica mode. `@libsql/client@0.18.0` builds no embedded replica
  *   for it: `lib-esm/node.js` routes `http`/`https` to its HTTP client and
  *   `ws`/`wss` to its WebSocket client, and `syncUrl` is read by
  *   `lib-esm/sqlite3.js` alone (a `syncUrl` grep over `http.js` and `ws.js`
@@ -1087,7 +1413,7 @@ type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica'
  *
  *   The scheme is now matched in any letter case (see {@link startsWithScheme}),
  *   so an uppercase remote url is remote, as the client routes it. What is left
- *   has no durable reading at all: `@libsql/client@0.17.4` refuses a bare path
+ *   has no durable reading at all: `@libsql/client@0.18.0` refuses a bare path
  *   as `URL_INVALID` ("not in a valid format") and an unsupported scheme as
  *   `URL_SCHEME_NOT_SUPPORTED`. Treating a bare path as `file:` instead was
  *   rejected: that invents a url spelling the client refuses, so the same
@@ -1158,7 +1484,7 @@ function refuseNonDurableLocalEngine(
       `read back, then be lost on restart, and none of them would reach the remote. ` +
       (mode === 'replica'
         ? '(@libsql/client builds a plain remote client for a remote url and ignores `syncUrl` beside ' +
-          'it, measured against @libsql/client 0.17.4, so there is no embedded replica to sync.) '
+          'it, measured against @libsql/client 0.18.0, so there is no embedded replica to sync.) '
         : '') +
       `To use the remote database, ${toRemote}. ${toLocal}`;
   } else if (defect === 'unrecognised-url') {
@@ -1191,7 +1517,7 @@ function refuseNonDurableLocalEngine(
       'local SQLite engine that can open only a `file:` url or `:memory:`. On this url it would run ' +
       'on a private in-memory database instead: writes would succeed and read back, then be lost on ' +
       'restart. (@libsql/client refuses such a url itself: a bare path as URL_INVALID, an unsupported ' +
-      `scheme as URL_SCHEME_NOT_SUPPORTED, measured against @libsql/client 0.17.4.) ${toFile} ${toRemote}`;
+      `scheme as URL_SCHEME_NOT_SUPPORTED, measured against @libsql/client 0.18.0.) ${toFile} ${toRemote}`;
   } else {
     const drop = config.mode
       ? "`mode: 'replica'`" + (config.syncUrl ? ' and `syncUrl`' : '')
@@ -1288,7 +1614,8 @@ export class TursoDriver extends SqlDriver {
       batchSchemaSync: true,
 
       // Remote transport does NOT do native date bucketing. SqlDriver's
-      // `aggregate` — which emits `date_trunc`/`strftime` for structured
+      // `aggregate` — which emits its dialect's bucket expression (`strftime`
+      // here; see `SqlDriver.buildDateBucketExpr`) for structured
       // `{ field, dateGranularity }` groupBy items — is only reached in
       // local/replica mode; remote mode delegates `aggregate` to
       // `RemoteTransport.aggregate`, which accepts only string group-by
@@ -1372,6 +1699,15 @@ export class TursoDriver extends SqlDriver {
    */
   private readonly remoteCodecResidueConverged: Record<string, Set<string>> = {};
 
+  /**
+   * The remote face's `sequencesTableEnsurePromise`: that the `key_hash`-keyed
+   * `_objectstack_sequences` table EXISTS, probed once per process through the
+   * transport. It remembers nothing about any counter's value — the counter
+   * lives in the database and moves there. See
+   * {@link ensureRemoteSequencesTable}.
+   */
+  private remoteSequencesTableEnsured: Promise<void> | null = null;
+
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
     // A local or replica engine with nothing durable behind it (a remote url,
@@ -1399,6 +1735,35 @@ export class TursoDriver extends SqlDriver {
     // `undefined` alike.
     if (mode === 'remote' && timeoutMs !== undefined && config.client !== undefined && config.client !== null) {
       refuseSuppliedClientTimeout(timeoutMs);
+    }
+    // [#20200] Sync keys this configuration would ignore are refused here too,
+    // in `@objectstack/spec`'s own words: `syncUrl` under a forced remote mode
+    // (the remote client never receives it and no sync runs), and `sync` with
+    // no `syncUrl` in any mode (nothing reads it). The presence tests are the
+    // ones `detectMode`, `connect()` and `sync()` already use — a `syncUrl` is
+    // set when truthy, so an empty one is unset — and the same the spec's
+    // refinement applies. See `REMOTE_MODE_SYNC_URL_REFUSAL`.
+    if (mode === 'remote' && config.syncUrl) {
+      refuseIgnoredSyncKey(REMOTE_MODE_SYNC_URL_REFUSAL);
+    }
+    if (config.sync && !config.syncUrl) {
+      refuseIgnoredSyncKey(SYNC_WITHOUT_SYNC_URL_REFUSAL);
+    }
+    // [#20437] A replica with no remote to replicate from: a forced
+    // `mode: 'replica'` with no `syncUrl` never syncs and runs as a plain local
+    // database, so it is refused here too, in the spec's words. After the `sync`
+    // refusal, which the spec contract also raises first. See
+    // `REPLICA_MODE_WITHOUT_SYNC_URL_REFUSAL`.
+    if (mode === 'replica' && !config.syncUrl) {
+      refuseIgnoredSyncKey(REPLICA_MODE_WITHOUT_SYNC_URL_REFUSAL);
+    }
+    // [#20586] The same defect the other way round: a forced `mode: 'local'`
+    // beside a `syncUrl` would still be synced by `connect()`, so the declared
+    // local mode would be ignored. Refused here too, in the spec's words, last:
+    // every refusal above is exclusive of it except the url ones, which the
+    // spec contract also raises first. See `LOCAL_MODE_WITH_SYNC_URL_REFUSAL`.
+    if (mode === 'local' && config.syncUrl) {
+      refuseIgnoredSyncKey(LOCAL_MODE_WITH_SYNC_URL_REFUSAL);
     }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);
@@ -1435,6 +1800,28 @@ export class TursoDriver extends SqlDriver {
       // column's canonical ISO text.
       this.remoteTransport.setNonTextColumnResolver((object, field) =>
         this.isNonTextColumn(object, field),
+      );
+
+      // [#20444] The declaration `$empty` expands, handed down the same way:
+      // `registerRemoteFieldMetadata` → `registerExternalObject` fills the SAME
+      // `valueShapeFields` registry the local compiler reads, keyed by object
+      // name, so both transports answer `$empty` by one declared row.
+      this.remoteTransport.setDeclaredValueShapeResolver((object, field) =>
+        this.declaredValueShape(object, field),
+      );
+
+      // [#21178] The JSON-column rule, handed down the same way:
+      // `registerRemoteFieldMetadata` → `registerExternalObject` fills the SAME
+      // `jsonFields` registry the local compiler's gate and `$contains`
+      // membership read, keyed by object name, so a filter on a multi-value or
+      // structured-JSON field is refused, or answered by membership, alike on
+      // both transports (`turso-local-remote-json-column-parity` holds them to
+      // one answer). [#21236] It hands down the column's CLASS, from the same
+      // registry plus `mediaFields`, so a single-value file-class field (a JSON
+      // column on this face always: remote mode never moves its media columns)
+      // reads the local face's media-column-move refusal, not `$contains`.
+      this.remoteTransport.setJsonColumnResolver((object, field) =>
+        this.jsonColumnFieldClass(object, field),
       );
 
       // [#7929] The server-side half of a REDACTED filter refusal. The remote
@@ -1747,14 +2134,14 @@ export class TursoDriver extends SqlDriver {
   // [#6402] Every `options` parameter in this file is a {@link DriverOptions},
   // matching `SqlDriver` / `IDataDriver` — the two faces of one driver may not
   // declare one argument two ways. This was the last `any` axis left in the
-  // overrides: #5181 (PR #6076), #6075 (PR #6210) and #6212 each narrowed
+  // overrides: #5181 (commit 6513c1749), commit d367f03d6 (PR #6210) and #6212 each narrowed
   // `query`, and each deliberately left `options` alone because it is a
   // SEPARATE axis whose shape was verbatim-identical across all 17 overrides —
   // narrowing one would have read as a verdict on the other sixteen. #6402
   // closed all 17 in one sweep, so there is no half-narrowed state to
   // interpret. Keep it that way: a new override here declares `DriverOptions`.
 
-  // [#17690] The return is the contract's own type, and this override needs it
+  // [commit be5c60291] The return is the contract's own type, and this override needs it
   // declared HERE: an override re-declares the door in this package's own
   // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
   // consumer holding a `TursoDriver` — measured twice already (#15280 for
@@ -1764,7 +2151,18 @@ export class TursoDriver extends SqlDriver {
   // `turso-driver-doors-declared-types.test.ts`.
   override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'find');
-    if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'find');
+      const remoteQuery = this.toRemoteReadQuery(object, query);
+      // [#21226] The caller's tenant scope, as the local face scopes `findRows`.
+      const scope = this.remoteTenantScope(object, options);
+      return this.formatRemoteRows(
+        object,
+        await this.remoteReadExit(object, { where: query?.where }, () =>
+          this.remoteTransport!.find(object, remoteQuery, table, scope),
+        ),
+      );
+    }
     return super.find(object, query, options);
   }
 
@@ -1776,7 +2174,17 @@ export class TursoDriver extends SqlDriver {
   // re-erasing the door, which no driver-sql fix reaches.
   override async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.assertRemoteTransactionUnsupported(options, 'findOne');
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'findOne');
+      const remoteQuery = this.toRemoteReadQuery(object, query, { singleRowLookup: true });
+      const scope = this.remoteTenantScope(object, options);
+      return this.formatRemoteRow(
+        object,
+        await this.remoteReadExit(object, { where: query?.where }, () =>
+          this.remoteTransport!.findOne(object, remoteQuery, table, scope),
+        ),
+      );
+    }
     return super.findOne(object, query, options);
   }
 
@@ -1832,140 +2240,546 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
-   * [#6944] Refuse a remote write that would need a record number this face
-   * cannot issue — see {@link refuseRemoteAutonumber} for the ruling and the
-   * measurements.
+   * [#20107] The table a REMOTE statement for `object` is compiled against: the
+   * answer {@link SqlDriver.getBuilder} gives the local face, read from the same
+   * registry, `physicalTableByObject`.
    *
-   * Called BEFORE `toRemoteWriteForms` and before any statement is built, so a
-   * refused write costs no round trip — the rule every other refusal on this
-   * path already follows, and the one the refusal suites assert.
+   * # The defect this closes
    *
-   * The lookup is `autoNumberFields[object]` with no table-name fallback,
-   * unlike `fillAutoNumberFields`. That is not a shortcut: in remote mode the
-   * only writer of this registry is `registerRemoteFieldMetadata`, whose own
-   * docs record that it keys strictly by `object` ("never let a stray
-   * `schema.name` shadow it"), and the Knex path that produces the other key is
-   * unreachable here. A second lookup rule would be a second answer.
+   * `registerExternalObject` records a federated object's remote table
+   * (`external.remoteName`, ADR-0015), and on the local face `getBuilder`
+   * reads that record for every statement. This face inherits the registration
+   * (`REMOTE_FACE_ANSWERS.registerExternalObject`), and every remote data door
+   * handed `RemoteTransport` the object name, which the transport used as the
+   * table. So the registration was recorded and never read here. Measured on a
+   * remote face over a libSQL `file:` client with `ext_t` registered to
+   * `probe_t`, at the base of this change: `find`, `findOne`, `count` and every
+   * write door failed with a bare `LibsqlError`, `SQLITE_ERROR: no such table:
+   * ext_t` (no `status`); `aggregate` answered `[]`; `distinct` answered
+   * `DATABASE_ERROR`/500. A local control over the same file answered all of
+   * them from `probe_t`.
    *
-   * A no-op for an object with no `auto_number` field, which is the overwhelming
-   * majority — one map read per remote write.
+   * The `IDataDriver` contract says what carrying `registerExternalObject`
+   * promises: the driver records the physical remote table "so queries resolve
+   * to the remote table". ADR-0015 says `remoteName` "is honoured on all
+   * dialects". This face carries the member, so it delivers what the member
+   * promises.
+   *
+   * # One lookup, not a copy
+   *
+   * The registry is `SqlDriver`'s and stays there: this reads it, and does not
+   * move it or restate it. A managed object misses the map, or maps to itself
+   * (`registerRemoteFieldMetadata` registers it under its own name), so it
+   * resolves to its own name, and its statement is the one this face built
+   * before. `physicalSchemaByObject` needs no reading here: the base
+   * registration never fills it on a SQLite dialect, where it warns that the
+   * qualifier is ignored, on both faces alike.
+   *
+   * # A column map that renames is refused here, before any statement
+   *
+   * See {@link refuseRemoteColumnMap}. Every remote data door calls this first,
+   * so a refused call sends nothing.
    */
-  private refuseUngeneratableRemoteAutonumber(
-    object: string,
-    rows: Array<Record<string, any> | null | undefined>,
-    path: string,
-  ): void {
-    const cfgs = this.autoNumberFields[object];
-    if (!cfgs || cfgs.length === 0) return;
-    const empty = new Set<string>();
-    for (const row of rows) {
-      if (!row || typeof row !== 'object') continue;
-      for (const cfg of cfgs) {
-        if (isEmptyAutoNumberSlot(row[cfg.name])) empty.add(cfg.name);
-      }
+  private remoteTableFor(object: string, door: string): string {
+    const columnFields = this.columnFieldByObject[object];
+    if (columnFields) {
+      const renamed = Object.entries(columnFields)
+        .filter(([remoteColumn, field]) => remoteColumn !== field)
+        .map(([, field]) => field);
+      if (renamed.length > 0) refuseRemoteColumnMap(object, door, renamed);
     }
-    if (empty.size > 0) refuseRemoteAutonumber(object, [...empty], path);
+    return this.physicalTableByObject[object] ?? object;
   }
 
   /**
-   * [#7099] Say out loud that a remote write landed a row whose declared
-   * `auto_number` column holds no record number.
+   * [#21226] The caller's tenant scope for a REMOTE statement on `object`,
+   * compiled by the local face's own chokepoint, or `undefined` when the call
+   * is unscoped. Every remote door that reads rows or picks rows to write
+   * hands it to `RemoteTransport`, which ANDs it onto the statement's `WHERE`.
    *
-   * # Why this exists beside the refusal, rather than inside it
+   * # The gap this closes
    *
-   * {@link refuseUngeneratableRemoteAutonumber} runs BEFORE the statement is
-   * built, which is what makes a refused write cost zero round trips — and is
-   * also the reason it cannot cover every leg. An upsert carrying an `id` or
-   * explicit `conflictKeys` may merge (safe: the row keeps the number already
-   * in its column) or may insert (the slot lands NULL), and which one it did is
-   * not knowable before it runs. #6944 left that leg as declared residue.
+   * The engine threads the caller's organization to every driver as
+   * `DriverOptions.tenantId` (ADR-0131 D8). On the local face
+   * {@link SqlDriver.applyTenantScope} puts it on every read and on every
+   * update and delete predicate. The remote branches of `find`, `findOne`,
+   * `count`, `aggregate`, `update`, `delete`, `bulkUpdate`, `bulkDelete`,
+   * `updateMany` and `deleteMany` handed `RemoteTransport` no `DriverOptions`,
+   * so their statements carried the caller's filter and nothing else, and
+   * `create` stamped no organization on the row. Only `distinct()` refused,
+   * because its source stated the gap. Where the engine's Layer 0 wall composes
+   * a predicate above the driver, it held other organizations' rows back. Where
+   * it composes none (the `single` posture, or an elevated caller that carries
+   * its organization), the driver scope is the only fence, and this face had
+   * none.
    *
-   * What has since been measured is that the round trip the residue was
-   * attributed to is **already paid**: `RemoteTransport.upsert` follows its
-   * `INSERT … ON CONFLICT` with `SELECT * FROM "<object>" WHERE "id" = ?` and
-   * returns the mapped row, unconditionally. So the NULL is in hand at no extra
-   * cost, on the layer that knows which column is an `auto_number` — and the
-   * leg can be made loud without buying anything. Note the check is not "did it
-   * insert or merge": it is one field read on a row this method already holds.
+   * # One rule, compiled, not a copy
    *
-   * # Report, not refuse — deliberately
+   * This method does not restate the predicate. It hands
+   * {@link SqlDriver.applyTenantScope} a bare Knex query builder and compiles
+   * what the chokepoint added. So the rule's decisions all stay in that one
+   * method:
+   *  - the NULL-organization arm (a platform row with no organization is no
+   *    other tenant's);
+   *  - the `group` posture's membership set (`tenantIds`, the union Layer 0
+   *    enforces);
+   *  - the exits for a call with no tenant context and for an object with no
+   *    tenant column.
+   * The two faces therefore answer the same row set by construction. Compiling
+   * needs no connection: this face's Knex has none
+   * (`REMOTE_HAS_NO_KNEX_CONNECTION`), and nothing here runs a statement on
+   * it. The fragment is SQLite, the dialect the remote database speaks, in the
+   * identifier quoting Knex's SQLite compiler uses.
    *
-   * The write has already happened when this runs. Refusing here would be a
-   * different act from the pre-write gate (it would have to undo a landed row),
-   * and that trade-off is untouched by this change: nothing about what the
-   * remote face accepts or rejects moves. Generating the number on remote stays
-   * behind the same appetite door (#6944 disposition A) it always has.
-   *
-   * # `warn`, not `error`
-   *
-   * By AGENTS.md §Degradation log levels this is a FUNCTIONAL degradation, not
-   * a durability one: everything the caller submitted persisted, nothing it
-   * claims to have stored is missing, and the returned row carries the `null`
-   * in plain sight rather than reporting a success that did not happen. What is
-   * absent is a DERIVED value this face declares it does not issue — the same
-   * capability gap the sibling legs answer with `NOT_IMPLEMENTED`/501. Grading
-   * it `error` would file a known capability gap beside real data loss, which
-   * is the over-application that rule warns about by name.
-   *
-   * # Not throttled, unlike the tenant-audit warning
-   *
-   * `SqlDriver.tenantAuditWarned` collapses its warning per `{object}:{op}`
-   * because that one reports a CONFIGURATION mistake — the second occurrence
-   * carries no information the first did not. Here the row `id` IS the payload:
-   * each occurrence names a different row that landed without a record number,
-   * and that list is what an operator repairs. One line per unnumbered row is
-   * proportional, not noisy.
+   * A compiled shape this method cannot read is refused, never sent unscoped
+   * ({@link refuseUnreadableRemoteTenantScope}).
    */
-  private reportUnnumberedRemoteRow(
+  private remoteTenantScope(object: string, options: DriverOptions | undefined): RemoteTenantScope | undefined {
+    const probe = this.knex.queryBuilder();
+    this.applyTenantScope(probe, object, options);
+    // The chokepoint may add `where` terms and nothing else: a limit, an order
+    // or a join cannot ride into a remote `WHERE`.
+    if (probe.clone().clearWhere().toSQL().sql !== REMOTE_SCOPE_PROBE_UNSCOPED) {
+      refuseUnreadableRemoteTenantScope(object);
+    }
+    const { sql, bindings } = probe.toSQL();
+    if (sql === REMOTE_SCOPE_PROBE_UNSCOPED) return undefined;
+    if (!sql.startsWith(REMOTE_SCOPE_PROBE_PREFIX)) refuseUnreadableRemoteTenantScope(object);
+    return { sql: sql.slice(REMOTE_SCOPE_PROBE_PREFIX.length), args: [...bindings] };
+  }
+
+  /**
+   * [#20107] The terminal of the remote `find`, `findOne` and `count` exits:
+   * the local face's own read-exit envelope, {@link SqlDriver.backendStatementFault}.
+   *
+   * On the local face every typed read exit ends there (#8931), so a statement
+   * the backend refuses leaves the driver as `DATABASE_ERROR` / 500. The
+   * dialect text stays in the server log, the dialect error rides under a
+   * non-enumerable `cause`, and the table the statement targeted is declared
+   * for `isMissingTableError`. These three remote exits had no terminal: the
+   * libSQL client's error came back whole, a `LibsqlError` with an
+   * `SQLITE_ERROR` code and no `status`. That is what a federated object's
+   * reads raised here, and what a remote table that really is absent still
+   * raises once the table is resolved.
+   *
+   * The same method is called, not a copy. It resolves the targeted table the
+   * way {@link remoteTableFor} does, from the same registry, so the declared
+   * table is the one this face's statement named. It returns anything that
+   * already declares a `status` unchanged: the transport's filter refusals and
+   * the remote timeout envelope keep their own answers. `distinct` already
+   * reaches the same terminal through `distinctBackendFault`. The write doors
+   * are left alone exactly as the local face leaves them, because a write
+   * fault is classified at the REST boundary from its message.
+   *
+   * [#20424] `aggregate` now ends here too, and every exit reaches the
+   * terminal through {@link remoteReadFault}, which adds the local face's
+   * unresolvable-column arms in front of it.
+   */
+  private async remoteReadExit<T>(object: string, query: DriverQuery, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      throw this.remoteReadFault(object, query, error);
+    }
+  }
+
+  /**
+   * [#20424] Which envelope a backend error leaving a remote read exit
+   * deserves: the local face's answer, from the local face's own seam.
+   *
+   * # The defect this closes
+   *
+   * `RemoteTransport` answered a missing table or column with `[]` in two
+   * catches: `aggregate` for `no such table` and `no such column`, and the
+   * terminal of `find`'s projection backstop for `no such column`. Measured at
+   * base `6e3e5462c` over one libSQL `file:` database, with a local driver over
+   * the same file as the control, for a federated object and for a managed one
+   * alike:
+   *
+   * ```
+   * aggregate, table really absent                     local DATABASE_ERROR 500  remote []
+   * aggregate, groupBy a declared field, column absent local INVALID_FIELD 400   remote []
+   * find, where names a declared field, column absent  local INVALID_FILTER 400  remote []
+   * findOne, the same where                            local INVALID_FILTER 400  remote null
+   * find, orderBy on that field                        local rows, unordered     remote []
+   * count, the same where                              local INVALID_FILTER 400  remote DATABASE_ERROR 500
+   * ```
+   *
+   * The transport now lets the backend's error out (its `find` keeps the local
+   * ladder's projection and ORDER BY rungs first), and this classifies it.
+   *
+   * # The seam: `SqlDriver.aggregateBackendFault`, called, not copied
+   *
+   * The local face decides AFTER its statement runs, from the backend's error:
+   * `count` and `findRows` send an unresolvable column to
+   * `unresolvableFilterColumnRefusal` (#8790) and everything else to
+   * `backendStatementFault` (#8931); `aggregate` attributes the column to the
+   * clause the caller's own query names it in first (#11541). All three
+   * compositions are protected members this driver inherits. The class
+   * predicate they share, `isUnresolvableColumnError`, is not exported from
+   * `@objectstack/driver-sql`, so `aggregateBackendFault` is the one inherited
+   * member that asks it. For `aggregate` it is the local exit verbatim. For
+   * `find`, `findOne` and `count` it is handed the WHERE alone, and then it is
+   * the local exit too: with no groupBy and no aggregation its first arm cannot
+   * fire, its second is `unresolvableFilterColumnRefusal` with the caller's
+   * `where`, and its terminal is `backendStatementFault`. The one place the two
+   * could differ, a recognised wording whose column name does not parse (the
+   * local `count` still answers `INVALID_FILTER` there, this answers
+   * `DATABASE_ERROR`), cannot arise on libSQL, whose only wording is
+   * `no such column: <name>`.
+   *
+   * # Anything that already declares a `status` passes unchanged
+   *
+   * The local face guards only the statement's EXECUTION, so its classifier
+   * never sees a refusal raised while the statement is built. A remote door
+   * compiles and executes inside one transport call, so the transport's own
+   * refusals (the filter compiler's `INVALID_FILTER`, the aggregate
+   * vocabulary's refusals, the timeout envelope) arrive here beside the
+   * backend's errors. They all declare a `status`; a libSQL error declares
+   * none. So the gate `backendStatementFault` applies first on its own terms
+   * ("is it already ours") is applied here before the classifier reads a
+   * message, and the classifier sees exactly what the local one sees.
+   */
+  private remoteReadFault(object: string, query: DriverQuery, error: unknown): Error {
+    if (typeof (error as { status?: unknown } | null | undefined)?.status === 'number') return error as Error;
+    return this.aggregateBackendFault(object, query, error);
+  }
+
+  // ── Autonumber on the remote face: the sequence, moved in one statement ────
+  //
+  // The ruling, the measurements and the shared/own split are in the module
+  // docblock "Autonumber on the remote face" above. In short: every rule that
+  // decides WHICH counter a value is drawn from and WHERE a cold counter starts
+  // is `SqlDriver`'s and is called, never copied; only the statement that moves
+  // the counter is this face's, because it has no Knex connection to hold a
+  // transaction on.
+
+  /**
+   * Rows answered by one sequence statement over the remote transport. The
+   * transport's raw door is used on purpose: these statements belong to the
+   * counter, not to any object's data, so they bypass the per-object read
+   * classifiers the data doors wrap their statements in.
+   */
+  private async remoteSequenceRows(sql: string, args: unknown[] = []): Promise<Array<Record<string, unknown>>> {
+    const rows = await this.remoteTransport!.execute(sql, args);
+    return Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+  }
+
+  /**
+   * The remote half of {@link SqlDriver.ensureSequencesTable}: make sure the
+   * `key_hash`-keyed sequences table exists, once per process, through the
+   * transport. The DDL is `SqlDriver.defineSequencesTable` compiled to text by
+   * this face's connection-less Knex (#20054 — it holds the dialect's compiler
+   * and nothing else), so both faces create the same table from one
+   * definition. A pre-`key_hash` table is refused rather than migrated — see
+   * {@link refuseLegacyRemoteSequencesTable}.
+   *
+   * Cross-process race on the first create: a sibling container may create the
+   * table between this process's existence probe and its DDL. The DDL then
+   * fails on "already exists", and the table is re-probed before the error is
+   * believed — the same recovery `ensureSequencesTable` performs.
+   */
+  private async ensureRemoteSequencesTable(): Promise<void> {
+    if (this.remoteSequencesTableEnsured) {
+      await this.remoteSequencesTableEnsured;
+      return;
+    }
+    const table = this.sequencesTableName;
+    // Knex types its schema probes by what AWAITING them answers (`hasTable`
+    // → `Promise<boolean>`), but each is a `SchemaBuilder`, and a builder
+    // compiles to its statements without a connection. Compiled here and SENT
+    // through the transport, so the probes and the DDL are the dialect's own
+    // spellings rather than a second copy of them.
+    const compile = (builder: unknown): Array<{ sql: string; bindings: readonly unknown[] }> =>
+      (builder as { toSQL(): Array<{ sql: string; bindings: readonly unknown[] }> }).toSQL();
+    const run = async (statements: Array<{ sql: string; bindings: readonly unknown[] }>) => {
+      let rows: Array<Record<string, unknown>> = [];
+      for (const s of statements) rows = await this.remoteSequenceRows(s.sql, [...s.bindings]);
+      return rows;
+    };
+    const exists = async () => (await run(compile(this.knex.schema.hasTable(table)))).length > 0;
+    this.remoteSequencesTableEnsured = (async () => {
+      if (!(await exists())) {
+        try {
+          await run(compile(this.knex.schema.createTable(table, (t) => this.defineSequencesTable(t))));
+        } catch (err) {
+          if (!(await exists())) throw err;
+        }
+      }
+      // `hasColumn` compiles to the dialect's column listing (`PRAGMA table_info`
+      // on SQLite); the shape check reads the column names off its rows.
+      const columns = await run(compile(this.knex.schema.hasColumn(table, 'key_hash')));
+      if (!columns.some((c) => c.name === 'key_hash')) refuseLegacyRemoteSequencesTable(table);
+    })();
+    try {
+      await this.remoteSequencesTableEnsured;
+    } catch (err) {
+      // Not cached: a transient failure must not pin "ensured" or "refused" on
+      // the process. The next write probes again.
+      this.remoteSequencesTableEnsured = null;
+      throw err;
+    }
+  }
+
+  /**
+   * `SqlDriver.getNextSequenceValue`, routed by transport: the inherited Knex
+   * transaction on the local and embedded-replica faces, one atomic statement
+   * over `@libsql/client` on the remote face. The caller is
+   * `fillAutoNumberFields`, inherited unchanged, which is what keeps the format,
+   * the tenant, the scope and the reservation report one rule on all three
+   * faces.
+   */
+  protected override async getNextSequenceValue(
     object: string,
-    row: Record<string, any> | null | undefined,
-    path: string,
-  ): void {
-    const cfgs = this.autoNumberFields[object];
-    if (!cfgs || cfgs.length === 0) return;
-    if (!row || typeof row !== 'object') return;
-    const unfilled = cfgs
-      .filter((cfg) => isEmptyAutoNumberSlot(row[cfg.name]))
-      .map((cfg) => cfg.name);
-    if (unfilled.length === 0) return;
-    this.logger.warn(
-      `[driver-turso] ${path} on "${object}" returned row id ${JSON.stringify(row.id)} with ` +
-      `auto_number field(s) [${unfilled.join(', ')}] left empty. The Turso REMOTE transport does ` +
-      `not generate record numbers, so an upsert that matches no existing row inserts one without ` +
-      `it — the row is persisted, its record number is not, and nothing else reports this. Supply ` +
-      `the value explicitly on this path (a seed replay or import keeps its own numbers and is ` +
-      `written unchanged), or use the local / embedded-replica transport, which do issue them ` +
-      `(#7099).`,
-      { object, fields: unfilled, id: row.id, path },
+    tableName: string,
+    field: string,
+    prefix: string,
+    tenantField: string | null,
+    tenantId: string | null,
+    parentTrx?: Parameters<SqlDriver['getNextSequenceValue']>[6],
+    scope = '',
+    suffix = '',
+  ): Promise<number> {
+    if (!this.isRemote) {
+      return super.getNextSequenceValue(object, tableName, field, prefix, tenantField, tenantId, parentTrx, scope, suffix);
+    }
+    return this.nextRemoteSequenceValue(tableName, field, prefix, tenantField, tenantId, scope, suffix);
+  }
+
+  /**
+   * Reserve and return the next counter value over the remote transport.
+   *
+   * Warm path, one round trip: `UPDATE … SET last_value = last_value + 1 …
+   * RETURNING last_value`. A row comes back, that is the value; none comes
+   * back, the counter is cold. Cold path: bootstrap from the data table's MAX
+   * by the shared reading, then `INSERT … ON CONFLICT (key_hash) DO UPDATE SET
+   * last_value = last_value + 1 RETURNING last_value` — so a sibling that
+   * seeded the row first is incremented, never overwritten, and the value this
+   * process reads back is the one the database committed for it. Both
+   * statements are single SQLite statements, serialised by the database's
+   * write lock across every connection and process. No in-process state takes
+   * part: `remoteSequencesTableEnsured` only remembers that the TABLE exists.
+   *
+   * The counter is keyed exactly as the local face keys it —
+   * `sequenceKeyHash(table, resolveSequenceTenantId(…), field, scope)` — which
+   * is what lets an embedded replica and a remote client of the same database
+   * draw from one row rather than two.
+   */
+  private async nextRemoteSequenceValue(
+    tableName: string,
+    field: string,
+    prefix: string,
+    tenantField: string | null,
+    tenantId: string | null,
+    scope: string,
+    suffix: string,
+  ): Promise<number> {
+    await this.ensureRemoteSequencesTable();
+    const table = this.sequencesTableName;
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
+    const keyHash = this.sequenceKeyHash(tableName, resolvedTenantId, field, scope);
+
+    const bumped = await this.remoteSequenceRows(
+      `UPDATE "${table}" SET "last_value" = "last_value" + 1, "updated_at" = CURRENT_TIMESTAMP ` +
+        `WHERE "key_hash" = ? RETURNING "last_value"`,
+      [keyHash],
     );
+    if (bumped.length > 0) return Number(bumped[0].last_value);
+
+    const seedMax = await this.scanRemoteMaxCounter(
+      tableName,
+      field,
+      prefix,
+      tenantField,
+      resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+      suffix,
+    );
+    const issued = await this.remoteSequenceRows(
+      `INSERT INTO "${table}" ("key_hash", "object", "tenant_id", "field", "scope", "last_value", "updated_at") ` +
+        `VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ` +
+        `ON CONFLICT ("key_hash") DO UPDATE SET "last_value" = "${table}"."last_value" + 1, ` +
+        `"updated_at" = CURRENT_TIMESTAMP RETURNING "last_value"`,
+      [keyHash, tableName, resolvedTenantId, field, scope, seedMax + 1],
+    );
+    if (issued.length === 0) {
+      // RETURNING always answers one row for an INSERT that landed or merged;
+      // an empty answer means the transport is not the SQLite this face
+      // expects. Said rather than read as `NaN`.
+      throw new Error(
+        `The sequence statement for "${tableName}.${field}" answered no row over the remote transport; ` +
+          `no record number was issued. The remote endpoint must honour INSERT … ON CONFLICT … RETURNING.`,
+      );
+    }
+    return Number(issued[0].last_value);
+  }
+
+  /**
+   * The remote half of {@link SqlDriver.scanMaxNumericTail}: fetch the stored
+   * values of one counter's partition through the transport and read them by
+   * the shared `maxAutonumberCounter`. The predicate is the same anchor the
+   * local face compiles — the escaped prefix as a `LIKE` pre-filter, the tenant
+   * column when the counter is tenant-scoped — spelled with an explicit
+   * `ESCAPE '\'`, because SQLite's `LIKE` has no escape character unless one is
+   * declared, and the shared escaping writes backslashes.
+   */
+  private async scanRemoteMaxCounter(
+    tableName: string,
+    field: string,
+    prefix: string,
+    tenantField: string | null,
+    tenantId: string | null,
+    suffix: string,
+  ): Promise<number> {
+    const col = quoteSequenceName(field);
+    let sql = `SELECT ${col} FROM ${quoteSequenceName(tableName)} WHERE ${col} LIKE ? ESCAPE '\\' AND ${col} IS NOT NULL`;
+    const args: unknown[] = [`${this.escapeLikePrefix(prefix)}%`];
+    if (tenantField && tenantId !== null) {
+      sql += ` AND ${quoteSequenceName(tenantField)} = ?`;
+      args.push(tenantId);
+    }
+    const rows = await this.remoteSequenceRows(sql, args);
+    return this.maxAutonumberCounter(rows.map((r) => r[field]), prefix, suffix);
+  }
+
+  /**
+   * [#5495] The collision discriminator, routed by transport: does a row in
+   * this counter's partition already hold the value this driver just issued?
+   * The inherited Knex read on the local faces; the same `WHERE` through the
+   * transport on the remote face, which ignores the Knex runner it is handed
+   * (`collidingAutoNumberReservations` passes `this.knex`, which holds no
+   * connection here).
+   */
+  protected override async autoNumberValueExists(
+    queryRunner: Parameters<SqlDriver['autoNumberValueExists']>[0],
+    reservation: Parameters<SqlDriver['autoNumberValueExists']>[1],
+  ): Promise<boolean> {
+    if (!this.isRemote) return super.autoNumberValueExists(queryRunner, reservation);
+    const col = quoteSequenceName(reservation.field);
+    let sql = `SELECT ${col} FROM ${quoteSequenceName(reservation.tableName)} WHERE ${col} = ?`;
+    const args: unknown[] = [reservation.value];
+    if (reservation.tenantField && reservation.tenantId !== null) {
+      sql += ` AND ${quoteSequenceName(reservation.tenantField)} = ?`;
+      args.push(reservation.tenantId);
+    }
+    sql += ' LIMIT 1';
+    return (await this.remoteSequenceRows(sql, args)).length > 0;
+  }
+
+  /**
+   * [#5495] Re-seed one counter from the data-table MAX, routed by transport.
+   * The remote statement moves the counter FORWARD only, in one atomic step:
+   * `UPDATE … SET last_value = ? WHERE key_hash = ? AND last_value < ?` — the
+   * same "never rewind" rule the inherited version applies in its transaction,
+   * without needing one.
+   */
+  protected override async resyncSequenceToDataMax(
+    reservation: Parameters<SqlDriver['resyncSequenceToDataMax']>[0],
+  ): Promise<void> {
+    if (!this.isRemote) return super.resyncSequenceToDataMax(reservation);
+    await this.ensureRemoteSequencesTable();
+    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const keyHash = this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
+    const observedMax = await this.scanRemoteMaxCounter(
+      reservation.tableName,
+      reservation.field,
+      reservation.prefix,
+      reservation.tenantField,
+      resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+      reservation.suffix,
+    );
+    await this.remoteSequenceRows(
+      `UPDATE "${this.sequencesTableName}" SET "last_value" = ?, "updated_at" = CURRENT_TIMESTAMP ` +
+        `WHERE "key_hash" = ? AND "last_value" < ?`,
+      [observedMax, keyHash, observedMax],
+    );
+  }
+
+  /**
+   * One remote row write with its record numbers issued first and the #5495
+   * collision re-seed around it — the shape `SqlDriver.create` and
+   * `SqlDriver.upsert` give the local faces, with the statement itself handed
+   * in: `fillAutoNumberFields` fills the empty slots on `row` (a caller-supplied
+   * value is kept), `send` writes the filled row, and a unique violation that
+   * `collidingAutoNumberReservations` proves to be THIS counter's (a seed
+   * replay or import landed rows above it) re-seeds the counter from the data
+   * table, clears only the colliding fields and retries, up to the inherited
+   * retry budget. Any other error — including a duplicate on a value the caller
+   * typed — is rethrown untouched: that 409 is the caller's to receive.
+   *
+   * `row` is this method's own copy of the caller's data, so the caller's
+   * object is never mutated by a number it did not ask to see on it.
+   */
+  private async writeRemoteRowWithAutoNumbers<T>(
+    object: string,
+    row: Record<string, any>,
+    options: DriverOptions | undefined,
+    send: (filled: Record<string, any>) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      const reservations = await this.fillAutoNumberFields(object, row, options);
+      try {
+        return await send(row);
+      } catch (error) {
+        if (attempt >= this.autoNumberCollisionRetries) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
+        if (colliding.length === 0) throw error;
+        for (const reservation of colliding) {
+          await this.resyncSequenceToDataMax(reservation);
+          delete row[reservation.field];
+        }
+      }
+    }
   }
 
   // [#15267] The override declares the contract's type, as both of its branches
   // already do: `RemoteTransport.create()` answers `Record<string, unknown>`
   // through the generic `formatRemoteRow`, and the local branch forwards to
   // `super.create` (narrowed alongside). Same shape the `update()` override
-  // above took with #14438.
+  // above took with commit 2200f8ec8.
   override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     this.assertRemoteTransactionUnsupported(options, 'create');
     if (this.isRemote) {
-      this.refuseUngeneratableRemoteAutonumber(object, [data], 'create');
-      return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
+      const table = this.remoteTableFor(object, 'create');
+      // [#21226] The caller's organization is stamped on the row, as the local
+      // face's `create` stamps it (`injectTenantOnInsert`, before the record
+      // numbers, which are issued per organization). Without it the row landed
+      // with no organization. An explicit value on the row is kept.
+      const row: Record<string, any> = { ...data };
+      this.injectTenantOnInsert(object, row, options);
+      // The record numbers are issued HERE, on the layer that holds the
+      // schema, before the transport builds its INSERT — see "Autonumber on
+      // the remote face" at the top of this file. A row that already carries
+      // its number (seed replay, import) is written through unchanged.
+      const written = await this.writeRemoteRowWithAutoNumbers(object, row, options, (filled) =>
+        this.remoteTransport!.create(object, this.toRemoteWriteForms(object, filled), table),
+      );
+      return this.formatRemoteRow(object, written);
     }
     return super.create(object, data, options);
   }
 
-  // [#14438] The override declares the contract's type, as both of its branches
+  // [commit 2200f8ec8] The override declares the contract's type, as both of its branches
   // already do: `super.update` (driver-sql) and `RemoteTransport.update()`
-  // (#14428) both answer `Record<string, unknown> | null`, and `formatRemoteRow`
+  // (commit ca3fd4b1a) both answer `Record<string, unknown> | null`, and `formatRemoteRow`
   // is a generic pass-through. The explicit `Promise<any>` here was the one
   // place this package's own `.d.ts` re-erased the door.
   override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.assertRemoteTransactionUnsupported(options, 'update');
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data)));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'update');
+      // [#21226] The key AND the caller's tenant scope, on the write and on its
+      // read-back, as `SqlDriver.update` scopes both: a row outside the scope
+      // is untouched and the answer is `null`.
+      const scope = this.remoteTenantScope(object, options);
+      return this.formatRemoteRow(
+        object,
+        await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data), table, scope),
+      );
+    }
     return super.update(object, id, data, options);
   }
 
-  // [#17690] The return is the contract's own type, and this override needs it
+  // [commit be5c60291] The return is the contract's own type, and this override needs it
   // declared HERE: an override re-declares the door in this package's own
   // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
   // consumer holding a `TursoDriver` — measured twice already (#15280 for
@@ -1976,51 +2790,87 @@ export class TursoDriver extends SqlDriver {
   override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     this.assertRemoteTransactionUnsupported(options, 'upsert');
     if (this.isRemote) {
-      // [#6944] An upsert is insert-OR-merge, and only the merge leg is safe
-      // here: `RemoteTransport.upsert` emits
-      // `INSERT … ON CONFLICT(<keys>) DO UPDATE`, so a row that matches keeps
-      // the number already in its column and never needed one issued — measured
-      // (an `id`-bearing upsert onto an existing `CASE-00042` merged and kept
-      // it). Refusing that would break a path that works.
+      const table = this.remoteTableFor(object, 'upsert');
+      // An upsert is insert-OR-merge, and which leg it takes is knowable only
+      // after it runs. The record number is therefore reserved BEFORE the
+      // statement, as `SqlDriver.upsert` reserves it on the local faces, and
+      // the autonumber columns are named to the transport as insert-only
+      // (#7011): on the insert leg the fresh number lands with the row — the
+      // leg #7099 recorded as writing NULL under the refusal — and on the merge
+      // leg the row keeps the number already in its column, the reservation
+      // going unused exactly as it does on the local faces (a gap in the
+      // sequence, never a renumbering). An explicit payload value does not
+      // renumber a merged row either; `update()` is the renumbering path.
       //
-      // The insert leg is refused where it is PROVABLE without a round trip: no
-      // `id`/`_id` and no explicit `conflictKeys` means the transport mints a
-      // fresh nanoid for the sole default merge key, so the statement can only
-      // insert — measured, two such upserts produced two rows with different
-      // ids. That is also the shape the engine sends for a new record.
+      // [#21166] The insert-only set is `insertOnlyUpsertColumns` itself, the
+      // list the local faces build their merge set from, so it names `id` and
+      // `created_at` beside the autonumber columns. This face once handed the
+      // transport the autonumber columns alone, from a lookup of its own, so a
+      // merge on a business key (`conflictKeys: ['email']`) wrote
+      // `"id" = excluded."id"` and replaced the stored row's primary key with
+      // the payload's, or with the nanoid minted for the insert that lost
+      // (#8622's re-key, on this face). One list, so the faces cannot drift on
+      // which columns a merge may write. A remote object never renames a
+      // column (`remoteTableFor` refuses a renaming column map first), so the
+      // list's physical names are the names the transport writes.
       //
-      // ⚠️ The leg the pre-write gate cannot classify: an upsert that DOES
-      // carry an id or conflict keys but matches nothing still inserts, and on
-      // that leg the slot is still written NULL. That outcome is UNCHANGED by
-      // #7099 — what changed is that it is no longer silent. The row comes back
-      // through this method, so the NULL can be read AFTER the write and
-      // reported, without the probe query the pre-write gate exists to avoid
-      // and without turning an accepted write into a refused one. Generating
-      // the number here stays behind the deferred half (A).
-      const mayMerge = data?.id !== undefined || data?._id !== undefined
-        || (Array.isArray(conflictKeys) && conflictKeys.length > 0);
-      if (!mayMerge) this.refuseUngeneratableRemoteAutonumber(object, [data], 'upsert');
-      const row = this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
-      // Judged on the row the CALLER receives, after read-coercion — reporting
-      // a different value than the one handed out would be its own defect. The
-      // `!mayMerge` leg reaches this too and is a no-op there by construction:
-      // an empty slot was already refused above, and a caller-supplied number
-      // comes back filled.
-      this.reportUnnumberedRemoteRow(object, row, 'upsert');
-      return row;
+      // [#21185] The same list now names the tenant column, so a call with no
+      // tenant context never re-parents the row it merges into. And a
+      // tenant-scoped call is fenced to its organization on this face as on
+      // the local one, in three steps, because this face had none of them:
+      //  - the caller's organization is stamped on the row on entry
+      //    (`injectTenantOnInsert`, the local face's own first step) — without
+      //    it the insert leg wrote a row with no organization, and the
+      //    "written" organization the fence compares against was empty;
+      //  - the transport puts the predicate inside the merge statement, so a
+      //    conflict on another organization's row (or a row with none) leaves
+      //    it untouched;
+      //  - the transport reads the landed row back under the written
+      //    organization exactly and answers `null` when the predicate left the
+      //    row alone, which is refused here with the local face's own
+      //    `UNIQUE_VIOLATION` sentence. The check sits outside the autonumber
+      //    re-seed wrapper: the refusal is not a counter collision, and nothing
+      //    was written to re-seed for.
+      const row: Record<string, any> = { ...data };
+      this.injectTenantOnInsert(object, row, options);
+      const fence = this.upsertTenantGuard(object, row, options);
+      const insertOnly = [...this.insertOnlyUpsertColumns(object)];
+      const written = await this.writeRemoteRowWithAutoNumbers(object, row, options, (filled) =>
+        this.remoteTransport!.upsert(
+          object,
+          this.toRemoteWriteForms(object, filled),
+          conflictKeys,
+          table,
+          insertOnly,
+          fence ? { column: fence.column, value: fence.value } : undefined,
+        ),
+      );
+      if (written === null) throw this.upsertConflictRefusal(object, conflictKeys);
+      return this.formatRemoteRow(object, written);
     }
     return super.upsert(object, data, conflictKeys, options);
   }
 
   override async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
     this.assertRemoteTransactionUnsupported(options, 'delete');
-    if (this.isRemote) return this.remoteTransport!.delete(object, id);
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'delete');
+      // [#21226] The key AND the caller's tenant scope, as `SqlDriver.delete`.
+      return this.remoteTransport!.delete(object, id, table, this.remoteTenantScope(object, options));
+    }
     return super.delete(object, id, options);
   }
 
   override async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     this.assertRemoteTransactionUnsupported(options, 'count');
-    if (this.isRemote) return this.remoteTransport!.count(object, this.toRemoteQuery(object, query));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'count');
+      const remoteQuery = this.toRemoteQuery(object, query);
+      const scope = this.remoteTenantScope(object, options);
+      return this.remoteReadExit(object, { where: query?.where }, () =>
+        this.remoteTransport!.count(object, remoteQuery, table, scope),
+      );
+    }
     return super.count(object, query, options);
   }
 
@@ -2048,7 +2898,19 @@ export class TursoDriver extends SqlDriver {
     options?: DriverOptions,
   ): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'aggregate');
-    if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'aggregate');
+      // [#20424] The caller's own query is what the fault is attributed
+      // against, as `SqlDriver.aggregate` does locally: its groupBy and
+      // aggregation fields, and the `where` before `toRemoteFilter` rewrote it.
+      //
+      // [#21226] The rows are narrowed to the caller's tenant scope before they
+      // are grouped, as `SqlDriver.aggregate` scopes its builder.
+      const scope = this.remoteTenantScope(object, options);
+      return this.remoteReadExit(object, query, () =>
+        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table, scope),
+      );
+    }
     return super.aggregate(object, query, options);
   }
 
@@ -2102,9 +2964,10 @@ export class TursoDriver extends SqlDriver {
    * runs on libsql (SQLite), and the base config is `better-sqlite3`, so every
    * dialect branch inside it resolves the way local mode's does.
    *
-   * The write-column map is deliberately NOT applied: a managed object is its
-   * own physical table here (see `registerRemoteFieldMetadata`), so the mapping
-   * is a no-op, and the transport addresses columns by object-field name.
+   * The write-column map is deliberately NOT applied: a managed object has
+   * none (see `registerRemoteFieldMetadata`), the transport addresses columns
+   * by object-field name, and a federated object whose `external.columnMap`
+   * renames a column is refused before this runs ({@link remoteTableFor}).
    */
   private toRemoteWriteForms<T>(object: string, data: T): T {
     if (!data || typeof data !== 'object') return data;
@@ -2113,14 +2976,16 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Compile a filter into the storage forms and operator shapes the remote
-   * transport can bind correctly.
+   * transport can bind correctly: each comparand in the driver's storage form,
+   * and `$between` split into the `$gte` / `$lte` pair the transport compiles.
    *
-   * Three things happen here, and the ORDER of the last two is load-bearing
-   * (ADR-0053 D-E3): the calendar-day widening is a *calendar* operation and
-   * must run on the bare-day STRING, with only the resulting bound converted to
-   * storage form. Converting first would hand `nextUtcCalendarDay` an instant,
-   * which it correctly refuses to widen — silently narrowing a whole-day window
-   * back to a midnight one.
+   * [ADR-0053 D-D1 items 5 and 9, as amended — #20822] No calendar-day widening
+   * happens here any more. A bare-day upper bound is widened ONCE, by the shared
+   * lowering (`lowerFilterCondition`, `@objectstack/spec/data`) at the seams,
+   * in the calendar-string domain — so every seamed read hands this method `$lt`
+   * the next day, which it converts to storage form like any comparand, and
+   * D-E3's order (widen the day first, convert the bound second) holds by
+   * construction. A caller that passes no seam gets the comparison it wrote.
    */
   private toRemoteFilter(object: string, where: unknown): unknown {
     if (where == null || typeof where !== 'object') return where;
@@ -2134,14 +2999,12 @@ export class TursoDriver extends SqlDriver {
       // `$not` carries ONE nested filter condition, so it recurses like the two
       // array combinators rather than passing through as an opaque `$`-key
       // (#1076). Skipping it left every condition INSIDE a negation on the raw
-      // path, i.e. short of the seam this method IS: `$between` was never
-      // lowered (so `{ $not: { amount: { $between: […] } } }` reached a
-      // transport that correctly refuses un-lowered `$between`, naming a step
-      // that had in fact been skipped), and a bare `YYYY-MM-DD` upper bound was
-      // never widened to the whole calendar day (framework#3777) — which under
-      // a negation hands BACK exactly the rows the day was meant to cover.
-      // Comparand storage form and the operator lowerings apply at every depth
-      // a condition can appear at, so the recursion has to reach all of them.
+      // path: `$between` was never split (so `{ $not: { amount: { $between:
+      // […] } } }` reached a transport that correctly refuses an unsplit
+      // `$between`, naming a step that had in fact been skipped), and a
+      // comparand under a negation never reached its storage form. Comparand
+      // storage form and the `$between` split apply at every depth a condition
+      // can appear at, so the recursion has to reach all of them.
       if (key === '$not') {
         out[key] = this.toRemoteFilter(object, val);
         continue;
@@ -2151,7 +3014,7 @@ export class TursoDriver extends SqlDriver {
     return out;
   }
 
-  /** One field's comparand(s), in storage form and with `$between` lowered. */
+  /** One field's comparand(s), in storage form and with `$between` split. */
   private toRemoteFieldSpec(object: string, field: string, spec: unknown): unknown {
     if (spec == null) return spec;
     // A bare scalar / `Date` is implicit equality; a bare array is not a valid
@@ -2166,10 +3029,14 @@ export class TursoDriver extends SqlDriver {
     for (const [op, raw] of Object.entries(spec as Record<string, unknown>)) {
       switch (op) {
         case '$between': {
-          // Lowered to its two bounds rather than given an operator of its own
-          // (framework#4081): the upper-bound arm below already carries the
-          // whole-day calendar rule, so a range's max inherits it by
-          // construction instead of via a second implementation.
+          // Split into its two bounds rather than given an operator of its own
+          // (framework#4081): the transport compiles `$gte` / `$lte` and has no
+          // `$between` arm. The split is structural only — both ends inclusive,
+          // as written. [#20822] The whole-day rule is not applied here: the
+          // shared lowering at the seams already split a `datetime` column's
+          // bare-day range into `$gte` / `$lt` the next day, and a range that
+          // arrives here unsplit is either on a column the typed seam leaves
+          // alone or from a caller that passed no seam.
           //
           // [#20094] A range that is not two bounds is NOT refused here: it is
           // handed to the transport as written, un-lowered, and the transport's
@@ -2187,12 +3054,9 @@ export class TursoDriver extends SqlDriver {
             break;
           }
           out.$gte = this.temporalFilterValue(object, field, raw[0]);
-          Object.assign(out, this.toRemoteUpperBound(object, field, '$lte', raw[1]));
+          out.$lte = this.temporalFilterValue(object, field, raw[1]);
           break;
         }
-        case '$lte':
-          Object.assign(out, this.toRemoteUpperBound(object, field, op, raw));
-          break;
         case '$in':
         case '$nin':
           out[op] = Array.isArray(raw)
@@ -2209,6 +3073,9 @@ export class TursoDriver extends SqlDriver {
         case '$regex':
         case '$null':
         case '$exists':
+        // [#20444] A presence flag like the two above — its boolean is not a
+        // value of the column, so the temporal coercion keeps its hands off.
+        case '$empty':
           out[op] = raw;
           break;
         default:
@@ -2216,25 +3083,6 @@ export class TursoDriver extends SqlDriver {
       }
     }
     return out;
-  }
-
-  /**
-   * An inclusive upper bound, compiled half-open when the comparand is a bare
-   * calendar day on a `datetime` column (ADR-0053 D-D1, framework#3777).
-   *
-   * `calendarDayUpperBoundRewrite` is the inherited authority for that rule and
-   * already scopes itself to `datetime`, so `date`/`time` columns compile
-   * byte-identically to before.
-   */
-  private toRemoteUpperBound(
-    object: string,
-    field: string,
-    op: string,
-    raw: unknown,
-  ): Record<string, unknown> {
-    const rewritten = this.calendarDayUpperBoundRewrite(object, field, op, raw);
-    if (rewritten) return { [rewritten.op]: rewritten.value };
-    return { [op]: this.temporalFilterValue(object, field, raw) };
   }
 
   /** A query with its `where` compiled through {@link toRemoteFilter}. */
@@ -2335,8 +3183,8 @@ export class TursoDriver extends SqlDriver {
    * `formatOutput()` had nothing to coerce. Reuse the base `registerExternalObject`,
    * whose sole documented job is exactly this — it classifies fields with the
    * canonical logic, so the two can never drift. A managed object is its own
-   * physical table, so the default `remoteName === name` mapping is a no-op for
-   * the RemoteTransport SQL (which addresses tables by object name directly).
+   * physical table, so the default `remoteName === name` mapping it records is
+   * what {@link remoteTableFor} then reads back for the object: its own name.
    *
    * It also records the object as one whose table this driver created, which is
    * the whole input to {@link paginationTieBreaker} in remote mode. That goes
@@ -2581,20 +3429,25 @@ export class TursoDriver extends SqlDriver {
   override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'bulkCreate');
     if (this.isRemote) {
-      // [#6944] Same refusal as `create`, and it has to be stated here rather
-      // than inherited: `RemoteTransport.bulkCreate` loops its OWN `create`, not
-      // this class's, so nothing about the single-row override reaches this
-      // path. Refused for the whole batch before any row is written — the
-      // statement is all-or-nothing on this transport too, so a partial batch is
-      // not a state this can leave behind.
-      this.refuseUngeneratableRemoteAutonumber(object, Array.isArray(data) ? data : [], 'bulkCreate');
-      const formatted = Array.isArray(data) ? data.map((d) => this.toRemoteWriteForms(object, d)) : data;
-      return this.formatRemoteRows(object, await this.remoteTransport!.bulkCreate(object, formatted));
+      // The column-map refusal runs once, before any row, as it did when the
+      // batch was handed down whole.
+      this.remoteTableFor(object, 'bulkCreate');
+      // The batch is written one row at a time through this class's own
+      // `create`, so each row's record number is issued on the layer that holds
+      // the schema and each row's #5495 collision re-seed is its own.
+      // `RemoteTransport.bulkCreate` was never one statement: it loops the
+      // transport's own `create` (one INSERT and one read-back per row), so a
+      // batch on this transport was never all-or-nothing, and routing it
+      // through the driver's `create` changes neither the statements sent nor
+      // what a mid-batch failure leaves behind — it adds only the numbers.
+      const results: Record<string, unknown>[] = [];
+      for (const row of data) results.push(await this.create(object, row, options));
+      return results;
     }
     return super.bulkCreate(object, data, options);
   }
 
-  // [#17690] The return is the contract's own type, and this override needs it
+  // [commit be5c60291] The return is the contract's own type, and this override needs it
   // declared HERE: an override re-declares the door in this package's own
   // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
   // consumer holding a `TursoDriver` — measured twice already (#15280 for
@@ -2605,31 +3458,56 @@ export class TursoDriver extends SqlDriver {
   override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'bulkUpdate');
     if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'bulkUpdate');
       const formatted = Array.isArray(updates)
         ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
         : updates;
-      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted));
+      // [#21226] Each row's update carries the caller's tenant scope, as each of
+      // `SqlDriver.bulkUpdate`'s goes through the scoped `update`.
+      const scope = this.remoteTenantScope(object, options);
+      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted, table, scope));
     }
     return super.bulkUpdate(object, updates, options);
   }
 
   override async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'bulkDelete');
-    if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids);
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'bulkDelete');
+      // [#21226] The id set AND the caller's tenant scope, as `SqlDriver.bulkDelete`.
+      return this.remoteTransport!.bulkDelete(object, ids, table, this.remoteTenantScope(object, options));
+    }
     return super.bulkDelete(object, ids, options);
   }
 
   override async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.assertRemoteTransactionUnsupported(options, 'updateMany');
     if (this.isRemote) {
-      return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data));
+      const table = this.remoteTableFor(object, 'updateMany');
+      // [#21226] The caller's filter AND tenant scope, as `SqlDriver.updateMany`.
+      return this.remoteTransport!.updateMany(
+        object,
+        this.toRemoteQuery(object, query),
+        this.toRemoteWriteForms(object, data),
+        table,
+        this.remoteTenantScope(object, options),
+      );
     }
     return super.updateMany(object, query, data, options);
   }
 
   override async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     this.assertRemoteTransactionUnsupported(options, 'deleteMany');
-    if (this.isRemote) return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'deleteMany');
+      // [#21226] The caller's filter AND tenant scope, as `SqlDriver.deleteMany`.
+      return this.remoteTransport!.deleteMany(
+        object,
+        this.toRemoteQuery(object, query),
+        table,
+        this.remoteTenantScope(object, options),
+      );
+    }
     return super.deleteMany(object, query, options);
   }
 
@@ -2674,7 +3552,7 @@ export class TursoDriver extends SqlDriver {
   // have been a lie on the remote arm. The `any` masked that real LSP
   // violation, and closing it meant widening `SqlDriver`'s narrowing (measured
   // at the time: +14 further consumer sites across the driver packages) or
-  // restructuring the remote handle — both above an annotation swap (#17690).
+  // restructuring the remote handle — both above an annotation swap (commit be5c60291).
   //
   // What dissolved it is that the remote arm no longer returns anything.
   // [#18616] made it REFUSE, and `refuseRemoteTransaction` returns `never`, so
@@ -2814,12 +3692,12 @@ export class TursoDriver extends SqlDriver {
    *
    * In local / replica modes the existing Knex-based path remains in effect.
    *
-   * ⛔ #16711 — this parameter type must declare every key `SqlDriver.initObjects`
+   * ⛔ Commit 7862fb711 — this parameter type must declare every key `SqlDriver.initObjects`
    * declares, and `scripts/check-object-def-param-keys.mjs` fails the build if it
    * stops doing so. An `override` does NOT inherit the base's parameter type, so
    * this literal is what every caller of `@objectstack/driver-turso` sees: while
    * it read `{ name; fields? }`, #4311's `tenancy` fix sat on the base for five
-   * weeks and was invisible from outside `@objectstack/driver-sql`, and #16570's
+   * weeks and was invisible from outside `@objectstack/driver-sql`, and commit b72226f48's
    * `indexes` fix would have escaped the same way. The escape is silent because
    * TypeScript's excess-property check fires on a FRESH object literal only — and
    * the remote arm below forwards the WHOLE object as `schema`, so the runtime
@@ -2903,9 +3781,15 @@ export class TursoDriver extends SqlDriver {
    * and the `find()` presentation of each value, deduplicated.
    *
    * A tenant-scoped call is refused. `SqlDriver.distinct` puts the tenant scope
-   * on its statement, and no remote read here applies it, so an answer would
-   * list every organization's values for the column. The condition is the
-   * scope's own: a non-empty `tenantId` on an object with a tenant field.
+   * on its statement, and {@link RemoteTransport.compileDistinct} carries none,
+   * so an answer would list every organization's values for the column. The
+   * condition is the scope's own: a non-empty `tenantId` on an object with a
+   * tenant field.
+   *
+   * [#21226] The other remote read doors now carry the scope
+   * ({@link remoteTenantScope}). This one still refuses: answering the scoped
+   * call instead would accept a call the face refuses today, a widening this
+   * change does not make.
    */
   override async distinct(
     object: string,
@@ -2928,7 +3812,8 @@ export class TursoDriver extends SqlDriver {
       );
     }
     // Compiled outside the classifier, so a filter refusal keeps its envelope.
-    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteFilter(object, filters));
+    const table = this.remoteTableFor(object, 'distinct');
+    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteFilter(object, filters), table);
     let rows: unknown;
     try {
       rows = await this.remoteTransport!.execute(sql, args);
@@ -3041,18 +3926,43 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Reclaim free pages — answered on the REMOTE face with the statement the
-   * local face issues, `PRAGMA incremental_vacuum`, sent to the remote database
-   * through the raw door's envelope (`DATABASE_ERROR` / 500 if the server
-   * refuses it). As on a local file, it returns pages only on a database whose
-   * `auto_vacuum` is `INCREMENTAL`; the remote face does not set that mode at
-   * connect, the local face does.
+   * local face issues, `PRAGMA incremental_vacuum`, run to completion on the
+   * remote database, in the raw door's envelope (`DATABASE_ERROR` / 500 if the
+   * server refuses it). As on a local file, it returns pages only on a database
+   * whose `auto_vacuum` is `INCREMENTAL`; the remote face does not set that
+   * mode at connect, the local face does.
+   *
+   * The statement goes through the client's `executeMultiple()`, not
+   * `execute()`. SQLite frees one page per step of this statement, and the
+   * libSQL client's `execute()` steps a statement that declares no result
+   * columns once and leaves it unfinished. Measured over a libSQL `file:`
+   * client: the issuing connection read one page fewer (300 → 299), a second
+   * connection read the freelist and the file size unchanged, and a row
+   * written after the call on the same connection never reached the file.
+   * `executeMultiple()` runs each statement to its end: a second connection
+   * reads 300 → 0, and the later write lands. What a hosted libSQL server does
+   * with either call is not measured here.
+   *
+   * The free-page count is read first, through the raw door, which connects
+   * the transport lazily as every remote door does. Nothing more is sent when
+   * the freelist is empty.
    */
   override async reclaimSpace(options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'reclaimSpace');
     if (this.isRemote) {
+      const transport = this.remoteTransport!;
+      const count = 'PRAGMA freelist_count';
+      let freePages: number;
+      try {
+        const rows = (await transport.execute(count)) as ArrayLike<ArrayLike<unknown>>;
+        freePages = Number(rows[0]?.[0]);
+      } catch (error) {
+        throw this.rawStatementFault(count, error);
+      }
+      if (freePages === 0) return;
       const statement = 'PRAGMA incremental_vacuum';
       try {
-        await this.remoteTransport!.execute(statement);
+        await transport.getClient()!.executeMultiple(statement);
       } catch (error) {
         throw this.rawStatementFault(statement, error);
       }

@@ -64,6 +64,42 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Integrado del sistema",
         helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
       },
+      highlightFields: {
+        label: "Campos destacados",
+        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
+      },
+      searchableFields: {
+        label: "Campos buscables",
+        helpText: "Nombres de campo con los que coincide la consulta $search (ADR-0061): el valor predeterminado del selector de registros, la búsqueda rápida de listas y la búsqueda global; una vista puede acotarlo. Sin definir, la búsqueda usa el campo de nombre/título más los campos de texto corto. Cada entrada debe nombrar un campo almacenado de este objeto: un nombre desconocido o un campo formula virtual se rechaza al publicar."
+      },
+      fieldGroups: {
+        label: "Grupos de campos",
+        helpText: "Secciones ordenadas que agrupan los campos de este objeto en el formulario de entrada y en la página de detalle del registro (ADR-0085); el orden del array es el orden de visualización. Un campo se une a un grupo indicando su clave en el ajuste group del propio campo. Los campos sin grupo van después de los grupos, y un grupo al que no se une ningún campo no se dibuja."
+      },
+      "fieldGroups.key": {
+        label: "Clave",
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+      },
+      "fieldGroups.label": {
+        label: "Etiqueta",
+        helpText: "Texto del encabezado de la sección del grupo."
+      },
+      "fieldGroups.icon": {
+        label: "Icono",
+        helpText: "Nombre de icono Lucide que se muestra junto al encabezado en la página de detalle del registro (p. ej., \"banknote\"). El formulario de entrada no lo muestra."
+      },
+      "fieldGroups.description": {
+        label: "Descripción",
+        helpText: "Texto que se muestra bajo el encabezado, en el formulario de entrada y en la página de detalle del registro."
+      },
+      "fieldGroups.collapse": {
+        label: "Contraer",
+        helpText: "Si la sección se puede contraer, en el formulario de entrada y en la página de detalle del registro. Sin definir: none."
+      },
+      "fieldGroups.visibleWhen": {
+        label: "Condición de visibilidad",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.type == 'invoice'): el formulario de entrada muestra el grupo entero, encabezado incluido, solo mientras sea TRUE."
+      },
       fields: {
         label: "Campos",
         helpText: "Añade las columnas que almacenará este objeto"
@@ -257,9 +293,45 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Validaciones",
         helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"
       },
+      activityMilestones: {
+        label: "Hitos de actividad",
+        helpText: "Entradas de la cronología que se disparan cuando un campo alcanza un valor (ADR-0052 §5b.2): cuando una actualización cambia el campo vigilado a ese valor, el plugin de auditoría escribe el resumen del hito en la cronología de actividad del registro en lugar de la entrada de cambio de campo. Gana el primer hito que coincide."
+      },
+      "activityMilestones.field": {
+        label: "Campo",
+        helpText: "Nombre del campo de este objeto que se vigila (p. ej., status). No se comprueba al guardar ni al publicar: un nombre que no es un campo de este objeto nunca se dispara."
+      },
+      "activityMilestones.value": {
+        label: "Valor",
+        helpText: "El valor almacenado al que debe cambiar el campo, comparado exactamente como texto; para un campo de selección, el valor de la opción, no su etiqueta (p. ej., done). Un hito sobre un campo numérico o booleano nunca se dispara."
+      },
+      "activityMilestones.summary": {
+        label: "Resumen",
+        helpText: "Texto de la cronología (p. ej., \"Deal won: {name}\"). Un token {field_name} toma el valor del registro tras la actualización, y el token de un campo de búsqueda, maestro-detalle o usuario muestra el título del registro referenciado; un token que no nombra ningún campo queda vacío."
+      },
+      "activityMilestones.type": {
+        label: "Tipo",
+        helpText: "Tipo de actividad de la entrada de la cronología: un tipo integrado como completed, o una palabra propia, guardada tal cual. Sin definir: updated."
+      },
       datasource: {
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
+      },
+      indexes: {
+        label: "Índices",
+        helpText: "Índices de base de datos de la tabla de este objeto. El driver SQL crea cada uno que le falte a la tabla cuando la sincroniza; una sincronización nunca elimina un índice."
+      },
+      "indexes.name": {
+        label: "Nombre",
+        helpText: "Nombre físico del índice. Sin definir: se genera a partir de la tabla y las columnas (p. ej., idx_task_status)."
+      },
+      "indexes.fields": {
+        label: "Campos",
+        helpText: "Nombres de columna de este objeto, en el orden de la clave (p. ej., status, owner). Guardar no los comprueba; publicar y os validate rechazan un nombre que no sea un campo de este objeto. Un campo que no sea una columna almacenada (una fórmula, por ejemplo) hace que el driver SQL omita el índice entero, con un error en el registro del servidor."
+      },
+      "indexes.unique": {
+        label: "Único",
+        helpText: "Ámbito de unicidad (ADR-0120). Sin definir: no es único. El true desnudo obsoleto (significa global) no se ofrece; un índice que lo lleve lo conserva hasta que elijas un ámbito."
       },
       ownership: {
         label: "Propiedad",
@@ -269,9 +341,73 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Modelo de uso compartido",
         helpText: "Visibilidad predeterminada de la organización (OWD) para usuarios internos. Un objeto personalizado que lo omita se resuelve como private en tiempo de ejecución (ADR-0090 D1)."
       },
+      access: {
+        label: "Acceso",
+        helpText: "Postura ante las concesiones comodín (ADR-0066 D2). Si se omite, se resuelve como public. Decide si la concesión de objeto '*' de un conjunto de permisos cubre este objeto; la visibilidad de registros entre usuarios la decide sharingModel."
+      },
+      "access.default": {
+        label: "Exposición predeterminada",
+        helpText: "public: cubierto por las concesiones comodín '*'. private: necesita una concesión explícita por objeto y queda exento de la seguridad a nivel de fila comodín."
+      },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener para acceder a este objeto, comprobadas además de las concesiones CRUD (ADR-0066 D3). Una lista restringe todas las operaciones; un mapa {read, create, update, delete} restringe solo las operaciones que enumera. Ausente o vacío: sin restricción por capacidad."
+      },
+      publicSharing: {
+        label: "Uso compartido público",
+        helpText: "Política de enlaces compartidos: si los registros de este objeto pueden publicarse mediante un enlace que cualquiera que lo tenga puede abrir, y en qué condiciones. Es distinta de sharingModel, que comparte con usuarios y equipos concretos. Sin definir o desactivada: no se puede crear ningún enlace y ninguno se abre."
+      },
+      "publicSharing.enabled": {
+        label: "Habilitado",
+        helpText: "Permite enlaces compartidos para los registros de este objeto. Se comprueba en cada canje: al desactivarlo, ningún enlace existente se abre, y al reactivarlo vuelven a servirse. Desactivado (el valor predeterminado): no se aplica nada más de este bloque."
+      },
+      "publicSharing.allowedAudiences": {
+        label: "Audiencias permitidas",
+        helpText: "Audiencias que puede indicar un enlace nuevo; cualquier otra se rechaza. Sin definir: solo enlace. Toda audiencia sigue necesitando el propio enlace: signed in además necesita un usuario con sesión iniciada, y email además necesita la dirección del destinatario en la lista del enlace."
+      },
+      "publicSharing.allowedPermissions": {
+        label: "Permisos permitidos",
+        helpText: "Niveles de permiso que puede conceder un enlace nuevo; cualquier otro se rechaza. Sin definir: solo ver."
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "Días máximos de caducidad",
+        helpText: "Caducidad más lejana que puede solicitar un enlace nuevo, en días a partir de ahora; una posterior se rechaza. Sin definir: 365. No obliga a caducar: un enlace creado sin caducidad nunca caduca."
+      },
+      "publicSharing.redactFields": {
+        label: "Campos ocultados",
+        helpText: "Nombres de campo de este objeto que se eliminan de todo registro servido por un enlace, sea cual sea la audiencia; el acceso propio del propietario no se ve afectado. Un nombre que no es un campo de este objeto se rechaza al publicar."
+      },
+      "publicSharing.eligibility": {
+        label: "Elegibilidad",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status == 'published'): solo se crea un enlace mientras sea TRUE, y un enlace existente deja de abrirse cuando su registro deja de cumplirlo. Un predicado que no compila, o que falla al evaluarse, rechaza el enlace."
+      },
       managedBy: {
         label: "Gestionado por",
         helpText: "Categoría de ciclo de vida: platform (CRUD de usuario), config (escrito por el administrador), system-data (esquema definido por la plataforma con datos escribibles por administrador o usuario), engine-owned (sin escrituras de usuario), append-only (auditoría), better-auth (identidad). Los clientes de UI derivan de aquí las acciones CRUD disponibles, así que decide qué se ofrece al usuario en los registros de este objeto."
+      },
+      userActions: {
+        label: "Acciones de usuario",
+        helpText: "Qué entradas genéricas (Nuevo, Importar, Editar, Eliminar, Exportar) ofrecen los clientes de UI en los registros de este objeto, sustituyendo el valor predeterminado de managedBy entrada por entrada. Una entrada sin definir mantiene ese valor predeterminado: platform ofrece las cinco; config y system-data todas salvo Importar; engine-owned, append-only y better-auth solo Exportar. Un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el valor predeterminado ofrezca la entrada. En un objeto engine-owned o append-only, activar una entrada también permite a los usuarios hacer esa escritura a través de la API de datos. Los usuarios siguen necesitando el permiso correspondiente."
+      },
+      "userActions.create": {
+        label: "Crear",
+        helpText: "El botón Nuevo: activado lo muestra, desactivado lo oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar el botón al registro en contexto, evaluado una vez por barra de herramientas (el registro anfitrión en una lista relacionada)."
+      },
+      "userActions.import": {
+        label: "Importar",
+        helpText: "La entrada de importación CSV: activada la muestra, desactivada la oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar la entrada al registro en contexto, evaluado una vez por barra de herramientas."
+      },
+      "userActions.edit": {
+        label: "Editar",
+        helpText: "Edición de registros existentes, en línea y en el formulario: activada la ofrece, desactivada la oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar cada fila a su propio registro."
+      },
+      "userActions.delete": {
+        label: "Eliminar",
+        helpText: "Eliminación por fila y masiva: activada la ofrece, desactivada la oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar cada fila a su propio registro."
+      },
+      "userActions.exportCsv": {
+        label: "Exportar CSV",
+        helpText: "La entrada de exportación CSV. Sin definir: se muestra, porque todas las categorías de managedBy ofrecen la exportación."
       },
       editMode: {
         label: "Modo de edición",
@@ -444,6 +580,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Decimales",
         helpText: "Número de dígitos decimales"
       },
+      useGrouping: {
+        label: "Separador de miles",
+        helpText: "Agrupación de dígitos (separador de miles) en los valores mostrados. Sin definir: lo decide el renderizador; un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el renderizador agrupe. Desactivado: nunca se agrupa, p. ej., un año o un ID. Activado: siempre se agrupa."
+      },
+      currencyConfig: {
+        label: "Configuración de moneda",
+        helpText: "En qué moneda está este campo. Sin definir: modo dynamic. En ambos modos el valor almacenado es un número sin más."
+      },
+      "currencyConfig.currencyMode": {
+        label: "Modo de moneda",
+        helpText: "dynamic (predeterminado): el campo no tiene moneda propia y los importes se muestran en la moneda predeterminada del tenant (el ajuste localization.currency). fixed: el campo tiene una única moneda, defaultCurrency."
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "Moneda predeterminada",
+        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Por defecto, CNY. No se lee en modo dynamic."
+      },
       step: {
         label: "Incremento",
         helpText: "Incremento del control deslizante (1 por defecto). Solo lo usa el renderizador: la ruta de escritura no rechaza un valor fuera de la cuadrícula."
@@ -451,6 +603,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxSize: {
         label: "Tamaño máximo",
         helpText: "Tamaño máximo permitido en BYTES (entero positivo). Se aplica en el servidor al escribir, contra el tamaño registrado del archivo; un archivo sin tamaño registrado no puede incumplirlo."
+      },
+      accept: {
+        label: "Tipos aceptados",
+        helpText: "Tipos de archivo permitidos, como tipos MIME, comodines type/* o sufijos .ext (p. ej., image/*, .pdf). Se pasan al selector de archivos y se vuelven a comprobar en el servidor al escribir, contra el archivo almacenado. Sin definir: cualquier tipo."
       },
       dimensions: {
         label: "Dimensiones",
@@ -518,13 +674,49 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filas por página",
         helpText: "Filas por página en el diálogo del selector de registros: un entero positivo; 10 por defecto."
       },
+      lookupColumns: {
+        label: "Columnas de lookup",
+        helpText: "Columnas de la tabla del selector de registros: nombres de campo del objeto referenciado o entradas {field, label, width, type} (p. ej., [\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]). Sin definir: se derivan del objeto referenciado."
+      },
+      lookupFilters: {
+        label: "Filtros de lookup",
+        helpText: "Filtro base sobre los candidatos del selector, como reglas {field, operator, value} sobre el objeto referenciado; operator es uno de eq, ne, gt, lt, gte, lte, contains, in, notIn (p. ej., [{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]). Se aplica en todas las superficies del selector, combinado con AND con cualquier filtro de dependsOn."
+      },
+      dependsOn: {
+        label: "Depende de",
+        helpText: "Campos del mismo registro de los que dependen las opciones de este campo: el formulario retiene este campo hasta que cada uno tenga valor y lo reevalúa cuando alguno cambia. Un lookup filtra sus candidatos por ellos: un nombre filtra el campo homónimo del objeto referenciado; {field, param} nombra otro distinto. En un campo de opciones, enumera los nombres de los campos padre; la regla por opción va en el visibleWhen de cada opción."
+      },
       relatedListTitle: {
         label: "Título de la lista relacionada",
         helpText: "Título de la lista relacionada de esta relación en la página de detalle del registro padre."
       },
+      relatedListColumns: {
+        label: "Columnas de la lista relacionada",
+        helpText: "Columnas de la lista relacionada de esta relación en la página de detalle del registro padre, como nombres de campo de este objeto (el hijo), p. ej., name, status. Sin definir: se derivan del objeto hijo. Solo nombres: etiquetas, tipos de celda y formato vienen de las definiciones de campo del hijo."
+      },
       inlineTitle: {
         label: "Título en línea",
         helpText: "Título de la cuadrícula maestro-detalle incrustada en el registro padre."
+      },
+      inlineColumns: {
+        label: "Columnas en línea",
+        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando este campo define inlineEdit, que se escribe en el código fuente. Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
+      },
+      "inlineColumns.name": {
+        label: "Nombre",
+        helpText: "Campo de este objeto (el hijo) que la columna muestra y edita (p. ej., quantity). No se comprueba al guardar ni al publicar: un nombre que no es un campo de este objeto se muestra como una columna de texto simple."
+      },
+      "inlineColumns.label": {
+        label: "Etiqueta",
+        helpText: "Encabezado de la columna. Sin definir: la propia etiqueta del campo."
+      },
+      "inlineColumns.width": {
+        label: "Ancho",
+        helpText: "Ancho fijo de la columna en píxeles. Sin definir: según el tipo de celda; las columnas de texto se expanden y las de número, fecha y selección se mantienen estrechas."
+      },
+      "inlineColumns.defaultHidden": {
+        label: "Oculta por defecto",
+        helpText: "Empieza la columna en el selector de columnas de la cuadrícula en lugar de en pantalla; el usuario puede mostrarla. Una columna cuyo campo es obligatorio siempre se muestra."
       },
       inlineAmountField: {
         label: "Campo de importe en línea",
@@ -566,6 +758,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ID externo",
         helpText: "Marca como ID externo para operaciones upsert"
       },
+      storage: {
+        label: "Almacenamiento",
+        helpText: "Restricciones físicas de almacenamiento (ADR-0113): el DDL que el contrato de escritura deliberadamente no implica. Sin definir: no se solicita ninguna."
+      },
+      "storage.notNull": {
+        label: "No nulo",
+        helpText: "Emite un NOT NULL de base de datos en la columna. Sin definir, la columna sigue admitiendo nulos incluso con required: el motor aplica required al escribir. Declararlo sobre filas nulas existentes es una migración destructiva controlada por la deriva de esquema (rellene antes). Se rechaza junto a requiredWhen."
+      },
       readonly: {
         label: "Solo lectura",
         helpText: "El campo es de solo lectura en formularios"
@@ -582,9 +782,25 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ordenable",
         helpText: "Permite ordenar listas por este campo"
       },
+      visibleWhen: {
+        label: "Condición de visibilidad",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.type == 'invoice'): el formulario muestra este campo solo mientras sea TRUE."
+      },
+      readonlyWhen: {
+        label: "Condición de solo lectura",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status == 'paid'): el campo es de solo lectura mientras sea TRUE, y se aplica en el servidor: el cambio de una actualización sobre un campo bloqueado se descarta y se conserva el valor almacenado. Lee las columnas propias del registro; objectstack validate rechaza una lectura a través de un campo de referencia."
+      },
+      requiredWhen: {
+        label: "Condición de obligatoriedad",
+        helpText: "Predicado CEL sobre el registro: el campo es obligatorio mientras sea TRUE, y se aplica en el servidor como compuerta de transición: se rechaza una escritura que deja el valor vacío si el registro cumplía antes de ella, así que una fila a la que ya le faltaba el valor sigue superando ediciones no relacionadas. Para una regla que toda escritura deba cumplir, use una regla script en validations. Se rechaza junto a storage.notNull."
+      },
       maskingRule: {
         label: "Regla de enmascaramiento",
         helpText: "Enmascaramiento parcial: preset ('phone', 'id_card', 'bank_account', 'email', 'name') o {\"keepHead\": n, \"keepTail\": m}. Enmascarado salvo que el llamante tenga los requiredPermissions del campo"
+      },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para leer o editar este campo (ADR-0066 D3). Sin ellas, el valor se enmascara al leer (parcialmente si hay maskingRule) y las ediciones se deniegan. Vacío o sin definir: sin restricción por capacidad."
       },
       internal: {
         label: "Interno",
@@ -710,6 +926,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   seed: {
     label: "Datos semilla",
     description: "Datos predefinidos / de inicialización aplicados al publicar"
+  },
+  picklist: {
+    label: "Lista de selección",
+    description: "Lista de opciones compartida a la que los campos de selección hacen referencia por nombre"
   },
   mapping: {
     label: "Mapeo de importación",
@@ -890,37 +1110,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       userFilters: {
         label: "Filtros de usuario",
         helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
-      },
-      tabs: {
-        label: "Pestañas",
-        helpText: "Pestañas de filtro en la vista: cada pestaña aplica sus propias reglas de filtro"
-      },
-      "tabs.name": {
-        label: "Nombre"
-      },
-      "tabs.label": {
-        label: "Etiqueta"
-      },
-      "tabs.icon": {
-        label: "Icono"
-      },
-      "tabs.view": {
-        label: "Vista de lista"
-      },
-      "tabs.filter": {
-        label: "Filtro"
-      },
-      "tabs.order": {
-        label: "Orden de visualización"
-      },
-      "tabs.pinned": {
-        label: "Fijada"
-      },
-      "tabs.isDefault": {
-        label: "Pestaña predeterminada"
-      },
-      "tabs.visible": {
-        label: "Visibilidad"
       },
       appearance: {
         label: "Apariencia",
@@ -1515,6 +1704,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Operación",
         helpText: "Escritura declarativa de campos sobre un único registro: 'update' aplica `patch`, fusionado bajo los `params` recogidos, al registro actual EN NOMBRE DE QUIEN LLAMA — nunca con privilegios del sistema, así que los permisos de quien llama, los hooks del objeto y sus validaciones se ejecutan igual que en una edición de usuario."
       },
+      patch: {
+        label: "Valores fijos (patch)",
+        helpText: "Valores de campo fijos que la actualización escribe en el registro actual, p. ej., {\"status\": \"done\"}; se fusionan POR DEBAJO de los valores que recoge `params`, así que un parámetro con el mismo nombre prevalece. Se escribe como quien llama: los permisos, hooks y validaciones del objeto se aplican como en una edición de usuario."
+      },
       undoable: {
         label: "Reversible",
         helpText: "Ofrece deshacer después de que la actualización se complete. El deshacer captura el valor previo de cada campo que la acción escribe: el conjunto fusionado, `patch` bajo los `params` recogidos. Una acción sin `operation` no declara conjunto de escritura, así que no hay nada que capturar."
@@ -1523,6 +1716,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ejecución",
         helpText: "Contrato de despacho masivo para el que está escrito el cuerpo de esta acción: 'perRecord' envía un despacho por cada fila seleccionada, con el recordId de esa fila; 'aggregate' envía UN solo despacho para toda la selección, con todos los id en params._selectedIds. Si se omite, la acción se despacha por registro."
       },
+      description: {
+        label: "Descripción",
+        helpText: "Línea explicativa bajo el título del diálogo de parámetros de esta acción. En una acción que recoge parámetros, la pregunta de confirmación va aquí y no en confirmText: un diálogo, no dos. No es ai.description, que es el texto que lee un agente de IA."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"
@@ -1530,6 +1727,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       successMessage: {
         label: "Mensaje de éxito",
         helpText: "Mensaje de éxito tras completar"
+      },
+      errorMessage: {
+        label: "Mensaje de error",
+        helpText: "Mensaje de error que se muestra cuando la acción falla, en lugar del error original."
       },
       refreshAfter: {
         label: "Actualizar después",
@@ -1567,6 +1768,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Requiere función",
         helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
       },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La ruta de acciones de la plataforma rechaza a cualquier otro con 403 (acciones script, flow y modal, y la vía MCP/IA), y se le oculta el botón. Una acción de type api llama directamente a su endpoint, así que ese endpoint debe volver a comprobarlas."
+      },
       ai: {
         label: "Exposición a IA",
         helpText: "Exposición a IA (voluntaria): establece ai.exposed=true y escribe ai.description (≥40 caracteres) para que los agentes puedan llamarla."
@@ -1582,6 +1787,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       bodyShape: {
         label: "Forma del cuerpo",
         helpText: "Estructura del cuerpo de solicitud (flat o nested)"
+      },
+      bodyExtra: {
+        label: "Cuerpo adicional (bodyExtra)",
+        helpText: "Campos fijos del cuerpo de la petición de esta acción api, fusionados al final, así que prevalecen sobre los parámetros recogidos (p. ej., {\"resend\": true}). Los tokens de variables de página (page.NAME entre llaves dobles) los resuelve el runtime. La carga útil va aquí, nunca en params."
       }
     }
   },
@@ -1652,7 +1861,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "Bloques",
-        helpText: "Une varios objetos (solo informe joined)"
+        helpText: "Subinformes vinculados a un conjunto de datos (solo informe joined)"
       },
       "blocks.name": {
         label: "Nombre"
@@ -1947,7 +2156,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "Identidad",
-        description: "Identificador y tipo de contenido. El id se referencia con sendTemplate({ template: id, ... })."
+        description: "Identificador de plantilla que resuelve IEmailService.sendTemplate({ template: name, locale, ... })."
       },
       subject: {
         label: "Asunto",
@@ -2047,7 +2256,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       tab_and_row_level_security: {
         label: "Pestaña y seguridad a nivel de fila",
-        description: "Visibilidad de pestañas, políticas RLS y variables de contexto personalizadas para evaluar predicados."
+        description: "Visibilidad de pestañas y políticas RLS."
       }
     },
     fields: {
@@ -2078,6 +2287,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       systemPermissions: {
         label: "Permisos del sistema",
         helpText: "Lista de claves de capacidades del sistema"
+      },
+      adminScope: {
+        label: "Ámbito de administración delegada",
+        helpText: "Administración delegada (ADR-0090 D12): permite a quienes tienen este conjunto administrar un subárbol de unidades de negocio. businessUnit es la raíz del subárbol (sys_business_unit.name), es obligatorio y no puede estar en blanco; includeSubtree vale true por defecto; manageAssignments, manageBindings y authorEnvironmentSets valen false por defecto; un delegado solo puede asignar los conjuntos nombrados en assignablePermissionSets. Déjalo vacío en un conjunto que no delega nada."
       },
       objects: {
         label: "Permisos de objeto",
@@ -2139,7 +2352,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       capabilities: {
         label: "Capacidades",
-        description: "Skills, herramientas y fuentes de conocimiento que puede usar el agente."
+        description: "Skills y fuentes de conocimiento que puede usar el agente."
       },
       access: {
         label: "Acceso y seguridad",
@@ -2181,15 +2394,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "Planificación",
-        helpText: "Configuración de razonamiento autónomo (strategy, max iterations, replan)"
+        helpText: "Configuración de razonamiento autónomo: el número máximo de iteraciones de razonamiento antes de que el agente se detenga (1–100, 10 por defecto)."
       },
       memory: {
         label: "Memoria",
-        helpText: "Gestión de memoria (short-term, long-term, reflection)"
+        helpText: "Memoria a largo plazo: notas destiladas que se guardan por usuario, se recuperan antes de cada conversación y las escribe una reflexión cada reflectionInterval interacciones entregadas. Cuando la memoria a largo plazo está habilitada, maxEntries y reflectionInterval son obligatorios. Lo aplica el runtime de IA en la nube."
       },
-      lifecycle: {
-        label: "Ciclo de vida",
-        helpText: "Máquina de estado que define el flujo de conversación"
+      structuredOutput: {
+        label: "Salida estructurada",
+        helpText: "Contrato de salida para la respuesta final del agente: formato JSON, el JSON Schema con el que se valida, reintentos, formato de respaldo y pasos de transformación. Lo aplica el runtime de IA en la nube."
       },
       skills: {
         label: "Habilidades",

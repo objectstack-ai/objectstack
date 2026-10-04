@@ -14,7 +14,7 @@
  * metadata-only" — and to RUN the lowered `source` through the real QuickJS
  * runner in a test — needs this exact function, not a lookalike: a local
  * reimplementation passes its own tests while diverging from the rule the
- * build actually applies, which is the failure mode #13651 was filed about.
+ * build actually applies, which is the failure mode behind commit ada3834ad.
  *
  * Until 17.3.0 the extractor was reachable as a deep `dist/utils/` import, and
  * one out-of-repo consumer (hotcrm's hook-body fidelity harness) reached it

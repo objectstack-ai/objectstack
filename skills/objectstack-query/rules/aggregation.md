@@ -46,7 +46,7 @@ const rows = await engine.aggregate('sale', {
 ```
 
 Never list the grouped fields in `fields`: drivers auto-select every grouped
-field into the result rows, and `fields` is not one of the six keys
+field into the result rows, and `fields` is not one of the keys
 `engine.aggregate()` accepts — it is rejected by name (see the calling
 convention in `SKILL.md`).
 
@@ -79,10 +79,10 @@ aggregations (never bucket by hand in app code):
   the projected COLUMN only** — grouping still keys on the field, so the buckets
   themselves are unchanged. Read the result under `alias ?? field`, and reference
   that same name from `having`.
-- The engine pushes bucketing down to the driver (`DATE_TRUNC` etc.) when
-  the dialect supports that granularity, and transparently falls back to
-  in-memory bucketing otherwise — results are correct either way, **including
-  the column keys**.
+- The engine pushes bucketing down to the driver (`to_char` / `date_format` /
+  `strftime` / `$dateToString`, never `date_trunc`) when the dialect supports
+  that granularity, and transparently falls back to in-memory bucketing
+  otherwise — results are correct either way, **including the column keys**.
 
 ## HAVING Clause
 

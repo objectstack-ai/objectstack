@@ -24,7 +24,7 @@
  * `ql` yields a partial context (even `{ positions: [], permissions: [] }`) and
  * enforcement stays the SecurityPlugin's job, never this resolver's.
  *
- * ⚠️ [#13279] A FAILED read is not a missing service, and since the 2026-08-30
+ * ⚠️ [commit 6a180e42d] A FAILED read is not a missing service, and since the 2026-08-30
  * ruling the two no longer share an answer. When a permission-store read is
  * issued and THROWS, this resolver raises {@link AuthzStoreUnavailableError}
  * instead of reporting an empty grant set: an outage must not be answerable as
@@ -39,7 +39,7 @@
  */
 
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
-// [#13279, ruled 2026-08-30] `isMissingTableError` is the one "was this READ
+// [commit 6a180e42d, ruled 2026-08-30] `isMissingTableError` is the one "was this READ
 // failure just an unprovisioned table?" predicate. It was `@objectstack/metadata`'s
 // until this resolver needed it; metadata depends on core, so the ruling relocated
 // it to `@objectstack/types` — which core already depends on — rather than let a
@@ -269,7 +269,7 @@ async function tryFind(
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch (err) {
-    // [#13279] THE loud failure. This `catch` used to `return []`, which made a
+    // [commit 6a180e42d] THE loud failure. This `catch` used to `return []`, which made a
     // FAILED read and an EMPTY one the same answer — so an outage of the
     // permission store resolved as an authenticated principal holding zero
     // capabilities, and the door answered a `403` byte-identical to a genuine
@@ -326,7 +326,7 @@ async function tryFind(
     // Both directions are pinned by name in `authz-store-unavailable.test.ts`
     // ('THE OUTAGE DIRECTION' / 'THE UNPROVISIONED DIRECTION'); keep them.
     //
-    // `object` is passed as `readObject` so the #13324 narrowing applies: a
+    // `object` is passed as `readObject` so commit 4cda78c9b's narrowing applies: a
     // phrase that names some OTHER relation is not evidence about the table
     // this read asked for, and stays loud.
     if (isMissingTableError(err, object)) return [];
@@ -338,7 +338,7 @@ async function tryFind(
  * Resolve the authorization context for an inbound request. Anonymous requests
  * yield `{ positions: [], permissions: [], ... }`.
  *
- * ⚠️ [#13279] This function used to document itself as "Always resolves — never
+ * ⚠️ [commit 6a180e42d] This function used to document itself as "Always resolves — never
  * throws", and that total guarantee WAS the defect: the only way to always
  * resolve across a permission-store outage is to report a capability set the
  * resolver never actually read. It now throws exactly one error —
@@ -451,9 +451,13 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // Degrading would hand back exactly the `200 + total 0` silent-empty this
   // card exists to kill — an ex-member's automation would keep answering
   // success while reading nothing.
-  if (keyPrincipal?.tenantId && input.tenancyPosture) {
-    const posture = input.tenancyPosture;
-    if (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId)) {
+  //
+  // [#20604] The membership rule is {@link vetOrganizationClaim}, the one the
+  // session arm below asks: a walled posture, and no current membership backing
+  // the key's organization. Only the CONSEQUENCE is this arm's own — the key is
+  // refused (#15256 2A) where the session arm drops the claim.
+  if (keyPrincipal?.tenantId) {
+    if (vetOrganizationClaim(keyPrincipal.tenantId, grants.accessible_org_ids, input.tenancyPosture) === undefined) {
       // [#15256 / 2A] The `organization_membership_ended` decision point — AFTER
       // grants, because the membership set is what decides it. One line, here.
       warnApiKeyRefusal({
@@ -529,12 +533,13 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // Session-only by construction: an admitted API key sets `userId`, which
   // makes the session branch above unreachable, so a non-empty `tenantId` here
   // with no `keyPrincipal` can only have come from the session claim.
+  //
+  // [#20580] The check itself is {@link vetOrganizationClaim}, so the
+  // permission explainer asks the same question about the user it explains.
   if (
     !keyPrincipal
     && tenantId
-    && input.tenancyPosture
-    && postureEnforcesWall(input.tenancyPosture)
-    && !grants.accessible_org_ids.includes(tenantId)
+    && vetOrganizationClaim(tenantId, grants.accessible_org_ids, input.tenancyPosture) === undefined
   ) {
     // [#15256 / 2A, mirrored] The one decision point where the drop is decided.
     warnSessionOrganizationClaimDropped({
@@ -565,6 +570,38 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   return ctx;
 }
 
+/**
+ * [#15409 — maintainer ruling 2026-09-05, option B] The organization a
+ * principal that CLAIMS `claimedOrganizationId` is resolved in: the claim
+ * itself while a current membership backs it, `undefined` once it does not.
+ *
+ * This is the session arm of {@link resolveAuthzContext}, as one function.
+ * Under a wall-enforcing posture (`isolated`, `group`) a claim on an
+ * organization absent from `accessibleOrgIds` (the principal's
+ * {@link UserAuthzGrants.accessible_org_ids}, which does not depend on the
+ * organization the grants were resolved in) is dropped, and the principal
+ * resolves with NO active organization. Under `single`, or with no posture
+ * supplied, there is no wall and the claim stands as made.
+ *
+ * [#20580] A second reader asks it: the permission explainer, about the user
+ * it explains in the caller's organization. That is how `security/explain`
+ * resolves that user in the organization enforcement would resolve them in.
+ * [#20604] The API-key arm of {@link resolveAuthzContext} asks it too, about
+ * the organization a key is stamped with. The rule is the same; the
+ * consequence is that arm's own: a key IS its organization binding, so an
+ * unbacked key is refused (#15256 2A) where a session's claim is dropped.
+ * ⛔ Nothing else spells this rule — a caller that needs it calls this.
+ */
+export function vetOrganizationClaim(
+  claimedOrganizationId: string | undefined,
+  accessibleOrgIds: readonly string[],
+  tenancyPosture: TenancyPosture | undefined,
+): string | undefined {
+  if (!claimedOrganizationId) return undefined;
+  if (!tenancyPosture || !postureEnforcesWall(tenancyPosture)) return claimedOrganizationId;
+  return accessibleOrgIds.includes(claimedOrganizationId) ? claimedOrganizationId : undefined;
+}
+
 /** The authorization grants a KNOWN user holds — a subset of {@link ResolvedAuthzContext}. */
 export interface UserAuthzGrants {
   positions: string[];
@@ -581,7 +618,13 @@ export interface UserAuthzGrants {
 }
 
 export interface ResolveUserAuthzGrantsOptions {
-  /** Active org/tenant id — scopes org-bound grants (a null-org row is global). */
+  /**
+   * Active org/tenant id — scopes org-bound grants (a null-org row is global).
+   * Omitted ⇒ NO active organization, so only the global grants apply: an
+   * organization-scoped position or permission-set row applies only while its
+   * organization is this tenant ({@link grantAppliesInTenant}). There is no
+   * "every organization" reading of an omitted tenant.
+   */
   tenantId?: string;
   /** Clock injection for grant validity windows (tests). */
   nowMs?: number;
@@ -616,6 +659,37 @@ export interface ResolveUserAuthzGrantsOptions {
 }
 
 /**
+ * The ONE organization rule for a stored grant row — `sys_user_position` (§4),
+ * `sys_user_permission_set` (§6) and the `sys_position` rows whose bindings
+ * §6a collects all ask it, so none of them can disagree: a row with no
+ * `organization_id` is GLOBAL and applies in every resolution; a row scoped to
+ * an organization applies only when that organization is the ACTIVE tenant.
+ * With no active tenant, an organization-scoped row does not apply at all.
+ *
+ * The spelling both sites carried before, `org && tenantId && org !== tenantId`
+ * as the SKIP condition, read "no tenant" as "every organization": it was false
+ * for every row once `tenantId` was undefined, so a resolution with no active
+ * organization kept every organization-scoped grant the user held anywhere.
+ * That is the resolution the session arm of {@link resolveAuthzContext} falls
+ * back to when it drops a claim its membership no longer backs, so a member
+ * removed from an organization kept the capabilities that organization had
+ * granted — with no organization boundary left on them at all.
+ *
+ * ⛔ There is no "every organization" mode: no option selects one and nothing
+ * falls back to one. A caller that has an organization passes it; a caller
+ * that has none gets the global grants and nothing else.
+ *
+ * ⚠️ Not applied to §3's `sys_member` role projection, which reads the user's
+ * OWN current memberships rather than a grant row. With no active organization
+ * that projection still names every membership's role; what a role name can
+ * CONFER arrives through §6a's per-organization position rows and §6's
+ * organization-scoped grants, and both answer to this rule.
+ */
+function grantAppliesInTenant(organizationId: unknown, tenantId: string | undefined): boolean {
+  return !organizationId || organizationId === tenantId;
+}
+
+/**
  * resolveUserAuthzGrants — the userId-driven core of {@link resolveAuthzContext}.
  *
  * Given a KNOWN user id, aggregate the authorization grants that user holds:
@@ -637,7 +711,7 @@ export interface ResolveUserAuthzGrantsOptions {
  * Fail-closed like its parent: a missing engine yields an empty-but-valid
  * envelope.
  *
- * ⚠️ [#13279] "and it never throws" was removed from this sentence deliberately.
+ * ⚠️ [commit 6a180e42d] "and it never throws" was removed from this sentence deliberately.
  * A permission-store read that is issued and FAILS now raises
  * {@link AuthzStoreUnavailableError} rather than contributing an empty grant
  * set, so a `runAs:'user'` automation cannot silently run with the authority of
@@ -795,11 +869,11 @@ export async function resolveUserAuthzGrants(
 
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role.
-  //    `organization_id = null` = global (cross-tenant); else match active org.
+  //    `organization_id = null` = global (cross-tenant); else match active org —
+  //    so with no active org, only the global rows ({@link grantAppliesInTenant}).
   // (read in Leg 1 above)
   for (const ur of userPositionRows) {
-    const org = ur.organization_id ?? null;
-    if (org && tenantId && org !== tenantId) continue;
+    if (!grantAppliesInTenant(ur.organization_id, tenantId)) continue;
     if (!isGrantActive(ur, nowMs)) continue;
     const r = ur.position;
     if (typeof r === 'string' && r && !grants.positions.includes(r)) grants.positions.push(r);
@@ -817,17 +891,15 @@ export async function resolveUserAuthzGrants(
     grants.org_user_ids = Array.from(ids);
   }
 
-  // 6. Permission sets — user-scoped grants (null org = global, else active org).
+  // 6. Permission sets — user-scoped grants (null org = global, else active org;
+  //    with no active org, only the global rows — {@link grantAppliesInTenant}).
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
   // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const psIds = new Set<string>(
     upsRows
-      .filter((r) => {
-        const org = (r.organization_id ?? r.organizationId) ?? null;
-        return !(org && tenantId && org !== tenantId);
-      })
+      .filter((r) => grantAppliesInTenant(r.organization_id ?? r.organizationId, tenantId))
       .map((r) => r.permission_set_id ?? r.permissionSetId)
       .filter(Boolean),
   );
@@ -850,7 +922,7 @@ export async function resolveUserAuthzGrants(
   // the flag exists rather than a plain deletion. Under `single` — the DEFAULT, what
   // a deployment that configured no tenancy at all resolves to — `bootstrapPlatformAdmin`
   // MINTS this very row for the first human user, and that promotion is ruled correct
-  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08 on #16682, verbatim: "The
+  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08, recorded in ADR-0131's 2026-09-17 amendment, verbatim: "The
   // rest of Choice 4A (#11974, 2026-08-25) stands: retiring the walled write must not
   // retire the `single` one"). A development environment started for a moment cannot be
   // asked to declare an administrator first, so deleting the row route for every posture
@@ -914,7 +986,22 @@ export async function resolveUserAuthzGrants(
     //     organization-less rows stay REACHABLE on purpose — they are not
     //     reaped, and grants point at them by row id, so dropping them here
     //     would revoke standing access silently.
-    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId);
+    //
+    //     [#20515] The same grant rule as §4 and §6 is then asked of each
+    //     position row ({@link grantAppliesInTenant}). With a tenant it is a
+    //     no-op — the driver's scope already returned only this organization's
+    //     rows and the organization-less ones. With NO tenant the read above is
+    //     installation-wide by design, so without it every organization's
+    //     `everyone` row, and every organization's copy of a name the caller
+    //     holds (the `sys_member` role projection's `org_member`, say), fed its
+    //     bindings into an organization-less resolution: measured on a real
+    //     `SqlDriver` over the shipped per-organization catalog, a member
+    //     removed from an organization kept the `manage_metadata` set that
+    //     organization had bound to its `org_member` position. This is the
+    //     grant rule, not a second tenant wall: it decides which organization's
+    //     bindings APPLY, after the driver decided which rows are visible.
+    const positionRows = (await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId))
+      .filter((r) => grantAppliesInTenant(r.organization_id, tenantId));
     const deactivatedNames = new Set<string>(
       positionRows.filter((r) => !isRowActive(r)).map((r) => r.name).filter(Boolean),
     );

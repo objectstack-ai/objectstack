@@ -15,7 +15,7 @@ import type { FlowActivationStore } from './engine.js';
  * ## What this replaces, and why the replacement is durable
  *
  * The engine used to carry its off-switch in a process-local `flowEnabled`
- * map. #10243 measured what that costs: the bit was NOT a row, so no
+ * map. Commit 02b41232d measured what that costs: the bit was NOT a row, so no
  * organization wall scoped it — `toggleFlow` wrote an in-process map keyed by
  * flow NAME only, and the automation service is ONE instance per environment.
  * On a real `isolated` posture a tenant org owner switched a shipped flow off
@@ -64,7 +64,7 @@ export type FlowActivationStoreEngine = MetadataActivationStoreEngine;
  * In-memory {@link FlowActivationStore} — process-lifetime only.
  *
  * ⚠️ This is NOT the retired `flowEnabled` map wearing a new name. The
- * difference is the one #10243 turned on: this store is only ever reached
+ * difference is the one the toggle ruling (commit 266436a7f) turned on: this store is only ever reached
  * through {@link AutomationEngine.toggleFlow}, which is reached from the wire
  * only through a door that refuses a tenant admin in a walled posture
  * (ADR-0126 §5). What it lacks versus the ObjectStore implementation is

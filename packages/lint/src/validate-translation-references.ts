@@ -231,7 +231,7 @@ function strName(v: unknown): string | undefined {
  * Add a validation rule's own `name` to the universe, then recurse into a
  * `conditional` rule's `then` / `otherwise` branch — each branch is itself a
  * full rule (with its own `name`, and possibly its own nested branches), and
- * mirrors the recursion `evaluateRule` performs at runtime (#14700). See the
+ * mirrors the recursion `evaluateRule` performs at runtime (commit de3c52beb). See the
  * call site in {@link buildUniverse} for why the wrapper's own name is kept
  * too, even though `then` / `otherwise` are what a caller actually reads.
  */
@@ -297,7 +297,7 @@ interface ObjectFacts {
    * (`objects[].validations[].name`, including a nested `conditional` rule's
    * `then` / `otherwise` branch — the branch is itself a full rule and is the
    * address `checkConditional` / `authoredRuleMessage` actually key on;
-   * #14700). `objects.<obj>._validations.<rule>.message` (#14253) is keyed by
+   * commit de3c52beb). `objects.<obj>._validations.<rule>.message` (#14253) is keyed by
    * that name, so a ghost here is a rule message that renders in the source
    * locale inside an otherwise translated refusal.
    */
@@ -547,7 +547,7 @@ function collectPageTabs(page: AnyRec, factsFor: (objectName: string) => ObjectF
  * very same view `<object>.default` — so a container declaring only a default
  * `list` produced a registry entry keyed `default` and a lint fact set that
  * knew no such view. The CLI i18n walker demanded `_views.default.label`
- * (#6124, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
+ * (commit b3c1f3cd5, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
  * six instances on the showcase, and no author action could make both green.
  * Ruled 2026-08-06 (#5164): canonical = the runtime identity's bare key.
  * Leg 1's `defaultListViewKey` in `packages/cli/src/utils/i18n-extract.ts` is
@@ -980,7 +980,7 @@ function buildUniverse(stack: AnyRec): Universe {
     // #14253: `_validations.<rule>` is keyed by the rule's own `name`. A rule
     // without a name has no key and is not registered — the resolver cannot
     // address it either, so nothing is lost by skipping it here.
-    // #14700: a `conditional` rule's `then` / `otherwise` branch is itself a
+    // Commit de3c52beb: a `conditional` rule's `then` / `otherwise` branch is itself a
     // full rule, and its `name` — not the wrapper's — is the address
     // `checkConditional` delegates to and `authoredRuleMessage` keys on (see
     // `packages/objectql/src/validation/rule-validator.ts`). A flat walk over
@@ -1118,9 +1118,10 @@ function buildUniverse(stack: AnyRec): Universe {
   // …from the stack in hand and from the artifact's other entries (#19349).
   //
   // ⛔ A name-only fold is wrong here for a reason peculiar to this rung: the
-  // stored RECORD is itself read downstream — `checkActionParams` judges
-  // `params.<name>` off it — so folding a bare name would resolve the action
-  // key and then report every one of its param keys as an orphan.
+  // stored RECORD is itself read downstream — `checkActionEntry` judges
+  // `params.<name>`, `outcomeMessages.<outcome>`, `resultDialog.fields.<path>`
+  // and the dialog's own leaves off it — so folding a bare name would resolve
+  // the action key and then report every one of those children as an orphan.
   //
   // ⚠️ And the OWNER is read from the record too, which is what keeps the
   // widening honest: an action a sibling binds to an object joins that object's
@@ -1131,7 +1132,7 @@ function buildUniverse(stack: AnyRec): Universe {
   const actionOwners = new Map<string, string>();
   // `ownDeclaration` carries #19064's decision one collection over: where both
   // the stack in hand and a sibling declare the same action name, the record
-  // this leg is JUDGING keeps the slot, because `checkActionParams` is the only
+  // this leg is JUDGING keeps the slot, because `checkActionEntry` is the only
   // consumer of the stored definition and picking the other layer would be a
   // second opinion on the registry's precedence.
   const collectActionRecord = (action: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
@@ -1337,9 +1338,7 @@ function buildUniverse(stack: AnyRec): Universe {
 
 /** Quote a locale for the config path — BCP-47 tags carry `-`. */
 function localePath(bundleIndex: number, locale: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(locale)
-    ? `translations[${bundleIndex}].${locale}`
-    : `translations[${bundleIndex}]["${locale}"]`;
+  return `translations[${bundleIndex}]${memberPath(locale)}`;
 }
 
 /**
@@ -1534,7 +1533,9 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           );
         }
 
-        // _actions.<name>[.params.<name>]
+        // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>
+        //                 | .resultDialog.(title|description|acknowledge)
+        //                 | .resultDialog.fields.<path>] — see `checkActionEntry`
         for (const [actionName, rawAction] of Object.entries(asRecord(rawNode._actions))) {
           const actionPath = `${objPath}._actions.${actionName}`;
           const action = facts.actions.get(actionName);
@@ -1551,7 +1552,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             );
             continue;
           }
-          checkActionParams(findings, {
+          checkActionEntry(findings, {
             rawAction,
             action,
             path: actionPath,
@@ -1587,7 +1588,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           );
           continue;
         }
-        checkActionParams(findings, {
+        checkActionEntry(findings, {
           rawAction,
           action,
           path: actionPath,
@@ -1830,22 +1831,85 @@ function checkOptionKeys(
   }
 }
 
-/** Action-parameter translations are keyed by the param's `name`. */
-function checkActionParams(
-  findings: TranslationRefFinding[],
-  ctx: { rawAction: unknown; action: AnyRec; path: string; where: string; subject: string },
-): void {
-  const rawParams = Object.keys(asRecord(isRec(ctx.rawAction) ? ctx.rawAction.params : undefined));
-  if (rawParams.length === 0) return;
+/** What every leg of {@link checkActionEntry} is handed. */
+interface ActionEntryContext {
+  /** The bundle's node for this action — `_actions.<name>` or `globalActions.<name>`. */
+  rawAction: unknown;
+  /** The action's stored definition — the record `translateAction` overlays. */
+  action: AnyRec;
+  path: string;
+  where: string;
+  subject: string;
+}
 
-  const declared = new Set<string>();
+/**
+ * Every child of one action's translation entry that hangs off something the
+ * action declares, judged against that declaration through the resolver that
+ * reads it (#21216, #21264).
+ *
+ * Four groups under an action entry are records keyed by a name the action
+ * itself declares, and `translateAction` (`@objectstack/spec/system`, the
+ * resolver objectui's `useObjectLabel` mirrors) walks the DECLARED side of each,
+ * never the bundle's keys — so a key the declaration does not carry is read by
+ * nothing, and its copy silently never shows. The result dialog's own leaves
+ * are prose, but they hang off a node the action may not declare at all, and
+ * `resolveActionResultDialog` returns before reading any of them when it
+ * declares none:
+ *
+ *   | bundle key                          | declared by                          | read by                         |
+ *   |-------------------------------------|--------------------------------------|---------------------------------|
+ *   | `params.<name>`                     | `params[].name` (`field` fallback)   | `translateActionParams`         |
+ *   | `params.<name>.options.<value>`     | that param's inline `options[].value`| `translateActionParams`         |
+ *   | `outcomeMessages.<outcome>`         | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
+ *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
+ *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
+ *
+ * A dialog leaf under a DECLARED dialog is read whether or not the dialog
+ * authors that leaf itself — the resolver overlays a translated `title` onto a
+ * dialog that declares none — so declaring the dialog is the whole condition.
+ *
+ * The leaf keys beside them (`label`, `description`, `confirmText`,
+ * `successMessage`) are prose on a node that resolved, read whenever the
+ * action is, as on the object branch.
+ *
+ * ⛔ One vocabulary: a key naming a target the action does not declare is
+ * `translation-target-unknown` at `params`' severity; an OPTION key keyed off
+ * a declared param's option values is `translation-option-key-unknown` at
+ * warning, exactly as it is on a field's `options` — see the module's Severity
+ * note for why the two differ.
+ */
+function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  checkActionParams(findings, ctx);
+  checkActionOutcomeMessages(findings, ctx);
+  checkActionResultDialogLeaves(findings, ctx);
+  checkActionResultDialogFields(findings, ctx);
+}
+
+/** Action-parameter translations are keyed by the param's `name`. */
+function checkActionParams(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawParams = asRecord(isRec(ctx.rawAction) ? ctx.rawAction.params : undefined);
+  if (Object.keys(rawParams).length === 0) return;
+
+  const declaredParams = new Map<string, AnyRec>();
   for (const param of recordsOf(ctx.action.params)) {
     const name = strName(param.name) ?? strName(param.field);
-    if (name) declared.add(name);
+    if (name) declaredParams.set(name, param);
   }
+  const declared = new Set(declaredParams.keys());
 
-  for (const paramName of rawParams) {
-    if (declared.has(paramName)) continue;
+  for (const [paramName, rawParam] of Object.entries(rawParams)) {
+    const param = declaredParams.get(paramName);
+    if (param) {
+      checkActionParamOptionKeys(findings, {
+        optionMap: isRec(rawParam) ? rawParam.options : undefined,
+        param,
+        paramName,
+        path: `${ctx.path}.params.${paramName}.options`,
+        where: `${ctx.where} · param "${paramName}"`,
+        subject: ctx.subject,
+      });
+      continue;
+    }
     findings.push({
       severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
       rule: TRANSLATION_TARGET_UNKNOWN,
@@ -1860,4 +1924,214 @@ function checkActionParams(
         (declared.size > 0 ? ` Declared params: ${listNames(declared)}.` : ''),
     });
   }
+}
+
+/**
+ * Option translations under a DECLARED action param —
+ * `params.<name>.options.<value>`, keyed by the option's stored value: the
+ * field `options` leg ({@link checkOptionKeys}) one surface over, at its
+ * severity and with its label-versus-value diagnosis.
+ *
+ * Judged against the param's INLINE `options` array, the one set both readers
+ * agree on: `translateActionParams` overlays `String(option.value)` for each
+ * entry of that array and nothing else, and objectui's action dialog resolves
+ * `param.options ?? <the referenced field's options>` — an authored array wins.
+ * A FIELD-BACKED param with no inline array inherits its list from the field
+ * at render time; this rule does not re-derive that inheritance, so those
+ * option keys are left unjudged rather than guessed at. A param with neither
+ * has no options for anything to read.
+ */
+function checkActionParamOptionKeys(
+  findings: TranslationRefFinding[],
+  ctx: {
+    optionMap: unknown;
+    param: AnyRec;
+    paramName: string;
+    path: string;
+    where: string;
+    subject: string;
+  },
+): void {
+  const optionKeys = Object.keys(asRecord(ctx.optionMap));
+  if (optionKeys.length === 0) return;
+
+  const raw = ctx.param.options;
+  if (!Array.isArray(raw) && strName(ctx.param.field)) return;
+
+  const values = new Set<string>();
+  const byLabel = new Map<string, string>();
+  for (const opt of Array.isArray(raw) ? raw : []) {
+    if (!isRec(opt) || opt.value === undefined) continue;
+    const value = String(opt.value);
+    values.add(value);
+    const label = strName(opt.label);
+    if (label) byLabel.set(label.toLowerCase(), value);
+  }
+
+  if (values.size === 0) {
+    findings.push({
+      severity: 'warning',
+      rule: TRANSLATION_OPTION_KEY_UNKNOWN,
+      where: ctx.where,
+      path: ctx.path,
+      message:
+        `Option translations are keyed under parameter "${ctx.paramName}" of ${ctx.subject}, ` +
+        `which declares no \`options\`` +
+        (Array.isArray(raw) ? '' : ' and references no field') +
+        `. Nothing reads this map.`,
+      hint:
+        `Declare the options on the param, move the translations to the param that owns ` +
+        `them, or drop them.`,
+    });
+    return;
+  }
+
+  for (const key of optionKeys) {
+    if (values.has(key)) continue;
+    const labelHit = byLabel.get(key.toLowerCase());
+    findings.push({
+      severity: 'warning',
+      rule: TRANSLATION_OPTION_KEY_UNKNOWN,
+      where: ctx.where,
+      path: `${ctx.path}.${key}`,
+      message: labelHit
+        ? `Option translation is keyed by the DISPLAY LABEL "${key}" instead of the stored ` +
+          `value "${labelHit}". The resolver looks the option up by value, so this entry is ` +
+          `never found and the option renders with its source-locale label.`
+        : `Option translation is keyed by "${key}", which is not one of the values declared ` +
+          `by parameter "${ctx.paramName}" of ${ctx.subject}. The option renders untranslated.` +
+          suggest(key, values),
+      hint: labelHit
+        ? `Rename the key to "${labelHit}".`
+        : `Option keys are the stored \`value\`, not the label and not a variant spelling. ` +
+          `Declared values: ${listNames(values)}.`,
+    });
+  }
+}
+
+/**
+ * `outcomeMessages.<outcome>` — keyed by an outcome the action's own
+ * `outcomeMessages` declares (`ActionSchema.outcomeMessages`, #21095).
+ *
+ * `resolveActionOutcomeMessages` overlays key by key over the DECLARED map and
+ * returns early when the action declares none, so a translated outcome the
+ * action does not declare is never selected by anything: the bundle cannot add
+ * an outcome, only translate one.
+ */
+function checkActionOutcomeMessages(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawOutcomes = Object.keys(
+    asRecord(isRec(ctx.rawAction) ? ctx.rawAction.outcomeMessages : undefined),
+  );
+  if (rawOutcomes.length === 0) return;
+
+  const declared = new Set(Object.keys(asRecord(ctx.action.outcomeMessages)));
+
+  for (const outcome of rawOutcomes) {
+    if (declared.has(outcome)) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · outcome "${outcome}"`,
+      path: `${ctx.path}.outcomeMessages.${outcome}`,
+      message:
+        (declared.size > 0
+          ? `Translations are keyed to outcome "${outcome}", which ${ctx.subject} does not ` +
+            `declare in \`outcomeMessages\`. Only the outcomes the action declares are ` +
+            `translated, so this copy is never shown.` +
+            suggest(outcome, declared)
+          : `Translations are keyed to outcome "${outcome}", but ${ctx.subject} declares no ` +
+            `\`outcomeMessages\` at all, so nothing reads this map and this copy is never shown.`),
+      hint:
+        `Match the key to an outcome the action's \`outcomeMessages\` declares, declare the ` +
+        `outcome there first, or drop it.` +
+        (declared.size > 0 ? ` Declared outcomes: ${listNames(declared)}.` : ''),
+    });
+  }
+}
+
+/** The result dialog's prose leaves — every key `ActionResultDialogTranslationSchema` declares beside `fields`. */
+const RESULT_DIALOG_LEAVES = ['title', 'description', 'acknowledge'] as const;
+
+/**
+ * `resultDialog.title` / `.description` / `.acknowledge` — prose, but prose
+ * for a dialog the action must declare.
+ *
+ * `resolveActionResultDialog` returns the action's own `resultDialog` untouched
+ * when it has none, before any lookup, so under an action that declares no
+ * `resultDialog` these leaves are read by nothing: the bundle cannot add a
+ * dialog, only translate one. Under a declared dialog every leaf is read, even
+ * one the dialog does not author itself, so nothing further is judged there.
+ */
+function checkActionResultDialogLeaves(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  if (isRec(ctx.action.resultDialog)) return;
+  const rawDialog = asRecord(isRec(ctx.rawAction) ? ctx.rawAction.resultDialog : undefined);
+
+  for (const leaf of RESULT_DIALOG_LEAVES) {
+    if (rawDialog[leaf] === undefined) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · result dialog "${leaf}"`,
+      path: `${ctx.path}.resultDialog.${leaf}`,
+      message:
+        `Translations carry a result dialog \`${leaf}\`, but ${ctx.subject} declares no ` +
+        `\`resultDialog\`, so nothing reads this copy: a bundle translates a dialog the ` +
+        `action declares and cannot add one.`,
+      hint:
+        `Move the \`resultDialog\` translations under the action that declares the dialog, ` +
+        `declare the \`resultDialog\` on this action first if it should show one, or drop them.`,
+    });
+  }
+}
+
+/**
+ * `resultDialog.fields.<path>` — keyed by the LITERAL `path` of a field the
+ * action's `resultDialog.fields[]` declares (dots included: `"client.secret"`
+ * is one key, never two levels).
+ *
+ * `resolveActionResultDialog` maps over the declared `fields[]` and looks each
+ * one's label up by its `path`; it reads nothing at all when the action
+ * declares no `resultDialog`, and no label when the dialog declares no
+ * `fields` (it then renders the whole payload as JSON). A key naming any other
+ * path is never read.
+ */
+function checkActionResultDialogFields(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawDialog = isRec(ctx.rawAction) ? ctx.rawAction.resultDialog : undefined;
+  const rawPaths = Object.keys(asRecord(isRec(rawDialog) ? rawDialog.fields : undefined));
+  if (rawPaths.length === 0) return;
+
+  const dialog = isRec(ctx.action.resultDialog) ? ctx.action.resultDialog : undefined;
+  const declared = new Set<string>();
+  for (const field of dialog && Array.isArray(dialog.fields) ? dialog.fields : []) {
+    if (isRec(field) && typeof field.path === 'string') declared.add(field.path);
+  }
+
+  for (const fieldPath of rawPaths) {
+    if (declared.has(fieldPath)) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · result field "${fieldPath}"`,
+      path: `${ctx.path}.resultDialog.fields${memberPath(fieldPath)}`,
+      message: !dialog
+        ? `Translations are keyed to result field "${fieldPath}", but ${ctx.subject} declares ` +
+          `no \`resultDialog\`, so nothing reads this label.`
+        : declared.size > 0
+          ? `Translations are keyed to result field "${fieldPath}", which ${ctx.subject}'s ` +
+            `\`resultDialog.fields\` does not declare. Each label is looked up by a declared ` +
+            `field's literal \`path\`, so this one is never shown.` +
+            suggest(fieldPath, declared)
+          : `Translations are keyed to result field "${fieldPath}", but ${ctx.subject}'s ` +
+            `\`resultDialog\` declares no \`fields\` — it renders the whole response as JSON — ` +
+            `so nothing reads this label.`,
+      hint:
+        `Match the key to a declared field's literal \`path\` (dots included), or drop it.` +
+        (declared.size > 0 ? ` Declared paths: ${listNames(declared)}.` : ''),
+    });
+  }
+}
+
+/** A record key as a config-path member — bracketed when it is not an identifier. */
+function memberPath(key: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `.${key}` : `["${key}"]`;
 }

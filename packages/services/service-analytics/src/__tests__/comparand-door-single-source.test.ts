@@ -68,7 +68,7 @@ import {
   ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
 } from '@objectstack/spec/data';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import {
   isBindableComparand,
@@ -77,7 +77,7 @@ import {
   unrenderableTextComparandMessage,
 } from '../comparand-shape.js';
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any, NO_DATETIME_COLUMNS);
 const scope = (where: unknown) => compileScopedFilterToSql(where as FilterCondition, 'person');
 
 /** `'accept'`, or the refusal's ADR-0112 envelope as `CODE/status`. */

@@ -17,6 +17,14 @@ import {
   formatMtimeGap,
 } from '../utils/dev-restart.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+// THE artifact precedence, written once (#21501) — shared with `start`, and
+// with the `serve` child this command spawns. ⛔ No rung of it is restated here.
+import {
+  CONVENTIONAL_ARTIFACT_RELATIVE_PATH,
+  cwdConfigJoinsBoot,
+  isRemoteArtifact,
+  resolveArtifactBootSource,
+} from '../utils/artifact-precedence.js';
 import { artifactObjectNames } from '../utils/stack-collections.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 // The ONE port contract, shared with `start` and with the `serve` child this
@@ -46,10 +54,14 @@ import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
  * onto the ONE shared resolution (`resolveProjectDatabaseUrl`, #6469) that
  * `os start` and `os migrate` resolve through too. Priority: `--database` /
  * `--fresh`'s ephemeral file → `OS_DATABASE_URL` / `DATABASE_URL` /
- * `TURSO_DATABASE_URL` → explicit in-memory driver (`--database-driver memory`
- * / `OS_DATABASE_DRIVER=memory`) → the config-declared default datasource →
- * the unified default `<state dir>/data/objectstack.db` (legacy `dev.db` /
- * `standalone.db` still compat-read, with the loud `notice` line).
+ * `TURSO_DATABASE_URL` → the config-declared default datasource → the unified
+ * default `<state dir>/data/objectstack.db` (legacy `dev.db` / `standalone.db`
+ * still compat-read, with the loud `notice` line). The in-memory (mingo)
+ * engine is no longer a boot store: `--database-driver memory` is refused by
+ * the flag's allowlist, and `OS_DATABASE_DRIVER=memory` by the shared
+ * resolution ahead of every rung — so this seam never hands `dev` a Database
+ * row for a store its serve child would refuse. `--fresh` (a throwaway file)
+ * and `--database :memory:` (SQLite's own in-memory database) replace it.
  *
  * `dev` keeps a persistent default on purpose — the historical serve default
  * of `:memory:` wipes all data (and AI-authored metadata) on every restart,
@@ -175,6 +187,20 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
   return true;
 }
 
+/**
+ * Whether this `os dev` boot runs the watch-recompile loop (#20681).
+ *
+ * Off when the operator passed `--no-watch`, when the boot serves an artifact
+ * `os dev` does not build — `--artifact`, or the reference `OS_ARTIFACT_URL`
+ * (#21501) — since a rebuild would change nothing that is served, or when the
+ * cwd has no `objectstack.config.ts`. The one decision both the loop and the
+ * stale-artifact remedy line read, exported so `dev-no-watch.pin.test.ts` can
+ * drive it with what oclif actually parsed.
+ */
+export function devWatchActive(opts: { watch: boolean; artifact?: string; configExists: boolean }): boolean {
+  return opts.watch && !opts.artifact && opts.configExists;
+}
+
 export default class Dev extends Command {
   static override description =
     'Start development mode — watch sources, rebuild the artifact, and restart the server on change';
@@ -184,7 +210,18 @@ export default class Dev extends Command {
   };
 
   static override flags = {
-    watch: Flags.boolean({ char: 'w', description: 'Enable watch mode (default)', default: true }),
+    // `allowNo` is what makes the off branch below (`devWatchActive`, the
+    // watch-recompile loop) reachable at all: without it `--no-watch` is a
+    // "Nonexistent flag", and `--watch=false` is not a boolean spelling oclif
+    // reads — it parses as `--watch` plus the PACKAGE positional `false`
+    // (#20681). Same declaration as the sibling `compile` / `restart` /
+    // `seed-admin` switches.
+    watch: Flags.boolean({
+      char: 'w',
+      description: 'Watch objectstack.config.ts and src/, rebuilding on change (default: on). Disable with --no-watch.',
+      default: true,
+      allowNo: true,
+    }),
     ui: Flags.boolean({ description: 'Enable the bundled Console portal at /_console/' }),
     verbose: Flags.boolean({ char: 'v', description: 'Verbose output (shortcut for --log-level debug)' }),
     'log-level': Flags.string({
@@ -207,7 +244,7 @@ export default class Dev extends Command {
     }),
     restart: Flags.boolean({
       description:
-        'Restart the server after each successful rebuild so the running server always matches dist/objectstack.json (#5148). With --no-restart the watcher only rebuilds the artifact — the running server keeps the build it booted with until you restart it yourself, and every rebuild says so.',
+        'Restart the server after each successful rebuild so the running server always matches dist/objectstack.json. With --no-restart the watcher only rebuilds the artifact — the running server keeps the build it booted with until you restart it yourself, and every rebuild says so.',
       default: true,
       allowNo: true,
     }),
@@ -219,14 +256,14 @@ export default class Dev extends Command {
     // source to compile from. All flags override the matching env var.
     artifact: Flags.string({
       char: 'a',
-      description: 'Path or http(s):// URL to a compiled objectstack.json (skips auto-compile; overrides $OS_ARTIFACT_PATH)',
+      description: 'Path or http(s):// URL to a compiled objectstack.json (skips auto-compile; overrides $OS_ARTIFACT_URL, $OS_ARTIFACT_PATH and a cwd objectstack.config.ts)',
     }),
     'environment-id': Flags.string({
       description: 'Environment identifier (overrides $OS_ENVIRONMENT_ID, default env_local)',
     }),
     database: Flags.string({
       char: 'd',
-      description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL)',
+      description: 'Database URL: file:./db.sqlite | :memory: | libsql://... | postgres://... | mongodb://... (overrides $OS_DATABASE_URL)',
     }),
     // Enforced allowlist, not a help string — see `utils/database-driver-flag.ts`.
     // Both the choices and the enumerated list in the description come from the
@@ -302,21 +339,47 @@ export default class Dev extends Command {
     // local config — semantically the same as `os start` but with the
     // dev conveniences (NODE_ENV=development, dev-fallback AUTH_SECRET,
     // --ui default-on, dev-mode error formatting).
-    const isUrl = !!flags.artifact && /^https?:\/\//i.test(flags.artifact);
-    const inferredArtifact = flags.artifact
-      ?? process.env.OS_ARTIFACT_PATH
-      ?? path.resolve(process.cwd(), 'dist/objectstack.json');
-    const artifactPath = isUrl ? flags.artifact! : path.resolve(process.cwd(), inferredArtifact);
-    const useArtifactDirect = !!flags.artifact || !configExists;
+    //
+    // Resolved through THE precedence (`utils/artifact-precedence.ts`, #21501),
+    // the one `start` resolves through — `dev` used to carry its own copy with
+    // no `OS_ARTIFACT_URL` rung, so the reference beat `--artifact` in the
+    // child. The answer is printed, handed down and served as one value: the
+    // `serve` child boots it even beside a cwd `objectstack.config.ts`.
+    const bootSource = resolveArtifactBootSource({ flag: flags.artifact, env: process.env, cwd: process.cwd() });
+    // `OS_ARTIFACT_URL` drives the boot: the child resolves it, as under `start`.
+    const artifactUrl = bootSource.kind === 'reference' ? bootSource.url : undefined;
+    // The artifact this boot serves — or, when no artifact rung answered, the
+    // conventional path the cwd config compiles to (the precedence's last rung).
+    const artifactPath = bootSource.kind === 'resolved'
+      ? bootSource.path
+      : path.resolve(process.cwd(), CONVENTIONAL_ARTIFACT_RELATIVE_PATH);
+    // An artifact this command does not build from the cwd sources: the flag,
+    // the reference, or a remote `OS_ARTIFACT_PATH`. Nothing is compiled into
+    // it, watched for it, or judged stale against it.
+    const pinnedArtifact = flags.artifact ?? artifactUrl
+      ?? (isRemoteArtifact(artifactPath) ? artifactPath : undefined);
+    // Where THIS command compiles the cwd config: the artifact it builds, which
+    // is `<cwd>/dist/objectstack.json` or the operator's local
+    // `OS_ARTIFACT_PATH` (#21501, as triage ruled). That file is the config's
+    // own compiled output wherever it lives, so the config joins the boot that
+    // serves it, and the child is told the path so it recognises it too.
+    const configCompiledTo = pinnedArtifact || !configExists ? undefined : artifactPath;
 
     if (packageName === 'all' && (configExists || flags.artifact)) {
-      if (configExists && !flags.artifact) {
+      // `Config:` only when the cwd config takes part in this boot — the same
+      // predicate the `serve` child loads it by (#21501).
+      const configJoins = cwdConfigJoinsBoot({
+        configExists,
+        configPath,
+        artifact: artifactUrl ? { kind: 'reference' } : { kind: 'path', path: artifactPath, configCompiledTo },
+      });
+      if (configJoins) {
         printKV('Config', configPath, '📂');
       }
 
-      // Auto-compile only when we have a config AND no explicit artifact.
-      // Explicit `--artifact` means "use this, don't rebuild".
-      const needsCompile = !flags.artifact && (flags.compile || !fs.existsSync(artifactPath));
+      // Auto-compile only when we have a config AND the boot's artifact is one
+      // this command builds. A pinned artifact means "use this, don't rebuild".
+      const needsCompile = !pinnedArtifact && (flags.compile || !fs.existsSync(artifactPath));
       if (needsCompile) {
         if (!configExists) {
           printError('No objectstack.config.ts and no --artifact given — nothing to start.');
@@ -380,8 +443,8 @@ export default class Dev extends Command {
       // and dev still printed `Plugins: 38 loaded` until a manual build.
       // Warn loudly and name the remedy; never gate the boot (per triage:
       // remove the silence, not the start).
-      const watchActive = flags.watch !== false && !flags.artifact && configExists;
-      if (!needsCompile && !flags.artifact && configExists) {
+      const watchActive = devWatchActive({ watch: flags.watch, artifact: pinnedArtifact, configExists });
+      if (!needsCompile && !pinnedArtifact && configExists) {
         const stale = assessArtifactStaleness({
           artifactPath,
           configPath,
@@ -500,7 +563,9 @@ export default class Dev extends Command {
         databaseDriverFlag: flags['database-driver'],
         env: process.env,
         cwd: process.cwd(),
-        artifactPath,
+        // The reference's bytes are the child's to fetch; a local file the
+        // reference outranks must not choose this boot's datasource (as `start`).
+        artifactPath: artifactUrl ? undefined : artifactPath,
       });
       if (resolvedDb.notice) {
         // Legacy-file compat-read — one loud line naming the file being read
@@ -512,17 +577,20 @@ export default class Dev extends Command {
         fs.mkdirSync(path.dirname(resolvedDb.url.replace(/^file:/, '')), { recursive: true });
       }
       const effectiveDb = resolvedDb.url;
-      // `dev` always has a resolved artifact by this point (it compiled one, or
-      // was handed one with `--artifact`, or is pointing at the canonical
-      // `<cwd>/dist/objectstack.json`), so the decision is unconditionally
-      // `resolved` — exactly as unconditional as the `OS_ARTIFACT_PATH` write
-      // it replaces. What changed is the channel: the resolved path travels on
-      // the CLI's own `OS_INTERNAL_ARTIFACT_PATH`, so an `OS_ARTIFACT_PATH`
-      // seen by a downstream `objectstack.config.ts` means an operator set it.
-      // The operator's own value is inherited verbatim, and `dev`'s ladder
-      // above still honours it on the rung it has always occupied.
+      // `dev` has a resolved artifact by this point (it compiled one, or was
+      // handed one, or is pointing at the canonical
+      // `<cwd>/dist/objectstack.json`) — UNLESS `OS_ARTIFACT_URL` drives the
+      // boot, in which case it resolves nothing and the child resolves the
+      // reference, exactly as under `start` (#21501). The resolved path
+      // travels on the CLI's own `OS_INTERNAL_ARTIFACT_PATH`, so an
+      // `OS_ARTIFACT_PATH` seen by a downstream `objectstack.config.ts` means
+      // an operator set it; a `resolved` answer also removes an outranked
+      // `OS_ARTIFACT_URL` (`--artifact` over env).
       const localEnv: NodeJS.ProcessEnv = {
-        ...childEnvWithResolvedArtifact(process.env, { kind: 'resolved', path: artifactPath }),
+        ...childEnvWithResolvedArtifact(
+          process.env,
+          artifactUrl ? { kind: 'reference' } : { kind: 'resolved', path: artifactPath, configCompiledTo },
+        ),
         OS_ENVIRONMENT_ID: environmentId,
         OS_SEED_ADMIN: seedAdmin ? '1' : '0',
         ...(seedAdmin && flags['admin-email'] ? { OS_SEED_ADMIN_EMAIL: flags['admin-email'] } : {}),
@@ -535,7 +603,14 @@ export default class Dev extends Command {
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
       printKV('Environment ID', environmentId, '🎯');
-      printKV('Artifact', isUrl ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
+      if (artifactUrl) {
+        // Redacted: the reference may be a pre-signed URL whose query string IS
+        // the credential — the same row `start` prints for it.
+        const { redactArtifactUrl } = await import('@objectstack/runtime');
+        printKV('Artifact', `${redactArtifactUrl(artifactUrl)} (OS_ARTIFACT_URL)`, '📦');
+      } else {
+        printKV('Artifact', isRemoteArtifact(artifactPath) ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
+      }
       printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
 
       const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
@@ -697,8 +772,9 @@ export default class Dev extends Command {
       // running server keeps the old build.
       //
       // Skipped when:
-      //   - --watch=false (user opted out)
-      //   - --artifact was passed (no source to watch)
+      //   - --no-watch (user opted out)
+      //   - the boot serves a pinned artifact — --artifact or OS_ARTIFACT_URL
+      //     (no source of it to watch)
       //   - the environment has no objectstack.config.ts
       if (watchActive) {
         this.startWatchRecompile({
@@ -728,7 +804,25 @@ export default class Dev extends Command {
         process.exit(1);
       }
 
-      const filter = packageName === 'all' ? '' : `--filter ${packageName}`;
+      // `--no-watch` turns off THIS process's watch-recompile loop, which only
+      // exists when `os dev` boots one environment. Here each package's own
+      // `dev` script runs and decides its own watching, so the flag cannot be
+      // honoured — refuse it rather than print "Watch: enabled" under an
+      // operator who just asked for the opposite (#20681).
+      if (!flags.watch) {
+        printError('--no-watch has no effect in monorepo orchestration mode: each package\'s own `dev` script decides whether it watches.');
+        console.error(chalk.yellow('  Run it in a directory with objectstack.config.ts, or pass --artifact <path|url>, to boot one environment with watch off.'));
+        process.exit(1);
+      }
+
+      // `--fail-if-no-match`: a PACKAGE that selects no workspace project fails
+      // non-zero instead of exiting 0 having started nothing (#20681). pnpm
+      // owns the filter grammar (names, globs, `./dir`, `...pkg`), so pnpm
+      // answers whether it matched — ⛔ no second reading of the workspace
+      // here. The measured trap it closes: `os dev --watch=false` parses as
+      // `--watch` plus the PACKAGE `false`, and used to print "No projects
+      // found" and exit 0.
+      const filter = packageName === 'all' ? '' : `--filter ${packageName} --fail-if-no-match`;
       printKV('Package', packageName === 'all' ? 'All packages' : packageName, '📦');
       printKV('Watch', 'enabled', '🔄');
 

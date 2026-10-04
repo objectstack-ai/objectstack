@@ -52,7 +52,7 @@ function safeGetService(kernel: any, name: string): any {
  * seeder docblock (`bootstrap-platform-admin.ts`) this line must not
  * contradict: the skip decision is unconditionally intentional (only
  * platform-owned rows are ever reconciled), but a stored `'admin'` stamp is
- * NOT always a deliberate Setup takeover — on any install predating #8692
+ * NOT always a deliberate Setup takeover — on any install predating commit 712e185db
  * the platform's own seeder wrote that exact stamp, so `resynced 0 / skipped
  * N` is a permanent, by-design outcome there rather than a sign the command
  * failed. `'user'` is named too: it is the legacy spelling of the same
@@ -68,7 +68,8 @@ export function resyncSkipExplanationLine(resyncSkipped: number): string | null 
   return (
     "  Expected, not a failure — resync only reconciles platform-owned rows. " +
     "A stored 'admin' stamp (or the legacy 'user' spelling) isn't always a deliberate Setup takeover: " +
-    "on installs from before #8692, the platform's own seeded defaults carry that same stamp, so a " +
+    "on installs created before the seeder began stamping its default sets 'platform', the platform's own " +
+    "seeded defaults carry that same stamp, so a " +
     "persistent skip count here can be permanent by design. A package-owned row, by contrast, is " +
     "always a deliberate override by the package that owns it."
   );
@@ -93,14 +94,14 @@ export function resyncSkipExplanationLine(resyncSkipped: number): string | null 
  * `'admin'` — or the legacy spelling `'user'`, healed to `'admin'` by the
  * boot-time vocabulary normalizer (`normalizeManagedByVocab`) — is left alone
  * too, but is NOT always a deliberate override: on any install created before
- * #8692 (2026-08-15) the platform's OWN seeded default sets carry that same
+ * commit 712e185db (the 2026-08-15 ruling) the platform's OWN seeded default sets carry that same
  * `'admin'` stamp, indistinguishable from a genuine Setup takeover, so
  * `resynced 0 / skipped N` is a permanent, by-design outcome on those
  * installs rather than a bug.
  */
 export default class MetaResync extends Command {
   static override description =
-    'Reconcile materialized metadata (default permission sets) to the compiled dist without a --fresh wipe (#2705)';
+    'Reconcile materialized metadata (default permission sets, which boot seeds insert-once) to the compiled dist without a --fresh wipe';
 
   static override examples = [
     '$ os meta resync',
@@ -127,9 +128,21 @@ export default class MetaResync extends Command {
       printStep('Booting runtime stack…');
     }
 
+    // [#21391] A run that can never reach the write — no `--yes`, and nobody
+    // at a terminal to confirm (`--json`, or stdin not a TTY) — answers
+    // `confirmation_required` and writes nothing, so it boots READ-ONLY, the
+    // boot `os migrate plan` takes. A run that may write keeps the plain boot:
+    // `sys_permission_set` must exist before the resync writes into it, and
+    // the interactive prompt comes after the boot.
+    const mayWrite = flags.yes || (!flags.json && process.stdin.isTTY === true);
+
     let stack;
     try {
-      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'] });
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        ...(mayWrite ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
+      });
     } catch (error: any) {
       if (flags.json) await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
       else printError(error.message || String(error));

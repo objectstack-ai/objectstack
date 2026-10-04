@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #15068 — the publish-then-read path under `applyPublishedSeeds`, and the
+ * Commit 8744de9e9 — the publish-then-read path under `applyPublishedSeeds`, and the
  * proof that its org-then-env ladder cannot choose between its two rungs.
  *
  * ## What the ladder was, and why deleting it needed a measurement
@@ -24,7 +24,7 @@
  * ## The mechanism, in one line
  *
  * `getMetaItem` opens with `organizationIdForMetaRead(request.type,
- * request.organizationId)` (#14908, the singular twin of #14683's plural
+ * request.organizationId)` (commit d5cbb44f3, the singular twin of commit 96326040f's plural
  * gate) and spends that binding — never `request.organizationId` — on every
  * read below it. `seed` declares `allowOrgOverride: false`
  * (`metadata-plugin.zod.ts`), so the predicate answers `undefined` whatever
@@ -34,7 +34,7 @@
  * ⛔ The repair is NOT to restore org-awareness to this read. An org-scoped
  * `seed` row is the unhydratable phantom `reportUnhydratableOrgScopedRows`
  * exists to warn about — the same argument the `app` flip one function up
- * carries since #15063.
+ * carries since commit ad35745e8.
  *
  * ## How this file is composed, and which half is doubled
  *
@@ -50,7 +50,7 @@
  * would double-insert"). So the second call presents a `publishPackageDrafts`
  * that reports the published seed without a `seedApplied` field — the exact
  * population this fallback documents itself as existing for. It also records
- * the request it received, which is §0's positive control that the session's
+ * the request it received, which is §0's positive control that the caller's
  * organization really reached this request.
  *
  * ## Sections, and which are evidence vs. which are the bound
@@ -217,18 +217,24 @@ function makeEngine() {
     return engine;
 }
 
-/** An authenticated package admin — the route's anonymous-deny + capability floor. */
-const PKG_ADMIN = (): any => ({
+/**
+ * An authenticated package admin — the route's anonymous-deny + capability
+ * floor. `organizationId` lands where `dispatch()`'s identity step puts the
+ * caller's VETTED organization, the execution context's `tenantId`: the one
+ * source the route reads (#20477), never the session claim as stored.
+ */
+const PKG_ADMIN = (organizationId?: string): any => ({
     request: { headers: {} },
     environmentId: 'env_1',
     executionContext: {
         userId: 'u_pkg_admin',
         systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+        ...(organizationId ? { tenantId: organizationId } : {}),
     },
 });
 
 interface DriveOptions {
-    /** Session's active organization; `undefined` drives the one-rung branch. */
+    /** The caller's vetted active organization; `undefined` drives the one-rung branch. */
     activeOrganizationId?: string;
     /** Injection: the read-back throws this instead of answering. */
     readBackError?: () => Error;
@@ -297,13 +303,6 @@ async function publishThenRead(opts: DriveOptions = {}) {
                 fields: { name: { type: 'text' }, status: { type: 'select' } },
             }),
         },
-        auth: {
-            api: {
-                getSession: async () => (opts.activeOrganizationId
-                    ? { session: { activeOrganizationId: opts.activeOrganizationId } }
-                    : { session: {} }),
-            },
-        },
     };
     const kernel: any = {
         getServiceAsync: async (name: string) => services[name] ?? null,
@@ -312,7 +311,7 @@ async function publishThenRead(opts: DriveOptions = {}) {
     };
 
     const result = await new HttpDispatcher(kernel).handlePackages(
-        `/${PKG}/publish-drafts`, 'POST', {}, {}, PKG_ADMIN(),
+        `/${PKG}/publish-drafts`, 'POST', {}, {}, PKG_ADMIN(opts.activeOrganizationId),
     );
     expect(result.response?.status).toBe(200);
     const body: any = (result.response as any)?.body;
@@ -388,7 +387,7 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         expect(served?.item?.records).toHaveLength(2);
     });
 
-    it('the session organization really reaches this request', async () => {
+    it('the caller\'s organization really reaches this request', async () => {
         const { publishRequest } = await publishThenRead({ activeOrganizationId: ORG });
 
         // `applyPublishedSeeds` receives the SAME binding this route handed
@@ -488,7 +487,7 @@ describe('#15068 · 2 · the publish path stops spending an organization the gat
         const { readBackArgs } = await publishThenRead({ activeOrganizationId: ORG });
 
         // Not cosmetic: an `organizationId` on a non-overridable read is the
-        // shape #14908 and #15063 exist to stop anyone reading as meaningful.
+        // shape commits d5cbb44f3 and ad35745e8 exist to stop anyone reading as meaningful.
         expect(readBackArgs).toEqual([{ type: 'seed', name: SEED }]);
     });
 

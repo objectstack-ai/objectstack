@@ -124,16 +124,17 @@ const REFUSED: Array<{ name: string; filter: FilterCondition; path: string; wasS
  *
  * Every one of these is a DECLARED comparand whose meaning is settled, and every
  * one of them sits one `===` away from the value being refused: the module's
- * emitter arms (`$eq`/`$ne`), `operatorIsNullTotal` and
- * `nullValueSatisfiesOperator` all branch on `value === null`. A refusal
+ * emitter arms (`$eq`/`$ne`) and the shared lowering's `operatorIsNullTotal`
+ * and `nullValueSatisfiesOperator` (this module's own copies until #5930 step
+ * 4) all branch on `value === null`. A refusal
  * written one character wider takes this whole table with it, and — because
  * `IS NULL` lowering is what an RLS policy uses to scope unowned rows — it would
  * take it with a 500 on a policy that is correct.
  *
  * The `$not` rows are here for the second failure mode: the #5146 rewrite
- * reaches leaves through `nullSafeNegationOperand`, so a guard placed on the
- * wrong side of it changes the SHAPE rather than throwing, which no
- * throw-assertion would catch.
+ * (the shared lowering's rule 3, at the compiler's entry) reaches every leaf,
+ * so a guard placed on the wrong side of it changes the SHAPE rather than
+ * throwing, which no throw-assertion would catch.
  */
 const NULL_CONTROL: Array<{ name: string; filter: FilterCondition; sql: string; params: unknown[] }> = [
   { name: '{ d: null } — the implicit null predicate', filter: { d: null }, sql: '"t"."d" IS NULL', params: [] },
@@ -285,7 +286,8 @@ describe('[#6125] what the sweep deliberately leaves alone', () => {
     // either. The one deliberate divergence from `driver-sql`'s twin.
     const err = refusalFor({ owner: { manager_id: undefined } });
     expect(err?.code).toBe('READ_SCOPE_COMPILE_FAILED');
-    expect(String(err?.message)).toContain('has a nested/relation value');
+    // [#20887] Its own refusal, in the words that name the route serving the form.
+    expect(String(err?.message)).toContain('carries a nested-relation condition');
   });
 
   it('the boolean identities still reduce — the refusal is not reached through them', () => {

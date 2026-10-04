@@ -1019,6 +1019,88 @@
  * one closes the first bullet by reading the removed value's shape rather than
  * its text.
  *
+ * ## The thirteenth accidental variable #20969 removed — a WRAPPER around a
+ * tombstone the same block re-declares
+ *
+ * Measured on PR #20961's own diff (`git diff 75519e1c0a...d9d0d38cfc`) with
+ * `--declaration no`: exit 4, three rows. The two T3 rows on
+ * `packages/spec/api-surface/ui.json` are true — two new exports. The T1 on
+ * `packages/spec/src/ui/component.zod.ts#PageCardProps` (new-file line 932, the
+ * `body` key) is false: its change block
+ * removes `body: retiredKey(` and adds `body: retiredComponentSlot(retiredKey(`,
+ * the SAME tombstone with a marker call around it, and the marker hands back
+ * the very instance it is given.
+ *
+ * ⭐ The finding is the CONTROL SET. The same block spelled without the marker —
+ * `- body: retiredKey(` / `+ body: retiredKey(` — declines (#17955), and the two
+ * LIVE keys the same hunk re-declares through the sibling marker
+ * `componentSlot(` (`children`, `footer`) are paid by #16943's budget. One
+ * tombstone, re-declared in place, fires only when a call wraps it.
+ *
+ * ⚠️ RE-DERIVED here, and it corrects the filing on the mechanism: the wrapper
+ * does NOT hide the line's shape from the budget — the wrapped live keys on the
+ * same hunk are paid by it. Two readings each declined correctly on the
+ * evidence they read, and nothing was left to pay:
+ *
+ *   ① the REMOVED side — #17955 lets a removed tombstone buy no T1 unit,
+ *     because un-retiring (`- legacy: retiredKey(` → `+ legacy: z.string()`) is
+ *     the one diff shape that re-opens an accept set the tree had closed;
+ *   ② the ADDED side — #17955's decline reads the value's FIRST call, finds
+ *     `retiredComponentSlot(`, and rightly refuses to call the line a tombstone
+ *     on that alone: #18702's resolver classifies the factory `'writable'`
+ *     because it returns its own argument, and a wrapper that returns its
+ *     argument can still put a live arm on it.
+ *
+ * ⇒ The repair is the triage's direction — the #16943 block reads a removed key
+ * and a re-added key of the SAME name as a replacement — in a SECOND CURRENCY,
+ * ⛔ never as a T1 unit. A removed tombstone records its KEY in `retired`; an
+ * added line spends it only when {@link wrappedTombstoneKey} reads it as a
+ * tombstone of that same key re-declared through ONE wrapper that
+ * {@link transparentFactory} proves hands its argument back unchanged, read off
+ * the same head blob, in the same pass, by #18702's reader. It is read BEFORE
+ * the budget, for #17955's reason: a tombstone must neither fire nor spend a
+ * unit owed to a live rename beside it.
+ *
+ * ⛔ "Whatever wraps the value" is honoured for every wrapper the diff PROVES
+ * transparent, and for no other. A wrapper is a call, and a call can widen:
+ * `return z.string().or(schema)`, `return schema.or(z.string())`, and a braced
+ * branch returning a live schema above `return schema` all hand a tombstone back
+ * with a live arm on it. Paying those against a removed tombstone of the same
+ * key would be #17955's un-retiring leg gone quiet behind a prefix, the twin of
+ * the chained `.or(z.string())` control that section pins. So a wrapper this
+ * reader cannot certify keeps the tell firing — the loud direction.
+ *
+ * The price, measured over the history provably present in this tree (shallow,
+ * ONE graft boundary `2e8bd8322b` excluded, through {@link wideningTells} with
+ * {@link headBlobSource} live and a known blob probed first), up to `a5bce40888`:
+ * of the 1,979 non-merge commits touching `packages/spec/src`, 1,933 carry a
+ * non-test `.ts` diff — 5,865 file diffs. The merge-base version of this file
+ * raises 4,915 rows and this one **4,914 — ONE differing commit, ONE row**:
+ * `315888d660` (PR #20961 as it landed), whose T1 on `PageCardProps.body`
+ * declines. No other row moves and none begins firing (T1 2,390 · T2 2,040 ·
+ * T4 484 stand). On the PR's own diff `--declaration no` still exits 4, on the
+ * two true T3 rows alone. The shape's population on `packages/spec/src/**` is
+ * that one key line (`a5bce40888`).
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be found: a body
+ * that MUTATES the instance it hands back (`schema._zod.def = …`) reads as
+ * transparent, and nothing a text reader sees says otherwise. Measured over the
+ * same surface's non-test `.ts` at `a5bce40888`: 8 of 6,388 top-of-line
+ * definitions read transparent (`componentSlot`, `retiredComponentSlot`,
+ * `defineBook`, `defineDataset`, `asItem`, `asInput`, `asApp`,
+ * `withRefusalConversions`), none of them mutating what it returns. #17955's own
+ * residual — a live arm chained on the CLOSING line of a multi-line tombstone —
+ * reaches inside a wrapper unchanged (`)).or(z.string()),` declares no key),
+ * with the same population of 0 and the same overturn condition.
+ *
+ * ⚠️ And the LOUD residuals, kept on purpose: a NEW tombstone re-declared
+ * through a transparent wrapper with no same-key removal fires (the renamed-key
+ * pin), as do two wrapper levels and a wrapper whose own tail carries
+ * arguments; an IMPORTED wrapper stays #18702's stated, reported silence. ⭐ The
+ * OVERTURN CONDITION, so it needs no second discussion: the first landed diff
+ * whose only tell is a new tombstone through a transparent wrapper closes the
+ * first by reading through the wrapper on the ADDED side as #17955's decline.
+ *
  * ## #19099 — NOT a variable removed: a walk that says when it stopped reading
  *
  * ⛔ This section removes no accidental variable and moves no row, and that is
@@ -1442,6 +1524,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
+  '#20969 — a tombstone RE-DECLARED through a transparent wrapper is a replacement, not a key added': 28,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2545,6 +2628,16 @@ const CLOSED_SET_CONSTRUCTOR = /z\.(enum|union|discriminatedUnion|literal)\(/;
 export function keyedPropertyName(text) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s) || !SCHEMA_PROPERTY.test(s)) return null;
+  return propertyNameOf(s);
+}
+
+/**
+ * The name half of {@link keyedPropertyName}, for a caller that has already
+ * established the line's VALUE shape by a reading of its own — #20969's
+ * {@link wrappedTombstoneKey}, whose value opens a file-local wrapper
+ * `SCHEMA_PROPERTY` has no row for. ⛔ Still one reading of the name.
+ */
+function propertyNameOf(s) {
   const name = KEYED_PROPERTY_NAME.exec(s);
   if (name === null) return null;
   return name[1] ?? name[2] ?? name[3] ?? name[4];
@@ -3033,6 +3126,64 @@ export function declaresUnwritableKey(text, localRefusal = null) {
   return TOMBSTONE_TAIL.test(withoutComments(s.slice(close + 1)));
 }
 
+/**
+ * The unwritable forms, as the alternation {@link wrappedTombstoneKey} reads
+ * INSIDE a wrapper's open paren — the same shared {@link UNWRITABLE_FORMS} rows
+ * {@link declaresUnwritableKey} reads at the key head, so a shared tombstone
+ * helper means one thing on both readings. ⛔ A file-local REFUSING factory
+ * inside a wrapper is not read here: population 0, and the loud direction.
+ */
+const UNWRITABLE_VALUE_SOURCE = UNWRITABLE_FORMS.map((f) => f.pattern).join('|');
+
+/** What may follow the tombstone's balancing paren: the wrapper's own `)`, then a comma. */
+const REWRAPPED_TAIL = /^[ \t]*\)[ \t]*,?[ \t]*$/;
+
+/**
+ * #20969 — the KEY a line re-declares as a tombstone THROUGH one transparent
+ * wrapper, or `null` when the line is not exactly that.
+ *
+ * `  body: retiredComponentSlot(retiredKey(` is PR #20961's line: the key line
+ * of a tombstone, with a marker call around the value. #17955's decline reads
+ * the value's FIRST call, finds `retiredComponentSlot(`, and correctly refuses
+ * to call the line a tombstone on that alone — a wrapper can put a live arm back
+ * on what it is handed. This reading supplies the missing fact from the head
+ * blob instead of from the name: `transparentNames` are the factories
+ * {@link transparentFactory} proved hand their argument back unchanged.
+ *
+ * Every condition is the loud direction when it does not hold:
+ *   ① the value OPENS one wrapper on `transparentNames`, and that wrapper's
+ *     first argument OPENS an unwritable form — ⛔ ONE wrapper level: nested
+ *     wrappers keep firing, population 0;
+ *   ② the tombstone call is still open at the end of the line and the reader
+ *     was CERTAIN of that (#18488's reading, unchanged), or it closes here and
+ *     only the wrapper's own `)` and a comma follow — so a live arm chained
+ *     onto the tombstone OR onto the wrapper fires, as the single-line chained
+ *     controls #17955 pins do.
+ *
+ * ⛔ It answers WHICH key, never whether the line is paid: the #16943 block in
+ * `tellsInFile` pays it only against a tombstone of the SAME key the same block
+ * removed. A key this returns with no such removal still fires.
+ *
+ * @param {string} text — one patch line's text, `+` / `-` already stripped
+ * @param {string[]} transparentNames — the file's transparent wrappers
+ * @returns {string|null}
+ */
+export function wrappedTombstoneKey(text, transparentNames = []) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  const names = (Array.isArray(transparentNames) ? transparentNames : [])
+    .filter((n) => /^[A-Za-z_$][\w$]*$/.test(n))
+    .map((n) => n.replace(/\$/g, '\\$'));
+  if (names.length === 0) return null;
+  const opening = new RegExp(
+    `${KEY_HEAD_SOURCE}(?:${names.join('|')})[ \\t]*\\([ \\t]*(?:${UNWRITABLE_VALUE_SOURCE})`,
+  ).exec(s);
+  if (opening === null) return null;
+  const { close, unreadable } = readToCloser(s, opening[0].length - 1);
+  const certain = close === -1 ? !unreadable : REWRAPPED_TAIL.test(withoutComments(s.slice(close + 1)));
+  return certain ? propertyNameOf(s) : null;
+}
+
 
 // ---------------------------------------------------------------------------
 // #18702 — a declaring factory PRIVATE to one file
@@ -3300,6 +3451,55 @@ function topLevelReturn(s, bodyOpen) {
   return -1;
 }
 
+/**
+ * How many `return` statements the body opening at `bodyOpen` carries at ANY
+ * depth, or -1 when that body does not close in the text this reader sees.
+ *
+ * #20969 — {@link transparentFactory} needs "the one `return` is the ONLY one",
+ * and {@link topLevelReturn} deliberately answers about depth one alone. ⛔ A
+ * nested callback's `return` is counted too, on purpose: it costs a body that
+ * merely CONTAINS a callback its transparency, which is the loud direction, and
+ * it never lets a braced `if (…) { return z.string(); }` above the one this
+ * reader quotes go unseen.
+ */
+function returnCount(s, bodyOpen) {
+  let depth = 1;
+  let n = 0;
+  for (let k = bodyOpen + 1; k < s.length; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (ch === '{') { depth += 1; continue; }
+    if (ch === '}') { depth -= 1; if (depth === 0) return n; continue; }
+    if (
+      ch === 'r'
+      && s.startsWith('return', k)
+      && !/[\w$.]/.test(s[k - 1] ?? ' ')
+      && !/[\w$]/.test(s[k + 6] ?? ' ')
+    ) {
+      n += 1;
+    }
+  }
+  return -1;
+}
+
 /** The leading text of the expression at `at`, whitespace collapsed. */
 function leadingExpression(s, at) {
   return s.slice(at, at + 200).replace(/\s+/g, ' ').trim();
@@ -3378,7 +3578,7 @@ function functionReturn(s, from) {
   if (bodyOpen === -1) return null;
   const at = topLevelReturn(s, bodyOpen);
   if (at === -1) return null;
-  return { expr: leadingExpression(s, at), params };
+  return { expr: leadingExpression(s, at), params, returns: returnCount(s, bodyOpen) };
 }
 
 /** What `name`'s definition RETURNS, or `null` when this reader cannot say. */
@@ -3429,9 +3629,10 @@ export function factoryReturnExpression(source, name) {
   if (s[body] === '{') {
     const at = topLevelReturn(s, body);
     if (at === -1) return null;
-    return { expr: leadingExpression(s, at), params };
+    return { expr: leadingExpression(s, at), params, returns: returnCount(s, body) };
   }
-  return { expr: leadingExpression(s, body), params };
+  // An EXPRESSION body has no `return` statement at all: `expr` IS the body.
+  return { expr: leadingExpression(s, body), params, returns: 0 };
 }
 
 /**
@@ -3496,6 +3697,44 @@ export function resolveDeclaringFactory(source, name) {
   return { verdict, reason: `its body returns \`${read.expr.slice(0, 48)}\`` };
 }
 
+/**
+ * #20969 — is `name` a TRANSPARENT wrapper in `source`: does its one definition
+ * hand its FIRST argument back, the very instance, with nothing chained onto it
+ * and no other `return` anywhere in the body?
+ *
+ * ⭐ A narrower question than the `'writable'` arm of
+ * {@link classifyFactoryReturn}, and deliberately so. That arm reads "the
+ * factory returns its own argument" as "the key is as writable as that
+ * argument", which is right for a LIVE argument whatever is chained on —
+ * `placeholderFree`'s `return schema.superRefine(…)` narrows a live schema and
+ * the key stays a key. It is wrong for a TOMBSTONE argument:
+ * `return z.string().or(schema)` and `return schema.or(z.string())` both put a
+ * live arm back on a `retiredKey(…)` handed to them. Only the bare identifier
+ * passes the argument's own register through unchanged, so only the bare
+ * identifier is transparent.
+ *
+ * ⛔ Positive evidence only: one definition site, a readable body, exactly ONE
+ * `return` (or an expression body that IS the parameter), and that return is the
+ * first parameter followed by `;` or the body's closing brace. Anything else is
+ * `false` and the tell keeps firing. ⚠️ What a text reader cannot see, stated
+ * rather than left to be found: a body that MUTATES the instance it hands back
+ * (`schema._zod.def = …`) passes this reading — the header's #20969 section
+ * carries the measured population.
+ *
+ * @returns {boolean}
+ */
+export function transparentFactory(source, name) {
+  const s = String(source ?? '');
+  const n = String(name ?? '');
+  if (definitionSites(s, n).length !== 1) return false;
+  const read = factoryReturnExpression(s, n);
+  if (read === null || typeof read.params?.[0] !== 'string') return false;
+  if (read.returns !== 0 && read.returns !== 1) return false;
+  const first = read.params[0].replace(/\$/g, '\\$');
+  const ending = read.returns === 0 ? '(?:;|$)' : '(?:;|\\}|$)';
+  return new RegExp(`^${first}[ ]?${ending}`).test(read.expr);
+}
+
 /** One file's own declaring forms, built from `KEY_HEAD_SOURCE` like the list. */
 function localFormPattern(names) {
   if (names.length === 0) return null;
@@ -3511,7 +3750,12 @@ function localFormPattern(names) {
  * line names a form the shared vocabulary has no row for — the overwhelming
  * majority of diffs never reach the blob.
  *
- * @returns {{ recognises: RegExp, refusal: RegExp|null }|null}
+ * #20969 — it also names which WRITABLE factories are {@link transparentFactory}
+ * wrappers, read off the same blob in the same pass: `transparent` is the one
+ * list {@link wrappedTombstoneKey} may peel. A name the resolver never read is
+ * never on it.
+ *
+ * @returns {{ recognises: RegExp, refusal: RegExp|null, transparent: string[] }|null}
  */
 function localDeclaringForms(file, lines, onContractSource, readSource, unresolved) {
   if (!onContractSource) return null;
@@ -3527,10 +3771,13 @@ function localDeclaringForms(file, lines, onContractSource, readSource, unresolv
   const source = typeof readSource === 'function' ? readSource(file) : null;
   const writable = [];
   const refusing = [];
+  const transparent = [];
   for (const [name, at] of wanted) {
     const read = resolveDeclaringFactory(source ?? '', name);
-    if (read.verdict === 'writable') writable.push(name);
-    else if (read.verdict === 'refusing') refusing.push(name);
+    if (read.verdict === 'writable') {
+      writable.push(name);
+      if (transparentFactory(source ?? '', name)) transparent.push(name);
+    } else if (read.verdict === 'refusing') refusing.push(name);
     else if (Array.isArray(unresolved)) {
       for (const line of at) {
         unresolved.push({ file: String(file?.filename ?? ''), line, name, reason: read.reason });
@@ -3539,7 +3786,7 @@ function localDeclaringForms(file, lines, onContractSource, readSource, unresolv
   }
   const recognises = localFormPattern([...writable, ...refusing]);
   if (recognises === null) return null;
-  return { recognises, refusal: localFormPattern(refusing) };
+  return { recognises, refusal: localFormPattern(refusing), transparent };
 }
 
 /**
@@ -3774,8 +4021,12 @@ export function tellsInFile(
   // run of lines rather than the hunk: a removal three context lines away is a
   // different edit and buys nothing here either.
   const removedOfLine = new Map();
+  // #20969 — the tombstones each block REMOVED, by key: a second currency beside
+  // `budget`, and ⛔ never converted into it. See the removed-side note below.
+  const retiredOfLine = new Map();
   for (const block of changeBlocks(lines)) {
     const budget = new Map();
+    const retired = new Map();
     const removed = [];
     for (const i of block) {
       const r = lines[i];
@@ -3793,12 +4044,23 @@ export function tellsInFile(
       // and letting the tombstone pay for it would trade this file's loud
       // failure for a silent one on the only diff shape that re-opens an accept
       // set the tree had already closed.
-      if (kind === 'T1' && declaresUnwritableKey(r.text)) continue;
+      //
+      // #20969 — …but the tombstone still NAMES its key, and that name is
+      // recorded in `retired`, a currency only a tombstone of the SAME key can
+      // spend: a key re-declared through a transparent wrapper (PR #20961's
+      // `body: retiredComponentSlot(retiredKey(`) has replaced a tombstone with
+      // the same tombstone. ⛔ It buys no T1 unit, so un-retiring still fires.
+      if (kind === 'T1' && declaresUnwritableKey(r.text)) {
+        const key = keyedPropertyName(r.text);
+        if (key !== null) retired.set(key, (retired.get(key) ?? 0) + 1);
+        continue;
+      }
       if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
     }
     for (const i of block) {
       budgetOfLine.set(i, budget);
       removedOfLine.set(i, removed);
+      retiredOfLine.set(i, retired);
     }
   }
   for (let i = 0; i < lines.length; i += 1) {
@@ -3835,6 +4097,21 @@ export function tellsInFile(
     // takes nothing from the block, so a genuine key beside it still has the
     // full budget to pay with — and fires when it cannot.
     if (kind === 'T1' && declaresUnwritableKey(text, localRefusal)) continue;
+    // #20969 — a tombstone RE-DECLARED through a transparent wrapper, against a
+    // tombstone of the SAME key the same block removed, is a replacement: paid
+    // from `retired`, one removal per line, BEFORE the budget for #17955's
+    // reason — it must neither fire nor spend a unit owed to a live rename.
+    // ⛔ Without that removal it is not paid here and falls through to the
+    // budget like any other key line; see the header's #20969 section.
+    const rewrapped = kind === 'T1' && localForms !== null ? wrappedTombstoneKey(text, localForms.transparent) : null;
+    if (rewrapped !== null) {
+      const retired = retiredOfLine.get(i);
+      const owed = retired?.get(rewrapped) ?? 0;
+      if (owed > 0) {
+        retired.set(rewrapped, owed - 1);
+        continue;
+      }
+    }
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -6032,7 +6309,150 @@ export function selfTest() {
   t('⭐ the OLD side moves too — a REMOVED parameter behind leading context is still not a key, so it buys no budget', inParameterList(AFTER_UNDERFLOW, 2) === true && tells(REMOVED_PARAM_PAYS_NOTHING).length === 1);
   t('…and the row that fires is the genuine new key the phantom budget used to pay for', tells(REMOVED_PARAM_PAYS_NOTHING)[0]?.text === 'extra: z.string(),');
 
-  // -- the floor -------------------------------------------------------------
+  // -- #20969: a tombstone RE-DECLARED through a transparent wrapper ---------
+  //
+  // The live pair is PR #20961: `git diff 75519e1c0a...d9d0d38cfc` exited 4
+  // with three rows, and the T1 on `PageCardProps.body` was false — the block
+  // removes `body: retiredKey(` and adds `body: retiredComponentSlot(retiredKey(`,
+  // the same tombstone with a marker call around it. The two T3 rows on the
+  // same run were true and must stay.
+  //
+  // ⭐ Read the FIRING half beside the decline, the way every battery above is
+  // ordered: the three pins the triage named (the pair paid; a genuinely new key
+  // inside a wrapper call still tells; a renamed key still tells), the dark
+  // control with nothing removed, and every way a wrapper can put a live arm
+  // back on what it is handed.
+  battery('#20969 — a tombstone RE-DECLARED through a transparent wrapper is a replacement, not a key added');
+  const SLOT_FILE = 'packages/spec/src/ui/component.zod.ts';
+  // The two definitions PR #20961's head blob (`b2f88ca605`) carries, verbatim.
+  const SLOT_DEFINITIONS = [
+    'const COMPONENT_SLOT_DECLARATIONS = new WeakMap<object, { readonly retired: boolean }>();',
+    '',
+    '/**',
+    ' * Declare the key whose schema this is as a component-composition slot. Wrap',
+    ' * the OUTERMOST schema the shape holds (after `.optional()` / `.describe()`),',
+    " * so the registered instance is the one `shape[key]` returns.",
+    ' */',
+    'function componentSlot<T extends z.ZodType>(schema: T): T {',
+    '  COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: false });',
+    '  return schema;',
+    '}',
+    '',
+    '/** {@link componentSlot} for a tombstoned spelling of a slot — see the block above. */',
+    'function retiredComponentSlot<T extends z.ZodType>(schema: T): T {',
+    '  COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: true });',
+    '  return schema;',
+    '}',
+    '',
+  ].join('\n');
+  // Three wrappers spelled IDENTICALLY at the call site, each of which hands a
+  // `retiredKey(…)` back with a live arm on it — the shapes `transparentFactory`
+  // exists to refuse. Every one is `'writable'` to #18702's resolver.
+  const WIDENING_WRAPPERS = [
+    'function lenientSlot<T extends z.ZodType>(schema: T) {',
+    '  return z.string().or(schema);',
+    '}',
+    'function chainedSlot<T extends z.ZodType>(schema: T) {',
+    '  return schema.or(z.string());',
+    '}',
+    'function branchySlot<T extends z.ZodType>(schema: T) {',
+    '  if (LEGACY_BODY_ACCEPTED) {',
+    '    return z.array(z.unknown());',
+    '  }',
+    '  return schema;',
+    '}',
+    '',
+  ].join('\n');
+  const SLOT_SOURCE = `${SLOT_DEFINITIONS}${WIDENING_WRAPPERS}`;
+  const slotFile = (patch) => ({ filename: SLOT_FILE, status: 'modified', patch });
+  const slotTells = (patch, source = SLOT_SOURCE) => tellsInFile(slotFile(patch), { readSource: () => source });
+  const slotTexts = (patch) => slotTells(patch).map((r) => r.text).join('|');
+  // PR #20961's own hunk, byte for byte, as `git diff` printed it.
+  const PR_20961_HUNK = [
+    '@@ -871,21 +919,29 @@ export const PageCardProps = strictObject({',
+    '    * than declaring both — one composition key, not two de-facto contracts',
+    '    * (Prime Directive #12). `footer` is a genuinely distinct slot and stays.',
+    '    */',
+    "-  children: z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)'),",
+    "+  children: componentSlot(z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)')),",
+    '   /**',
+    '    * REMOVED (#5775). `body` was the declared spelling of the slot every other',
+    '    * container calls `children`; the two are the same slot, and the renderer',
+    '    * already reads both. The live mechanism is `children`.',
+    '+   *',
+    '+   * Marked a RETIRED slot spelling (#20940): the authoring walks do not',
+    '+   * descend it, the ADR-0087 conversion walker does — see',
+    '+   * {@link retiredComponentSlot}.',
+    '    */',
+    '-  body: retiredKey(',
+    '+  body: retiredComponentSlot(retiredKey(',
+    "     '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '",
+    "     + 'it was a second spelling of the composition slot every other container calls `children`, '",
+    "     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '",
+    "     + 'components) is unchanged. '",
+    "     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',",
+    '-  ),',
+    '-  /** Slot for footer content */',
+    "-  footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),",
+    '+  )),',
+    '+  /**',
+    '+   * Slot for footer content — a declared, rendered slot distinct from',
+    "+   * `children` (objectui's `PageCardRenderer` draws it under the body), so",
+    '+   * every page walk descends it (#20940).',
+    '+   */',
+    "+  footer: componentSlot(z.array(z.unknown()).optional().describe('Card footer components (slot)')),",
+    '   /** ARIA accessibility */',
+    "   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),",
+    ' });',
+  ].join('\n');
+  const RETIRED_BODY = '-  body: retiredKey(';
+  const REWRAPPED_BODY = '+  body: retiredComponentSlot(retiredKey(';
+  const block = (...lines) => ['@@ -931,1 +931,2 @@', ...lines].join('\n');
+
+  // -- the decline: the live pair -------------------------------------------
+  t('⭐ THE FINDING — PR #20961\'s own hunk: the tombstone re-declared through `retiredComponentSlot(` reads NO tell', slotTells(PR_20961_HUNK).length === 0, slotTexts(PR_20961_HUNK));
+  t('…at the line the card reported, so the fixture is the probe and not a shape like it', patchLines(PR_20961_HUNK).find((r) => r.kind === 'added' && r.text.includes('retiredComponentSlot(retiredKey('))?.line === 932);
+  t('…and the whole verdict is CLEAN, the exit code the false T1 held out of reach', wideningRefusal({ declaration: 'no', files: [slotFile(PR_20961_HUNK)], readSource: () => SLOT_SOURCE }).state === 'clean');
+  t('⛔ DARK CONTROL — the same re-declared line with NO tombstone removed beside it still fires: the silence is bought by the removal, never by the wrapper', slotTells(block(REWRAPPED_BODY))[0]?.tell === 'T1' && slotTells(block(REWRAPPED_BODY)).length === 1);
+
+  // -- the three pins the triage named --------------------------------------
+  t('⛔ PIN — un-retiring THROUGH the wrapper fires: the same key and the same wrapper around a LIVE schema is a spelling an author may now write', slotTexts(block(RETIRED_BODY, '+  body: retiredComponentSlot(z.array(z.unknown())),')) === 'body: retiredComponentSlot(z.array(z.unknown())),' && slotTexts(block(RETIRED_BODY, '+  body: retiredComponentSlot(z.array(z.unknown()).optional()),')) === 'body: retiredComponentSlot(z.array(z.unknown()).optional()),');
+  t('⛔ PIN — a genuinely new key inside a wrapper call, beside the pair, fires at its OWN line', slotTexts(block(RETIRED_BODY, '+  fresh: componentSlot(z.array(z.unknown())),', REWRAPPED_BODY)) === 'fresh: componentSlot(z.array(z.unknown())),');
+  t('…and the mirror order reads the same, so the patch order cannot decide which line is reported', slotTexts(block(RETIRED_BODY, REWRAPPED_BODY, '+  fresh: componentSlot(z.array(z.unknown())),')) === 'fresh: componentSlot(z.array(z.unknown())),');
+  t('⛔ PIN — a RENAMED key fires: a tombstone removed under one name pays nothing for a tombstone re-declared under another', slotTexts(block(RETIRED_BODY, '+  panel: retiredComponentSlot(retiredKey(')) === 'panel: retiredComponentSlot(retiredKey(');
+
+  // -- a wrapper that is not transparent ------------------------------------
+  t('⛔ a wrapper that puts a live arm IN FRONT of what it is handed is not transparent, so the re-declaration fires', slotTells(block(RETIRED_BODY, '+  body: lenientSlot(retiredKey(')).length === 1);
+  t('⛔ …nor one that chains a live arm ONTO what it is handed', slotTells(block(RETIRED_BODY, '+  body: chainedSlot(retiredKey(')).length === 1);
+  t('⛔ …nor one whose body carries a SECOND return, in a braced branch the depth-one reading never reaches', slotTells(block(RETIRED_BODY, '+  body: branchySlot(retiredKey(')).length === 1);
+  t('⛔ a live arm chained onto the WRAPPER on the key line fires', slotTells(block("-  body: retiredKey('gone'),", "+  body: retiredComponentSlot(retiredKey('gone')).or(z.string()),")).length === 1);
+  t('⛔ …and one chained onto the TOMBSTONE inside it fires', slotTells(block("-  body: retiredKey('gone'),", "+  body: retiredComponentSlot(retiredKey('gone').or(z.string())),")).length === 1);
+  t('⭐ …while the single-line spelling that closes both calls and nothing after them is paid', slotTells(block("-  body: retiredKey('gone'),", "+  body: retiredComponentSlot(retiredKey('gone')),")).length === 0);
+
+  // -- the arithmetic: #16943's, in a second currency -----------------------
+  t('⛔ ONE-FOR-ONE — a second re-declaration of the key in the block has nothing left to pay with', slotTells(block(RETIRED_BODY, REWRAPPED_BODY, REWRAPPED_BODY)).length === 1);
+  t('⛔ BLOCK-scoped — a context line between the removal and the re-declaration makes them two edits, and the second fires', slotTells(['@@ -931,2 +931,2 @@', RETIRED_BODY, '   kept: z.string(),', REWRAPPED_BODY].join('\n')).length === 1);
+  t('⭐ the re-declaration never SPENDS the budget, so a live rename beside it is still paid', slotTells(block(RETIRED_BODY, '-  old: z.string(),', REWRAPPED_BODY, '+  renamed: z.string(),')).length === 0);
+  t('…and the mirror order reads the same', slotTells(block(RETIRED_BODY, '-  old: z.string(),', '+  renamed: z.string(),', REWRAPPED_BODY)).length === 0);
+  t('⛔ the removed tombstone still buys NO T1 unit: #17955\'s un-retiring control holds with the resolver live', slotTells(block(RETIRED_BODY, '+  body: z.array(z.unknown()),')).length === 1);
+  t('⛔ …and a tombstone re-declared WITHOUT a wrapper is #17955\'s decline, untouched by this reading', slotTells(block(RETIRED_BODY, '+  body: retiredKey(')).length === 0 && slotTells(block('+  body: retiredKey(')).length === 0);
+  const importedSlot = (() => {
+    const unresolved = [];
+    const rows = tellsInFile(slotFile(block(RETIRED_BODY, REWRAPPED_BODY)), { readSource: () => "import { retiredComponentSlot } from './slots';\n", unresolved });
+    return { rows, unresolved };
+  })();
+  t('⚠️ BOUNDARY — an IMPORTED wrapper is #18702\'s stated silence, unchanged: nothing fires or pays here, and the line is REPORTED unresolved', importedSlot.rows.length === 0 && importedSlot.unresolved.length === 1 && importedSlot.unresolved[0]?.name === 'retiredComponentSlot');
+
+  // -- the readers ----------------------------------------------------------
+  t('⭐ `transparentFactory` reads both of PR #20961\'s markers as transparent: each hands its argument back, the very instance', transparentFactory(SLOT_SOURCE, 'retiredComponentSlot') === true && transparentFactory(SLOT_SOURCE, 'componentSlot') === true);
+  t('⛔ …and refuses all three widening wrappers, although #18702\'s resolver calls every one of them WRITABLE — the narrower question is the point', ['lenientSlot', 'chainedSlot', 'branchySlot'].every((n) => transparentFactory(SLOT_SOURCE, n) === false && resolveDeclaringFactory(SLOT_SOURCE, n).verdict === 'writable'));
+  t('…an expression-bodied arrow that IS its parameter is transparent; one chaining onto it, or handing back a LATER parameter, is not', transparentFactory('const pass = (schema) => schema;\n', 'pass') === true && transparentFactory('const opt = (schema) => schema.optional();\n', 'opt') === false && transparentFactory('const second = (a, b) => b;\n', 'second') === false);
+  t('⛔ …two definitions of the name are ambiguous and an absent one is unread — neither is transparent', transparentFactory('const dup = (s) => s;\nconst dup = (s) => s;\n', 'dup') === false && transparentFactory(SLOT_SOURCE, 'nowhere') === false);
+  t('`wrappedTombstoneKey` names the key, in the quoted spelling too, for every shared unwritable form', wrappedTombstoneKey('  body: retiredComponentSlot(retiredKey(', ['retiredComponentSlot']) === 'body' && wrappedTombstoneKey("  'a.b': retiredComponentSlot(retiredKey(", ['retiredComponentSlot']) === 'a.b' && wrappedTombstoneKey("  onClear: retiredComponentSlot(handlerKeyRefusal('onClear',", ['retiredComponentSlot']) === 'onClear');
+  t('⛔ …and answers null for a wrapper not on the transparent list, a COMMENT, a live value inside the wrapper, and a SECOND wrapper level', wrappedTombstoneKey('  body: retiredComponentSlot(retiredKey(', ['componentSlot']) === null && wrappedTombstoneKey('  // body: retiredComponentSlot(retiredKey(', ['retiredComponentSlot']) === null && wrappedTombstoneKey('  body: retiredComponentSlot(z.array(z.unknown())),', ['retiredComponentSlot']) === null && wrappedTombstoneKey('  body: retiredComponentSlot(retiredComponentSlot(retiredKey(', ['retiredComponentSlot']) === null);
+  t('⛔ …and for a tail this reader cannot LEX — #18488\'s certainty, read the same way inside a wrapper', wrappedTombstoneKey('  body: retiredComponentSlot(retiredKey(/\\(/.source).or(z.string())),', ['retiredComponentSlot']) === null);
+
+
   const floorFailures = [];
   const floorFailure = (text) => {
     floorFailures.push(text);
@@ -6089,7 +6509,8 @@ export function selfTest() {
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
-      "#19099's walk saying when it STOPPED READING — the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
+      "#20969's tombstone RE-DECLARED through a transparent wrapper — PR #20961's own hunk paid in a second currency only a removed tombstone of the SAME key mints, bracketed by the dark control with nothing removed, the three triage pins (un-retiring through the wrapper, a new key inside a wrapper at its own line, a renamed key), every way a wrapper can hand a live arm back, and the one-for-one, block-scoped and never-spends arithmetic, " +
+      "#19099's walk saying when it STOPPED READING —the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

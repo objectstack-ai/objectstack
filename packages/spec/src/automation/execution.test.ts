@@ -24,7 +24,7 @@ describe('ExecutionStatus', () => {
     });
   });
 
-  it('names the refused terminal (#14945) — appended LAST, so every `.options` index reader keeps its positions', () => {
+  it('names the refused terminal — appended LAST, so every `.options` index reader keeps its positions', () => {
     expect(ExecutionStatus.options).toContain('refused');
     expect(ExecutionStatus.options.at(-1)).toBe('refused');
     expect(ExecutionStatus.options.slice(0, 8)).toEqual(
@@ -204,7 +204,7 @@ describe('ExecutionStepLogSchema', () => {
     expect(step.branch).toBe(1);
   });
 
-  it('a `success` step that delegated to a child carries the child\'s contained failures on `metrics.failures` (#15617)', () => {
+  it('a `success` step that delegated to a child carries the child\'s contained failures on `metrics.failures`', () => {
     // The card's shape: `loop { subflow(child) }`, one iteration whose child
     // COMPLETED while losing a row. The subflow step itself succeeded — the
     // failure is the child's, contained — so `status` stays `success` and the
@@ -415,7 +415,7 @@ describe('FlowRunSummarySchema', () => {
     expect(summary.failed).toBe(summary.nodes.reduce((sum, node) => sum + node.failures, 0));
   });
 
-  it('`failed` is the fold INCLUDING what a delegating node rolled up from its child — the card\'s measured shape, as ruled (#15617)', () => {
+  it('`failed` is the fold INCLUDING what a delegating node rolled up from its child — it answers what the run caused', () => {
     // Parent `loop { subflow(child) }` over five rows; the child COMPLETED on
     // every iteration and contained one failure on the last. The subflow node
     // succeeded five times — `status: success`, its own executions never
@@ -440,7 +440,7 @@ describe('FlowRunSummarySchema', () => {
     expect(call?.failures).toBe(1);
   });
 
-  it('the control keeps counting as before: a child that FAILED is the delegating step\'s own failure, counted once (#15617)', () => {
+  it('the control keeps counting as before: a child that FAILED is the delegating step\'s own failure, counted once', () => {
     // Same parent, but the child FAILED on the last row rather than containing
     // the failure. That is the subflow step's own `status: failure` — one
     // execution failed — and nothing rides up on top of it: the child's own
@@ -457,7 +457,7 @@ describe('FlowRunSummarySchema', () => {
     expect(summary.failed).toBe(summary.nodes.reduce((sum, node) => sum + node.failures, 0));
   });
 
-  it('declares the roll-up at the point of use — the field describes say so, not only the paragraph above the schema (#15617)', () => {
+  it('declares the roll-up at the point of use — the field describes say so, not only the paragraph above the schema', () => {
     // Triage's explicit failure mode for this card: a reconciliation that
     // leaves `failed`'s own `.describe()` saying the narrow thing. A consumer
     // reads the field's description, so the widened rule has to be there.

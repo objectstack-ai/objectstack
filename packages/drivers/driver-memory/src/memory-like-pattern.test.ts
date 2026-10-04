@@ -38,11 +38,17 @@
  * These cases go red if that widening is ever removed without removing the
  * arms, and `memory-filter-ast-vocabulary.test.ts` goes red if the arms are
  * removed without the widening.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is retired. For `$like` / `$ilike` it evaluated the spec's
+ * `matchesLikePattern` and nothing of its own, so the "both faces agree" half
+ * of each case is held on that shared predicate directly — the one `formula`
+ * evaluates too. The `$contains` control is asserted on the query path alone.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { matchesLikePattern } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
 
 const TABLE = 'like_probe';
 
@@ -77,9 +83,19 @@ describe('[#7536] driver-memory — $like / $ilike on both faces', () => {
       .map((r: Record<string, unknown>) => String(r.id))
       .sort((a, b) => a.localeCompare(b));
 
-  /** Ids the REFERENCE MATCHER returns, ascending. */
-  const matcherIds = (where: unknown): string[] =>
-    ROWS.filter((r) => match(r, where)).map((r) => r.id).sort((a, b) => a.localeCompare(b));
+  /**
+   * Ids the spec's shared `matchesLikePattern` answers for a single `$like` /
+   * `$ilike` case, ascending — what the retired reference matcher evaluated.
+   * `null` for a case on any other operator.
+   */
+  const sharedPatternIds = (where: Record<string, unknown>): string[] | null => {
+    const spec = where.name as Record<string, unknown>;
+    const op = Object.keys(spec)[0];
+    if (op !== '$like' && op !== '$ilike') return null;
+    return ROWS.filter((r) => matchesLikePattern(r.name, String(spec[op]), op === '$ilike'))
+      .map((r) => r.id)
+      .sort((a, b) => a.localeCompare(b));
+  };
 
   const refusalOf = async (where: unknown): Promise<WireBearingError> => {
     const err = await driver
@@ -94,9 +110,9 @@ describe('[#7536] driver-memory — $like / $ilike on both faces', () => {
   });
 
   /**
-   * Every case is asserted on BOTH faces, and the faces are compared to each
-   * other FIRST — a drift between them reads as a drift rather than as two
-   * unrelated wrong answers.
+   * Every case is asserted on the query path and — for the pattern operators —
+   * on the shared predicate, compared to each other FIRST, so a drift between
+   * them reads as a drift rather than as two unrelated wrong answers.
    */
   const CASES: Array<[string, Record<string, unknown>, string[]]> = [
     // The card's own repro table.
@@ -130,8 +146,10 @@ describe('[#7536] driver-memory — $like / $ilike on both faces', () => {
   for (const [name, where, expected] of CASES) {
     it(name, async () => {
       const fromQuery = await queryIds(where);
-      const fromMatcher = matcherIds(where);
-      expect(fromMatcher, 'the reference matcher disagrees with the query path').toEqual(fromQuery);
+      const fromShared = sharedPatternIds(where);
+      if (fromShared !== null) {
+        expect(fromShared, 'the shared pattern predicate disagrees with the query path').toEqual(fromQuery);
+      }
       expect(fromQuery).toEqual(expected);
     });
   }

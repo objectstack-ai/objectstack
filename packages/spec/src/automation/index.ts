@@ -43,7 +43,7 @@ export * from './time-relative-trigger.zod';
 export * from './flow-trigger-kind';
 // The acting-organization declaration a time-triggered flow carries, and the
 // one refusal sentence the schedule trigger and the time-relative sweep both
-// say it with (#16659). ⛔ `FlowSchema` does NOT emit that sentence: the key is
+// say it with (commit ecdfc9411). ⛔ `FlowSchema` does NOT emit that sentence: the key is
 // enforced at BIND, not at parse, because the start node's `config` is an open
 // record and a parse-time requirement would make every package-shipped
 // scheduled flow unparseable. Named beside `flow-trigger-kind` because the two
@@ -55,19 +55,26 @@ export * from './schedule-organization.zod';
 // layer was narrative-only — zero importers across objectstack / cloud /
 // objectui, no engine ever parsed or executed a DataSyncConfig, and the def was
 // unreachable from the metadata-type roots (#4650 gate). Connector-attached
-// sync config is `ConnectorSchema.syncConfig` (integration/connector.zod.ts,
-// the live parse path). ⚠️ This note used to send readers on to `etl.zod.ts`
+// sync config (`ConnectorSchema.syncConfig`) was retired the same way under
+// ADR-0049; a sync is defined on its target `mapping` (`connectorSource`, with
+// a `job` for the cadence). ⚠️ This note used to send readers on to `etl.zod.ts`
 // for multi-step transformation; L2 was retired for the same narrative-only
 // reason at #6414, so that pointer is gone rather than re-aimed — there is no
 // third layer to forward to. The bare
 // `ConflictResolution` name went to `@objectstack/spec/ui` (offline sync) at
 // #4738 — and left the package entirely at #4988, which retired
-// `ui/offline.zod.ts` under ADR-0049. The connector vocabulary keeps its
-// `ConnectorConflictResolution` name; a freed word is not a reason to rename
-// back, and no domain may re-adopt the bare one (pinned in
-// `sync-retirement.test.ts`).
-export * from './state-machine.zod';
+// `ui/offline.zod.ts` under ADR-0049. The connector's
+// `ConnectorConflictResolution` left with `syncConfig`; no domain may re-adopt
+// the bare name (pinned in `sync-retirement.test.ts`).
+// `./state-machine.zod` REMOVED (#21320, ADR-0049): the XState-style
+// `StateMachineSchema` family (`StateNodeSchema`, `TransitionSchema`,
+// `ActionRefSchema`, `GuardRefSchema` and their types) left with its last
+// authorable door, the tombstoned `agent.lifecycle`. ADR-0020 had already
+// retired it as a record-lifecycle declaration — a record's legal transitions
+// are the `state_machine` validation rule (`data/validation.zod.ts`), and
+// orchestration is Flow (ADR-0019).
 export * from './node-executor.zod';
 export * from './flow-node-expression-paths';
+export * from './flow-node-config-refusals';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

@@ -18,19 +18,24 @@
  *   on ordinary data. Right answer for the wrong reason, and a DIFFERENT filter
  *   from the FALSE everyone believed was being computed.
  * - `memory-matcher.match` (the reference matcher the cross-backend conformance
- *   suites hold against driver-sql and formula) fell through to
+ *   suites held against driver-sql and formula) fell through to
  *   `JSON.stringify(value) === JSON.stringify(condition)` — structural equality
  *   against `{}` — and answered `false` incidentally.
  *
  * Neither was a ruling, and driver-sql read the same shape as TRUE inside a
  * combinator. #5240 ruled REFUSE; a backend whose two halves disagree about
  * what a filter MEANS is exactly the divergence the ruling closes, so both
- * halves are pinned here.
+ * halves were pinned here.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is retired. Its refusal was never its own: it ran `assertFilterConditionShape`,
+ * the same gate `InMemoryDriver.find` runs, so its half of this file is held on
+ * that gate directly (the second describe) and its row answers on the live path.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 import type { FilterCondition } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
@@ -73,9 +78,6 @@ describe('[#5240] InMemoryDriver (live mingo path) refuses a zero-operator field
     const rows = await driver.find('deal', { fields: ['id'], where: where as FilterCondition });
     return rows.map((r: any) => String(r.id)).sort();
   };
-
-  /** The same filter through the OTHER face, so an answer can be compared. */
-  const matchedIds = (filter: unknown): string[] => ROWS.filter((r) => match(r, filter)).map((r) => r.id);
 
   const refusalOf = async (where: unknown): Promise<WireBearingError> => {
     try {
@@ -127,29 +129,30 @@ describe('[#5240] InMemoryDriver (live mingo path) refuses a zero-operator field
       // such operator. Now that the path compiles `$not` to `$nor`, the identity
       // is the answer it was always supposed to be, and it agrees with
       // driver-sql (#5134: NOT of a TRUE group is FALSE → the FALSE constant)
-      // and with this package's own matcher.
+      // and with the answer this package's retired reference matcher gave.
       expect(await ids({ $not: {} })).toEqual([]);
-      expect(matchedIds({ $not: {} })).toEqual([]);
     });
   });
 });
 
-describe('[#5240] memory-matcher (reference matcher) refuses the same shape', () => {
-  const matched = (filter: unknown): string[] =>
-    ROWS.filter((r) => match(r, filter)).map((r) => r.id);
-
-  const refusalOf = (filter: unknown): WireBearingError => {
+/**
+ * [#5930 step 4] What `describe('[#5240] memory-matcher (reference matcher)
+ * refuses the same shape')` asserted, moved off the retired matcher: its
+ * refusals onto the gate it ran, its answers onto the live query path.
+ */
+describe('[#5240] the shared shape gate refuses the same shape, whatever the rows', () => {
+  const gateRefusalOf = (filter: unknown): WireBearingError => {
     try {
-      matched(filter);
+      assertFilterConditionShape(filter, 'filter');
     } catch (e) {
       return e as WireBearingError;
     }
-    throw new Error('expected the matcher to refuse this filter, but it answered');
+    throw new Error('expected the shape gate to refuse this filter, but it passed');
   };
 
   for (const [name, filter, position] of POSITIONS) {
     it(`${name} → INVALID_FILTER naming ${position}`, () => {
-      const err = refusalOf(filter);
+      const err = gateRefusalOf(filter);
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain(position);
@@ -157,31 +160,54 @@ describe('[#5240] memory-matcher (reference matcher) refuses the same shape', ()
     });
   }
 
-  it('the refusal does not depend on the RECORD being tested', () => {
-    // The evaluator short-circuits (`every`/`some`, and a node returns on its
-    // first failing key), so a gate inside evaluation would fire for some rows
-    // and not others. The walk runs before evaluation, so every row refuses.
-    for (const row of ROWS) {
-      expect(() => match(row, { stage: 'nothing-matches-this', owner: {} })).toThrow(/zero operators/);
-      expect(() => match(row, { $or: [{ stage: 'won' }, { owner: {} }] })).toThrow(/zero operators/);
+  it('the refusal does not depend on the RECORD being tested', async () => {
+    // A record-at-a-time evaluator short-circuits (`every`/`some`, and a node
+    // returns on its first failing key), so a gate inside evaluation would fire
+    // for some rows and not others. The walk runs before any row is read, so a
+    // table holding any one row — or none — refuses alike.
+    for (const rows of [...ROWS.map((row) => [row]), []]) {
+      const driver = new InMemoryDriver();
+      for (const row of rows) await driver.create('deal', { ...row });
+      for (const where of [
+        { stage: 'nothing-matches-this', owner: {} },
+        { $or: [{ stage: 'won' }, { owner: {} }] },
+      ]) {
+        await expect(driver.find('deal', { where: where as FilterCondition }), JSON.stringify(rows))
+          .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400, message: expect.stringMatching(/zero operators/) });
+      }
     }
   });
 
   describe('evaluation is otherwise byte-identical', () => {
-    it('ordinary filters answer exactly as before', () => {
-      expect(matched({ stage: 'won' })).toEqual(['1']);
-      expect(matched({ amount: { $gt: 15 } })).toEqual(['2', '3']);
-      expect(matched({ $or: [{ stage: 'won' }, { owner: 'u2' }] })).toEqual(['1', '2']);
-      expect(matched({ $and: [{ owner: 'u1' }, { amount: { $gt: 15 } }] })).toEqual(['3']);
-      expect(matched({ $not: { stage: 'won' } })).toEqual(['2', '3']);
-      expect(matched({})).toEqual(['1', '2', '3']);
+    let driver: InMemoryDriver;
+    beforeEach(async () => {
+      driver = new InMemoryDriver();
+      for (const row of ROWS) await driver.create('deal', { ...row });
+    });
+    const liveIds = async (where: unknown): Promise<string[]> =>
+      ((await driver.find('deal', { where: where as FilterCondition })) as Array<Record<string, unknown>>)
+        .map((r) => String(r.id))
+        .sort();
+
+    it('ordinary filters answer exactly as before', async () => {
+      expect(await liveIds({ stage: 'won' })).toEqual(['1']);
+      expect(await liveIds({ amount: { $gt: 15 } })).toEqual(['2', '3']);
+      expect(await liveIds({ $or: [{ stage: 'won' }, { owner: 'u2' }] })).toEqual(['1', '2']);
+      expect(await liveIds({ $and: [{ owner: 'u1' }, { amount: { $gt: 15 } }] })).toEqual(['3']);
+      expect(await liveIds({ $not: { stage: 'won' } })).toEqual(['2', '3']);
+      expect(await liveIds({})).toEqual(['1', '2', '3']);
     });
 
-    it('a nested object comparison (a NON-empty plain object) still compares structurally', () => {
+    it('a nested object comparison (a NON-empty plain object) still compares structurally', async () => {
       // The arm `{ field: {} }` used to fall into. It keeps its behaviour for
       // every shape that actually carries keys.
-      expect(match({ meta: { a: 1 } }, { meta: { a: 1 } })).toBe(true);
-      expect(match({ meta: { a: 2 } }, { meta: { a: 1 } })).toBe(false);
+      const nested = new InMemoryDriver();
+      await nested.create('doc', { id: 'one', meta: { a: 1 } });
+      await nested.create('doc', { id: 'two', meta: { a: 2 } });
+      const found = (await nested.find('doc', { where: { meta: { a: 1 } } as unknown as FilterCondition })) as Array<
+        Record<string, unknown>
+      >;
+      expect(found.map((r) => r.id)).toEqual(['one']);
     });
   });
 });

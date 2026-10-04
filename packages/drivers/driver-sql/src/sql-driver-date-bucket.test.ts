@@ -107,12 +107,13 @@ describe('SqlDriver date bucket (dateGranularity)', () => {
       expect(caps.month).toBe(true);
       expect(caps.quarter).toBe(true);
       expect(caps.year).toBe(true);
-      // SQLite-specific: ISO week (%V) is not assumed.
-      expect(caps.week).toBe(false);
+      // [#21595] SQLite buckets the ISO week too: the Thursday rule through
+      // date modifiers, so no `%V` (which needs SQLite 3.46) is assumed.
+      expect(caps.week).toBe(true);
     });
   });
 
-  describe.each<Granularity>(['day', 'month', 'quarter', 'year'])(
+  describe.each<Granularity>(['day', 'week', 'month', 'quarter', 'year'])(
     'granularity=%s — native SQL matches bucketDateValue',
     (g) => {
       it('produces the same label set as the in-memory reference', async () => {
@@ -141,35 +142,47 @@ describe('SqlDriver date bucket (dateGranularity)', () => {
 
   describe('unsupported granularity', () => {
     /**
-     * [#6212] The subject is unchanged — week is not bucketed in SQL on SQLite,
-     * so the engine must be pushed back to in-memory bucketing — but the refusal
-     * now carries a wire identity, so the assertion moved with it. It used to be
-     * `rejects.toThrow(/dateGranularity 'week' not supported/)`: a bare `Error`
-     * with `code`/`status` both `undefined`, which `mapDataError` served as an
-     * opaque 500 for a named capability gap. `code` and `status` are asserted
-     * here for the #6144 reason — the un-fixed driver threw for this input too,
-     * so a `toThrow()` alone was green before and after and could never see the
-     * defect. The remote face's twin, and the parity between them, live in
-     * driver-turso's `remote-transport-groupby-node.test.ts`.
+     * [#6212] A granularity a dialect has no bucket expression for is refused
+     * with a wire identity, so the engine is pushed back to in-memory
+     * bucketing. It used to be `rejects.toThrow(/dateGranularity 'week' not
+     * supported/)`: a bare `Error` with `code`/`status` both `undefined`, which
+     * `mapDataError` served as an opaque 500 for a named capability gap. `code`
+     * and `status` are asserted here for the #6144 reason — the un-fixed driver
+     * threw for this input too, so a `toThrow()` alone was green before and
+     * after and could never see the defect. The remote face's twin, and the
+     * parity between them, live in driver-turso's
+     * `remote-transport-groupby-node.test.ts`.
+     *
+     * [#21595] This used to be SQLite `week`. SQLite now buckets all five, so
+     * the pin moved to the population that still reaches the refusal: a client
+     * this driver does not model, whose capability row is empty. `mssql` is
+     * one (`tedious` is a declared dependency), and the refusal is raised while
+     * the statement is built, so no server is needed.
      */
-    it('refuses week on SQLite with NOT_IMPLEMENTED / 501 (so engine routes to in-memory)', async () => {
-      const err = await driver
-        .aggregate('events', {
-          groupBy: [{ field: 'ts', dateGranularity: 'week' }],
-          aggregations: [{ function: 'count', alias: 'n' }],
-        })
-        .then(
-          () => { throw new Error('expected the driver to refuse week on SQLite'); },
-          (e) => e as Error & { code?: string; status?: number },
-        );
+    it('refuses a granularity on a client with no bucket expression, with NOT_IMPLEMENTED / 501', async () => {
+      const unmodeled = new SqlDriver({ client: 'mssql' });
+      try {
+        expect(unmodeled.supports.queryDateGranularity).toEqual({});
+        const err = await unmodeled
+          .aggregate('events', {
+            groupBy: [{ field: 'ts', dateGranularity: 'week' }],
+            aggregations: [{ function: 'count', alias: 'n' }],
+          })
+          .then(
+            () => { throw new Error('expected the driver to refuse week on mssql'); },
+            (e) => e as Error & { code?: string; status?: number },
+          );
 
-      expect(err.code).toBe('NOT_IMPLEMENTED');
-      expect(err.status).toBe(501);
-      expect(err.message.startsWith("Date bucketing by 'week' is not supported by this backend.")).toBe(true);
-      // The message names what this dialect DOES bucket, so a reader is told
-      // where the boundary is rather than only that they crossed it.
-      expect(err.message).toContain('Bucketed here: day, month, quarter, year');
-      expect(err.message).toContain('supports.queryDateGranularity');
+        expect(err.code).toBe('NOT_IMPLEMENTED');
+        expect(err.status).toBe(501);
+        expect(err.message.startsWith("Date bucketing by 'week' is not supported by this backend.")).toBe(true);
+        // The message names what this dialect DOES bucket, so a reader is told
+        // where the boundary is rather than only that they crossed it.
+        expect(err.message).toContain("Bucketed here: none (dialect 'mssql')");
+        expect(err.message).toContain('supports.queryDateGranularity');
+      } finally {
+        await unmodeled.disconnect().catch(() => {});
+      }
     });
   });
 

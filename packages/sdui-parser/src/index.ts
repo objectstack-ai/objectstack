@@ -15,12 +15,6 @@ export {
   DASHBOARD_WIDGET_HOST_TYPES,
   UNCONSUMED_WIDGET_OPTION,
 } from './dashboard-widget-options.js';
-export {
-  checkKanbanQuickAdd,
-  INERT_QUICK_ADD,
-  QUICK_ADD_HOST_TYPES,
-  QUICK_ADD_KEY,
-} from './kanban-quick-add.js';
 export { generateDts, propsName, generateBlockList } from './codegen.js';
 export type { CodegenOptions } from './codegen.js';
 export { inputTypeArms, canonicalizeInputType, MANIFEST_INPUT_TYPES } from './input-type.js';
@@ -68,8 +62,14 @@ export interface RegistryConfigLike {
   type: string;
   namespace?: string;
   isContainer?: boolean;
-  /** ADR-0080 contract tier — only 'public' configs form the AI/contract surface. */
-  tier?: 'public' | 'internal';
+  /**
+   * ADR-0080 contract tier — only 'public' configs form the AI/contract
+   * surface under `publicOnly`. `'html'` is the projection-only stamp
+   * `ComponentRegistry.getPublicConfigs()` puts on the html tier's intrinsic
+   * elements (objectui#10735); it is the one value {@link manifestFromConfigs}
+   * carries into `ManifestComponent.tier`.
+   */
+  tier?: 'public' | 'internal' | 'html';
   label?: string;
   category?: string;
   inputs?: Array<{
@@ -131,6 +131,11 @@ export function manifestFromConfigs(
       type: c.type,
       namespace: c.namespace,
       isContainer: c.isContainer,
+      // The html tier's stamp, and ONLY that stamp (objectui#10735): a
+      // registration's `'public'` / `'internal'` is registry mechanics the
+      // manifest never carried, and `undefined` is dropped by `JSON.stringify`,
+      // so every curated entry serialises exactly as before this key existed.
+      tier: c.tier === 'html' ? 'html' : undefined,
       inputs: (c.inputs ?? []).map((i) => ({
         name: i.name,
         type: canonicalizeInputType(i.type),

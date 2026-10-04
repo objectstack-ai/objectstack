@@ -250,7 +250,7 @@ function requireHeaderMap(
       + '— the read path returns the engine mask for it — so this is NOT a webhook authored without '
       + 'headers, and delivering it without them would silently drop whatever the author put in that '
       + 'map, including an Authorization credential, on a delivery that is otherwise correctly signed '
-      + 'and therefore looks genuine to the receiver (#7986, #8558). Causes, in the order worth '
+      + 'and therefore looks genuine to the receiver. Causes, in the order worth '
       + 'checking: the value was typed into the Custom Headers field and is not valid JSON; it parses '
       + 'but is an array, an empty object, or has a non-string value ({"X-Count": 5}); or it is a '
       + `nested object where the wire format allows only strings. ${HEADERS_REMEDY}`,
@@ -321,7 +321,7 @@ export async function resolveWebhookHeaders(
     throw new WebhookHeadersUnresolvableError(
       `Webhook "${String(row.name ?? row.id)}" stores encrypted custom headers, but this data engine `
         + 'does not implement resolveSecretField() — they cannot be recovered, so the subscription is '
-        + 'dropped rather than delivered without the headers it was authored with (#7986).',
+        + 'dropped rather than delivered without the headers it was authored with.',
     );
   }
   const plain = await resolver.resolveSecretField(object, String(row.id), WEBHOOK_HEADERS_FIELD);
@@ -332,7 +332,7 @@ export async function resolveWebhookHeaders(
         + 'path returns the engine mask for it — so this is NOT a webhook authored without headers, '
         + 'and delivering it without them would silently drop whatever the author put in that map, '
         + 'including an Authorization credential, on a delivery that is otherwise correctly signed and '
-        + 'therefore looks genuine to the receiver (#7986, #8558). Causes, in the order worth checking: '
+        + 'therefore looks genuine to the receiver. Causes, in the order worth checking: '
         + 'the row was deleted while this refresh was reading it; the column holds something that is '
         + 'not a secret: ref (a hand-edited column, or a dump restored without its sys_secret rows); '
         + `or the stored value decrypts to an empty string. ${HEADERS_REMEDY}`,

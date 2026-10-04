@@ -48,14 +48,14 @@ const cube: Cube = {
   name: 'compliance',
   title: 'Compliance',
   sql: 'compliance_assessment',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
     // NB: dimension id `assessed` deliberately differs from column `assessed_at`
     // to prove the storage target resolves the real column, not the member name.
-    assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
-    score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
+    assessed: { label: 'Assessed', type: 'time', sql: 'assessed_at' },
+    score: { label: 'Score', type: 'number', sql: 'score' },
   },
-  public: false,
+  public: true,
 };
 
 const EPOCH_2025_06_18 = Date.parse('2025-06-18T00:00:00.000Z');

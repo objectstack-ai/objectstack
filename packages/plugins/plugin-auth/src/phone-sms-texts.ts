@@ -14,7 +14,7 @@
  *     no template row resolves (fresh env, missing table, exotic locale).
  *
  * The recipient locale reaching this module is resolved by the caller
- * (`AuthManager.renderPhoneSmsBody`), and #14762 gave the OTP send a rung
+ * (`AuthManager.renderPhoneSmsBody`), and commit 35e94c96b gave the OTP send a rung
  * above the deployment default: the recipient's own `sys_user.locale`
  * (#13881, ruling 2026-09-01 — the same column the messaging channels read
  * per recipient), then the DEPLOYMENT default (`localization.locale`

@@ -36,10 +36,10 @@
  * `start.ts` and once in `dev.ts`, and that duplication is exactly how the two
  * can drift apart from each other as well as from the resolver.
  *
- * SCOPE (#6860 vs #6345): this pins the CANONICAL kinds — the `driverId` values
+ * SCOPE (#6860 vs commit e2798fab7): this pins the CANONICAL kinds — the `driverId` values
  * the resolver produces. The resolver also accepts aliases (`pg`, `mysql2`,
  * `libsql`, `mingo`, `wasm`, …) which the flag deliberately does not offer;
- * converging that vocabulary is #6345's job, and this pin is written so it does
+ * converging that vocabulary was commit e2798fab7's job, and this pin is written so it does
  * not prejudge it — an alias collapses to its canonical id and is not demanded
  * of the flag.
  */
@@ -101,7 +101,7 @@ function candidateTokens(): string[] {
  * is supplied so it resolves normally; the catch is kept so the derivation
  * survives another kind growing the same "recognized but unusable" shape.
  *
- * `err.recognized` is what keeps that catch honest (#6345). The resolver now
+ * `err.recognized` is what keeps that catch honest (commit e2798fab7). The resolver now
  * ALSO throws `UnsupportedDriverError` for a spelling nothing claims — the CLI
  * half of "both hosts refuse the same input", which replaced a silent fall-through
  * to the dev SQLite default. Reading `driverType` off that error would report the
@@ -187,6 +187,19 @@ describe('#6860 — --database-driver allowlist agrees with resolveStorageDefini
         // Keeps the test above honest: if `options:` were dropped, everything
         // would parse and "parses every offered kind" would prove nothing.
         await expect(parseDriverFlag(flags, 'not-a-driver')).rejects.toThrow(/expected .*not-a-driver.* to be one of/i);
+      });
+
+      // The in-memory engine was withdrawn from the spec's selection face, so the
+      // derived allowlist refuses its spellings at PARSE time — before the
+      // command body, and so before `os dev` prints a Database row for a store
+      // its serve child would never open. The wording is oclif's (the allowlist
+      // is derived, never subtracted here); it lists the legal kinds, sqlite
+      // among them.
+      it('refuses the withdrawn in-memory spellings at parse time', async () => {
+        for (const spelling of ['memory', 'mingo', 'in-memory']) {
+          await expect(parseDriverFlag(flags, spelling), `--database-driver ${spelling}`)
+            .rejects.toThrow(/to be one of: .*sqlite/i);
+        }
       });
     });
   }

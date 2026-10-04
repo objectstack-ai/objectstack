@@ -8,12 +8,12 @@
  * ## What was measured, and why this row came first
  *
  * `buildFileReadAuthorizer` re-raises `AuthzStoreUnavailableError` rather than
- * returning `'deny'` (#13279). `registerStorageRoutes`' `authorizeDownload`
+ * returning `'deny'` (commit 6a180e42d). `registerStorageRoutes`' `authorizeDownload`
  * then wrapped the whole authorizer call in `catch { verdict = 'deny' }` one
  * frame up, so the re-raise was absorbed and the outage rendered as
  * `403 FILE_DOWNLOAD_DENIED` / `403 ATTACHMENT_DOWNLOAD_DENIED`. Fail-CLOSED,
  * never an admission — but indistinguishable on the wire from a genuine
- * refusal, which is the exact confusion #13279 exists to prevent, and the worst
+ * refusal, which is the exact confusion commit 6a180e42d was made to prevent, and the worst
  * shape in this card's six-site census (the datasource and settings families
  * lost the envelope into a 500; this one lost it into a *verdict*).
  *

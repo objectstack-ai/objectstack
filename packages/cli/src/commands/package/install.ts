@@ -26,7 +26,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, printStep, isExitSignal } from '../../utils/format.js';
 
 export default class PackageInstall extends Command {
   static override description =
@@ -205,7 +205,15 @@ export default class PackageInstall extends Command {
             'MarketplaceInstallLocalPlugin (see @objectstack/cloud-connection).',
           );
         } else {
-          printError(`Install failed (${res.status}): ${res.error}`);
+          // [#21489] The runtime's refusal is printed with its CODE beside the
+          // status, for every refusal alike — the code is the machine-readable
+          // half an installer (human or AI) branches on, and the message carries
+          // the remedy (e.g. a package whose enabled job has no `body`:
+          // `422 VALIDATION_ERROR`, "give the job a `body`, or boot it with
+          // `os start --artifact`"). No case per code: a refusal this command
+          // has never heard of renders the same way.
+          const code = typeof res.body?.error?.code === 'string' ? ` ${res.body.error.code}` : '';
+          printError(`Install failed (${res.status}${code}): ${res.error}`);
         }
         this.exit(1);
         return;
@@ -246,6 +254,7 @@ export default class PackageInstall extends Command {
         console.log(`    ${storageDir}`);
       }
     } catch (error) {
+      if (isExitSignal(error)) throw error;
       printError((error as Error).message);
       this.exit(1);
     }

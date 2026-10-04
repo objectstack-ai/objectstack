@@ -271,7 +271,7 @@ export async function ensureOverlayStateIndex(
             logger,
             `[metadata-protocol] could not create '${indexName}' on "${OVERLAY_TABLE}" after the probe ` +
             `succeeded — the table may currently have NO unique index over ` +
-            `(${overlayIndexKeyParts().join(', ')}) among state='${state}' rows. Restart to retry (#6418).`,
+            `(${overlayIndexKeyParts().join(', ')}) among state='${state}' rows. Restart to retry.`,
             detail,
         );
         return { status: 'failed', detail, fallback: 'not-attempted' };
@@ -374,7 +374,7 @@ function reportDegradation(
             `(${columns}) is enforced only as far as it was before; ADR-0005 overlay uniqueness is NOT ` +
             `enforced until the duplicates are resolved, and getMetaItem has no defined answer for ` +
             `which of the colliding rows wins. List them with: ${duplicateQuery} — or run ` +
-            `"os migrate duplicates" — then restart (ADR-0120 D4, #6418, #8725).`,
+            `"os migrate duplicates" — then restart (ADR-0120 D4).`,
             detail,
         );
         return;
@@ -390,7 +390,7 @@ function reportDegradation(
         `[metadata-protocol] could not rebuild '${indexName}' on "${OVERLAY_TABLE}" as the ` +
         `state='${state}' partial UNIQUE index; the existing index is unchanged, so two ${state} ` +
         `overlay rows for one (${columns}) can still coexist while everything else looks healthy. ` +
-        `Fix the cause below and restart (#6418).`,
+        `Fix the cause below and restart.`,
         detail,
     );
 }

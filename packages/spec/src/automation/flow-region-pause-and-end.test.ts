@@ -113,7 +113,7 @@ describe('FLOW_PAUSE_CAPABLE_NODE_TYPES — the declared set, and how it was der
   });
 });
 
-describe('a region body refuses a pause-capable node (#15646)', () => {
+describe('a region body refuses a pause-capable node', () => {
   it.each(FLOW_PAUSE_CAPABLE_NODE_TYPES)('refuses a `%s` node in a loop body, anchored on its `type`', (type) => {
     expect(issuesOf(flowWith([loopOver([pausingNode(type)])]))).toEqual([[
       'nodes.1.config.body.nodes.0.type',
@@ -194,7 +194,7 @@ describe('a region body refuses a pause-capable node (#15646)', () => {
   });
 });
 
-describe('a region body refuses an `end` node (#18112, absorbed into #15646)', () => {
+describe('a region body refuses an `end` node', () => {
   it.each([
     ['loop body', loopOver([{ id: 'stop', type: 'end', label: 'Stop' }]), 'nodes.1.config.body.nodes.0.type', "loop 'sweep' body"],
     ['try region', tryCatchOver([{ id: 'stop', type: 'end', label: 'Stop' }], [step('recover')]), 'nodes.1.config.try.nodes.0.type', "try_catch 'guard' try"],
@@ -242,10 +242,19 @@ describe('the rule does NOT over-reach', () => {
   });
 
   it('leaves every non-pausing node type alone inside a region — the rule is a list, not a mood', () => {
+    // Each node carries the config its executor contract requires, so the parse
+    // judges only this rule — a config left out is refused by its own (#20316).
+    const WHOLE: Record<string, Record<string, unknown>> = {
+      create_record: { objectName: 'task' },
+      update_record: { objectName: 'task', filter: { id: '{row.id}' } },
+      get_record: { objectName: 'task' },
+      http: { url: 'https://example.com/hook' },
+      notify: { recipients: ['{row.owner}'], title: 'Row processed' },
+    };
     for (const type of ['assignment', 'decision', 'create_record', 'update_record', 'get_record', 'http', 'notify', 'loop']) {
       const node: FlowNode = type === 'loop'
         ? loopOver([step('inner')], 'inner_loop')
-        : { id: 'work', type, label: 'Work' };
+        : { id: 'work', type, label: 'Work', ...(WHOLE[type] ? { config: WHOLE[type] } : {}) };
       expect(FlowSchema.safeParse(flowWith([loopOver([node])])).success, type).toBe(true);
     }
   });

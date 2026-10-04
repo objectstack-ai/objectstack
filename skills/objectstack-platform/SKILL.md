@@ -41,8 +41,9 @@ It calls `defineStack()` to declare all metadata.
 ### Full Configuration Reference
 
 `defineStack()` accepts an `ObjectStackDefinitionInput` whose top-level keys
-are `manifest`, `packages`, `objects`, `objectExtensions`, `views`, `apps`,
-`pages`, `dashboards`, `reports`, `datasets`, `actions`, `flows`, `jobs`,
+are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
+`picklistExtensions`, `views`, `apps`, `pages`, `dashboards`, `reports`,
+`datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
 `capabilities`, `sharingRules`, `apis`, `webhooks`, `api`, `server`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
@@ -188,16 +189,18 @@ what the platform owns.
 
 `blank` is the only template `create-objectstack` offers, and it is the default:
 
-- Bundled with `create-objectstack` — works offline, no network fetch
-- One example object, and `requires: ['automation']` plus the three generic
-  connector executors in `plugins:`. The memory driver and the Hono server are
-  NOT in the file — the CLI auto-registers both at boot
+- Bundled with `create-objectstack` — no network fetch
+- One example object; `requires: ['automation', 'triggers']` plus the three
+  generic connector executors in `plugins:`; and the eight generator barrels
+  (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`, `picklists`),
+  each `src/*/index.ts` handed to the stack key of its name through
+  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
+  memory driver and the Hono server are NOT in the file — the CLI
+  auto-registers both at boot
 - A clean slate to extend with the metadata this skill describes
 
-The five remote content templates (`todo`, `compliance`, `content`,
-`contracts`, `procurement`) are **retired** — delisted from the marketplace and
-no longer maintained. Do not recommend them; asking for one by name is refused.
-Build domain metadata on top of `blank` instead.
+The five retired remote templates (`todo`, `compliance`, `content`,
+`contracts`, `procurement`) are refused by name.
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Scaffolding Command.
 
@@ -369,7 +372,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
 | `mcp` | `@objectstack/mcp` |
-| `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api`. **Pair it with `job`** — schedule and time-relative triggers run on the job service |
+| `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api` |
 
 The tokens in `PLATFORM_CAPABILITY_TOKENS` not in that map do not resolve
 through it:
@@ -447,9 +450,8 @@ definition: never write it by hand, and never hand-write a raw
 
 ## CLI Commands
 
-Daily commands are covered in **Part 3 — Operations** below
-([jump there](./references/operations.md#part-3--operations-cli-testing-deployment)). High-level cheat
-sheet for the bootstrap loop:
+Daily commands are in [Part 3 — Operations](./references/operations.md#part-3--operations-cli-testing-deployment).
+Cheat sheet for the bootstrap loop:
 
 ```bash
 npx create-objectstack my-app

@@ -51,7 +51,8 @@
  * both before and after, tree for tree.
  *
  * `the #5146 rewrite cannot swallow the leaf` is the gate-SIDE question. The gate
- * sits in `fieldLeaves`, downstream of `nullSafeNegationOperand`, so whether row
+ * sits in `fieldLeaves`, downstream of the `$not` rewrite (the shared lowering's
+ * rule 3 since #5930 step 4 deleted this module's copy), so whether row
  * three throws or merely changes shape depends on the rewrite carrying the
  * author's spec through. Measured, not assumed — PR #6390 hit the same trap on
  * the sibling door, and its reasoning does not transfer (that module's polarity
@@ -123,7 +124,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 
 /** The ADR-0112 fields a refusal must carry. */
 interface FilterRefusal extends Error {
@@ -133,7 +134,7 @@ interface FilterRefusal extends Error {
 
 function refusalFor(where: unknown): FilterRefusal | undefined {
   try {
-    normalizeAnalyticsFilterTree({ where });
+    normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
     return undefined;
   } catch (e) {
     return e as FilterRefusal;
@@ -141,7 +142,7 @@ function refusalFor(where: unknown): FilterRefusal | undefined {
 }
 
 function treeFor(where: unknown): unknown {
-  return normalizeAnalyticsFilterTree({ where });
+  return normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
 }
 
 /**
@@ -407,14 +408,15 @@ describe('[#6386] the `null` control group does not move', () => {
     // The refusal is about a KEY INSIDE a `where`; a missing `where` is the
     // legitimate way to say "no filter" and must stay silent.
     expect(treeFor(undefined)).toBeNull();
-    expect(normalizeAnalyticsFilterTree({})).toBeNull();
+    expect(normalizeAnalyticsFilterTree({}, NO_DATETIME_COLUMNS)).toBeNull();
     expect(treeFor({})).toBeNull();
     expect(treeFor([])).toBeNull();
   });
 });
 
 describe('[#6386] the #5146 rewrite cannot swallow the leaf — the gate side is load-bearing', () => {
-  // The gate lives in `fieldLeaves`, DOWNSTREAM of `nullSafeNegationOperand`, so
+  // The gate lives in `fieldLeaves`, DOWNSTREAM of the `$not` rewrite (the shared
+  // lowering's rule 3 since #5930 step 4), so
   // `{$not: {…}}` throws only if the rewrite carries the author's spec through.
   // One case per rewrite path that can carry a swept comparand.
   const REWRITE_PATHS: Array<{ name: string; where: unknown; path: string }> = [
@@ -446,7 +448,7 @@ describe('[#6386] the #5146 rewrite cannot swallow the leaf — the gate side is
   ];
 
   // [#20035] RE-JUDGED. The shared type face (#7872) now answers first, on the
-  // author's OWN condition, before `nullSafeNegationOperand` rewrites anything:
+  // author's OWN condition, before the `$not` rewrite rewrites anything:
   // `lowerAnalyticsWhere` runs it ahead of `buildNode`. So the refusal names
   // the `$not` path the author wrote (`where.$not.d`) — the question "can the
   // rewrite swallow the leaf before the gate sees it" is answered upstream of
@@ -462,7 +464,8 @@ describe('[#6386] the #5146 rewrite cannot swallow the leaf — the gate side is
   }
 
   it('there is no `none`-disposition case to write, and this is why', () => {
-    // `nullGuardForFieldSpec` answers 'none' only when EVERY operator satisfies
+    // The rewrite's `nullGuardForFieldSpec` (the shared lowering's since #5930
+    // step 4) answers 'none' only when EVERY operator satisfies its
     // `operatorIsNullTotal`, which for an `undefined` comparand is false on every
     // operator this gate sweeps ($eq/$ne compare `value === null`; $in/$nin need
     // an empty array). So the only field specs reaching 'none' while holding an

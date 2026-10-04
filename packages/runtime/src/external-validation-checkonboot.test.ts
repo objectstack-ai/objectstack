@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13037] `datasource.external.validation.checkOnBoot` — declared with
+ * [commit e7dfb1d69] `datasource.external.validation.checkOnBoot` — declared with
  * `.default(true)` since the block was written, and read by NOTHING until this
  * card. An author who wrote `checkOnBoot: false` and left `onMismatch` at its
  * default still got the boot sweep, and a measured mismatch still threw
@@ -54,7 +54,7 @@ const mismatch: SchemaDiffEntry[] = [
   { kind: 'type_mismatch', remoteName: 'fact_orders', column: 'amount', expected: 'number', actual: 'text', severity: 'error' },
 ];
 
-/** [#11166] The indeterminate row: the remote could not be read at all. */
+/** [commit 735f5c709] The indeterminate row: the remote could not be read at all. */
 const unreachable: SchemaDiffEntry[] = [
   { kind: 'unreachable', remoteName: 'fact_orders', actual: 'connect ECONNREFUSED 10.0.0.5:5432', severity: 'error' },
 ];
@@ -136,7 +136,7 @@ describe('checkOnBoot: false — the datasource is skipped by the kernel:ready s
   });
 
   /**
-   * [#11166]'s loud unreachable warning is part of the boot gate, so it is part
+   * Commit 735f5c709's loud unreachable warning is part of the boot gate, so it is part
    * of what `checkOnBoot: false` opts out of. Skipped means skipped — an author
    * who took the boot check off their datasource should not be told at every
    * startup that the boot check could not read it.

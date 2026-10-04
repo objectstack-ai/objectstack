@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12868] The per-option `default` key is narrowed OUT of the form-view
+ * [commit c459da6bc] The per-option `default` key is narrowed OUT of the form-view
  * options vocabulary — and ONLY there (maintainer-ruled disposition 甲,
  * 2026-08-28, on the objectui#6263 analysis).
  *

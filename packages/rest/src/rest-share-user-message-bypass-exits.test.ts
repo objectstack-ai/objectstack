@@ -45,7 +45,7 @@
  *
  * ⭐ The second row is the card's OPEN question, measured rather than assumed:
  * the prefix exit had no precedent of its own (the fault terminal has one —
- * #9934 deliberately rides the mark onto fault terminals). The measurement
+ * commit 79c46da90 deliberately rides the mark onto fault terminals). The measurement
  * answers it. `/data` carries the mark for that identical throw, on all five
  * prefixes (§3), so the two doors disagree and the exit is in. Had `/data`
  * omitted it there, the two doors would have AGREED and there would have been
@@ -297,7 +297,7 @@ const FAULTS: Array<{ name: string; error: unknown; message: string }> = [
         // ⭐ The row that shows the mark and the WITHHELD PROSE are two
         // different decisions: `sharingFaultMessage` replaces the QuickJS
         // wrapper with the generic sentence, and the author's own text still
-        // travels. #9934's argument, exercised rather than quoted.
+        // travels. Commit 79c46da90's argument, exercised rather than quoted.
         name: 'a sandboxed body on a declared 5xx — prose withheld, mark carried',
         error: sandboxRefusal('the share index is being rebuilt', {
             code: 'SHARE_INDEX_REBUILDING', status: 503, userMessage: RECOVERING,

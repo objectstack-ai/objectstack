@@ -55,7 +55,7 @@
  * specifically (range operators `>=`/`<=` are not flagged — they're the building
  * block of the correct pattern), keeping false positives near zero.
  *
- * #13681 / #14394 — per-iteration containment, as a PAIR of rules. A `loop`
+ * commit 8ed9c54b4 / #14394 — per-iteration containment, as a PAIR of rules. A `loop`
  * body has no error handling of its own: `loop-node.ts` iterates with a bare
  * `await`, so the first item whose node fails ends the entire run and every
  * later item goes unprocessed, silently. The containment spelling exists and was
@@ -159,6 +159,9 @@ import {
   collectFlowGraphs,
 } from '@objectstack/spec/automation';
 import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
+// [#15429] The decision's `mode` contract, parsed here so `os validate` and
+// `registerFlow` refuse the same declaration with the same sentence.
+import { DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#5659] The Filter Protocol's boolean identity reduction — the same predicate
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
@@ -231,6 +234,21 @@ export const FLOW_MULTIPLE_DEFAULT_EDGES = 'flow-multiple-default-edges';
 /** #4414 — `config.condition` on a node whose executor never reads it. */
 export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
 /**
+ * #15429 — a `decision` `config.mode` the spec refuses: a value outside
+ * `'exclusive' | 'inclusive'`, or a legal `mode` beside a non-empty
+ * `conditions` list (ruling A on #20168). `error`: `registerFlow` refuses the
+ * same declaration with the same sentence, so the flow can never arm.
+ */
+export const FLOW_DECISION_MODE_INVALID = 'flow-decision-mode-invalid';
+/**
+ * #15429 (ruling item 4) — a `decision` declaring `mode: 'inclusive'` with two
+ * or more conditioned out-edges: every edge whose condition holds runs, so
+ * where the conditions overlap more than one branch runs for one record.
+ * Advisory — that is exactly what the declaration asks for, and the rule
+ * cannot prove the conditions disjoint over CEL; it says what the shape does.
+ */
+export const FLOW_DECISION_INCLUSIVE_OVERLAP = 'flow-decision-inclusive-overlap';
+/**
  * #5482 — a `delete_record` / `update_record` node that declares `multi: true`
  * and bounds it with NOTHING: the whole-object write, by declaration.
  *
@@ -243,7 +261,7 @@ export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
  */
 export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
 /**
- * #13681 / #14394 — a `loop` body that runs a node which can fail, with no
+ * commit 8ed9c54b4 / #14394 — a `loop` body that runs a node which can fail, with no
  * `try_catch` between the loop and that node. The first failing item kills the
  * whole sweep: `loop-node.ts:123-135` iterates with a bare `await` and no
  * `try`/`catch` anywhere in the file, so the body's failure propagates out of
@@ -261,7 +279,7 @@ export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
  */
 export const FLOW_LOOP_BODY_UNCONTAINED = 'flow-loop-body-uncontained';
 /**
- * #13681 / #14394 — the near-miss shape: a `try_catch` that declares no `catch`
+ * commit 8ed9c54b4 / #14394 — the near-miss shape: a `try_catch` that declares no `catch`
  * region. `catch` is optional in the schema (`control-flow.zod.ts:315`) and
  * omitting it makes the container **fail** (`try-catch-node.ts:190`), so the
  * wrapped region dies exactly like an unwrapped one — measured side by side, the
@@ -322,7 +340,7 @@ const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record',
  *  - `http` — a non-2xx (when `failOnError`), a timeout/abort, or a failed
  *    durable enqueue (`http-nodes.ts:208, :249-253`).
  *  - `notify` — no title, an empty resolved recipient set, or a delivery throw
- *    (`notify-node.ts:293, :300, :446`). The measured #13681 case exactly: one
+ *    (`notify-node.ts:293, :300, :446`). The measured case commit 8ed9c54b4 records, exactly: one
  *    row with a null owner killed the sweep.
  *  - `connector_action` — a degraded connector, an unresolvable action, or a
  *    throwing call (`connector-nodes.ts:69, :76, :124`).
@@ -621,7 +639,9 @@ function scanFilterForDateEquality(
           `time component, so exact equality against \`${hit.src}\` (re-computed each run) silently matches nothing.`,
         hint:
           `Use a one-day window instead: \`${key}: { $gte: daysFromNow(N), $lt: daysFromNow(N+1) }\` ` +
-          `(wrap multiple tiers in \`$or\`). The abutting windows tile the timeline so each row matches exactly once. (#1874)`,
+          `(wrap multiple tiers in \`$or\`). The abutting windows tile the timeline so each row matches exactly once. ` +
+          `A T-minus rule can declare the sweep instead: a \`schedule\` flow whose start node carries a ` +
+          `\`config.timeRelative\` descriptor with \`offsetDays\` runs once per record on each offset day.`,
         rule: FLOW_DATE_EQUALITY_FILTER,
       });
     }
@@ -706,7 +726,7 @@ function scanErrorLabelledEdges(
       hint:
         `Add \`type: 'fault'\` to this edge. Only runtime failures route — a guard refusal (a filter token ` +
         `that resolved to nothing, a missing required config key, an unscoped run) stays fatal by design and ` +
-        `must be fixed in the metadata, not handled. (#3863)`,
+        `must be fixed in the metadata, not handled.`,
       rule: FLOW_ERROR_LABEL_NOT_FAULT,
     });
   }
@@ -752,6 +772,23 @@ function scanErrorLabelledEdges(
  *  (5) `flow-inert-node-condition` — `config.condition` on a node that never
  *      reads it. The key is the trigger gate on `start` and dead on every other
  *      builtin, so the predicate reads like a guard and gates nothing.
+ *  (6) `flow-decision-mode-invalid` (#15429) — a `config.mode` the spec's
+ *      `DecisionConfigSchema` refuses: a value outside the closed pair, or a
+ *      legal `mode` beside a non-empty `conditions` list, which is first-match
+ *      on its own so the key would be accepted and never read (ruling A on
+ *      #20168). The finding IS the schema's issue message, and `registerFlow`
+ *      refuses the same shape with the same sentence.
+ *  (7) `flow-decision-inclusive-overlap` (#15429, ruling item 4) — a decision
+ *      declaring `mode: 'inclusive'` with two or more conditioned out-edges.
+ *      An edge-branched decision is exclusive by default (the first true edge
+ *      in declaration order wins); `inclusive` takes every one that holds, and
+ *      where the conditions overlap that is more than one branch for one
+ *      record. Beside (2), not a repeat of it: (2) is about an out-edge nothing
+ *      gates, this is about gates that can all open.
+ *
+ * (6) GATES — the engine refuses the flow at registration with the same
+ * sentence, so a warning would just be a slower way of finding out. (7) stays
+ * advisory: it names what the declaration does, and the declaration is legal.
  *
  * (1) and (3) GATE — neither has a reading under which the author's metadata
  * routes what it says, on any run, so a warning would just be a slower way of
@@ -792,7 +829,7 @@ function scanBranchRouting(
             `guarded branch. The condition wins and the default marker routes nothing.`,
           hint:
             `Drop one: keep \`condition\` for a guarded branch, or drop it and keep \`isDefault: true\` ` +
-            `for the "otherwise" path. (#4414)`,
+            `for the "otherwise" path.`,
           rule: FLOW_DEFAULT_EDGE_WITH_CONDITION,
           // Gating: the two keys contradict, the condition always wins, and the
           // marker never routes. No reading makes it do what it says.
@@ -811,7 +848,7 @@ function scanBranchRouting(
           `when no condition matches, which is a parallel fan-out, not an "otherwise".`,
         hint:
           `Keep \`isDefault: true\` on the single fallback edge and give the others a \`condition\` ` +
-          `(or leave them unconditional if the fan-out really is intended). (#4414)`,
+          `(or leave them unconditional if the fan-out really is intended).`,
         rule: FLOW_MULTIPLE_DEFAULT_EDGES,
       });
     }
@@ -846,9 +883,9 @@ function scanBranchRouting(
       hint:
         nodeType === 'decision'
           ? `Branching lives on the OUT-EDGES: give each branch its own \`condition\` and mark the ` +
-            `fallback \`isDefault: true\`. If the edges already carry the predicate, delete this copy. (#4414)`
+            `fallback \`isDefault: true\`. If the edges already carry the predicate, delete this copy.`
           : `Delete it, or move the predicate to the incoming edge's \`condition\` if this step was ` +
-            `meant to be conditional. (#4414)`,
+            `meant to be conditional.`,
       rule: FLOW_INERT_NODE_CONDITION,
     });
   }
@@ -869,6 +906,59 @@ function scanBranchRouting(
     );
     const edgeLabels = new Set(outs.map(edgeLabelOf).filter(Boolean));
 
+    // (6) #15429 — the decision's `mode`, judged by the spec's own contract.
+    //     Only issues rooted at `mode` are reported here: the same parse also
+    //     refuses an undeclared key, but that strictness binds at authoring by
+    //     the standing decision in `schemaless-node-config.zod.ts`, and (5)
+    //     above already owns the one such key an author reaches for. Read
+    //     before (1)/(2): a decision whose `mode` is refused never registers,
+    //     so what its branches would route is moot until the key is fixed —
+    //     but the other findings still print, so the author fixes it once.
+    const modeVerdict = DecisionConfigSchema.safeParse(cfg);
+    if (!modeVerdict.success) {
+      for (const issue of modeVerdict.error.issues) {
+        if (issue.path[0] !== 'mode') continue;
+        findings.push({
+          where: `${at} · decision '${nid}' · config.mode`,
+          message: issue.message,
+          hint:
+            `\`registerFlow\` refuses this flow with the same sentence, so it can never arm. Fix the node ` +
+            `in the flow definition: an omitted \`mode\` is exclusive (the first true out-edge wins), ` +
+            `\`mode: 'inclusive'\` takes every true out-edge, and a \`conditions\` list is first-match ` +
+            `on its own and takes no \`mode\`.`,
+          rule: FLOW_DECISION_MODE_INVALID,
+          // Gating: the engine refuses the same declaration at registration.
+          severity: 'error',
+        });
+      }
+    }
+
+    // (7) #15429 ruling item 4 — an inclusive gateway whose gates can all
+    //     open. Counted over conditioned out-edges only (a `fault` edge is error
+    //     routing and was dropped above; an `isDefault` edge opens only when
+    //     nothing else did), so one conditioned edge plus a default is not
+    //     this shape: there, inclusive and exclusive cannot differ.
+    if (cfg.mode === 'inclusive') {
+      const conditioned = outs.filter((e) => e.condition && conditionSource(e.condition).trim() !== '');
+      if (conditioned.length >= 2) {
+        findings.push({
+          where: `${at} · decision '${nid}'`,
+          message:
+            `declares \`mode: 'inclusive'\` with ${conditioned.length} conditioned out-edge(s) ` +
+            `(${conditioned.map((e) => `'${String(e.target)}'`).join(', ')}) — EVERY one whose condition ` +
+            `holds runs, one after another, so where the conditions overlap more than one branch runs ` +
+            `for one record. Nothing checks that they partition.`,
+          hint:
+            `If exactly one branch was meant, delete \`mode\`: an omitted \`mode\` is exclusive, and the ` +
+            `first out-edge whose condition holds, in declaration order, wins (mark the fallback ` +
+            `\`isDefault: true\`). Keep \`mode: 'inclusive'\` only where running every matching branch is ` +
+            `the intent. A flow migrated by \`os migrate meta --from 17\` carries this key wherever two ` +
+            `or more conditioned out-edges left a decision — delete it where the branches partition.`,
+          rule: FLOW_DECISION_INCLUSIVE_OVERLAP,
+        });
+      }
+    }
+
     // (1) a declared branch label nothing claims. `default` is the engine's own
     //     sentinel for "no declared condition matched" and is additionally
     //     claimed by the BPMN default edge, so it is never counted as unclaimed.
@@ -884,7 +974,7 @@ function scanBranchRouting(
         hint:
           `Make an out-edge's \`label\` match the declared branch exactly, or drop \`config.conditions\` ` +
           `and branch on the edges instead (\`condition\` per branch + \`isDefault: true\` on the ` +
-          `fallback) — one mechanism per decision, never both. (#4414)`,
+          `fallback) — one mechanism per decision, never both.`,
         rule: FLOW_BRANCH_LABEL_UNMATCHED,
         // Gating: a label nothing claims cannot route under ANY reading, on
         // every run. See the severity policy at the top of this file.
@@ -941,7 +1031,7 @@ function scanBranchRouting(
           `decision declares a matching \`conditions[].label\`.`,
         hint:
           `Mark the fallback \`isDefault: true\` so it is taken only when no sibling condition matched ` +
-          `(BPMN default flow), or give it its own \`condition\`. (#4414)`,
+          `(BPMN default flow), or give it its own \`condition\`.`,
         rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
       });
     }
@@ -1107,11 +1197,13 @@ function scanUnboundedBulkWrites(
       hint:
         `Write the constraint you mean into \`filter\` (e.g. \`{ status: 'closed' }\` — see ` +
         `examples/app-showcase \`showcase_inquiry_purge\`, bulk intent bounded by a predicate). If emptying ` +
-        `'${objectName}' really is the intent, keep it: this is a warning, not a gate, and the run-time path ` +
-        `stays open. Distinct from the #3810 erased-condition guard, which REFUSES this node at run time when ` +
+        `'${objectName}' really is the intent, keep it: \`multi: true\` is how a flow declares bulk intent, and ` +
+        `the engine admits a whole-object write declared that way, so this is a warning, not a gate, and the ` +
+        `run-time path stays open. Distinct from the run-time erased-condition guard, which REFUSES this node ` +
+        `at run time when ` +
         `a condition you WROTE interpolated to nothing — that guard is keyed on "a written condition is gone" ` +
         `and deliberately not on "the filter is empty", which is the fact this rule judges at authoring ` +
-        `time. (#5482, #5393)`,
+        `time.`,
       // Warning, not `error`: see the severity policy at the top of this file.
       // The shape has a legitimate reading the engine grants on purpose, so it is
       // not provably wrong — unlike the gating members of this family.
@@ -1175,7 +1267,8 @@ function scanApprovalReviseLoops(
           `Set node '${target}' to \`type: '${APPROVAL_REVISE_NODE_TYPE}'\` (drop any \`waitEventConfig\` \u2014 the ` +
           `window is ended by POST /api/v1/approvals/requests/:id/resubmit, not by a signal). ADR-0044 D3 ` +
           `originally said 'wait' here; its 2026-07-28 amendment reversed that, because a 'wait' is ` +
-          `resumable by anyone with the run id (#3823, #3801).`,
+          `resumable by anyone with the run id, while the run-resume route continues a pause on a ` +
+          `service-owned node type only through the service that owns it.`,
         rule: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
       });
     }
@@ -1242,7 +1335,7 @@ function scanApprovalReviseLoops(
 
 /**
  * The minimal `catch` region, measured end to end on the real `AutomationEngine`
- * (#13681) and quoted verbatim by both containment rules and by
+ * (commit 8ed9c54b4) and quoted verbatim by both containment rules and by
  * `content/docs/automation/flows.mdx`.
  *
  * `catch` cannot be empty: `FlowRegionSchema.nodes` is `.min(1)`
@@ -1337,7 +1430,7 @@ function scanUncontainedLoopBodies(
               `that is a legitimate reading and this stays a warning. ` +
               // The tracker ids stay OUT of the runtime string (`check:doc-authoring`):
               // an author reading this hint cannot resolve `#NNNN`. The measurement
-              // and the ruling behind this rule are #13681 / #14394; the docblock on
+              // and the ruling behind this rule are commit 8ed9c54b4 / #14394; the docblock on
               // {@link FLOW_LOOP_BODY_UNCONTAINED} carries them for the reader who can.
               `See content/docs/automation/flows.mdx §"Per-iteration containment".`,
             // Warning, not `error`: see the severity policy at the top of this
@@ -1377,7 +1470,7 @@ function scanUncontainedLoopBodies(
 /**
  * #14394 rule B — a `try_catch` with no `catch` region, anywhere in the flow.
  *
- * Measured (#13681): the container fails through, and the run is byte-identical
+ * Measured (commit 8ed9c54b4): the container fails through, and the run is byte-identical
  * to the one with no `try_catch` at all. `retry`, when present, only delays it.
  *
  * A `catch` that is PRESENT but malformed is deliberately not this rule's
@@ -1464,7 +1557,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             `record happens to be written on that exact day, so unattended "N days before" rules never run.`,
           hint:
             `Use a SCHEDULE trigger (daily cron) + a range query instead — e.g. a scheduled flow whose ` +
-            `get_record filters \`end_date\` BETWEEN {TODAY()} and {TODAY()+N}. (#1874)`,
+            `get_record filters \`end_date\` BETWEEN {TODAY()} and {TODAY()+N}. Or declare the sweep ` +
+            `instead: a \`schedule\` flow whose start node carries a \`config.timeRelative\` descriptor (the ` +
+            `object, the date field, and \`withinDays\` or \`offsetDays\`) is swept daily and runs once per ` +
+            `record whose date falls in the window.`,
           rule: FLOW_TIME_RELATIVE_ANTIPATTERN,
         });
       }
@@ -1517,8 +1613,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             `will be REFUSED at run time.`,
           hint:
             `Declare \`runAs:'system'\` to make the elevation explicit and intended (the run reads/writes ` +
-            `every record). A ${userLessKind} flow cannot scope to a user — there is none. ` +
-            `(ADR-0049, ADR-0073 D5, #1888, #3760)`,
+            `every record). A ${userLessKind} flow cannot scope to a user — there is none, and \`runAs\` is ` +
+            `enforced: \`'user'\` scopes each data operation to the triggering user's grants, and with no ` +
+            `trigger user the runtime refuses the operation rather than run it unscoped. ` +
+            `(ADR-0049, ADR-0073 D5)`,
           rule: FLOW_RUNAS_UNSCOPED,
           severity: 'error',
         });
@@ -1583,7 +1681,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
                 `silently ignored and this node computes nothing at runtime.`,
               hint:
                 `Aggregation belongs in the data layer: use \`Field.summary\` for a cross-object rollup ` +
-                `(sum/count of children), or \`Field.formula\` for a per-record computed value. (#1870)`,
+                `(sum/count of children), or \`Field.formula\` for a per-record computed value.`,
               rule: FLOW_PHANTOM_AGGREGATION,
             });
           }
@@ -1615,7 +1713,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             findings.push({
               where: nodeWhere,
               message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — flow node values use SINGLE braces.`,
-              hint: `Use \`{var}\` (e.g. \`{record.title}\`). Double-brace \`{{ }}\` is the formula/template-field dialect, not flow node values. (#1315)`,
+              hint:
+                `Use \`{var}\` (e.g. \`{record.title}\`): a flow node value is a string template in which only ` +
+                `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
+                `the formula/template-field dialect, not flow node values.`,
               rule: FLOW_DOUBLE_BRACE_INTERP,
             });
           }
@@ -1623,7 +1724,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             findings.push({
               where: nodeWhere,
               message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` is NOT interpolated.`,
-              hint: `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user). (#1315)`,
+              hint:
+                `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user) — a flow ` +
+                `node value is a string template in which only single-brace \`{…}\` tokens resolve and all ` +
+                `other text is literal.`,
               rule: FLOW_BARE_DOLLAR_REF,
             });
           }
@@ -1649,7 +1753,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     purge, and this rule's main habitat — in range (#5383/#5635).
       scanUnboundedBulkWrites(at, graphNodes, findings);
 
-      // (g) #13681/#14394 — a `loop` body running a fallible node with no
+      // (g) commit 8ed9c54b4 / #14394 — a `loop` body running a fallible node with no
       //     `try_catch` between the loop and it. Per graph like the rest, and
       //     that is what keeps the count right: every `loop` node belongs to
       //     exactly one graph, so its body is descended exactly once, and a
@@ -1657,7 +1761,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     parent (see {@link scanUncontainedLoopBodies}).
       scanUncontainedLoopBodies(at, graphNodes, findings);
 
-      // (h) #13681/#14394 — the near-miss: a `try_catch` with no `catch`. Scanned
+      // (h) commit 8ed9c54b4 / #14394 — the near-miss: a `try_catch` with no `catch`. Scanned
       //     everywhere, not only inside a loop: the container fails through
       //     wherever it is written. Inside a loop body it is the shape (g)
       //     deliberately treats as contained, so exactly one of the two rules

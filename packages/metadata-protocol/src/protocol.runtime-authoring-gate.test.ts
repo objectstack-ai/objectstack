@@ -30,7 +30,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineUpdateDispatch,
+    assertEngineFindOnePredicate,
+    // [#21476] The reason the admin read of a view states — the advisory must carry the same bytes.
+    anonymousFormIntakeUnavailableMessage,
+} from '@objectstack/metadata-core';
 // [#4716] The advisory-tier rule the Q2 fence test proves its body WOULD trip
 // — imported from the full barrel deliberately: this is a TEST, not the gate
 // (the gate itself may only reach the registry through `@objectstack/lint/runtime`,
@@ -38,6 +44,8 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { validateSemanticRoles } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
+import { SDUI_MANIFEST_SERVICE } from './index.js';
+import { PUBLIC_FORM_INTAKE_UNAVAILABLE, stampHtmlPageRequires } from './runtime-authoring-gate.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
@@ -558,7 +566,7 @@ describe('#6710 — gate activation is keyed on the declared authoring channel',
     // [#8310] That build-time reason is the carve-out's ONLY footing. It does
     // not also rest on the runtime door lacking the rule, and must not be
     // re-founded on one: `validateSecurityPosture` declares both authoring
-    // surfaces (PR #8390) and PR #8600 put `object` in its `runtimeTypes`, so
+    // surfaces (PR #8390) and commit 018d22cc3 put `object` in its `runtimeTypes`, so
     // it answers at the runtime publish door as well as on every CLI command.
     // What skips a `package-author` write is the CHANNEL —
     // `assertRuntimeAuthoringRules` returns early on it at every call site,
@@ -780,9 +788,9 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
 // THE MEASUREMENT THIS BLOCK EXISTS TO TAKE. The entry's `surfaceReason` held
 // the crossing back on an open question: does the gate's `body` reach the rule
 // BEFORE the per-type `safeParse`, whose residue stage strips the only evidence
-// the rule reads? It does — and not by luck. `saveMetaItem` keeps the AUTHORED
-// body verbatim on purpose (`parsed.data` would strip the Studio-only auxiliary
-// fields an overlay rides with) and grafts back exactly two normalizations,
+// the rule reads? It does — and not by luck. For every type but `view` (a
+// permission set among them; a `view` stores its parsed body since #20051),
+// `saveMetaItem` keeps the AUTHORED body verbatim and grafts back exactly two normalizations,
 // each a walk over the authored keys that adds nothing and drops nothing else.
 // So the residue is still there at the gate call, and the persisted row proves
 // it from the other side. Post-parse the rule would indeed be structurally
@@ -1068,5 +1076,515 @@ describe('runtime authoring gate on PERMISSION writes — the engine judge (#201
         });
         expect(result.success).toBe(true);
         expect(calls).toEqual([]);
+    });
+});
+
+/**
+ * [#20312] ADR-0080 §5 at the save door — an html page's `source` is compiled
+ * against the deployment's SDUI component manifest, read per publish from the
+ * `SDUI_MANIFEST_SERVICE` key the host (`os serve`) registers.
+ *
+ * The manifest here is a minimal stand-in with the real one's shape: `flex` and
+ * `box` in the `ui` namespace (as in the pinned console's manifest) and one
+ * plugin component in `plugin-kanban`.
+ */
+describe('html page source compiled at the save door against the SDUI manifest (#20312)', () => {
+    const slot = { name: 'children', type: 'slot' };
+    const manifest = () => ({
+        components: {
+            flex: { type: 'flex', namespace: 'ui', isContainer: true, inputs: [slot] },
+            box: { type: 'box', namespace: 'ui', isContainer: true, inputs: [slot] },
+            kanban: { type: 'kanban', namespace: 'plugin-kanban', inputs: [] },
+        },
+    });
+    const htmlPage = (source: string, extra: Record<string, unknown> = {}) => ({
+        name: 'landing', label: 'Landing', kind: 'html', source, ...extra,
+    });
+    const KNOWN = '<flex><box>hello</box></flex>';
+    const UNKNOWN = '<flex><plugin-nonexistent /></flex>';
+
+    /** A protocol whose services table the test holds, so the key can be set and changed per publish. */
+    function hostWith(services: Map<string, unknown>) {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_test') as any;
+        return { protocol, rows };
+    }
+    const pageRows = (rows: Map<string, Row>) => Array.from(rows.values()).filter((r) => r.type === 'page');
+    const storedPage = (rows: Map<string, Row>, state = 'active') => {
+        const row = pageRows(rows).find((r) => r.state === state);
+        return row ? JSON.parse(row.metadata) : undefined;
+    };
+    const savePage = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'page', name: 'landing', item, ...extra });
+    const refusal = (e: any) => ({ code: e?.code, status: e?.status });
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('the exported key is the one the save door reads', () => {
+        expect(SDUI_MANIFEST_SERVICE).toBe('sdui-manifest');
+    });
+
+    it('refuses an unknown component with a 422 whose issues name it, and persists nothing', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        const err = await savePage(protocol, htmlPage(UNKNOWN)).catch((e: any) => e);
+        expect(refusal(err)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const named = err.issues.filter((i: any) => i.rule.startsWith('jsx-'));
+        expect(named.length, JSON.stringify(err.issues)).toBeGreaterThan(0);
+        for (const issue of named) {
+            expect(issue.where).toBe('page "landing" › <plugin-nonexistent>');
+            expect(issue.message).toContain('<plugin-nonexistent>');
+            expect(issue.path).toBe('pages.landing.source');
+        }
+        expect(err.rulesRun).toContain('html-page-source-compile');
+        expect(pageRows(rows)).toEqual([]);
+    });
+
+    it('saves a page built from known components and stamps `requires` from the compile', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        const result = await savePage(protocol, htmlPage(`<flex><box>a</box><kanban /></flex>`));
+        expect(result.success).toBe(true);
+        expect(storedPage(rows)?.requires).toEqual(['ui', 'plugin-kanban']);
+    });
+
+    it('keeps a hand-written `requires` that agrees with the source, in the compiled order', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        const result = await savePage(protocol, htmlPage(`<flex><kanban /></flex>`, { requires: ['plugin-kanban', 'ui'] }));
+        expect(result.success).toBe(true);
+        expect(storedPage(rows)?.requires).toEqual(['ui', 'plugin-kanban']);
+    });
+
+    it('refuses a hand-written `requires` that disagrees with the source, naming each namespace', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+
+        const unused = await savePage(protocol, htmlPage(KNOWN, { requires: ['ui', 'plugin-kanban'] })).catch((e: any) => e);
+        expect(refusal(unused)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const unusedIssue = unused.issues.find((i: any) => i.rule === 'page-requires-disagrees-with-source');
+        expect(unusedIssue?.path).toBe('pages.landing.requires');
+        expect(unusedIssue?.message).toContain(`'plugin-kanban' is not used by the source`);
+
+        const unprovided = await savePage(protocol, htmlPage(KNOWN, { requires: ['ui', 'plugin-absent'] })).catch((e: any) => e);
+        expect(refusal(unprovided)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(unprovided.issues.map((i: any) => i.message).join('\n'))
+            .toContain(`'plugin-absent' is a namespace no component in this deployment's manifest carries`);
+
+        const missing = await savePage(protocol, htmlPage(`<flex><kanban /></flex>`, { requires: ['ui'] })).catch((e: any) => e);
+        expect(refusal(missing)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(missing.issues.map((i: any) => i.message).join('\n'))
+            .toContain(`'plugin-kanban' is used by the source but not listed`);
+
+        expect(pageRows(rows)).toEqual([]);
+    });
+
+    it('a host with no manifest saves exactly as before: nothing compiled, nothing stamped', async () => {
+        const { protocol, rows } = hostWith(new Map());
+        const result = await savePage(protocol, htmlPage(UNKNOWN, { requires: ['plugin-absent'] }));
+        expect(result.success).toBe(true);
+        const stored = storedPage(rows);
+        expect(stored?.source).toBe(UNKNOWN);
+        expect(stored?.requires).toEqual(['plugin-absent']);
+    });
+
+    it('reads the key per publish: registering, fixing or removing it takes effect on the next save', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol } = hostWith(services);
+
+        await expect(savePage(protocol, htmlPage(UNKNOWN))).resolves.toMatchObject({ success: true });
+
+        services.set('sdui-manifest', manifest());
+        const refused = await savePage(protocol, htmlPage(UNKNOWN)).catch((e: any) => e);
+        expect(refusal(refused)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+
+        const widened = manifest() as any;
+        widened.components['plugin-nonexistent'] = { type: 'plugin-nonexistent', namespace: 'plugin-extra', inputs: [] };
+        services.set('sdui-manifest', widened);
+        await expect(savePage(protocol, htmlPage(UNKNOWN))).resolves.toMatchObject({ success: true });
+
+        services.delete('sdui-manifest');
+        await expect(savePage(protocol, htmlPage('<nothing-known />'))).resolves.toMatchObject({ success: true });
+    });
+
+    it('a draft is not gated but its publish is — the draft door is not a bypass', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        await expect(savePage(protocol, htmlPage(KNOWN, { requires: ['plugin-absent'] }), { mode: 'draft' }))
+            .resolves.toMatchObject({ success: true });
+        // Left as written for the publish to refuse, not silently re-stamped.
+        expect(storedPage(rows, 'draft')?.requires).toEqual(['plugin-absent']);
+
+        const err = await protocol.publishMetaItem({ type: 'page', name: 'landing' }).catch((e: any) => e);
+        expect(refusal(err)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => i.rule)).toContain('page-requires-disagrees-with-source');
+    });
+
+    it('a draft that compiles is stamped at its save, and publishes clean', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        await savePage(protocol, htmlPage(KNOWN), { mode: 'draft' });
+        expect(storedPage(rows, 'draft')?.requires).toEqual(['ui']);
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+    });
+
+    // [#21459] `requires` exists only on the kinds this door compiles. On any
+    // other kind the spec parse refuses it before the compile runs, so the
+    // refusal is the spec's own issue at `requires` — not a compile finding.
+    it.each(['react', 'full', 'slotted', undefined])(
+        'refuses `requires` on a `%s` page with a 422 at `requires`, and persists nothing (#21459)',
+        async (kind) => {
+            const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+            const page = {
+                name: 'landing', label: 'Landing', requires: ['ui'],
+                ...(kind === undefined ? {} : { kind }),
+                ...(kind === 'react' ? { source: KNOWN } : {}),
+            };
+            const err = await savePage(protocol, page).catch((e: any) => e);
+            expect(refusal(err)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = err.issues.filter((i: any) => i.path === 'requires');
+            expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+            expect(issues[0].code).toBe('custom');
+            expect(issues[0].message).toContain(`\`kind: '${kind ?? 'full'}'\``);
+            expect(err.issues.some((i: any) => String(i.rule ?? '').startsWith('jsx-'))).toBe(false);
+            expect(pageRows(rows)).toEqual([]);
+        },
+    );
+
+    it('CONTROL: the same `requires` on an html page still saves, and the compile stamps it (#21459)', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        await expect(savePage(protocol, htmlPage(KNOWN, { requires: ['ui'] }))).resolves.toMatchObject({ success: true });
+        expect(storedPage(rows)?.requires).toEqual(['ui']);
+    });
+
+    it('a registered value that is not a manifest is warned about once and compiled against never', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', { oops: true }]]));
+        await expect(savePage(protocol, htmlPage(UNKNOWN))).resolves.toMatchObject({ success: true });
+        await expect(savePage(protocol, htmlPage(UNKNOWN))).resolves.toMatchObject({ success: true });
+        expect(storedPage(rows)?.requires).toBeUndefined();
+        const lines = (warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes(`'sdui-manifest' service`));
+        expect(lines).toHaveLength(1);
+    });
+});
+
+/**
+ * [#20312] ADR-0080 §5 — `requires` is "validated at save and load", and it is
+ * derived from the source, never carried. The save door's half is pinned in
+ * the block above; this block pins the other two moments a stored page's
+ * `requires` meets the deployment's manifest:
+ *
+ *  - **At load** (`loadMetaFromDb`, the boot hydration of stored rows): a page
+ *    whose `requires` names a namespace no component in the manifest carries —
+ *    a plugin this deployment's console does not load — is reported with the
+ *    page and the namespace named, and the page still loads. It reads the same
+ *    `SDUI_MANIFEST_SERVICE` key the save door reads; with no manifest
+ *    registered nothing is judged, exactly as at the save door.
+ *  - **At draft → active promotion** (`publishMetaItem` and
+ *    `publishPackageDrafts`, both through `promoteDraftForPublish`): the
+ *    promoted body carries the `requires` the save door computes for it
+ *    (`stampHtmlPageRequires`), not the draft's.
+ */
+describe('stored html page `requires` at load and at draft promotion (#20312)', () => {
+    const slot = { name: 'children', type: 'slot' };
+    const manifest = (withKanban = true) => ({
+        components: {
+            flex: { type: 'flex', namespace: 'ui', isContainer: true, inputs: [slot] },
+            box: { type: 'box', namespace: 'ui', isContainer: true, inputs: [slot] },
+            ...(withKanban ? { kanban: { type: 'kanban', namespace: 'plugin-kanban', inputs: [] } } : {}),
+        },
+    });
+    const htmlPage = (source: string, extra: Record<string, unknown> = {}) => ({
+        name: 'landing', label: 'Landing', kind: 'html', source, ...extra,
+    });
+    const WITH_KANBAN = '<flex><box>a</box><kanban /></flex>';
+
+    /** A protocol whose services table the test holds, plus the registry writes boot hydration makes. */
+    function hostWith(services: Map<string, unknown>) {
+        const { engine, rows } = makeStubEngine();
+        const registered: Array<{ type: string; name: unknown }> = [];
+        engine.registry.registerItem = (type: string, item: { name?: unknown }) => {
+            registered.push({ type, name: item?.name });
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_test') as any;
+        return { protocol, rows, registered };
+    }
+    const storedPage = (rows: Map<string, Row>, state = 'active') => {
+        const row = Array.from(rows.values()).find((r) => r.type === 'page' && r.state === state);
+        return row ? JSON.parse(row.metadata) : undefined;
+    };
+    const savePage = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'page', name: 'landing', item, ...extra });
+    const loadReports = (warn: ReturnType<typeof vi.spyOn>) =>
+        (warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes('[page_requires_plugin_absent]'));
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    // ── At load ──────────────────────────────────────────────────────────
+
+    it('at load, a stored page naming a plugin the manifest does not carry is reported — page and plugin named — and still loads', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows, registered } = hostWith(services);
+        // Stored on a host with no manifest, so stored as written…
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['ui', 'plugin-kanban'] }));
+        expect(storedPage(rows)?.requires).toEqual(['ui', 'plugin-kanban']);
+        // …and the deployment's console now carries no `plugin-kanban` component.
+        services.set('sdui-manifest', manifest(false));
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0, storeUnavailable: false });
+        expect(registered).toContainEqual({ type: 'page', name: 'landing' });
+        const lines = loadReports(warn);
+        expect(lines, JSON.stringify(warn.mock.calls)).toHaveLength(1);
+        expect(lines[0]).toContain('page/landing');
+        expect(lines[0]).toContain(`'plugin-kanban'`);
+        expect(lines[0]).not.toContain(`'ui'`);
+    });
+
+    it('at load, a stored page whose every plugin is present is not reported (the control)', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, registered } = hostWith(services);
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['ui', 'plugin-kanban'] }));
+        services.set('sdui-manifest', manifest(true));
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'landing' });
+        expect(loadReports(warn)).toEqual([]);
+    });
+
+    it('at load, a host with no manifest judges nothing — the save door\'s posture', async () => {
+        const { protocol, registered } = hostWith(new Map());
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['ui', 'plugin-absent'] }));
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'landing' });
+        expect(loadReports(warn)).toEqual([]);
+    });
+
+    // [#21459] A row stored before `requires` was narrowed to the compiled
+    // kinds: a react page carrying the key, which the save door now refuses, so
+    // it is seeded straight into the store. The stored-row seam replays the D2
+    // conversion `page-requires-non-compiled-kind-removed` before anything reads
+    // the body — so the row loads with the key gone and a notice saying so, the
+    // spec check finds nothing to report, and the load report never sees a list.
+    it('at load, a stored react page carrying `requires` is read without it — converted, not reported or badged (#21459)', async () => {
+        const services = new Map<string, unknown>([['sdui-manifest', manifest(false)]]);
+        const { protocol, rows, registered } = hostWith(services);
+        const body = { name: 'workbench', label: 'Workbench', kind: 'react', source: '<Workbench />', requires: ['plugin-kanban'] };
+        rows.set(keyOf({ type: 'page', name: 'workbench', organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'page', name: 'workbench', organization_id: null, state: 'active', metadata: JSON.stringify(body),
+        });
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'workbench' });
+        const lines = (warn.mock.calls as unknown[][]).map((c) => String(c[0]));
+        const converted = lines.filter((m) => m.includes('stored page/workbench carries a pre-protocol shape'));
+        expect(converted, JSON.stringify(lines)).toHaveLength(1);
+        expect(converted[0]).toContain("ADR-0087 conversion 'page-requires-non-compiled-kind-removed'");
+        expect(converted[0]).toContain('page.requires at pages[0].requires');
+        // The manifest carries no `plugin-kanban`, so an unconverted list WOULD
+        // have been reported — its absence is the conversion's doing.
+        expect(loadReports(warn)).toEqual([]);
+        expect(lines.filter((m) => m.includes('[metadata_spec_invalid]'))).toEqual([]);
+    });
+
+    // ── At draft → active promotion ──────────────────────────────────────
+
+    it('a draft saved before the manifest arrived is promoted with the `requires` the save door computes', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows } = hostWith(services);
+        const body = htmlPage(WITH_KANBAN);
+        await savePage(protocol, body, { mode: 'draft' });
+        expect(storedPage(rows, 'draft')?.requires).toBeUndefined();
+        services.set('sdui-manifest', manifest());
+
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+
+        const saveDoor = stampHtmlPageRequires('page', body, manifest()) as { requires?: unknown };
+        expect(saveDoor.requires).toEqual(['ui', 'plugin-kanban']);
+        expect(storedPage(rows)?.requires).toEqual(saveDoor.requires);
+    });
+
+    it('an agreeing draft `requires` is promoted as the save door spells it, not as the draft carried it', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows } = hostWith(services);
+        const body = htmlPage(WITH_KANBAN, { requires: ['plugin-kanban', 'ui', 'ui'] });
+        await savePage(protocol, body, { mode: 'draft' });
+        services.set('sdui-manifest', manifest());
+
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+
+        expect(storedPage(rows)?.requires)
+            .toEqual((stampHtmlPageRequires('page', body, manifest()) as { requires?: unknown }).requires);
+        expect(storedPage(rows)?.requires).toEqual(['ui', 'plugin-kanban']);
+    });
+
+    it('the package batch promotion re-stamps too', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows } = hostWith(services);
+        const body = htmlPage(WITH_KANBAN);
+        await savePage(protocol, body, { mode: 'draft', packageId: 'com.example.pages' });
+        services.set('sdui-manifest', manifest());
+
+        const result = await protocol.publishPackageDrafts({ packageId: 'com.example.pages' });
+
+        expect(result, JSON.stringify(result.failed)).toMatchObject({ success: true, publishedCount: 1 });
+        expect(storedPage(rows)?.requires)
+            .toEqual((stampHtmlPageRequires('page', body, manifest()) as { requires?: unknown }).requires);
+    });
+
+    it('a promotion on a host with no manifest stores the draft as written — the save door\'s posture', async () => {
+        const { protocol, rows } = hostWith(new Map());
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['plugin-absent'] }), { mode: 'draft' });
+
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+
+        expect(storedPage(rows)?.requires).toEqual(['plugin-absent']);
+    });
+});
+
+/**
+ * [#21476] The public-form intake advisory, end to end through the two write
+ * doors: `saveMetaItem` (REST `PUT /meta/view/:name`) and the draft → active
+ * promotion `publishMetaItem` (REST `POST /meta/view/:name/publish`).
+ *
+ * The posture is read off a `tenancy` service in the protocol's own services
+ * table — the service, and the reader (`anonymousFormIntakePosture`), the
+ * anonymous form doors read. The rows pin both halves: on a walled posture in
+ * force the write SUCCEEDS with exactly one warning, located at the form's
+ * `sharing` and carrying the admin read's reason byte for byte; every control
+ * the doors serve the form on raises nothing, the degraded deployment included
+ * — whose REQUESTED posture (`OS_TENANCY_POSTURE`) walls while its in-force
+ * posture does not.
+ */
+describe('public-form intake advisory on save and publish (#21476)', () => {
+    const SLUG = 'contact-us';
+    const NAME = 'showcase_inquiry';
+    /** The showcase's contact form: a container whose public form is `formViews.contact`. */
+    const contactContainer = () => ({
+        list: { type: 'grid', data: { provider: 'object', object: NAME }, columns: [{ field: 'name' }] },
+        formViews: {
+            contact: {
+                type: 'simple',
+                data: { provider: 'object', object: NAME },
+                sections: [{ name: 'about', fields: [{ field: 'name' }, { field: 'email' }] }],
+                sharing: { enabled: true, allowAnonymous: true, publicLink: `/forms/${SLUG}` },
+            },
+        },
+    });
+    /** The bound object as the live registry holds it — `organization_id` injected at registration. */
+    const inquiry = (tenancyDisabled: boolean) => ({
+        name: NAME,
+        label: 'Inquiry',
+        ...(tenancyDisabled ? { tenancy: { enabled: false } } : {}),
+        fields: {
+            organization_id: { type: 'lookup', reference: 'sys_organization' },
+            name: { type: 'text', label: 'Name' },
+            email: { type: 'email', label: 'Email' },
+        },
+    });
+
+    type Tenancy = 'isolated' | 'group' | 'degraded' | 'single' | 'no-service';
+    /** A `tenancy` service as plugin-auth registers it: `posture` is the posture IN FORCE. */
+    const tenancyService = (t: Exclude<Tenancy, 'no-service'>) => ({
+        posture: t === 'degraded' ? 'single' : t,
+        requestedPosture: t === 'degraded' ? 'isolated' : t,
+        defaultOrgId: async () => (t === 'single' ? 'org_alpha' : null),
+    });
+
+    function hostOn(tenancy: Tenancy, tenancyDisabled = false) {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [inquiry(tenancyDisabled)] : []);
+        const services = new Map<string, unknown>(
+            tenancy === 'no-service' ? [] : [['tenancy', tenancyService(tenancy)]],
+        );
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_test') as any;
+        return { protocol, rows };
+    }
+
+    const put = (protocol: any, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'view', name: NAME, item: contactContainer(), ...extra });
+    const publish = async (protocol: any) => {
+        await expect(put(protocol, { mode: 'draft' })).resolves.toMatchObject({ success: true });
+        return protocol.publishMetaItem({ type: 'view', name: NAME });
+    };
+    const intake = (response: { advisories?: Array<{ rule: string }> }) =>
+        (response.advisories ?? []).filter((a) => a.rule === PUBLIC_FORM_INTAKE_UNAVAILABLE);
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    const savedPosture = process.env.OS_TENANCY_POSTURE;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+        else process.env.OS_TENANCY_POSTURE = savedPosture;
+    });
+
+    for (const posture of ['isolated', 'group'] as const) {
+        for (const [door, write] of [['PUT', put], ['publish', publish]] as const) {
+            it(`'${posture}' in force, walled object — ${door} succeeds with exactly one warning, the admin read's reason at the form's sharing`, async () => {
+                const { protocol, rows } = hostOn(posture);
+                const response = await write(protocol);
+                expect(response.success).toBe(true);
+                expect(response.advisories).toEqual([{
+                    severity: 'warning',
+                    rule: PUBLIC_FORM_INTAKE_UNAVAILABLE,
+                    where: `view "${NAME}" · public form "/forms/${SLUG}"`,
+                    path: 'views[0].formViews.contact.sharing',
+                    message: anonymousFormIntakeUnavailableMessage(SLUG, {
+                        object: NAME, posture, tenantField: 'organization_id',
+                    }),
+                    hint: expect.stringContaining('tenancy: { enabled: false }'),
+                }]);
+                // Never a refusal: the row landed active.
+                expect([...rows.values()].filter((r) => r.type === 'view' && r.state === 'active')).toHaveLength(1);
+            });
+        }
+    }
+
+    it.each<[string, Tenancy, boolean]>([
+        ['walled posture, object declared tenancy: { enabled: false }', 'isolated', true],
+        ["the 'single' posture", 'single', false],
+        ['no tenancy service registered', 'no-service', false],
+    ])('CONTROL — %s: PUT and publish raise no intake advisory', async (_label, tenancy, tenancyDisabled) => {
+        const { protocol } = hostOn(tenancy, tenancyDisabled);
+        const saved = await put(protocol);
+        expect(saved.success).toBe(true);
+        expect(intake(saved)).toEqual([]);
+        const published = await publish(protocol);
+        expect(published.success).toBe(true);
+        expect(intake(published)).toEqual([]);
+    });
+
+    it('CONTROL — a degraded walled deployment: the REQUESTED posture walls, the posture in force does not; the doors serve, so nothing is raised', async () => {
+        process.env.OS_TENANCY_POSTURE = 'isolated';
+        const { protocol } = hostOn('degraded');
+        const saved = await put(protocol);
+        expect(saved.success).toBe(true);
+        expect(intake(saved)).toEqual([]);
+        const published = await publish(protocol);
+        expect(published.success).toBe(true);
+        expect(intake(published)).toEqual([]);
     });
 });

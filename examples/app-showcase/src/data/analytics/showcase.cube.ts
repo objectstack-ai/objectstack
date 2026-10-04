@@ -21,52 +21,44 @@ export const DeliveryCube = defineCube({
   sql: 'showcase_task',
   measures: {
     count: {
-      name: 'count',
       label: 'Task Count',
       type: 'count',
       sql: '*',
     },
     total_estimate_hours: {
-      name: 'total_estimate_hours',
       label: 'Total Estimated Hours',
       type: 'sum',
       sql: 'estimate_hours',
     },
     avg_estimate_hours: {
-      name: 'avg_estimate_hours',
       label: 'Average Estimate (h)',
       type: 'avg',
       sql: 'estimate_hours',
     },
-    done_rate: {
-      name: 'done_rate',
-      label: 'Done Rate (%)',
-      type: 'number',
-      sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)",
-      format: 'percent',
-    },
+    // No `done_rate` here: a member's `sql` names a column, never a SQL
+    // expression (ADR-0021 "zero raw expressions", carried to the cube layer by
+    // #20943). The done rate this cube used to compute with a CASE expression
+    // is declared where the platform can judge every field it reads — the
+    // `showcase_task_metrics` dataset (src/ui/datasets/chart-gallery.dataset.ts),
+    // as a filtered count over a count.
   },
   dimensions: {
     status: {
-      name: 'status',
       label: 'Status',
       type: 'string',
       sql: 'status',
     },
     priority: {
-      name: 'priority',
       label: 'Priority',
       type: 'string',
       sql: 'priority',
     },
     due_date: {
-      name: 'due_date',
       label: 'Due Date',
       type: 'time',
       sql: 'due_date',
     },
     assignee: {
-      name: 'assignee',
       label: 'Assignee',
       type: 'string',
       sql: 'assignee',
@@ -92,10 +84,16 @@ export const DeliveryCube = defineCube({
       name: 'showcase_project',
     },
   },
-  refreshKey: {
-    every: '1 hour',
-  },
-  public: false,
+  // No refresh cadence: no analytics result is cached, so every query against
+  // this cube is computed when it is asked. The `every: '1 hour'` this file
+  // declared was read by nothing, and the key is retired.
+  //
+  // No `public` key: the cube is VISIBLE, the default. It is this app's
+  // demonstration of the `/api/v1/analytics/*` surface (src/coverage.ts marks
+  // `analyticsCubes` demonstrated, and the platform checklist's dashboards item
+  // discovers and queries it there). `public: false` would hide it from
+  // `/analytics/meta` and refuse every query against it — this file authored
+  // exactly that, inertly, until the analytics service began reading the key.
 });
 
 export const allCubes = [DeliveryCube];

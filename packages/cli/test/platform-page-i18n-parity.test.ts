@@ -140,12 +140,12 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
   });
 });
 
-// ─── Extractor ↔ resolver WALK parity (#13109) ─────────────────────────────
+// ─── Extractor ↔ resolver WALK parity (commit 8b236c826) ───────────────────
 //
 // The guard above compares extractor output against the SHIPPED bundle, so it
 // only ever sees keys the extractor already emits — it is structurally blind
 // to "a key that should have been offered and wasn't", which is exactly the
-// defect #13109 records. This block is the differential the shared
+// defect commit 8b236c826 fixed. This block is the differential the shared
 // `PAGE_COMPONENT_COPY_KEYS` list cannot give: the KEY LIST has one definition
 // and both sides import it, but the WALK — which COMPONENTS carry those keys —
 // was written twice, once in `translatePage` (`packages/spec`) and once in
@@ -160,7 +160,7 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
 // whichever side it was copied from and pass through the drift it exists to
 // catch.
 //
-// Since #13218 (ruled 2026-08-30) the walk itself is ONE exported symbol —
+// Since commit c45d8e6b4 (the 2026-08-30 ruling) the walk itself is ONE exported symbol —
 // `walkAddressedPageComponents` in `@objectstack/spec/system` — and both sides
 // consume it, so the five invariants this block measures (roots, descent key,
 // depth cap, cycle guard, collision arbitration) have a single source. This
@@ -288,10 +288,13 @@ const walkParityPage = (): Record<string, any> => ({
               'bare-component-id-string',
               null,
             ],
-            // NOT descended by `translatePage`: `body`/`footer` are a
-            // renderer-side back-compat fallback, not an authorable
-            // composition spelling.
+            // NOT descended by `translatePage`: `body` is the retired
+            // spelling (#5775) — a renderer-side back-compat fallback, not an
+            // authorable composition spelling.
             body: [{ id: 'card_body_child', type: 'object-metric', properties: { title: 'Body child' } }],
+            // DESCENDED since #20940 — `footer` is a declared, rendered slot,
+            // one of the positions spec's `pageComponentSlotPositions()`
+            // derives from the component rows.
             footer: [{ id: 'card_footer_child', type: 'object-metric', properties: { title: 'Footer child' } }],
             // DESCENDED since #16772 — a `page:tabs` / `page:accordion`
             // panel's `items[].children`, one level below the container.
@@ -375,19 +378,21 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
   it('pins the two sets by name, so a shape that stops being reachable is visible', () => {
     const page = walkParityPage();
     expect([...idsExtractorOffers(page)].sort()).toEqual([
-      'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
-      'slot_child', 'slot_list_child', 'tab_child',
+      'card', 'card_footer_child', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header',
+      'region_metric', 'slot_child', 'slot_list_child', 'tab_child',
     ]);
-    // `card_body_child` and `card_footer_child` are absent from BOTH sides —
-    // the shapes `translatePage` does not descend. `tab_child`, `slot_child`
-    // and `slot_list_child` are present on BOTH sides since #16772 widened
-    // the shared walk to `items[].children` and to the `slots.<slot>` roots.
+    // `card_body_child` is absent from BOTH sides — the retired spelling
+    // `translatePage` does not descend. `card_footer_child` is present on BOTH
+    // sides since #20940 moved the shared walk onto the rows' one derived slot
+    // list, which names `footer`. `tab_child`, `slot_child` and
+    // `slot_list_child` are present on BOTH sides since #16772 widened the
+    // shared walk to `items[].children` and to the `slots.<slot>` roots.
     // `hdr` — the region-level `page:header` — is absent from BOTH sides since
     // the ruling. `nested_header` stays: a `page:header` inside a container is
     // reached by the id route only, so the id key is the only key it has.
     expect([...idsResolverApplies(page)].sort()).toEqual([
-      'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
-      'slot_child', 'slot_list_child', 'tab_child',
+      'card', 'card_footer_child', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header',
+      'region_metric', 'slot_child', 'slot_list_child', 'tab_child',
     ]);
   });
 
@@ -650,7 +655,7 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
 });
 
 
-// --- The three shipped platform RECORD pages (#14817) ----------------------
+// --- The three shipped platform RECORD pages (commit 5529a374e) ------------
 //
 // The guard at the top of this file owns the plugin-carried Setup pages whose
 // copy lives in the BUNDLE. This block owns the other three pages the platform
@@ -684,7 +689,7 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
 //
 // ## What each assertion buys
 //
-// The harm recorded on #14817 is not today's debt (there is none) -- it is that
+// The harm commit 5529a374e records is not today's debt (there is none) -- it is that
 // `check:i18n-coverage`'s `0` for `platform-objects` reads as "checked, clean"
 // over a population that never contained these pages, so "a fourth plugin page,
 // or one new untranslated section heading, lands green". The population below

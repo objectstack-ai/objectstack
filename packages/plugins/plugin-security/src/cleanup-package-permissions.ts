@@ -192,7 +192,7 @@ export async function cleanupPackagePermissions(
     );
   }
   if (out.sets + out.positionBindings + out.userGrants + out.suggestions > 0) {
-    logger?.info?.('[security] package permission rows revoked on uninstall (#2747)', {
+    logger?.info?.('[security] package permission rows revoked on uninstall — removed by package_id, so no grant outlives the package (ADR-0090 D5)', {
       packageId, ...out,
     });
   }

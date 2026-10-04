@@ -24,8 +24,8 @@ import { verifyFileReferences, type FileReferenceReport } from './verify-file-re
  *      `sys_file` ids (dry run unless `apply`),
  *   2. {@link verifyFileReferences} — reconcile the ownership ledger against
  *      what records actually hold,
- *   3. on an APPLY run, record the outcome on the deployment-level
- *      `sys_migration` flag (`adr-0104-file-references`).
+ *   3. on an APPLY run over every object, record the outcome on the
+ *      deployment-level `sys_migration` flag (`adr-0104-file-references`).
  *
  * The flag — not the platform version — is what may later open released-file
  * collection (#3459 PR-5b) and strict media value-shape enforcement (#3438)
@@ -48,15 +48,29 @@ import { verifyFileReferences, type FileReferenceReport } from './verify-file-re
  * my deployment's posture" never depends on what the run happened to find.
  * A failing APPLY run, by contrast, deliberately records `blocking` and
  * clears `verified_at`: data that has regressed closes its own gate.
+ *
+ * ## A run narrowed by `objects` records NO flag (#21644)
+ *
+ * The flag attests every object's file values, and a run handed `objects`
+ * read only those. So it converts what it finds and records nothing, passing
+ * or failing, and a flag an earlier full-scope run recorded stays as it was.
+ * Any list narrows, an empty one too: `[]` walks nothing at all. A run that
+ * should earn the flag omits `objects`.
  */
 
 /** Engine surface the migration needs — the union of its three halves'. */
 export type FilesToReferencesEngine = BackfillEngine & MigrationFlagEngine;
 
 export interface FilesToReferencesOptions {
-  /** Write conversions and record the deployment flag. Omit for a dry run. */
+  /**
+   * Write conversions, and record the deployment flag when the run is not
+   * narrowed by `objects`. Omit for a dry run.
+   */
   apply?: boolean;
-  /** Restrict to these objects (default: every object with a file field). */
+  /**
+   * Restrict to these objects (default: every object with a file field). A
+   * narrowed run records no deployment flag.
+   */
   objects?: string[];
   /** Safety bound on records read per object; exceeding it fails the gate. */
   maxRecordsPerObject?: number;
@@ -71,7 +85,10 @@ export interface FilesToReferencesResult {
   gatePassed: boolean;
   /** Why the gate did not pass (empty when it did). */
   gateFailures: string[];
-  /** The flag row as recorded (apply runs only; null on a dry run). */
+  /**
+   * The flag row as recorded: a full-scope apply run only, so null on a dry
+   * run and on a run narrowed by `objects`.
+   */
   flag: DataMigrationFlag | null;
 }
 
@@ -113,8 +130,11 @@ export async function runFilesToReferencesMigration(
   }
   const gatePassed = gateFailures.length === 0;
 
+  // ⛔ Never from a run narrowed by `objects` (see the header): the flag is a
+  // claim about every object's file values, and this run read only some.
+  const narrowed = options.objects !== undefined;
   let flag: DataMigrationFlag | null = null;
-  if (apply) {
+  if (apply && !narrowed) {
     const advisory =
       (verify.issues.length - verify.blocking) + backfill.externalUrls + backfill.unresolvable;
     flag = await recordDataMigrationRun(engine, {

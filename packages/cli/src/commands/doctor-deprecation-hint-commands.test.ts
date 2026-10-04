@@ -11,8 +11,8 @@
  *
  * There is no `codemod` command. oclif resolves this CLI's commands by
  * globbing `dist/commands/**` (`package.json` → `oclif.commands`, pattern
- * strategy); nothing under `src/commands/` compiles to `codemod`, and neither
- * bundled plugin (`@oclif/plugin-help`, `@oclif/plugin-plugins`) supplies one.
+ * strategy); nothing under `src/commands/` compiles to `codemod`, and no plugin
+ * supplies one (`package.json` declares no `oclif.plugins`).
  * An operator who followed the prescription got oclif's exit 2,
  * `command codemod:v2-to-v3 not found` — after spending their time on it.
  * `content/docs/protocol/backward-compatibility.mdx` already recorded the

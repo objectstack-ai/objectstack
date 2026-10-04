@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11427 — record file-field hydration and the download path must answer the
+ * Commit c3c72a4bc — record file-field hydration and the download path must answer the
  * SAME question about one `sys_file` row.
  *
  * ## The defect
@@ -317,7 +317,7 @@ describe('#11427 — file-field hydration and the download path agree about one 
  * The batched question and the single-file question must be the SAME question.
  *
  * `findHeldFiles` exists only because asking `findFileHolder` per row would be
- * N queries per read. The moment the two disagree, the divergence #11427 fixes
+ * N queries per read. The moment the two disagree, the divergence commit c3c72a4bc fixed
  * reopens one layer down — hydration and the download path would once again be
  * reading one row through two predicates. So the equivalence is pinned over a
  * matrix that exercises both limbs and both of their absences, rather than

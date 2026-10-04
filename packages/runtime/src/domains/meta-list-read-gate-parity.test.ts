@@ -139,16 +139,21 @@ const CALLERS: Record<'holder' | 'non-holder' | 'anonymous', Caller> = {
 type CallerName = keyof typeof CALLERS;
 
 /**
- * One protocol double, the same shape both transports read. `unknownTypes`
- * makes `getMetaItems` throw for those types — the "protocol doesn't know this
- * type" answer that sends the dispatcher on to its fallback stores — while it
- * still answers every other type, the books the doc audience reads included.
+ * One protocol double, the same shape both transports read. `unansweredTypes`
+ * makes `getMetaItems` answer NO list for those types — the one protocol
+ * answer that sends the dispatcher on to its fallback stores — while it still
+ * answers every other type, the books the doc audience reads included.
+ *
+ * [#20590] Not a throw. A protocol throw is a fault and is answered as itself
+ * (`meta-list-protocol-fault.test.ts`); it used to be read as "the protocol
+ * does not know this type", which the one real protocol never signals that
+ * way — it answers such a type with an empty list.
  */
-function protocolDouble(unknownTypes: string[] = []) {
+function protocolDouble(unansweredTypes: string[] = []) {
     return {
         getMetaTypes: vi.fn(async () => ({ types: Object.keys(STORE) })),
         getMetaItems: vi.fn(async ({ type }: any) => {
-            if (unknownTypes.includes(singular(type))) throw new Error(`unknown metadata type '${type}'`);
+            if (unansweredTypes.includes(singular(type))) return undefined;
             return clone(STORE[singular(type)] ?? []);
         }),
     };
@@ -325,8 +330,8 @@ describe('[#20237] controls', () => {
         ]);
     });
 
-    it('an unauthenticated caller keeps its existing answer on every list: 401 UNAUTHENTICATED, before any read', async () => {
-        for (const row of ROWS) {
+    it('an unauthenticated caller keeps its existing answer on every list but doc and book: 401 UNAUTHENTICATED, before any read', async () => {
+        for (const row of ROWS.filter((r) => !['doc', 'book'].includes(singular(r.type)))) {
             const { list, protocol } = bootDispatcher('anonymous');
             const res = await list(row.type, row.query);
             expect({ status: res.status, code: res.code }, label(row)).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
@@ -335,13 +340,13 @@ describe('[#20237] controls', () => {
         }
     });
 
-    it('…which is STRICTER than RestServer for doc and book lists, where an anonymous caller reads the public ones (none here) — and neither transport serves gated content', async () => {
-        for (const type of ['doc', 'book']) {
-            const rest = await bootRest('anonymous').list(type, { include: 'content' });
-            expect(rest.status, type).toBe(200);
-            expect(rest.items, type).toEqual([]);
-            expect(text(rest), type).not.toContain(DOC_SECRET);
-            expect(text(rest), type).not.toContain(BOOK_SECRET);
+    it('[#20320] …and on doc and book lists answers what RestServer answers: the public ones (none here), never gated content', async () => {
+        for (const row of ROWS.filter((r) => ['doc', 'book'].includes(singular(r.type)))) {
+            const dispatcher = await bootDispatcher('anonymous').list(row.type, row.query);
+            const rest = await bootRest('anonymous').list(row.type, row.query);
+            expect({ status: rest.status, items: rest.items }, label(row)).toEqual({ status: 200, items: [] });
+            expect({ status: dispatcher.status, items: dispatcher.items }, label(row)).toEqual({ status: 200, items: [] });
+            for (const s of row.secrets) expect(text(dispatcher), label(row)).not.toContain(s);
         }
     });
 

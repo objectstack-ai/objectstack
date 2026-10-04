@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { MetadataManager } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
 import { loadExcelJs } from './xlsx-module.js';
@@ -113,6 +114,13 @@ const MEMBER = {
       name: 'work_hours', type: 'number' as const, label: 'Max hours per shift',
       precision: 5, scale: 0, min: 1, max: 12,
     },
+    // #19992 — the triage's own `precision` pin declaration: a DECIMAL(5, 2),
+    // up to 999.99. Unbounded otherwise, so `precision` is the only constraint
+    // a refusal below can come from.
+    hourly_rate: {
+      name: 'hourly_rate', type: 'number' as const, label: 'Hourly rate',
+      precision: 5, scale: 2,
+    },
   },
 };
 
@@ -153,6 +161,12 @@ async function boot(services?: Map<string, any>) {
   await engine.insert('user', { id: 'u1', name: '张三', email: 'zhang@x.com' });
   await engine.insert('user', { id: 'u2', name: '李四', email: 'li@x.com' });
 
+  // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+  // name its registry does not hold, so the harness registers the family as a boot
+  // does — after the DDL, so an unprovisioned store still answers "no such table".
+  for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+  }
   const protocol = new ObjectStackProtocolImplementation(
     engine as any,
     services ? () => services : undefined,
@@ -354,6 +368,8 @@ describe('import route — real engine + protocol integration', () => {
     expect(String(one.due)).toContain('2026-06-30');
     const two = await engine.findOne('task', { where: { id: '2' } });
     expect(two).toMatchObject({ title: '测试', done: false, priority: 'low', score: 3, owner: 'u2' });
+    // [#20534] A year-first text cell (Excel's zh-CN short date) is read as its ISO day.
+    expect(two.due).toBe('2026-07-01');
   });
 
   it('reads xlsxBase64 without an explicit format and honors the sheet selector', async () => {
@@ -950,6 +966,73 @@ describe('import + create routes — number `scale` enforcement (#7501)', () => 
     } as any, ok);
     expect(ok._status ?? 200).toBeLessThan(400);
     expect((await engine.findOne('member', { where: { id: 'w5' } }))?.work_hours).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #19992 — a declared `precision` is enforced by REJECTION at the write seam,
+// and the refusal survives the HTTP error envelope: the direct create route
+// answers `400 VALIDATION_FAILED` with field code `max_precision` (code AND
+// status), and the import route — whose create leg is a batch through
+// `createManyData` — refuses the row and writes its sibling. The engine-door
+// pins (insert[], insertMany, update by predicate) live beside the validator,
+// in `packages/objectql/src/validation/record-validator.precision.test.ts`.
+// ---------------------------------------------------------------------------
+describe('import + create routes — number `precision` enforcement (#19992)', () => {
+  let route: any;
+  let engine: any;
+  let rest: any;
+  beforeEach(async () => { ({ route, engine, rest } = await boot()); });
+
+  it('the direct create route answers 400 VALIDATION_FAILED + max_precision (code AND status), and writes nothing', async () => {
+    const create = rest.getRoutes().find(
+      (r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object',
+    );
+    expect(create).toBeDefined();
+    const res = makeRes();
+    await create.handler({
+      params: { object: 'member' },
+      body: { id: 'h1', member_name: 'Ada', status: 'active', hourly_rate: 1234.5 },
+    } as any, res);
+    expect(res._status).toBe(400);
+    expect(res._json).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(res._json.fields[0]).toMatchObject({
+      field: 'hourly_rate', code: 'max_precision',
+      constraint: { precision: 5, scale: 2, actual: 6 },
+    });
+    expect(await engine.findOne('member', { where: { id: 'h1' } })).toBeNull();
+
+    // …and a value inside the declaration still writes.
+    const ok = makeRes();
+    await create.handler({
+      params: { object: 'member' },
+      body: { id: 'h2', member_name: 'Bo', status: 'active', hourly_rate: 123.45 },
+    } as any, ok);
+    expect(ok._status ?? 200).toBeLessThan(400);
+    expect((await engine.findOne('member', { where: { id: 'h2' } }))?.hourly_rate).toBe(123.45);
+  });
+
+  it('the import route refuses the over-precision row, writes its sibling, and the dry run predicts it', async () => {
+    const imp = (body: any) => {
+      const res = makeRes();
+      return route.handler({ params: { object: 'member' }, body } as any, res).then(() => res);
+    };
+    const rows = [
+      { id: 'h3', member_name: 'Cy', status: 'active', hourly_rate: 1234.5 },
+      { id: 'h4', member_name: 'Di', status: 'active', hourly_rate: 999.99 },
+    ];
+    const dry = await imp({ format: 'json', dryRun: true, rows });
+    expect(dry._json).toMatchObject({ dryRun: true, total: 2, ok: 1, errors: 1 });
+
+    const res = await imp({ format: 'json', rows });
+    expect(res._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
+    const failed = res._json.results.find((r: any) => !r.ok);
+    expect(failed).toMatchObject({
+      row: 1, ok: false, action: 'failed', field: 'hourly_rate', code: 'max_precision',
+      error: 'Hourly rate must have at most 5 digits in total, counting 2 decimal places (got 6)',
+    });
+    expect(await engine.findOne('member', { where: { id: 'h3' } })).toBeNull();
+    expect((await engine.findOne('member', { where: { id: 'h4' } }))?.hourly_rate).toBe(999.99);
   });
 });
 

@@ -49,8 +49,30 @@ export * from './utils/env.js';
 // Export timezone-aware calendar utilities (ADR-0053 Phase 2)
 export * from './utils/datetime.js';
 
+// [#20544] The ONE compensated fold for `sum` / `avg`, hoisted from
+// `@objectstack/objectql`'s rows path for the reason `bucketDateKey` above
+// was: `driver-memory`'s two faces and `service-analytics`' draft preview add
+// a group's values in JavaScript too, neither package has objectql among its
+// runtime dependencies, and a copy per face is how one `sum` came to answer
+// two doubles.
+export * from './utils/compensated-sum.js';
+export * from './utils/json-membership-sql.js';
+// [#20889] What an aggregate ANSWERS and its `'number'` presenter, moved from
+// `driver-sql` so the analytics native-SQL face presents with the same rule.
+export * from './utils/aggregate-answer.js';
+
 // Export the shared batched-write helper (framework#2678)
 export * from './utils/bulk-write.js';
+
+// [#20919] The bulk-import runner and the three pieces it writes through, moved
+// here from `@objectstack/rest` (which re-exports every name) so the connector
+// sync executor in `@objectstack/service-automation` writes through the same
+// runner as the import door without depending on the HTTP layer. ⛔ Never a
+// copy: one runner, one coercion, one mapping pipeline.
+export * from './utils/import-field-meta.js';
+export * from './utils/import-coerce.js';
+export * from './utils/import-mapping.js';
+export * from './utils/import-runner.js';
 
 // Export the shared write-response `internal: true` strip (#7823, #8497) — the
 // ONE helper every write mouth that answers an external caller runs its
@@ -104,6 +126,20 @@ export * from './utils/temporal-comparand.js';
 // do not depend on each other, and each driver used to carry its own copy.
 export * from './utils/temporal-storage-form.js';
 
+// [#21238] …and the storage form of a value written to a declared multi-valued
+// column (a lone scalar stored as a one-member list). `@objectstack/objectql`'s
+// record validator applies it at the write door, and `@objectstack/plugin-security`'s
+// row-level write check applies it to the image it judges — one rule, here
+// because those two do not depend on each other at runtime.
+export * from './utils/multi-value-storage-form.js';
+
+// [#21007] …and the refusal a scalar comparison gets on a field stored as a
+// JSON column: the operator set and the words. `driver-sql` refuses it on
+// `where`, and `@objectstack/objectql` on the per-aggregation `filter` it
+// evaluates itself — one set and one sentence, here for the reason the entry
+// above gives.
+export * from './utils/json-column-operator-refusal.js';
+
 // [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
 // `metadata_type`. Same reason as the two entries above: its consumers —
 // `@objectstack/objectql` (packaged actions) and
@@ -118,6 +154,11 @@ export * from './utils/metadata-activation-store.js';
 // `callData`'s ObjectQL fallback and the engine's own by-id write gate answer
 // with. `@objectstack/metadata-protocol` re-exports it from its original home.
 export * from './utils/record-not-found.js';
+
+// The one `OBJECT_NOT_FOUND` envelope: the data door's object-existence gate
+// and the engine's in-process verbs refuse a name the registry does not
+// resolve with it (one name space for both doors).
+export * from './utils/object-not-found.js';
 
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';

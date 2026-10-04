@@ -226,12 +226,12 @@ describe('#4437 — measure source-field gate', () => {
             title: 'Invoices',
             sql: 'showcase_invoice',
             measures: {
-                count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-                revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'total' },
-                legacy: { name: 'legacy', label: 'Legacy', type: 'sum', sql: 'dropped_column' },
+                count: { label: 'Count', type: 'count', sql: '*' },
+                revenue: { label: 'Revenue', type: 'sum', sql: 'total' },
+                legacy: { label: 'Legacy', type: 'sum', sql: 'dropped_column' },
             },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service, aggregated } = makeService({ cubes: [authored] });
 
@@ -252,9 +252,9 @@ describe('#4437 — measure source-field gate', () => {
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM showcase_invoice WHERE status = 1',
-            measures: { anything_sum: { name: 'anything_sum', label: 'x', type: 'sum', sql: 'anything' } },
+            measures: { anything_sum: { label: 'x', type: 'sum', sql: 'anything' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived] });
 
@@ -282,10 +282,10 @@ describe('#4437 — measure source-field gate', () => {
             title: 'Joined',
             sql: 'showcase_invoice',
             measures: {
-                remote_sum: { name: 'remote_sum', label: 'Remote', type: 'sum', sql: 'account.balance' },
+                remote_sum: { label: 'Remote', type: 'sum', sql: 'account.balance' },
             },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [joined] });
 
@@ -325,9 +325,9 @@ describe('#4437 — measure source-field gate', () => {
             name: 'external_cube',
             title: 'External',
             sql: 'remote_table',
-            measures: { ghost_sum: { name: 'ghost_sum', label: 'x', type: 'sum', sql: 'ghost' } },
+            measures: { ghost_sum: { label: 'x', type: 'sum', sql: 'ghost' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [external] });
 

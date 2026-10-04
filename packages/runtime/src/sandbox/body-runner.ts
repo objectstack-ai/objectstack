@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Hook & Action Body Runner Factory
+ * Hook, Action & Job Body Runner Factory
  *
  * Bridges the metadata-only `Hook.body` / `Action.body` discriminated union
  * (defined in `@objectstack/spec/data/hook-body.zod`) into an executable
- * handler registered on the ObjectQL engine.
+ * handler registered on the ObjectQL engine — and, since #21489, a job's
+ * `Job.body` (the same shape, L2 only) into the handler `IJobService.schedule`
+ * takes ({@link jobBodyRunnerFactory}).
  *
  * The runtime owns this bridge — `objectql` itself never imports the
  * sandbox engine, so it can stay light enough to embed in tooling and
@@ -42,9 +44,11 @@
  * ({@link warnDiscardedRecordWrites}) instead of silent.
  */
 
-import type { Hook } from '@objectstack/spec/data';
+import type { Hook, ScriptBodyParsed } from '@objectstack/spec/data';
 import { HookBodySchema } from '@objectstack/spec/data';
-import type { ScriptRunner, ScriptContext, ScriptResult } from './script-runner.js';
+import { JobSchema } from '@objectstack/spec/system';
+import type { JobHandler, JobRunOutcome } from '@objectstack/spec/contracts';
+import type { ScriptRunner, ScriptContext, ScriptResult, ScriptOrigin } from './script-runner.js';
 // The record-title contract, imported rather than re-derived (#11293). The
 // object's `nameField` pointer, a formula title's server-side evaluation and
 // the "what does this reference field point at" rule all have exactly one
@@ -57,6 +61,14 @@ import {
   resolveRecordTitle,
   resolveRelatedTitleTarget,
 } from '@objectstack/objectql';
+import { refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import {
+  isWildcardHookTarget,
+  storedMetadataBodyHookBindingRefusal,
+  storedMetadataBodySubjectRecordRefusal,
+  storedMetadataFamilyTableList,
+} from '../stored-metadata-body-boundary.js';
 
 interface FactoryOptions {
   ql: any;
@@ -84,7 +96,7 @@ interface FactoryOptions {
  * body's own `ctx.log.info('task completed: …')` absent.
  *
  * That is the third limb of this shape removed from this file, not the first:
- * `doc` / `previousDoc` (#5906) and `session.user` (#6316) were also keys no
+ * `doc` / `previousDoc` (#5906) and `session.user` (commit 448ac9565) were also keys no
  * producer ever wrote, deleted rather than left as a second de-facto contract
  * (Prime Directive #12). The remedy is the same — read the source that exists.
  * `opts.logger` is the engine's own `Logger`, handed to the factory by all four
@@ -110,7 +122,7 @@ interface FactoryOptions {
  */
 function buildBodyLogSurface(
   opts: FactoryOptions,
-  origin: { kind: 'hook' | 'action'; name: string },
+  origin: { kind: ScriptOrigin['kind']; name: string },
 ): ScriptContext['log'] {
   const logger = opts.logger;
   const label = `[${origin.kind} '${origin.name}']`;
@@ -123,7 +135,8 @@ function buildBodyLogSurface(
       console.warn(
         `[BodyRunner] ${origin.kind} '${origin.name}' (app '${opts.appId}') declares the 'log' ` +
           `capability, but this BodyRunner was constructed without a logger — ctx.log output is ` +
-          `discarded. Pass \`logger\` to ${origin.kind}BodyRunnerFactory({ … }). See #7448.`,
+          `discarded. Pass \`logger\` to ${origin.kind}BodyRunnerFactory({ … }): the capability writes only ` +
+          `to that logger, never to \`console\`, so the host's level and sinks apply.`,
       );
     };
     // [#7661] `debug` is warned for like the other three. A member missing from
@@ -288,6 +301,20 @@ export function hookBodyRunnerFactory(
     const raw = (hook as any).body;
     if (!raw) return undefined;
 
+    // [#21520] An app-authored hook BODY may not be bound to a table of the
+    // stored-metadata family: the metadata protocol is the family's only writer
+    // for a body. This is the ONE point every body hook passes through to become
+    // a handler, whichever door bound it — the boot artifact and an installed
+    // artifact (`bindAppArtifactHandlers`), and runtime-authored hooks
+    // (ObjectQLPlugin's metadata-service bind, through the engine's default
+    // runner) — so the refusal is made here, at registration, and never per
+    // door. Thrown rather than answered `undefined`: the binder records the
+    // throw against the hook and logs it at `error` (rethrows under `strict`),
+    // whereas `undefined` would be reported as a missing runner. Platform hooks
+    // are code, not bodies, and never reach this factory.
+    const bindingRefusal = storedMetadataBodyHookBindingRefusal(hook as any);
+    if (bindingRefusal) throw bindingRefusal;
+
     const parsed = HookBodySchema.safeParse(raw);
     if (!parsed.success) {
       opts.logger?.warn?.('[BodyRunner] invalid hook.body shape', {
@@ -299,7 +326,24 @@ export function hookBodyRunnerFactory(
     }
     const body = parsed.data;
 
+    // [#21520] A wildcard target names no family table, so it binds — but it
+    // admits every object, the family's among them, and the boundary is that a
+    // body never touches those tables. So the body is not run for a family
+    // table's event (below), and the author is told once, at bind.
+    if (isWildcardHookTarget((hook as any).object)) {
+      opts.logger?.info?.(
+        `[BodyRunner] hook '${hook.name}' targets every object ('*'); its body is never run for the stored-metadata `
+          + `tables (${storedMetadataFamilyTableList()}). Change metadata through the metadata API.`,
+        { appId: opts.appId, hook: hook.name },
+      );
+    }
+
     return async function boundBodyHandler(engineCtx: any): Promise<void> {
+      // [#21520] The dispatch-side half of the binding refusal above: whatever
+      // admitted this event (a wildcard, a global registration), a body does not
+      // run on a stored-metadata table's event, so it never receives that row
+      // as its input or writes it back.
+      if (typeof engineCtx?.object === 'string' && isStoredMetadataBodyObject(engineCtx.object)) return;
       const sandboxCtx = buildSandboxContext(
         engineCtx,
         opts.ql,
@@ -387,7 +431,7 @@ export function actionBodyRunnerFactory(
       opts.logger?.warn?.(
         `[BodyRunner] action '${action.name}' declares \`type: '${type}'\` and carries a \`body\` — ` +
           `no handler was bound. \`body\` only runs for \`type: 'script'\`; a '${type}' action dispatches ` +
-          `on \`target\`. Set \`type: 'script'\` to run the body, or drop the \`body\`. See #4352.`,
+          `on \`target\`. Set \`type: 'script'\` to run the body, or drop the \`body\`.`,
         { appId: opts.appId, action: action.name, object: action.object, type },
       );
       return undefined;
@@ -405,6 +449,11 @@ export function actionBodyRunnerFactory(
     const body = parsed.data;
 
     return async function boundActionHandler(actionCtx: any): Promise<unknown> {
+      // [#21594] A body is handed nothing of the stored-metadata family: an
+      // action whose subject record is a family row is refused here, before
+      // the body runs and before its sandbox context is built.
+      const subjectRefusal = actionSubjectRecordRefusal(actionCtx, action);
+      if (subjectRefusal) throw subjectRefusal;
       const sandboxCtx = buildActionSandboxContext(
         actionCtx,
         opts.ql,
@@ -433,6 +482,180 @@ export function actionBodyRunnerFactory(
       }
     };
   };
+}
+
+/**
+ * [#21594] The refusal for an action body about to be handed a row of the
+ * stored-metadata family as its subject record, or `undefined`.
+ *
+ * Both action doors (REST `/actions` and MCP `run_action`) load the subject
+ * record before they dispatch, through the generic data door, and stamp the
+ * routed object and record id into `params` AFTER the caller's own params, so
+ * `params.objectName` is the door's routed object, never the caller's. That
+ * object is the subject: an action declared on a family table is routed under
+ * it, and so is an object-less action a caller addresses under it
+ * (`/actions/<family table>/<action>/<id>`), which no binding-time refusal
+ * could see. Absent a routed object (an engine `execute` call from host code),
+ * the action's declared object stands in.
+ *
+ * Judged here — the action body's own handler, the one point every action
+ * body passes through to run, whichever door bound it — because only here is
+ * the handler known to be a body: the doors dispatch body and host handlers
+ * alike, and a host code handler's subject record is outside the boundary.
+ * A record is "handed" when the call carries a record id or a non-empty
+ * record; a family-routed call with neither hands the body nothing and runs.
+ */
+function actionSubjectRecordRefusal(actionCtx: any, action: { name: string; object?: string }): Error | undefined {
+  const params = actionCtx?.params;
+  const routed = typeof params?.objectName === 'string' && params.objectName.length > 0 ? params.objectName : undefined;
+  const subject = routed ?? action.object;
+  if (typeof subject !== 'string' || !isStoredMetadataBodyObject(subject)) return undefined;
+  const record = actionCtx?.record;
+  const handed = (typeof params?.recordId === 'string' && params.recordId.length > 0)
+    || (record !== null && typeof record === 'object' && Object.keys(record).length > 0);
+  return handed ? storedMetadataBodySubjectRecordRefusal(subject, action.name) : undefined;
+}
+
+/** What {@link judgeJobBody} answers for a `body` that binds, and for one that does not. */
+export type JobBodyJudgement =
+  | { binds: true; body: ScriptBodyParsed }
+  | { binds: false; refusal: string; issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> };
+
+/**
+ * [#21585] The ONE judgement whether a job's present `body` binds — the
+ * declaration's own: `raw` is parsed against `JobSchema.body` (the L2 script
+ * body shape, with `body.timeoutMs` refused on a job), so this answers exactly
+ * what `os validate` answers about the same slot.
+ *
+ * Two readers, so they cannot disagree: {@link jobBodyRunnerFactory} binds
+ * nothing for a body this refuses, and the install-local door refuses a
+ * package whose enabled job carries one (`collectJobsWithoutBody` in
+ * `../app-artifact-handlers.ts`). Before the door asked, it judged only that a
+ * `body` was PRESENT — an L1 expression body, or one carrying `timeoutMs`,
+ * installed with a 200 and the job was never scheduled, with only a server
+ * `warn` to say so.
+ *
+ * `refusal` is the declaration's first refusal sentence, prefixed with the
+ * key it names — the text the author acts on. Call it on a PRESENT body: an
+ * absent one is a different fact (the job has no `body`), which the slot's
+ * `.optional()` would answer as binding.
+ */
+export function judgeJobBody(raw: unknown): JobBodyJudgement {
+  const parsed = JobSchema.shape.body.safeParse(raw);
+  if (parsed.success && parsed.data !== undefined) return { binds: true, body: parsed.data };
+  const issues = parsed.success ? [] : parsed.error.issues;
+  const first = issues[0];
+  const at = first && first.path.length > 0 ? `body.${first.path.map(String).join('.')}: ` : '';
+  return {
+    binds: false,
+    refusal: first ? `${at}${first.message}` : 'the job `body` is not a sandboxed JS body',
+    issues,
+  };
+}
+
+/**
+ * Job body runner factory (#21489) — the ONE point a job's `body`
+ * (`JobSchema.body`: the hook body shape, L2 only) becomes the `JobHandler`
+ * handed to `IJobService.schedule`. Its caller is the binder's job half,
+ * `scheduleAppArtifactJobs` (`../app-artifact-handlers.ts`), which every door
+ * that brings an artifact in calls — the boot and install-local alike.
+ *
+ * ## What a job body receives
+ *
+ * `ctx.api`, `ctx.log` and `ctx.crypto`, each behind the capability token the
+ * body declares, and nothing else: that is the surface `JobSchema.body`
+ * declares, so nothing is added here. Not the job's name and not a manual
+ * trigger's `data` — the in-process `JobHandlerContext` carries both, a body
+ * does not until the contract declares them.
+ *
+ * `ctx.api` runs as SYSTEM ({@link buildJobSandboxContext}): a job has no
+ * caller, so there is no envelope to elevate, and identity-less is the posture
+ * #3914 measured as worse than either coherent one. What bounds a body is its
+ * declared `capabilities` and the stored-metadata boundary every body's api
+ * carries ({@link buildSandboxApi}).
+ *
+ * …as SYSTEM IN the job's organization, when the binder hands one over
+ * (`job.organization` — `JobSchema.organization`, judged at bind by the
+ * scheduled-work posture rule): the envelope is `{ isSystem: true, tenantId }`,
+ * so a tenant-scoped write carries that organization the way a session write
+ * does, and is no longer refused under the `group` / `isolated` postures for
+ * want of one (ruling Q2-O1 on the connector-sync card). With none it stays
+ * `{ isSystem: true }`.
+ *
+ * ## The time limit
+ *
+ * The job's own `timeoutMs` reaches the runner as `opts.timeoutMs` — the ONE
+ * limit of a body job (`JobSchema.timeoutMs`). `body.timeoutMs` is refused on a
+ * job by the spec, so a body carrying one never parsed; it is refused here as
+ * well ({@link judgeJobBody}), rather than run under a second limit. A job with
+ * no `timeoutMs` gets the runner's job default.
+ *
+ * ## What it resolves
+ *
+ * The body's return value is read as the job's `JobRunOutcome`
+ * (`contracts/job-service.ts`, the only reader of a job's return value), copied
+ * only in that declared shape: any other value is a plain success, exactly like
+ * an in-process handler resolving `undefined`. A throw rejects — the adapters'
+ * `failed`, and the retry policy's trigger.
+ *
+ * Returns `undefined` — after a `warn` naming why — when the body cannot be
+ * bound. The binder then schedules NOTHING for the job: a present `body` wins
+ * over a `handler`, so falling back to the handler here would run code the
+ * author replaced.
+ */
+export function jobBodyRunnerFactory(
+  runner: ScriptRunner,
+  opts: FactoryOptions,
+): (job: { name: string; body?: unknown; timeoutMs?: number; organization?: string }) => JobHandler | undefined {
+  return (job) => {
+    const raw = job.body;
+    if (!raw) return undefined;
+
+    const judged = judgeJobBody(raw);
+    if (!judged.binds) {
+      opts.logger?.warn?.(`[BodyRunner] invalid job.body shape — the job is NOT scheduled: ${judged.refusal}`, {
+        appId: opts.appId,
+        job: job.name,
+        issues: judged.issues.slice(0, 3),
+      });
+      return undefined;
+    }
+    const body = judged.body;
+
+    return async function boundJobHandler(): Promise<void | JobRunOutcome> {
+      const sandboxCtx = buildJobSandboxContext(
+        opts.ql,
+        buildBodyLogSurface(opts, { kind: 'job', name: job.name }),
+        job.organization,
+      );
+      try {
+        opts.logger?.debug?.('[BodyRunner] job fired', { appId: opts.appId, job: job.name });
+        const result = await runner.run(body, sandboxCtx, {
+          origin: { kind: 'job', name: job.name },
+          timeoutMs: job.timeoutMs,
+        });
+        return jobRunOutcomeOf(result.value);
+      } catch (err: any) {
+        opts.logger?.error?.('[BodyRunner] sandboxed job threw', err, {
+          appId: opts.appId,
+          job: job.name,
+        });
+        throw err;
+      }
+    };
+  };
+}
+
+/**
+ * A job body's return value, read as the declared `JobRunOutcome` and nothing
+ * else (#21489): `{ outcome: 'completed' | 'degraded', reason?: string }` is
+ * copied in that shape, every other value is `undefined` — a plain success.
+ */
+function jobRunOutcomeOf(value: unknown): JobRunOutcome | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  if (v.outcome !== 'completed' && v.outcome !== 'degraded') return undefined;
+  return typeof v.reason === 'string' ? { outcome: v.outcome, reason: v.reason } : { outcome: v.outcome };
 }
 
 /**
@@ -465,7 +688,7 @@ function warnDiscardedRecordWrites(
     `[BodyRunner] action '${actionName}' wrote ${fields.length} field(s) to ctx.record, which is a read-only ` +
       `pre-fetched snapshot — the writes never left the sandbox and the stored record is unchanged. ` +
       `To persist, call ctx.api.object('${object ?? '<object>'}').update({ id: ctx.recordId, … }) ` +
-      `(needs the 'api.write' capability). See #4345.`,
+      `(needs the 'api.write' capability).`,
     { appId: opts.appId, action: actionName, object, fields },
   );
 }
@@ -505,7 +728,7 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
 }
 
 /**
- * [#14760] The entry value as the VM could actually have seen it, or `ok:
+ * [commit ee32e1cb8] The entry value as the VM could actually have seen it, or `ok:
  * false` for a host value the round-trip cannot evaluate at all.
  *
  * Leg 2 of {@link carriedInputKeys} compares an entry snapshot against the VM's
@@ -527,7 +750,7 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
  * readonly. Normalising the comparison closes both, because an untouched key is
  * no longer carried at all and the host simply keeps its own value.
  *
- * ⛔ The fail-open is NOT reversed. #14758 chose "anything we cannot prove
+ * ⛔ The fail-open is NOT reversed. Commit 84199cb87 chose "anything we cannot prove
  * equal is reported as changed and therefore CARRIED" deliberately, and a value
  * that throws here — a cycle, a bigint, a `toJSON` returning `undefined` — still
  * takes exactly that path. What changes is that the fail-open stops firing on
@@ -538,14 +761,14 @@ function jsonSeenByVm(value: unknown): { ok: true; value: unknown } | { ok: fals
   try {
     return { ok: true, value: JSON.parse(JSON.stringify(value)) as unknown };
   } catch {
-    /* unrepresentable (cycle, bigint) — #14758's fail-open, for this key only */
+    /* unrepresentable (cycle, bigint) — commit 84199cb87's fail-open, for this key only */
     return { ok: false };
   }
 }
 
 /**
- * [#14758] Which keys of the exit dump the write-back should re-assert, or
- * `undefined` to assert all of them (the pre-#14758 behaviour).
+ * [commit 84199cb87] Which keys of the exit dump the write-back should re-assert, or
+ * `undefined` to assert all of them (the behaviour before commit 84199cb87).
  *
  * Two sources, unioned, and neither is sufficient alone:
  *
@@ -565,7 +788,7 @@ function jsonSeenByVm(value: unknown): { ok: true; value: unknown } | { ok: fals
  *     whose ENTRY value is an object because a primitive cannot be mutated in
  *     place — every change to one is an assignment (1) already saw — and
  *     confining it there is what keeps this leg from re-widening into the value
- *     diff #14099's ruling refused. [#14760] Normalising the entry side is what
+ *     diff #14099's ruling refused. [commit ee32e1cb8] Normalising the entry side is what
  *     makes the comparison answer "did the body write through this?" instead of
  *     "is this host value already JSON?"; without it every `Date`-valued key
  *     answered the second question, in the wrong direction, forever.
@@ -603,7 +826,7 @@ function carriedInputKeys(
  * preserves insertion order for string keys but reorders integer-like ones, and
  * a reorder is not a write.
  *
- * [#14760] BOTH sides are JSON values by the time they reach here: `b` is the
+ * [commit ee32e1cb8] BOTH sides are JSON values by the time they reach here: `b` is the
  * VM's exit dump, and `a` is the entry snapshot already put through
  * {@link jsonSeenByVm}. So this compares like for like, and it no longer stands
  * in for the round-trip itself. It used to: an unequal verdict meant either
@@ -668,7 +891,7 @@ function sameJsonValue(a: unknown, b: unknown): boolean {
  * returns it (`delete ctx.input.x; return { x: 1 };`) keeps the explicit patch
  * — the return value is the later, more deliberate statement of the two.
  *
- * ## [#14758] Why the merge is a KEY SET and no longer the whole dump
+ * ## [commit 84199cb87] Why the merge is a KEY SET and no longer the whole dump
  *
  * `mutatedInput` is the whole post-run `ctx.input`, so `Object.assign(target,
  * mutated)` re-asserted every key a body could see, touched or not. `target` is
@@ -709,7 +932,7 @@ function sameJsonValue(a: unknown, b: unknown): boolean {
  *    itself ever fires, so the recorder cannot list `meta`. The dump is the only
  *    witness for those, and {@link carriedInputKeys} reads it the narrowest way
  *    available: an OBJECT-valued entry key whose dumped value no longer matches
- *    the entry snapshot — [#14760] as {@link jsonSeenByVm} shows it to the VM —
+ *    the entry snapshot — [commit ee32e1cb8] as {@link jsonSeenByVm} shows it to the VM —
  *    was written through, and is carried. Primitives need no such leg: a
  *    primitive cannot be mutated in place, so every change to one is an
  *    assignment the recorder saw.
@@ -732,7 +955,7 @@ function applyMutationsToInput(
     }
     const carried = carriedInputKeys(mutated, result.mutatedInputKeys, entryInput);
     if (carried === undefined) {
-      // The recorder could not speak — pre-#14758 behaviour, verbatim.
+      // The recorder could not speak — the behaviour before commit 84199cb87, verbatim.
       Object.assign(target, mutated);
     } else {
       for (const key of carried) {
@@ -784,7 +1007,34 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
   };
 }
 
+/**
+ * The `ctx.api` a sandboxed body (hook, action or job) reads and writes through.
+ *
+ * For an app-authored body, the stored-metadata family is reached through the
+ * metadata API only, so this API refuses every touch of a family table before
+ * it runs, whatever the body's elevation, with `PERMISSION_DENIED` / 403 and a
+ * prescription naming the metadata API:
+ *
+ * - [#21594] a READ (`find`, `findOne`, `count`, `aggregate`, and every filter,
+ *   sort, grouping or search one can carry): the body is served nothing of the
+ *   family, neither the stored row nor a projection of it, so it can copy
+ *   nothing of it either;
+ * - [#21520] a WRITE (every write verb, and any verb not known to be a read).
+ *
+ * This is the one place every body face gets its API, so the hook face, the
+ * action face, the job face and every fallback below are refused alike.
+ * Applied HERE and nowhere else: a host code handler's `ctx.api` is not a
+ * body's, and is served by the reader-context seam
+ * (`serveStoredMetadataReadsThrough`) with its writes kept (deployer code,
+ * outside the boundary).
+ */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
+  return refuseStoredMetadataBodyWrites(
+    refuseStoredMetadataBodyReads(buildSandboxApiSource(engineCtx, ql, errLabel)),
+  );
+}
+
+function buildSandboxApiSource(engineCtx: any, ql: any, errLabel: string) {
   const engineApi = engineCtx?.api;
   if (engineApi && typeof engineApi.object === 'function') return engineApi;
   // [#3914] The host's own execution envelope, when it supplied one. Hooks get
@@ -877,7 +1127,7 @@ function buildSandboxContext(
     // reliably distinguish create (`!ctx.previous`) from update/delete.
     previous: unwrapProxyToPlain(previousRaw),
     // `engineCtx.user` is the ONLY source, and the `?? engineCtx?.session?.user`
-    // limb that used to follow it was removed in #6316 (same family as #5906
+    // limb that used to follow it was removed in commit 448ac9565 (same family as #5906
     // above, and as #4984): `HookContext['session']` declares no `user` key
     // (`packages/spec/src/data/hook.zod.ts`) and its sole producer —
     // ObjectQL's `buildSession()` (`packages/objectql/src/engine.ts`), which
@@ -907,7 +1157,7 @@ function buildSandboxContext(
     // dispatches for one write, and its params bag has no caller options.
     dispatch,
     inputOptions,
-    // [#13644] The declared referential-cleanup marker, carried across the
+    // [commit 34ce8e7db] The declared referential-cleanup marker, carried across the
     // sandbox boundary BY CONTRACT — copied only in its declared shape
     // (`true`), the same unrecognised-shape rule as `dispatch` above: anything
     // else is left ABSENT, so `ctx.referentialFieldClear === true` reads "not
@@ -935,7 +1185,7 @@ function buildActionSandboxContext(
   return {
     input: unwrapProxyToPlain(actionCtx?.params ?? {}),
     previous: undefined,
-    // Same removal as the hook face above (#6316), measured on this face's own
+    // Same removal as the hook face above (commit 448ac9565), measured on this face's own
     // shapes: `ActionSession` (`packages/spec/src/ui/action-params.zod.ts`)
     // declares `userId` / `organizationId` / `positions` / `roles` and no
     // `user`, and its sole producer `buildActionSession()`
@@ -953,7 +1203,7 @@ function buildActionSandboxContext(
     // downstream writes it back. `warnDiscardedRecordWrites` reports the writes
     // a body makes to it rather than letting them vanish.
     record: unwrapProxyToPlain(actionCtx?.record),
-    // [#14143] The caller-scope load's verdict, marshalled EXPLICITLY for the
+    // [commit f19475c0a] The caller-scope load's verdict, marshalled EXPLICITLY for the
     // same reason `dispatch` / `referentialFieldClear` are on the hook face: a
     // body cannot reach the dispatcher's locals, and `ctx.record.id` is stamped
     // even when the caller cannot read the row, so without this key an action
@@ -964,6 +1214,35 @@ function buildActionSandboxContext(
     api: buildSandboxApi(actionCtx, ql, 'action body'),
     // [#7448] Same removal as the hook face: neither action-context assembly
     // site (`../domains/actions.ts`, `../action-execution.ts`) writes `logger`.
+    log,
+    crypto: globalThis.crypto,
+  };
+}
+
+/**
+ * The sandbox context of one job-body run (#21489): `api`, `log`, `crypto` —
+ * the surface `JobSchema.body` declares — and no input, caller or record.
+ *
+ * `ctx.api` is served through {@link buildSandboxApi} like every body's, under
+ * a fresh `{ isSystem: true }` envelope. A job has no caller to spread first
+ * (an action body spreads its caller's, `buildActionExecutionContext`), and the
+ * system envelope is what an action body with no caller gets, what a hook
+ * body's engine api falls back to, and what a `handler` job's in-process `ql`
+ * amounts to. Identity-less instead would be #3914's posture: plugin-sharing
+ * refuses an owner-scoped write that has neither a `userId` to own it nor
+ * `isSystem` to bypass. Fresh per run, never a shared constant, because an
+ * execution envelope is a value the engine may extend (a transaction joins it).
+ *
+ * `organization` — the job's declared one, which the binder resolved — joins
+ * the envelope as `tenantId`, the field the tenancy guard reads
+ * (`resolveSystemWriteOrganization`'s remedy: "pass it on the execution
+ * context"). Absent, no `tenantId` key is written at all.
+ */
+function buildJobSandboxContext(ql: any, log: ScriptContext['log'], organization?: string): ScriptContext {
+  const executionContext = organization ? { isSystem: true, tenantId: organization } : { isSystem: true };
+  return {
+    input: undefined,
+    api: buildSandboxApi({ executionContext }, ql, 'job body'),
     log,
     crypto: globalThis.crypto,
   };

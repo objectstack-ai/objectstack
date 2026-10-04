@@ -17,7 +17,7 @@
 // `@objectstack/core` "has no `typecheck` script (type-check DEBT ledger
 // entry)", making a `@ts-expect-error` here a phantom pin
 // `check:type-check-coverage` refuses. False on this tree in BOTH halves:
-// #14613 split a `tsconfig.test.json` out of the build config,
+// Commit 81208086a split a `tsconfig.test.json` out of the build config,
 // `package.json`'s `typecheck` NAMES it (via `check:test-typecheck
 // --project`), and this package holds no DEBT entry. A directive here WOULD be
 // evaluated — against `./plugin-loader.ts`, this package's own SOURCE, which

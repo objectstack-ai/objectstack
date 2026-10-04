@@ -211,3 +211,14 @@ describe('[#9190] derived reference sites — derivation is a pure function of t
         expect(flatten(a)).toEqual(flatten(REFERENCE_SITES));
     });
 });
+
+describe('a field\'s `picklist` is a reference site of the `picklist` kind', () => {
+    // The admin "Used by" panel and the delete-safety check read this index. A
+    // select field that names a shared list (`Field.select({ picklist })`)
+    // must count as a use of that list, or the list reads as safe to delete
+    // while objects take their options from it. Derived by the naming rule —
+    // the property spells the target — so no row exists to forget.
+    it('object.fields{}.picklist points at the picklist it names', () => {
+        expect(sitesFor('picklist')).toContainEqual({ fromType: 'object', property: 'picklist' });
+    });
+});

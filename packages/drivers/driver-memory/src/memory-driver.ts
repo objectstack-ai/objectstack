@@ -10,22 +10,36 @@ import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectst
 // the same translation `formula` evaluates and the same pattern `driver-sql`
 // hands to LIKE/GLOB, so this face cannot answer a pattern differently.
 import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion — the field's declared row of
+// the ruled 「is empty」 table, asked of the spec by the live query path.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
+// [#20874] The JSON-stored population — the declared fields on which
+// `$contains` asks MEMBERSHIP — from the spec's value-shape classes, the same
+// two `driver-sql`'s JSON-column registry is built from.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
+import { Logger, createLogger, compensatedSum } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
   assertCallNotTenantScoped,
 } from './memory-tenancy-guard.js';
-import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
+  // [#21066] What the shape gate is told about the declared fields, and the
+  // one log line a withheld refusal writes.
+  DRIVER_FILTER_CAPABILITIES,
+  type FilterFieldDeclarations,
+  withheldFilterLogLine,
   filterArrayReachedDriverError,
   filterNodeExpectedError,
   filterNodeListExpectedError,
   malformedBetweenError,
   nonBooleanNullComparandError,
+  // [#20444] The `$empty` refusals — a non-boolean flag, an undeclared field.
+  nonBooleanEmptyComparandError,
+  undeclaredEmptyOperatorFieldError,
   unknownFieldOperatorError,
   unknownLogicalOperatorError,
   unsupportedFilterError,
@@ -45,7 +59,7 @@ import {
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
-// [#13197] Field-level uniqueness — the constraint this driver enforced
+// [commit 56c093c4d] Field-level uniqueness — the constraint this driver enforced
 // NOWHERE, and the reason an out-of-process duplicate autonumber used to land
 // silently. The scoping semantics are `driver-sql`'s, measured; see the
 // module docblock.
@@ -64,9 +78,10 @@ import {
  * Read straight off {@link SUPPORTED_FIELD_OPERATORS}, which is
  * `[...FILTER_OPERATORS, '$like', '$ilike']` — the spec's declaration order,
  * not a hand-copy of it. That matters twice: a nineteenth operator is ranked
- * the day it is declared, and the rank of `$exists` (last in the spec's list)
- * is what makes this generalisation emit, byte for byte, the documents
- * #13195's guard already emits for the one operator it moved.
+ * the day it is declared, and the rank of `$exists` (after every comparison,
+ * set and text operator in the spec's list; only `$empty` follows it since
+ * #20446) is what makes this generalisation emit, byte for byte, the documents
+ * commit 9dac1ae01's guard already emits for the one operator it moved.
  *
  * An operator absent from the vocabulary cannot reach the assembly — the
  * `default:` arm throws first — so the `?? Number.MAX_SAFE_INTEGER` fallback is
@@ -105,28 +120,36 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true` |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
- * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
  * | `$regex` | the whole string family — promoted by `_multiRegex`, see below |
  *
- * `$lte` → `$lt` is the member no card had named: a bare `YYYY-MM-DD` upper
- * bound compiles half-open, so `{d: {$lte: '2026-07-28', $lt: '2026-07-02'}}`
- * and its key-swapped twin answered `['1']` and `['1','2']` on this fixture.
+ * `$lte` → `$lt` WAS the member no card had named: while this face compiled a
+ * bare `YYYY-MM-DD` upper bound half-open itself, `{d: {$lte: '2026-07-28',
+ * $lt: '2026-07-02'}}` and its key-swapped twin answered `['1']` and
+ * `['1','2']` on this fixture. [#20822] That rewrite (and the last-supported-day
+ * `$lte` → `$ne`) now runs once, at the seams, in the shared lowering, which
+ * never clobbers an author's key either (a lowered key that is taken becomes
+ * its own conjunct); this face writes `$lte` as `$lte`, so `$lt` and `$ne`
+ * have one fewer writer here.
  * `$not` is written by `$notContains` and by NOTHING else — it is covered here
  * by construction rather than curatively, which is the point of ranging over
  * the vocabulary instead of over the three operators that had been noticed.
+ * [#20874] `$elemMatch` joins it on the same terms: written by `$contains` on a
+ * JSON-stored field and by nothing else (an author cannot write `$elemMatch` —
+ * the shape gate refuses it), so it is never contested either.
  *
  * ## The rule, and why it is this one
  *
  * Free key → merge inline (the overwhelmingly common case: one operator, one
  * key). Taken key → the write becomes its own `$and` branch on the same field,
- * where both constraints survive. That is exactly the guard #13195 landed for
+ * where both constraints survive. That is exactly the guard commit 9dac1ae01 landed for
  * `$exists` alone, generalised to every writer rather than restated per
- * operator — the reference matcher (`memory-matcher.ts`), which loops the
- * operators and therefore CANNOT express this defect, is the oracle both
- * agree with.
+ * operator — the reference matcher (`memory-matcher.ts`, retired since #5930
+ * step 4), which looped the operators and therefore COULD NOT express this
+ * defect, was the oracle; `memory-operator-key-clobber.test.ts` keeps its
+ * answers as literals.
  *
  * ## Why rank, and not author order
  *
@@ -256,9 +279,10 @@ export interface InMemoryDriverConfig {
  *
  *  - `projectFields` skips `undefined` values, so the same stored row answered
  *    `'status' in row === false` under a projection and `true` without one;
- *  - the matcher reads it as absent — measured, `{ status: { $exists: true } }`
- *    excludes it and `{ status: { $null: true } }` includes it, exactly as for
- *    a row that never carried the key at all.
+ *  - the reference matcher (retired since #5930 step 4) read it as absent —
+ *    measured, `{ status: { $exists: true } }` excluded it and
+ *    `{ status: { $null: true } }` included it, exactly as for a row that
+ *    never carried the key at all.
  *
  * So the returned row was the only surface still claiming the key was present.
  *
@@ -294,11 +318,97 @@ function withoutUndefinedOwnKeys<T extends Record<string, any>>(record: T): T {
 }
 
 /**
+ * Read a nested property by dot-notation (`"user.name"`).
+ *
+ * [#5930 step 4] Lived in `memory-matcher.ts` and was the ONE symbol this
+ * driver imported from it; moved here, byte-for-byte, when ruling D6 retired
+ * that reference matcher (no production caller).
+ */
+function getValueByPath(obj: any, path: string): any {
+  if (!path.includes('.')) return obj[path];
+  return path.split('.').reduce((o, i) => (o ? o[i] : undefined), obj);
+}
+
+/**
  * Snapshot for in-memory transactions.
  */
 interface MemoryTransaction {
   id: string;
   snapshot: Record<string, any[]>;
+}
+
+/**
+ * [#20874] The JSON NUMBER grammar, spelled out — the pattern `driver-sql`'s
+ * `jsonMembershipCandidates` tests a comparand against, for its reason:
+ * `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none of
+ * which is a JSON number, and admitting them would make the member set depend
+ * on JS coercion rules no SQL dialect shares.
+ */
+const JSON_NUMBER_TEXT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * [#20874] The stored MEMBERS a `$contains` / `$notContains` comparand names on
+ * a JSON-stored field — the in-memory twin of `driver-sql`'s
+ * `jsonMembershipCandidates`, which reads one comparand the same way for all
+ * three SQL dialects.
+ *
+ * The contract declares the comparand a STRING (`FILTER_OPERATORS`' `$contains`
+ * docblock in `@objectstack/spec`), so a member stored as a JSON number or
+ * boolean is named by its TEXT: `'1'` names the string `'1'` OR the number `1`,
+ * `'true'` the string OR `true`, `'null'` the string OR `null`. The number is
+ * read through `Number()`, so `'1.50'` names a stored `1.5`, as it does on
+ * every SQL dialect. ⛔ Not a lenient alias: one declared comparand type read
+ * against one stored shape, decided in the driver so every backend gets the
+ * same reading.
+ *
+ * `String(value)` is the rendering the substring reading gives the comparand
+ * ({@link InMemoryDriver.filterSubstringPattern}) and the one `driver-sql`
+ * gives it, so the two readings never disagree about WHICH text was asked for.
+ * Each candidate's `JSON.stringify` is exactly the JSON text `driver-sql`
+ * compares a stored element against, which is what lets the analytics face's
+ * SQLite echo name the same set (`memory-analytics.ts`).
+ *
+ * @see InMemoryDriver.filterContainsTest — where the population decides
+ *      whether a comparand is read this way at all.
+ */
+function containsMemberCandidates(value: unknown): ContainsMember[] {
+  const text = String(value);
+  if (text === 'true') return [text, true];
+  if (text === 'false') return [text, false];
+  if (text === 'null') return [text, null];
+  if (JSON_NUMBER_TEXT.test(text)) {
+    const parsed = Number(text);
+    if (Number.isFinite(parsed)) return [text, parsed];
+  }
+  return [text];
+}
+
+/** [#20874] A stored member a `$contains` comparand can name. */
+type ContainsMember = string | number | boolean | null;
+
+/**
+ * [#20874] The un-negated test `$contains` lowers to on this driver —
+ * membership on a declared JSON-stored field, the substring pattern elsewhere.
+ * See {@link InMemoryDriver.filterContainsTest}.
+ */
+export type MemoryContainsTest =
+  | { $elemMatch: { $in: ContainsMember[]; $not: { $type: 'array' } } }
+  | { $regex: RegExp };
+
+/**
+ * [#20444] Each field's declared value shape — the `type` and `multiple` slice
+ * `expandEmptyOperator` reads — for the fields that declare a `type`. The RAW
+ * `type` is read: a field with none has no row of the ruled 「is empty」 table,
+ * and inventing one here would answer `$empty` with a row nobody declared.
+ */
+function indexValueShapes(fields: Record<string, unknown> | undefined): Map<string, ValueShapeFieldDef> {
+  const out = new Map<string, ValueShapeFieldDef>();
+  for (const [name, def] of Object.entries(fields ?? {})) {
+    const type = (def as { type?: unknown } | null | undefined)?.type;
+    if (typeof type !== 'string' || type === '') continue;
+    out.set(name, { type, multiple: (def as { multiple?: unknown }).multiple === true });
+  }
+  return out;
 }
 
 /**
@@ -317,7 +427,7 @@ interface MemoryTransaction {
  *
  * ## What this driver enforces, and what it still does not
  *
- * Since #13197 it enforces **field-level `unique`**, and since #13239
+ * Since commit 56c093c4d it enforces **field-level `unique`**, and since #13239
  * **object-level declared `indexes[]` entries carrying `unique`** — both
  * declaration surfaces `driver-sql` materializes uniqueness from, with its
  * ADR-0120 D1/D3 scoping (`memory-unique-constraint.ts` carries the measured
@@ -334,7 +444,7 @@ interface MemoryTransaction {
  * Since #13340 {@link bulkCreate} is ALL-OR-NOTHING: it builds and checks every
  * row — against the table AND against the rest of the batch — before it pushes
  * any of them, so a refused row leaves the table exactly as it found it. That
- * is the posture {@link updateMany} has had since #13197, and the one
+ * is the posture {@link updateMany} has had since commit 56c093c4d, and the one
  * `driver-sql` gets from sending a batch as a single insert. `bulkCreate` used
  * to be `Promise.all(map(create))`, where a refusal left every row accepted
  * BEFORE it standing — a refused 2-row batch on a 2-row table left THREE rows
@@ -398,7 +508,18 @@ export class InMemoryDriver implements IDataDriver {
   private temporalFields: Map<string, Map<string, TemporalFieldKind>> = new Map();
 
   /**
-   * [#13197, #13239] Declared unique constraints per object, populated by
+   * [#20444] Each declared field's value shape — its `type` and `multiple`, the
+   * slice the spec's `expandEmptyOperator` reads — per object, populated by
+   * {@link syncSchema} beside {@link temporalFields} and with its lifetime. The
+   * live query path answers `$empty` by the field's DECLARED row from it
+   * ({@link emptyOperatorCondition}); a field it does not hold (an object never
+   * synced, a field its schema does not name, one declared with no `type`) is
+   * refused rather than answered by a row read off the data.
+   */
+  private valueShapes: Map<string, Map<string, ValueShapeFieldDef>> = new Map();
+
+  /**
+   * [commit 56c093c4d, #13239] Declared unique constraints per object, populated by
    * {@link syncSchema} — both declaration surfaces in one list (field-level
    * `unique` and object-level `indexes[]` entries carrying `unique`), with the
    * same shape and the same lifetime as {@link temporalFields} above, and for
@@ -409,7 +530,7 @@ export class InMemoryDriver implements IDataDriver {
   private uniqueConstraints: Map<string, MemoryUniqueEnforcement[]> = new Map();
 
   /**
-   * [#16729] Objects whose schema EXPLICITLY declared `tenancy.enabled: false`,
+   * [commit 0f38ab084] Objects whose schema EXPLICITLY declared `tenancy.enabled: false`,
    * this driver's counterpart of `SqlDriver.tenantOptOutByTable` and the record
    * {@link computeAndRecordTenantField} maintains.
    *
@@ -582,7 +703,7 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   /**
-   * Declared as the contract declares it (#14435): `IDataDriver.find()` says
+   * Declared as the contract declares it (commit 20032594f): `IDataDriver.find()` says
    * `Promise<Record<string, unknown>[]>`, and the explicit annotation is what
    * keeps that visible to `tsc`. Left to inference the return type collapses
    * to `any[]` through the backing store's `any[]` rows (`db` -> `getTable`),
@@ -590,7 +711,7 @@ export class InMemoryDriver implements IDataDriver {
    * result was unchecked. Same repair shape as `update`/`upsert` (#13878).
    */
   async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('find', object, options);
     this.logger.debug('Find operation', { object, query });
@@ -667,7 +788,7 @@ export class InMemoryDriver implements IDataDriver {
   // called it. Page through `find()` with `limit`/`offset`.
 
   /**
-   * Declared as the contract declares it (#14435): the `null` arm is the
+   * Declared as the contract declares it (commit 20032594f): the `null` arm is the
    * "no row matched" answer the `results[0] || null` below has always given,
    * and the explicit annotation is what keeps that arm visible to `tsc` —
    * left to inference it is swallowed by the `any` arriving from `find()`,
@@ -675,7 +796,7 @@ export class InMemoryDriver implements IDataDriver {
    * to narrow. The same shape `update()` was repaired with (#13878).
    */
   async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('findOne', object, options);
     this.logger.debug('FindOne operation', { object, query });
@@ -693,7 +814,7 @@ export class InMemoryDriver implements IDataDriver {
   // driver's own tests read `.name` off a create() result and no tsc had ever
   // told them it wasn't there).
   //
-  // #14435: this annotation existed but read `Record<string, any>`, so it
+  // Commit 20032594f: this annotation existed but read `Record<string, any>`, so it
   // named the arity of the contract without its element type — the emitted
   // `.d.ts` published `Promise<Record<string, any>>` and every property read
   // off a `create()` result stayed unchecked, exactly the hole #4311 opened
@@ -703,7 +824,7 @@ export class InMemoryDriver implements IDataDriver {
   // breaking change, and method parameters compare bivariantly against the
   // contract's `Record<string, unknown>`, so the declaration is satisfied.
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('create', object, options);
     this.logger.debug('Create operation', { object, hasData: !!data });
@@ -717,7 +838,7 @@ export class InMemoryDriver implements IDataDriver {
       updated_at: data.updated_at || new Date().toISOString(),
     });
 
-    // [#13197] Refuse a declared-unique collision instead of landing it. Checked
+    // [commit 56c093c4d] Refuse a declared-unique collision instead of landing it. Checked
     // on the STORED form, so a temporal value is compared in the one shape this
     // driver stores (#4047), and BEFORE the push, so a refused write leaves the
     // table exactly as it found it.
@@ -738,7 +859,7 @@ export class InMemoryDriver implements IDataDriver {
    * `Promise<any>` and no caller was ever asked to narrow.
    */
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('update', object, options);
     this.logger.debug('Update operation', { object, id });
@@ -762,7 +883,7 @@ export class InMemoryDriver implements IDataDriver {
       updated_at: new Date().toISOString(),
     });
 
-    // [#13197] The row being updated is excluded from its own check — an update
+    // [commit 56c093c4d] The row being updated is excluded from its own check — an update
     // that does not touch the unique field must not collide with itself.
     this.assertUnique(object, updatedRecord, table[index].id);
 
@@ -773,7 +894,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('upsert', object, options);
     this.logger.debug('Upsert operation', { object, conflictKeys });
@@ -806,7 +927,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async delete(object: string, id: string | number, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('delete', object, options);
     this.logger.debug('Delete operation', { object, id });
@@ -829,7 +950,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('count', object, options);
     let records = this.getTable(object);
@@ -850,7 +971,7 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async bulkCreate(object: string, dataArray: Record<string, any>[], options?: DriverOptions): Promise<Record<string, any>[]> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('bulkCreate', object, options);
     this.logger.debug('BulkCreate operation', { object, count: dataArray.length });
@@ -858,7 +979,7 @@ export class InMemoryDriver implements IDataDriver {
     const table = this.getTable(object);
 
     // [#13340] Build and CHECK every row before pushing ANY of them — the
-    // posture `updateMany` took in #13197, one method over. This used to be
+    // posture `updateMany` took in commit 56c093c4d, one method over. This used to be
     // `Promise.all(dataArray.map(data => this.create(...)))`, and `create`
     // writes into the table synchronously, so every row accepted BEFORE a
     // refusal stayed in the store: the caller got a rejection describing a
@@ -897,7 +1018,7 @@ export class InMemoryDriver implements IDataDriver {
   }
   
   async updateMany(object: string, query: DriverQuery, data: Record<string, any>, options?: DriverOptions): Promise<number> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('updateMany', object, options);
       this.logger.debug('UpdateMany operation', { object, query });
@@ -915,7 +1036,7 @@ export class InMemoryDriver implements IDataDriver {
       
       const count = targetRecords.length;
       
-      // [#13197] Prepare and CHECK every row before mutating any of them: an
+      // [commit 56c093c4d] Prepare and CHECK every row before mutating any of them: an
       // `updateMany` that stamps the same unique value onto two rows collides
       // by construction, and a half-applied batch is worse than a refusal. The
       // pending rows are checked against each other too, which a per-row check
@@ -942,7 +1063,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('deleteMany', object, options);
       this.logger.debug('DeleteMany operation', { object, query });
@@ -975,7 +1096,7 @@ export class InMemoryDriver implements IDataDriver {
   // Compatibility aliases
   /**
    * [#13435] All-or-nothing, generalized from {@link updateMany}'s posture
-   * (#13197) to a PER-ID patch. Used to be
+   * (commit 56c093c4d) to a PER-ID patch. Used to be
    * `Promise.all(updates.map(u => this.update(object, u.id, u.data, options)))`,
    * and `update` writes into the table synchronously and calls
    * {@link assertUnique}, so a mid-batch refusal left every row processed
@@ -1005,7 +1126,7 @@ export class InMemoryDriver implements IDataDriver {
    * follows that established convention rather than inventing a second one.
    */
   async bulkUpdate(object: string, updates: { id: string | number, data: Record<string, any> }[], options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('bulkUpdate', object, options);
     this.logger.debug('BulkUpdate operation', { object, count: updates.length });
@@ -1237,7 +1358,7 @@ export class InMemoryDriver implements IDataDriver {
    * ]);
    */
   async aggregate(object: string, pipeline: Record<string, any>[] | DriverQuery, options?: DriverOptions): Promise<any[]> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('aggregate', object, options);
     // ObjectQL's engine calls driver.aggregate(object, AST) with the SAME
@@ -1319,12 +1440,16 @@ export class InMemoryDriver implements IDataDriver {
         return { [op]: conditions };
       }
       // MongoDB/FilterCondition format: { field: value } or { field: { $op: value } }
-      // [#5324/#5328] Shape first, then translate — the SAME gate the reference
-      // matcher runs (`filter-refusal.ts`), so the two faces cannot answer one
-      // filter differently again. It must run before `normalizeFilterCondition`
+      // [#5324/#5328] Shape first, then translate — the ONE gate every face of
+      // this package runs (`filter-refusal.ts`; the since-retired reference
+      // matcher ran it too), so no two faces can answer one filter differently
+      // again. It must run before `normalizeFilterCondition`
       // and not inside it: the translator recurses per key and would therefore
       // refuse or not refuse depending on where in the tree it gave up.
-      assertFilterConditionShape(filters, 'filter');
+      // [#21066] With the object's declarations, so a scalar comparison on a
+      // declared JSON-stored field is refused there too, before mingo answers
+      // it per element.
+      assertFilterConditionShape(filters, 'filter', DRIVER_FILTER_CAPABILITIES, this.filterFieldDeclarations(object));
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
       return this.normalizeFilterCondition(filters, object);
     }
@@ -1357,15 +1482,14 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $gte: store(value) } };
       case '<':
         return { [field]: { $lt: store(value) } };
-      case '<=': {
-        // A bare-day upper bound means "through that whole day" (#4042, the
-        // driver-sql twin is #3777): `<= 2026-07-28` on an ISO-timestamp value
-        // compiles half-open (`< 2026-07-29`), which is also order-equivalent
-        // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
-        // is needed, exactly the argument the preview evaluator uses.
-        const nextDay = nextUtcCalendarDay(value);
-        return { [field]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) } };
-      }
+      case '<=':
+        // [ADR-0053 D-D1 items 5 and 9, as amended — #20822] The comparison as
+        // written. The whole-day reading of a bare-day bound (#4042) is the
+        // shared lowering's, applied at the seams, and no seam emits this AST
+        // node form (the engine and the protocol hand a driver a
+        // FilterCondition), so it arrives here only from a direct driver call,
+        // which gets the comparison it wrote (item 5).
+        return { [field]: { $lte: store(value) } };
       case 'in':
         return { [field]: { $in: store(value) } };
       case 'nin': case 'not_in': case 'notin': case 'not in':
@@ -1377,8 +1501,12 @@ export class InMemoryDriver implements IDataDriver {
       // returned rows it excludes, which on an RLS read scope is over-reach
       // rather than a loose filter (#3948). `escapeRegex` stays: the comparand
       // was always literal, and that half was never the defect.
+      //
+      // [#20874] `contains` / `not_contains` take the ONE test the `$`-spelling
+      // takes ({@link filterContainsTest}): membership on a declared JSON-stored
+      // field, the case-exact substring everywhere else.
       case 'contains':
-        return { [field]: { $regex: new RegExp(this.escapeRegex(value)) } };
+        return { [field]: this.filterContainsTest(object, field, value) };
       // [#7536] `like` / `ilike` are NOT `contains`, and sharing this arm with
       // it was the memory-face twin of the wire defect #7536 closed: the
       // comparand was regex-ESCAPED (so a caller's `%` matched a literal percent
@@ -1400,33 +1528,43 @@ export class InMemoryDriver implements IDataDriver {
         };
       }
       case 'notcontains': case 'not_contains':
-        return { [field]: { $not: { $regex: new RegExp(this.escapeRegex(value)) } } };
+        return { [field]: { $not: this.filterContainsTest(object, field, value) } };
       case 'startswith': case 'starts_with':
         return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`) } };
       case 'endswith': case 'ends_with':
         return { [field]: { $regex: new RegExp(`${this.escapeRegex(value)}$`) } };
-      // Null / empty predicates. These are in `VALID_AST_OPERATORS` and were
-      // absent here, so every one of them fell to `default: return null` and was
+      // Null predicates. These are in `VALID_AST_OPERATORS` and were absent
+      // here, so every one of them fell to `default: return null` and was
       // dropped — `is_null` narrowed nothing instead of matching null rows.
       // Alias sets and semantics mirror driver-sql's `whereNull`/`whereNotNull`
       // arms so both backends accept the same vocabulary. In a document store
       // `{field: null}` matches null AND missing, and `$ne: null` excludes both,
       // which is the right analogue of SQL IS [NOT] NULL. #3948.
-      case 'is_null': case 'isnull': case 'is_empty': case 'isempty': case 'empty':
+      case 'is_null': case 'isnull':
         return { [field]: null };
-      case 'is_not_null': case 'isnotnull':
-      case 'is_not_empty': case 'isnotempty': case 'not_empty': case 'notempty':
-      case 'is_set': case 'set':
+      case 'is_not_null': case 'isnotnull': case 'is_set': case 'set':
         return { [field]: { $ne: null } };
+      // [#20446] Empty predicates are NOT null predicates any more.
+      // `canonicalAstOperator` folds `is_empty` / `isempty` onto `is_empty`
+      // (and the not-pair onto `is_not_empty`) instead of onto `is_null`, and
+      // `parseFilterAST` lowers them to `$empty` — the field's DECLARED row of
+      // the 「is empty」 table (text: null or `''`; multi-value: null or `[]`;
+      // every other type: null). This node path answers them through the SAME
+      // arm the FilterCondition path uses ({@link emptyOperatorCondition}), so
+      // one rule gets one answer whichever shape it arrived in, and a field
+      // this driver holds no declaration for is refused here too. The bare
+      // `empty` / `not_empty` / `notempty` spellings (no canonical fold; this
+      // switch's own legacy words) take the same arm rather than a second
+      // meaning.
+      case 'is_empty': case 'empty':
+        return this.emptyOperatorCondition(object, field, true, `filter.${field}.${operator}`);
+      case 'is_not_empty': case 'not_empty': case 'notempty':
+        return this.emptyOperatorCondition(object, field, false, `filter.${field}.${operator}`);
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
-          // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).
-          const nextDay = nextUtcCalendarDay(value[1]);
-          return {
-            [field]: nextDay != null
-              ? { $gte: store(value[0]), $lt: store(nextDay) }
-              : { $gte: store(value[0]), $lte: store(value[1]) },
-          };
+          // Both ends inclusive, as written: the whole-day reading of a
+          // bare-day max is the shared lowering's (see the `<=` arm above).
+          return { [field]: { $gte: store(value[0]), $lte: store(value[1]) } };
         }
         // [#5328] One condition, one wording — the same refusal the
         // FilterCondition `$between` arm raises. They used to differ, which is
@@ -1474,7 +1612,7 @@ export class InMemoryDriver implements IDataDriver {
       }
       if (key === '$not') {
         // [#5324] The whole point of the issue. `$not` is a declared combinator
-        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `memory-matcher`
+        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `formula`
         // evaluates it, and `cel-to-filter` EMITS it — a CEL `!expr` in an RLS
         // read scope lowers to `{ $not: {…} }`. Passing it through unchanged
         // meant mingo received a document-level `$not`, which MongoDB does not
@@ -1485,9 +1623,9 @@ export class InMemoryDriver implements IDataDriver {
         // is what `driver-mongodb` rewrites to for the identical reason (#4405).
         // It is also NULL-safe by construction, which is the semantics #5146
         // ruled canonical: a row whose field is null or missing does not satisfy
-        // the inner condition, so `$nor` admits it — the same answer this
-        // package's matcher and `@objectstack/formula` give, and the one
-        // driver-sql was rewritten to match.
+        // the inner condition, so `$nor` admits it — the same answer
+        // `@objectstack/formula` gives (and this package's reference matcher
+        // gave, until retired), and the one driver-sql was rewritten to match.
         //
         // At most one `$not` per node (it is one object key), so this never
         // overwrites a sibling `$nor`, and an input `$nor` cannot reach here —
@@ -1500,20 +1638,32 @@ export class InMemoryDriver implements IDataDriver {
       // Field-level: value may be primitive (implicit eq) or operator object
       if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp)) {
         // A field spec with no `$` keys is a nested-object COMPARAND, not an
-        // operator map — mingo compares it structurally, `driver-mongodb` says
-        // so explicitly, and the matcher deep-equals it. Handing it to the
+        // operator map — mingo compares it structurally, and `driver-mongodb`
+        // says so explicitly. Handing it to the
         // operator translator would read its field names as operators.
         if (!Object.keys(value).some((k) => k.startsWith('$'))) {
           result[key] = value;
           continue;
         }
-        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key), key, here);
+        // [#20444] `$empty` lowers to a condition of its OWN, AND-ed beside the
+        // field's other operators rather than written into their operator map:
+        // its multi-value row is an OR over two tests, which no single mingo
+        // field operator spells, and a separate conjunct can never contest a
+        // lowered key with a sibling operator (the #13524 clobber class).
+        let fieldOps: Record<string, any> = value;
+        if (Object.prototype.hasOwnProperty.call(value, '$empty')) {
+          const { $empty: flag, ...rest } = value as Record<string, any>;
+          extraAndConditions.push(this.emptyOperatorCondition(object, key, flag, `${here}.$empty`));
+          if (Object.keys(rest).length === 0) continue;
+          fieldOps = rest;
+        }
+        const normalized = this.normalizeFieldOperators(fieldOps, this.temporalKind(object, key), key, here, object);
         // [#13524] Lowered writes whose mingo key was already taken by a
         // sibling operator on the same field. They cannot be merged without one
         // of the two constraints silently overwriting the other, so each
         // becomes its own `$and` branch — see `assembleLoweredWrites()`. This
         // consumed a single `_presenceAnd` when the guard covered `$exists`
-        // alone (#13195); it is a LIST now because the class has several
+        // alone (commit 9dac1ae01); it is a LIST now because the class has several
         // members and one field constraint can contest more than one key.
         if (normalized._extraAnd) {
           const promoted: Record<string, any>[] = normalized._extraAnd;
@@ -1561,8 +1711,17 @@ export class InMemoryDriver implements IDataDriver {
    *
    * `field` and `path` are carried only so a refusal can name the position it
    * refused — the vocabulary itself is enforced one level up (#5324).
+   * [#20874] `object` is carried for `$contains` / `$notContains` alone: which
+   * question they ask is the FIELD's declared storage shape
+   * ({@link filterContainsTest}), and `field` names it only together with `object`.
    */
-  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind, field = '<field>', path = 'filter'): Record<string, any> {
+  private normalizeFieldOperators(
+    ops: Record<string, any>,
+    kind?: TemporalFieldKind,
+    field = '<field>',
+    path = 'filter',
+    object?: string,
+  ): Record<string, any> {
     const store = (v: any) => coerceTemporalValue(v, kind);
     const regexConditions: Record<string, any>[] = [];
     /**
@@ -1570,7 +1729,7 @@ export class InMemoryDriver implements IDataDriver {
      * {@link assembleLoweredWrites} after the loop. Collected rather than
      * assigned because an arm cannot know whether the key it wants is already
      * spoken for by a sibling operator the author wrote LATER — which is the
-     * whole of the defect this replaces. It also subsumes #13195's
+     * whole of the defect this replaces. It also subsumes commit 9dac1ae01's
      * single-operator `presence` collection: `$exists` is now one writer among
      * eighteen, ranked by the same rule as the rest.
      */
@@ -1587,11 +1746,21 @@ export class InMemoryDriver implements IDataDriver {
         // method up (`convertConditionToMongo`) and for the same reason — see
         // the note there. The comparand stays `escapeRegex`-literal; only the
         // Unicode-folding `i` flag is gone.
-        case '$contains':
-          regexConditions.push({ $regex: new RegExp(this.escapeRegex(val)) });
+        //
+        // [#20874] `$contains` / `$notContains` ask the ONE test
+        // {@link filterContainsTest} builds: MEMBERSHIP on a declared JSON-stored
+        // field, the substring pattern everywhere else. The substring test
+        // still joins `regexConditions`, so it composes with `$startsWith` /
+        // `$endsWith` exactly as before; the membership test lowers to
+        // `$elemMatch`, a key no other operator writes.
+        case '$contains': {
+          const test = this.filterContainsTest(object, field, val);
+          if ('$elemMatch' in test) put('$elemMatch', test.$elemMatch);
+          else regexConditions.push(test);
           break;
+        }
         case '$notContains':
-          put('$not', { $regex: new RegExp(this.escapeRegex(val)) });
+          put('$not', this.filterContainsTest(object, field, val));
           break;
         case '$startsWith':
           regexConditions.push({ $regex: new RegExp(`^${this.escapeRegex(val)}`) });
@@ -1654,23 +1823,15 @@ export class InMemoryDriver implements IDataDriver {
           // range simply vanished, and no one was told. The shape gate refuses
           // it now; this throw is the totality floor.
           if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
+          // Both ends inclusive, as written. [ADR-0053 D-D1 items 5 and 9, as
+          // amended — #20822] The whole-day reading of a bare-day max (#4042)
+          // and the last-supported-day rule (#20600) are the shared
+          // lowering's (`lowerFilterCondition`, `@objectstack/spec/data`),
+          // applied at the seams: a seam-fed filter arrives here with no
+          // `$between` left, and a direct driver call gets the comparison it
+          // wrote (item 5).
           put('$gte', store(val[0]));
-          // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
-          const betweenNextDay = nextUtcCalendarDay(val[1]);
-          if (betweenNextDay != null) put('$lt', store(betweenNextDay));
-          else put('$lte', store(val[1]));
-          break;
-        }
-        case '$lte': {
-          // A bare-day upper bound means "through that whole day" (#4042; the
-          // driver-sql twin is #3777). Order-equivalent to `<=` for plain
-          // `YYYY-MM-DD` values, so it applies without a field-type lookup.
-          // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is
-          // the member of the clobber class no card had named. See
-          // {@link assembleLoweredWrites}.
-          const nextDay = nextUtcCalendarDay(val);
-          if (nextDay != null) put('$lt', store(nextDay));
-          else put('$lte', store(val));
+          put('$lte', store(val[1]));
           break;
         }
         case '$null':
@@ -1694,11 +1855,14 @@ export class InMemoryDriver implements IDataDriver {
           break;
         // Value comparisons take the field's storage form (#4047); the null /
         // existence predicates above are value-independent and must not.
-        case '$eq': case '$ne': case '$gt': case '$gte': case '$lt':
+        // [#20822] `$lte` is one of them, as written: its whole-day reading of
+        // a bare day is the shared lowering's, applied at the seams (see the
+        // `$between` arm above).
+        case '$eq': case '$ne': case '$gt': case '$gte': case '$lt': case '$lte':
         case '$in': case '$nin':
           put(op, store(val));
           break;
-        // [#13195] `$exists` means "the field HAS A VALUE" (`!= null`), never
+        // [commit 9dac1ae01] `$exists` means "the field HAS A VALUE" (`!= null`), never
         // key presence — #5298 leg 3 / #5369, landed in PR #5962, and ruled
         // onto this exit by the maintainer on 2026-08-30.
         //
@@ -1745,7 +1909,7 @@ export class InMemoryDriver implements IDataDriver {
 
     // [#13524] Assemble every lowered write, and do NOT let one clobber another.
     //
-    // #13195 landed this rule for `$exists` alone — free key merges inline, a
+    // Commit 9dac1ae01 landed this rule for `$exists` alone — free key merges inline, a
     // taken key becomes its own `$and` branch — and said in this spot that the
     // identical clobber was reachable through `$null`, `$between` and
     // `$notContains`. Enumerating the declared vocabulary instead of the noticed
@@ -1766,6 +1930,52 @@ export class InMemoryDriver implements IDataDriver {
     }
 
     return result;
+  }
+
+  /**
+   * [#20444] Lower `{ field: { $empty: true | false } }` to a mingo condition
+   * by the field's DECLARED row of the ruled 「is empty」 table — ruling B on
+   * #20311 (record 5861435168), spelled as this operator by ruling A on #20399
+   * (record 5865693155) — through the spec's one expansion,
+   * `expandEmptyOperator`, against the declaration {@link syncSchema} recorded:
+   *
+   * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+   * |---|---|---|
+   * | `null_only` | `{ f: { $eq: null } }` | `{ f: { $ne: null } }` |
+   * | `text` | `{ f: { $in: [null, ''] } }` | `{ f: { $nin: [null, ''] } }` |
+   * | `multi_value` | `{ $or: [{ f: { $eq: null } }, { f: { $size: 0 } }] }` | the same pair under `$nor` |
+   *
+   * `null` in a mingo equality matches a missing key as well as a stored null,
+   * so both readings of "no value" are empty on every row — the answer the
+   * `$null` arm already gives. The empty list is tested with `$size: 0`, never
+   * as an equality comparand: measured on mingo 7.2, `$in: [null, []]` does NOT
+   * match a stored `[]` (mingo intersects an array value with the list), and
+   * `$eq: []` also matches an array holding an empty array.
+   *
+   * The flag's boolean shape was settled by `assertFilterConditionShape` before
+   * this ran; the re-check is the totality floor a translator owes itself.
+   */
+  private emptyOperatorCondition(object: string | undefined, field: string, flag: unknown, path: string): Record<string, any> {
+    if (typeof flag !== 'boolean') throw nonBooleanEmptyComparandError(field, flag, path);
+    const shape = object ? this.valueShapes.get(object)?.get(field) : undefined;
+    if (!shape) throw undeclaredEmptyOperatorFieldError(field, path);
+    const expansion = expandEmptyOperator(shape);
+    switch (expansion.arm) {
+      case 'null_only':
+        return { [field]: flag ? { $eq: null } : { $ne: null } };
+      case 'text':
+        return { [field]: flag ? { $in: [null, ''] } : { $nin: [null, ''] } };
+      case 'multi_value': {
+        const branches = [{ [field]: { $eq: null } }, { [field]: { $size: 0 } }];
+        return flag ? { $or: branches } : { $nor: branches };
+      }
+      default: {
+        // A closed union of three rows; a fourth is a spec change this driver
+        // was not taught, and it must fail loudly rather than answer for it.
+        const unknownArm: never = expansion.arm;
+        throw unsupportedFilterError(`No $empty arm for the declared row ${JSON.stringify(unknownArm)}.`);
+      }
+    }
   }
 
   /**
@@ -1862,7 +2072,7 @@ export class InMemoryDriver implements IDataDriver {
               if (!field || field === '*') return records.length;
               return values.filter(v => v !== null && v !== undefined).length;
               
-          // [#11065] A BOOLEAN is an aggregand worth 1 or 0 — not a value to
+          // [commit 20950404c] A BOOLEAN is an aggregand worth 1 or 0 — not a value to
           // drop. `typeof v === 'number'` dropped every one of them, so a
           // whole boolean column aggregated to `nums.length === 0` and `avg`
           // returned `null` while `sum` returned `0`. That is one query with
@@ -1893,12 +2103,21 @@ export class InMemoryDriver implements IDataDriver {
           // because "the faces disagree" is this package's recurring defect
           // class (#5374, #6814) and one face aligned alone leaves the other
           // free to keep its own answer.
+          //
+          // [#20544] The addition is `@objectstack/core`'s `compensatedSum`,
+          // the fold objectql's rows path and SQLite add with. It used to be a
+          // naive `reduce`, so on this driver `engine.aggregate` answered two
+          // doubles by path — `0.1 + 0.2 + 0.3` was `0.6000000000000001` here
+          // and `0.6` on the rows path a filtered sibling aggregation forces,
+          // and `having { s: { $eq: 0.6 } }` kept the group on that path alone.
+          // Which values count as addends is untouched: the boolean rule above
+          // and the `typeof === 'number'` gate decide that, the fold only adds.
           case 'sum':
           case 'avg': {
               const nums = values
                   .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v))
                   .filter(v => typeof v === 'number');
-              const sum = nums.reduce((a, b) => a + b, 0);
+              const sum = compensatedSum(nums);
               if (func === 'sum') return sum;
               return nums.length > 0 ? sum / nums.length : null;
           }
@@ -1974,7 +2193,7 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async syncSchema(object: string, schema: any, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('syncSchema', object, options);
     // #6915 — metadata-level half of the tenancy guard: an object asking for
@@ -2000,7 +2219,10 @@ export class InMemoryDriver implements IDataDriver {
     // (ADR-0053 D-B3) and, like it, is idempotent.
     const kinds = indexTemporalFields(schema?.fields);
     this.temporalFields.set(object, kinds);
-    // [#13197, #13239] Learn the object's unique constraints in the same pass —
+    // [#20444] …and each field's declared value shape, in the same pass, for
+    // the `$empty` operator's declared row.
+    this.valueShapes.set(object, indexValueShapes(schema?.fields));
+    // [commit 56c093c4d, #13239] Learn the object's unique constraints in the same pass —
     // BOTH declaration surfaces `driver-sql` materializes uniqueness from:
     // field-level `unique` and object-level `indexes[]` entries carrying
     // `unique`. Deliberately NOT retroactive: rows already in the table arrived
@@ -2010,7 +2232,7 @@ export class InMemoryDriver implements IDataDriver {
     // an already-duplicated pair is reported by the first write that touches
     // it — the same posture `driver-sql` takes when a unique index cannot be
     // built over dirty data (it announces, it does not delete rows).
-    // [#16729] Resolve the tenant column through the STICKY record rather than
+    // [commit 0f38ab084] Resolve the tenant column through the STICKY record rather than
     // from this call's schema alone. `syncSchema` is idempotent and is called
     // again with whatever schema the caller happens to hold; a call carrying no
     // `tenancy` block would otherwise fall through to the implicit
@@ -2033,13 +2255,13 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async dropTable(object: string, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('dropTable', object, options);
     if (this.db[object]) {
       const recordCount = this.db[object].length;
       delete this.db[object];
-      // [#13197] The declaration dies with the table. A constraint left behind
+      // [commit 56c093c4d] The declaration dies with the table. A constraint left behind
       // would be enforced over a table nobody declared — the inverse of the
       // gap this closes, and just as invisible.
       this.uniqueConstraints.delete(object);
@@ -2099,6 +2321,10 @@ export class InMemoryDriver implements IDataDriver {
    * [#5374] The pattern a `$contains` / `$notContains` comparand becomes — the
    * substring rule itself, for the analytics (cube) face.
    *
+   * [#20874] On a scalar column. A declared JSON-stored field asks MEMBERSHIP
+   * instead, so the analytics face now takes the whole predicate
+   * ({@link filterContainsTest}), which uses this for the substring half.
+   *
    * Same reasoning as {@link filterComparandStorageForm} one method up, on the
    * other half of what a `contains` predicate needs. This driver's rule is
    * `escapeRegex` and NO flags ({@link normalizeFieldOperators}): the comparand
@@ -2132,6 +2358,120 @@ export class InMemoryDriver implements IDataDriver {
    */
   filterSubstringPattern(value: unknown): RegExp {
     return new RegExp(this.escapeRegex(value as string));
+  }
+
+  /**
+   * [#20874] Is `field` of `object` DECLARED JSON-stored — the population on
+   * which `$contains` / `$notContains` ask MEMBERSHIP rather than SUBSTRING?
+   *
+   * The contract (`FILTER_OPERATORS`' `$contains` docblock, `@objectstack/spec`)
+   * selects the question by the COLUMN: on a `multiple: true` field or a
+   * JSON-stored type, `$contains: v` asks whether `v` is a member of the stored
+   * array; on a scalar string column it stays the substring test. The storage
+   * shape is DECLARED metadata, so this reads the declaration {@link syncSchema}
+   * recorded ({@link valueShapes}) and never the row: `driver-sql` forks on its
+   * JSON-column registry the same way (`SqlDriver.isJsonColumn`), and a fork read
+   * off each row's value would answer a declared JSON field holding a scalar
+   * string by substring where every SQL dialect answers no member.
+   *
+   * The population is the spec's JSON-stored classes — `STRUCTURED_JSON_TYPES`
+   * and every multi-valued field (`isMultiValueField`, which covers
+   * `MULTI_OPTION_TYPES`) — the two halves `driver-sql`'s registry is built
+   * from. Two members of that registry are deliberately not here: its
+   * driver-internal `object` / `array` aliases (introspected external columns,
+   * not an authorable `type`), and a SINGLE-VALUE media field, a JSON column
+   * only on a deployment that has not moved its media columns (ADR-0104
+   * addendum); this driver stores the bare id, the moved end-state.
+   *
+   * **A field with no recorded declaration answers `false`**, exactly as
+   * `SqlDriver.isJsonColumn` answers for a table it was never told about: an
+   * object never synced, or a field its schema does not name, keeps the
+   * substring reading it has always had.
+   */
+  private isJsonStoredField(object: string | undefined, field: string): boolean {
+    const shape = object ? this.valueShapes.get(object)?.get(field) : undefined;
+    if (!shape) return false;
+    return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
+  }
+
+  /**
+   * [#21066] What the shape gate is told about `object`'s declared fields
+   * (`FilterFieldDeclarations` in `filter-refusal.ts`): which of them are
+   * JSON-stored, and where the withheld half of a refusal is written.
+   *
+   * The population is {@link isJsonStoredField}'s — the one `$contains` forks
+   * on — so the fields on which `$contains` asks membership are exactly the
+   * fields on which the equality and ordering family is refused: one declared
+   * set, two halves of one contract (the spec's `$contains` docblock names
+   * `$contains` as the operator left working where the family is refused). It
+   * matches `driver-sql`'s JSON-column registry less that registry's
+   * driver-internal aliases, as {@link isJsonStoredField} records.
+   *
+   * **A field with no recorded declaration is not judged**: an object never
+   * passed through {@link syncSchema} keeps answering every operator as it
+   * always has, as `SqlDriver.isJsonColumn` answers `false` for a table it was
+   * never told about. The refusal fires only where the storage shape is KNOWN.
+   *
+   * The diagnostic goes to this driver's logger at `warn` — the level
+   * `driver-sql` writes its withheld filter diagnostics at — so the refusal's
+   * "the full diagnostic is in the server log" is true here too.
+   *
+   * @internal Not private only because the analytics face
+   * (`memory-analytics.ts`) is another class of this package and must judge
+   * its `where` by the same declarations, for the reason
+   * {@link filterContainsTest} is reachable from it. Not a consumer contract:
+   * `FilterFieldDeclarations` is not exported from the package root.
+   */
+  filterFieldDeclarations(object: string | undefined): FilterFieldDeclarations {
+    return {
+      isJsonStoredField: (field) => this.isJsonStoredField(object, field),
+      reportWithheld: (diagnostic) => this.logger.warn(withheldFilterLogLine(diagnostic)),
+    };
+  }
+
+  /**
+   * [#20874] The one un-negated test `$contains` asks of `field` on `object` —
+   * behind every spelling of the operator on this package: the `$`-spelling and
+   * the AST spelling of the query path, and the analytics face, which wraps it
+   * in `$not` for `$notContains` exactly as the query path does and renders its
+   * SQL echo from the members it names.
+   *
+   * - **A declared JSON-stored field ({@link isJsonStoredField}) → MEMBERSHIP**:
+   *   `{ $elemMatch: { $in: members, … } }` — some element of the stored array
+   *   IS one of the members the comparand names ({@link containsMemberCandidates}).
+   *   `$elemMatch` is array-only by construction, so a stored scalar, an object
+   *   or `null` has no member — the answer `driver-sql` gives on every dialect
+   *   (its constructs are array-only too). The `$not: { $type: 'array' }` clause
+   *   keeps a NESTED array out: mingo applies `$in` through an element that is
+   *   itself an array, so `[['u1']]` would otherwise answer `'u1'`, where SQLite
+   *   compares the element's JSON text `["u1"]` and does not. Measured on mingo
+   *   7.2 against `driver-sql`/SQLite over one fixture: with the clause the two
+   *   answer the same rows on every shape, `[null]` and `[[null]]` included.
+   * - **Anything else → `{ $regex }`, the case-exact literal SUBSTRING** (#6682),
+   *   {@link filterSubstringPattern} unchanged.
+   *
+   * Negated, it composes with the NULL rule rather than replacing it: `$not`
+   * over either test admits a row whose field is null or missing (#5298), which
+   * is `driver-sql`'s `col IS NULL OR NOT (…)`.
+   *
+   * Public for the analytics face, for the reason {@link filterComparandStorageForm}
+   * and {@link filterSubstringPattern} are: a face that re-derived the population
+   * or the member reading would be a second place for the two faces to drift
+   * apart (#5374). Returned whole rather than as a pattern because the two
+   * readings do not share a shape — the analytics face used to take
+   * {@link filterSubstringPattern} and wrap it in a `$regex` of its own, which is
+   * how it inherited the per-element substring answer along with the query path.
+   *
+   * ⚠️ On a field this driver holds no declaration for, the substring pattern
+   * still reaches mingo, which applies a `$regex` to each element of an array
+   * value — the population's deliberate `false`, the same one `driver-sql` keeps
+   * for a table it was never told about.
+   */
+  filterContainsTest(object: string | undefined, field: string, value: unknown): MemoryContainsTest {
+    if (this.isJsonStoredField(object, field)) {
+      return { $elemMatch: { $in: containsMemberCandidates(value), $not: { $type: 'array' } } };
+    }
+    return { $regex: this.filterSubstringPattern(value) };
   }
 
   /**
@@ -2216,7 +2556,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
-   * [#13197, #13239] Refuse `candidate` if it violates one of `object`'s
+   * [commit 56c093c4d, #13239] Refuse `candidate` if it violates one of `object`'s
    * declared unique constraints — field-level or object-level declared index.
    *
    * The ONE seam every write path goes through, so create, update and

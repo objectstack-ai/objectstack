@@ -101,7 +101,7 @@ import { ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, manifestIdRefusal } from 
 // `res`, and every error body on this surface is `deps.error`'s. See the
 // `@objectstack/rest` barrel entry that publishes the pair.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
-// [#19394] The repo's ONE coercion for a query parameter its schema declares
+// [commit 0862063ba] The repo's ONE coercion for a query parameter its schema declares
 // `z.boolean()`, from the module whose header is the authority on the rule
 // (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
 // door's `enabled` is declared `z.boolean().optional()` — character for
@@ -135,7 +135,7 @@ import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectst
  * ("real services with no written contract, so they keep today's `any` rather
  * than being given a shape here that nothing verifies"). The `any` is honest
  * about the SLOT. What it also did, silently, was hand every request literal
- * downstream of it an unchecked call target: the #11006 series' end state —
+ * downstream of it an unchecked call target: the end state of commit cccbe51bf's ruled pattern —
  * "an undeclared key in a request literal is a compile error" — stopped one
  * seam short here, so a misspelt or undeclared key in these literals compiled.
  *
@@ -412,6 +412,70 @@ function requireWritablePackage(
 }
 
 /**
+ * [#20492] `DELETE /packages/:id` — the ORGANIZATION-SCOPE refusal of the
+ * persisted delete, asked by the door before anything is mutated.
+ *
+ * ## The measurement
+ *
+ * A caller holding `manage_metadata` with no active organization sent
+ * `DELETE /api/v1/packages/:id` through `dispatch()` and was answered
+ * `400 TENANT_SCOPE_REQUIRED` — yet the package had ALREADY left the running
+ * registry (`GET /packages/:id` 200 before, 404 after; the listing empty), and
+ * its stored rows were kept. The door ran `registry.uninstallPackage(id)` first
+ * and reached `deletePackage`'s refusal second. A refused request had changed
+ * the process for everyone it serves, until a restart re-seeded the registry.
+ *
+ * ## The rule it mirrors
+ *
+ * `deletePackage` (`@objectstack/metadata-protocol`) refuses an uninstall
+ * whose request names neither `organizationId` nor `allTenants: true` — its
+ * declared request type says so ("Omitted together with `allTenants` ⇒
+ * refused"). This door never sends `allTenants`, so the request it builds is
+ * refused exactly when the caller's vetted organization is absent. That
+ * absence is the whole condition: nothing about the package or its rows enters
+ * it, so the door can decide it up front, from the SAME value it hands the
+ * protocol.
+ *
+ * ## Shape
+ *
+ * Same code and status as the protocol's refusal — `TENANT_SCOPE_REQUIRED`,
+ * `400` — so no caller sees a second vocabulary for one condition. The sentence
+ * is the door's own, for the reason {@link requireWritablePackage}'s is: the
+ * protocol's remedy ("pass organizationId … or allTenants: true") names request
+ * keys an HTTP caller cannot send. What this caller can do is select an
+ * organization; and what the door can now truthfully add is that nothing
+ * changed.
+ *
+ * ⛔ No `isSystem` bypass: the protocol refuses an org-less uninstall whoever
+ * asks, so a mirror that exempted anyone would disagree with it. Returns a
+ * refusal result to short-circuit on, or `null` to proceed. Callers MUST run
+ * it before `uninstallPackage`, and only when `deletePackage` will run.
+ *
+ * [#21276] The ordering above is the one this refusal was written against.
+ * Since then the door withdraws nothing before `deletePackage` answers: the
+ * registry withdrawal and the disable-record clear both follow it, so a
+ * refusal from the store leaves the running process untouched as well.
+ */
+function requireUninstallOrganizationScope(
+    deps: DomainHandlerDeps,
+    id: string,
+    organizationId: string | undefined,
+): HttpDispatcherResult | null {
+    if (organizationId) return null;
+    return {
+        handled: true,
+        response: deps.error(
+            `Refusing to uninstall '${id}' with no organization scope: this request carries no active `
+            + `organization, and an uninstall that names none would delete every organization's rows for `
+            + `this package. Nothing was changed — select an organization you are a member of as your `
+            + `active organization, then retry.`,
+            400,
+            { code: 'TENANT_SCOPE_REQUIRED', packageId: id },
+        ),
+    };
+}
+
+/**
  * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
  *
  * ## The measurement
@@ -619,7 +683,7 @@ function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unkno
  *
  * `400` with {@link repeatedQueryParamMessage} — the repo's ONE message for
  * this condition, imported from `packages/rest/src/query-multiplicity.ts`,
- * whose header is the authority on the rule. The status is the same one #6307
+ * whose header is the authority on the rule. The status is the same one commit 293476148
  * chose for this same condition on this same route, and the code is
  * `VALIDATION_ERROR`: `deps.error(msg, 400)` derives it from
  * `standardErrorCodeForHttpStatus(400)`, the standard catalog's member for 400,
@@ -774,12 +838,12 @@ function installedVersionOf(pkg: unknown): string | undefined {
 
 /**
  * The `?enabled=` filter of `GET /api/v1/packages`, read the way the schema
- * that publishes it declares it (#19394 — ruling item 2 of #17667).
+ * that publishes it declares it (commit 0862063ba — ruling item 2 of #17667).
  *
  * ⭐ THE DECLARATION IS THE AUTHORITY, and it is quoted here so the next reader
  * does not have to reconstruct it from this function's behaviour.
  * `ListInstalledPackagesRequestSchema` (`packages/spec/src/api/package-api.zod.ts`)
- * declares, since #19364:
+ * declares — a key commit ada701220 kept rather than retired:
  *
  * ```ts
  *   enabled: z.boolean().optional()
@@ -840,7 +904,7 @@ function readEnabledFilter(raw: unknown): { kind: 'repeated'; count: number } | 
 
 /**
  * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
- * comparison (#19394).
+ * comparison (commit 0862063ba).
  *
  * `InstalledPackageSchema` (`packages/spec/src/kernel/package-registry.zod.ts`)
  * declares the record's own key `enabled: z.boolean().default(true)`, so a row
@@ -897,7 +961,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages → list packages
         if (parts.length === 0 && m === 'GET') {
             const denied = requireReadCapability(deps, _context); if (denied) return denied;
-            // [#19394] ⭐ THE DOOR READS `enabled` — ruling item 2 of #17667.
+            // [commit 0862063ba] ⭐ THE DOOR READS `enabled` — ruling item 2 of #17667.
             //
             // Read BEFORE the registry, deliberately: a request-shape refusal
             // must not depend on server state (the same ordering argument the
@@ -1482,12 +1546,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // true` on the next restart, because the env-wide row it left
                     // untouched is the only one cold boot loads. The
                     // `getMetaItems` read below is env-wide for the same
-                    // reason, and since #14683 it is so by construction: that
+                    // reason, and since commit 96326040f it is so by construction: that
                     // method applies `organizationIdForMetaRead` to
                     // `request.type` itself, and the predicate answers
                     // `undefined` for every type the registry declares
                     // non-overridable — `app` among them, rolled back to
-                    // `allowOrgOverride: false` in #6483. The `organizationId`
+                    // `allowOrgOverride: false` in commit ee58392e1. The `organizationId`
                     // this route still hands that call is dropped at the gate.
                     //
                     // ⛔ Dropping it is the REPAIR, not an oversight to undo.
@@ -1954,32 +2018,43 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // listing (and with it every object the package registers) until
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
-            const registryRemoved = registry.uninstallPackage(id);
-
-            // ⭐ [#18877 ruling item 3] A package that no longer exists has no
-            // lifecycle state — so the DURABLE disable record goes with the row,
-            // and the next install of this id is a FRESH install that lands at
-            // the declared default. The registry half of the same sentence is
-            // inside `uninstallPackage`, which forgets the id from the boot seed
-            // set; this is the half that outlives the process.
+            // [#20492] The persisted delete's organization-scope refusal, taken
+            // HERE, before `uninstallPackage` — the same "refuse before you
+            // mutate" ordering as the gate above. `deletePackage` refuses an
+            // uninstall that names no organization, and it used to be asked
+            // only AFTER the registry had already dropped the package: the
+            // caller got `400 TENANT_SCOPE_REQUIRED` while the package and every
+            // object it registers had left the running process for everyone it
+            // serves, with the stored rows still saying it was installed.
             //
-            // Without it the record was immortal: `DELETE` removed the row and
-            // left the id listed on disk, the next boot seeded it back, and a
-            // reinstalled package came up disabled with nothing anywhere saying
-            // why — a disable the operator could no longer even see to undo,
-            // since the package it named was gone. Written only when the
-            // registry really removed the row, so a 404 changes no state.
-            //
-            // Same best-effort try/catch as the install and PATCH arms above:
-            // the uninstall itself already happened, so a state-file failure
-            // must not turn it into a 500.
-            if (registryRemoved) {
-                try {
-                    setPackageDisabled(_context?.environmentId, id, false);
-                } catch (err) {
-                    console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
-                }
+            // ONE organization read, and it is the value handed to
+            // `deletePackage` below, so this check and the protocol's cannot
+            // disagree. Asked only when the persisted half will run: with no
+            // `deletePackage` there is no refusal to mirror, and the in-memory
+            // uninstall proceeds exactly as before. ⛔ Not a compensating
+            // re-install after the fact — nothing is touched before this.
+            // The protocol keeps its own refusal as the second line.
+            const protocol = await resolveProtocol(deps, _context);
+            const organizationId = await deps.resolveActiveOrganizationId(_context);
+            const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
+            if (persists) {
+                const unscoped = requireUninstallOrganizationScope(deps, id, organizationId); if (unscoped) return unscoped;
             }
+
+            // [#21276] Existence is READ here, never acted on. This line used to
+            // be `registry.uninstallPackage(id)`, and the disable-record clear
+            // below sat right after it — both BEFORE `deletePackage`. So when the
+            // store then refused the `sys_packages` delete, the door answered the
+            // failure while the running process had already dropped the package
+            // (`GET` 404 until a restart brought it back) and the disable record
+            // was already gone (a disabled package came back enabled). Measured
+            // at this door on SQLite with a trigger refusing the delete.
+            //
+            // Triage's ruling for #21276 — refuse before withdrawing, not undo:
+            // `deletePackage` deletes the stored row FIRST and refuses before it
+            // removes anything else, so the door asks it first and touches the
+            // running registry and the disable record only once it has answered.
+            const existed = registry.getPackage(id) !== undefined;
 
             // Persisted removal (AI/runtime packages live in sys_metadata, not
             // just the in-memory registry — the registry uninstall alone would
@@ -2009,10 +2084,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // which is optional anyway), the slot takes whatever a host registers under
             // the name, and registrants carrying no `deletePackage` are real in-tree.
             // A capability question, asked as a capability probe — not a cast.
-            const protocol = await resolveProtocol(deps, _context);
+            //
+            // [#20492] `protocol` and `organizationId` are the ones resolved above,
+            // before the registry was touched: the organization this request
+            // carries is the one the scope check already read.
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
                     persisted = await protocol.deletePackage({
                         packageId: id,
@@ -2020,7 +2097,71 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(keepData ? { keepData: true } : {}),
                     });
                 } catch (e: any) {
+                    // [#21276] Nothing was touched on this path: the registry
+                    // still holds the package and its disable record is intact.
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
+                }
+            }
+
+            // [#21276] Only now — the persisted delete has answered, or this host
+            // has none — is the package withdrawn from the running registry.
+            // `deletePackage` withdraws it itself on the same registry (its own
+            // step after the stored rows), so this is usually a no-op and is
+            // skipped when the package is already gone. A host with no
+            // persisted half keeps exactly its old behaviour: the withdrawal is
+            // the uninstall, and its refusal (another package extends an object
+            // this one owns, ADR-0029) is the request's refusal.
+            //
+            // With a persisted half, that refusal does not arrive here:
+            // `deletePackage` asks it (`SchemaRegistry.assertPackageUninstallable`)
+            // before its store delete and throws it with nothing removed, which
+            // the `catch` above answers — `500`, nothing changed. This `try`
+            // stays as a safety net for a registry without that method, or a
+            // throw nothing asked ahead of time. The stored rows are already
+            // gone by then, so it is reported as `registryRemoved: false`
+            // rather than as a failure the store does not bear out, and the
+            // package leaves the running process at the next restart.
+            if (registry.getPackage(id) !== undefined) {
+                if (persists) {
+                    try {
+                        registry.uninstallPackage(id);
+                    } catch (err) {
+                        console.warn(
+                            `[handlePackages] '${id}' was deleted from storage but the running registry refused to `
+                            + `withdraw it, so this process keeps serving it until it restarts: ${(err as Error)?.message}`,
+                        );
+                    }
+                } else {
+                    registry.uninstallPackage(id);
+                }
+            }
+            const registryRemoved = existed && registry.getPackage(id) === undefined;
+
+            // ⭐ [#18877 ruling item 3] A package that no longer exists has no
+            // lifecycle state — so the DURABLE disable record goes with the row,
+            // and the next install of this id is a FRESH install that lands at
+            // the declared default. The registry half of the same sentence is
+            // inside `uninstallPackage`, which forgets the id from the boot seed
+            // set; this is the half that outlives the process.
+            //
+            // Without it the record was immortal: `DELETE` removed the row and
+            // left the id listed on disk, the next boot seeded it back, and a
+            // reinstalled package came up disabled with nothing anywhere saying
+            // why — a disable the operator could no longer even see to undo,
+            // since the package it named was gone. Written only for a package
+            // this request found, so a 404 changes no state; and [#21276] only
+            // once the persisted delete has answered — with a persisted half,
+            // whenever its stored row is gone, even if the running registry
+            // refused the withdrawal above.
+            //
+            // Same best-effort try/catch as the install and PATCH arms above:
+            // the uninstall itself already happened, so a state-file failure
+            // must not turn it into a 500.
+            if (persists ? existed : registryRemoved) {
+                try {
+                    setPackageDisabled(_context?.environmentId, id, false);
+                } catch (err) {
+                    console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
                 }
             }
 
@@ -2067,7 +2208,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     ),
                 };
             }
-            if (!registryRemoved && deletedCount === 0) {
+            // [#21276] `existed`, not `registryRemoved`: a package this request
+            // found whose withdrawal the registry refused after its stored row
+            // was deleted is not "not found".
+            if (!existed && deletedCount === 0) {
                 return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             }
             // [#16781] `packageId` is REQUIRED by
@@ -2221,7 +2365,7 @@ _context: HttpProtocolContext,
     for (const name of names) {
         // Read the just-published seed body. THE REGISTRY DECIDES THE SCOPE,
         // not this call site: `seed` declares `allowOrgOverride: false`, and
-        // since #14908 `getMetaItem` opens by resolving
+        // since commit d5cbb44f3 `getMetaItem` opens by resolving
         // `organizationIdForMetaRead(request.type, request.organizationId)`
         // and spends THAT binding — never the raw argument — on every read
         // beneath it. The predicate answers `undefined` for every type the
@@ -2229,7 +2373,7 @@ _context: HttpProtocolContext,
         // construction: `organization_id IS NULL`, the partition a workspace
         // seed is stored in and the only one cold boot hydrates.
         //
-        // [#15068] This used to be a two-attempt org-then-env ladder, written
+        // [commit 8744de9e9] This used to be a two-attempt org-then-env ladder, written
         // when resolving the wrong scope here is what silently produced "0
         // rows loaded". The gate is that fix now, and it made the org-first
         // rung a byte-identical repeat: both attempts resolved the same

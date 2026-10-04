@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14366] `RestApiConfigSchema` is the SINGLE SOURCE of the `api` sub-object's
+ * [commit 53cbad9f7] `RestApiConfigSchema` is the SINGLE SOURCE of the `api` sub-object's
  * defaults — `RestServer.normalizeConfig` follows a change to a
  * `z.default(...)` in `packages/spec` rather than restating it.
  *
@@ -35,9 +35,11 @@
  * ⚠️ This file mocks `@objectstack/spec/api` module-wide, so the schema it
  * drives is NOT the shipped one. The complementary pins that need the REAL
  * schema — that the shipped defaults are the schema's, that `requireAuth`
- * keeps its warn-and-ignore posture, and that the parse's inner defaults now
- * reach `documentation` (whose retired `enabled` member, like the retired
- * `responseFormat` block, is refused rather than defaulted since #20295) — live in
+ * keeps its warn-and-ignore posture, and that `documentation` arrives exactly
+ * as the parse outputs it (with no inner default left since #20294 made
+ * `title` optional; its retired `enabled` and `version` members, like the
+ * retired `responseFormat` block, are refused rather than defaulted since
+ * #20295 and #20294) — live in
  * `rest-config-parse-not-cast.test.ts` §D, which is deliberately unmocked.
  */
 

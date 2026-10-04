@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14419 — `create_record` used to collapse EVERY `data.insert()` failure into
+ * Commit c5a7448d5 — `create_record` used to collapse EVERY `data.insert()` failure into
  * one opaque string (`create_record(OBJECT_NAME) failed: MESSAGE_TEXT`), so a
  * flow's only two error-handling primitives — `try_catch` and a `fault` edge
  * — could not tell "the row is already there" (`engine.insert`'s own
@@ -257,7 +257,7 @@ describe('#14419 (PR #14948 patch round 1) — a stale $error.code must not leak
    * The tier contract review's reproduction. `try_catch`'s catch region reads
    * `code` off the run-wide `$error` (necessarily — see the second describe
    * block above), so a stale `$error` becomes a store failure misread as a
-   * duplicate and SWALLOWED — a different door than #14419's original bug,
+   * duplicate and SWALLOWED — a different door than the bug commit c5a7448d5 fixed,
    * the exact same failure mode, and the very thing fence 4 of the ruling of
    * record exists to rule out.
    *

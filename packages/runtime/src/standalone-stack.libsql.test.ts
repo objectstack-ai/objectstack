@@ -21,7 +21,7 @@
 //
 // No test here touches a real Turso endpoint. Every loader-level case
 // substitutes the package through `importDriverPackage`; the whole-boot case in
-// ③ has no such seam and stages absence with `vi.doMock` instead (#12943).
+// ③ has no such seam and stages absence with `vi.doMock` instead (commit 090f2302e).
 // Both make the "package missing" arm testable in a workspace where the package
 // IS installed — which, since `@objectstack/driver-turso` became a declared
 // optional peer of this package, is now every workspace.
@@ -106,7 +106,6 @@ describe('detectDriverFromUrl — libSQL/Turso URLs resolve to the `turso` kind 
 
 describe('detectDriverFromUrl — the existing schemes are untouched (positive controls)', () => {
   it.each([
-    ['memory://anything', 'memory'],
     ['postgres://user:pw@localhost:5432/db', 'postgres'],
     ['postgresql://user:pw@localhost:5432/db', 'postgres'],
     ['pg://user:pw@localhost:5432/db', 'postgres'],
@@ -119,11 +118,32 @@ describe('detectDriverFromUrl — the existing schemes are untouched (positive c
     expect(resolveStandaloneDatabase({ databaseUrl: url }).driver).toBe(kind);
   });
 
+  // The in-memory engine's schemes are no longer a positive control: they are
+  // recognised and REFUSED, with the replacements named — and kept distinct
+  // from the unknown-scheme refusal, whose "Supported schemes" list no longer
+  // offers memory://.
+  it.each(['memory://anything', 'mingo://anything', 'MEMORY://upper'])(
+    '%s is refused as the retired in-memory engine, not as an unknown scheme',
+    (url) => {
+      expect(() => resolveStandaloneDatabase({ databaseUrl: url })).toThrow(/--fresh/);
+      expect(() => resolveStandaloneDatabase({ databaseUrl: url })).toThrow(/:memory:/);
+      expect(() => resolveStandaloneDatabase({ databaseUrl: url })).not.toThrow(/Unsupported database URL scheme/);
+    },
+  );
+
+  it('SQLite\'s own :memory: is the replacement, and it resolves', () => {
+    const r = resolveStandaloneDatabase({ databaseUrl: ':memory:' });
+    expect(r.driver).toBe('sqlite');
+    expect(r.sqliteFile).toBeNull();
+  });
+
   it('an unknown scheme still throws, and the message now lists libsql', () => {
     expect(() => resolveStandaloneDatabase({ databaseUrl: 'wat://nope' }))
       .toThrow(/Unsupported database URL scheme/);
     expect(() => resolveStandaloneDatabase({ databaseUrl: 'wat://nope' }))
       .toThrow(/libsql:\/\//);
+    expect(() => resolveStandaloneDatabase({ databaseUrl: 'wat://nope' }))
+      .not.toThrow(/memory:\/\//);
   });
 
   // The turso arm is narrow on purpose: a plain https URL is not a database.
@@ -294,7 +314,7 @@ describe('loadTursoDriverFactory — the OPTIONAL driver package, both ways (#58
 //
 // ⭐ This case's old comment predicted its own future and was right: "Should the
 // package ever become a dependency of this one, this case turns red and names
-// exactly why in this comment." #12943 declared `@objectstack/driver-turso` an
+// exactly why in this comment." Commit 090f2302e declared `@objectstack/driver-turso` an
 // OPTIONAL PEER of `@objectstack/runtime` — install-time honesty for a
 // relationship the source already had, installing nothing for a consumer — and
 // pnpm LINKS an optional workspace peer. Measured on that change: the boot

@@ -2,16 +2,16 @@
 
 /**
  * backfill-sys-record-share-organizations — the ONE-OFF repair sweep for the
- * `sys_record_share` rows the pre-#14484 `SharingService.grant` stranded with
+ * `sys_record_share` rows that `SharingService.grant`, before commit 3f64fe6c6, stranded with
  * no organization.
  *
  * ## What this repairs, and why it is not optional
  *
- * #14484 fixed the WRITER: `SharingService.grant` now stamps
+ * Commit 3f64fe6c6 fixed the WRITER: `SharingService.grant` now stamps
  * `organization_id` on every insert and update of `sys_record_share` — a
  * rule-materialised grant carries the granting rule's organization, a direct
  * grant the shared record's. It wrote nothing to existing rows, and on a WALLED
- * deployment that asymmetry is the cliff the card names:
+ * deployment that asymmetry is the cliff that commit pins:
  *
  *   - the SQL driver's own tenant predicate is NULL-TOLERANT —
  *     `(organization_id = :tenantId OR organization_id IS NULL)` — so an
@@ -33,7 +33,7 @@
  * The tree's precedents for this shape are
  * `plugin-approvals/src/backfill-platform-row-organizations.ts` and
  * `service-storage/src/backfill-sys-file-organizations.ts`, and both require a
- * MAINTAINER ORDER PER TABLE. The 2026-09-02 ruling on #14484 (decision batch
+ * MAINTAINER ORDER PER TABLE. The 2026-09-02 ruling commit 3f64fe6c6 applies (decision batch
  * #11 item 3, maintainer verbatim 「#13564 转维护者处理；其他同意」 — "其他同意"
  * adopts A: tenant-scoped, writer-repaired, existing rows backfilled from the
  * record they grant access to) IS that order, and it is the order for
@@ -121,7 +121,7 @@ import { resolveTenantFieldName } from '@objectstack/objectql';
 
 /**
  * The ONE object this sweep repairs. ⛔ Scope-pinned by the 2026-09-02 ruling
- * on #14484 — a second table needs its own maintainer order (see the module
+ * applied by commit 3f64fe6c6 — a second table needs its own maintainer order (see the module
  * doc).
  */
 export const SYS_RECORD_SHARE_BACKFILL_OBJECT = 'sys_record_share';

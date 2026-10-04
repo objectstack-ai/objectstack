@@ -8,7 +8,7 @@
  * and either one alone is a regression:
  *
  *  1. **Compile-time** (section 1). An undeclared key in one of this domain's
- *     request literals must be a COMPILE ERROR. That is the #11006 series' end
+ *     request literals must be a COMPILE ERROR. That is commit cccbe51bf's ruled end
  *     state, and it stopped one seam short here.
  *  2. **Runtime** (section 2). ⛔ A host may occupy the `protocol` slot with a
  *     PARTIAL object. Tightening the type and then deleting a

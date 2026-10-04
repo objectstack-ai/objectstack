@@ -1,5 +1,804 @@
 # @objectstack/driver-mongodb
 
+## 17.6.0
+
+### Minor Changes
+
+- a3dc817: fix(driver-memory, driver-mongodb)!: a non-boolean `$exists` comparand is refused with `INVALID_FILTER` / 400, as `$null`'s is, instead of selecting the rows with no value (#20897)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered filter-query-face-comparands-refused-at-save) this narrows the query faces to the rule that registered entry already records: its reason states that every query face refuses a non-boolean $null / $exists flag, and its replacement is this change's whole migration (a flag is the boolean itself; $exists true is "has a value", false "has no value"). This change makes that statement true on the two drivers that did not yet refuse. No authorable key, spelling, export or published type moves, and no stored row is read or rewritten; a stored filter carrying such a flag is already refused when it is saved, by that entry. -->
+  
+  **BREAKING**: this narrows what the in-memory driver and the MongoDB driver accept in a filter. A `$exists` comparand that is not a boolean (a string, a number, `null`, `undefined`, an object) is now refused with `INVALID_FILTER` / 400, where these two drivers used to answer it. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  `FieldOperatorsSchema` declares `$exists` as a boolean, and `driver-sql`, `driver-sqlite-wasm` and both Turso transports already refused any other comparand. The in-memory driver and the MongoDB driver did not: they read `$exists` as `value === true`, so every other value asked for the rows with NO value. `{ stage: { $exists: "yes" } }` and `{ stage: { $exists: 1 } }` returned the rows without a stage, the opposite of what was written. `0`, `null` and the string `"false"` landed on that same side by the same default, not because anything read them. The in-memory driver's analytics face read the same flag by truthiness and answered the valued rows for the same filter, so that driver gave two different answers.
+  
+  **What an author sees now.** `400 INVALID_FILTER` with `driver-sql`'s message, beginning `Operator "$exists" on field "FIELD" requires a boolean comparand (true or false).` and naming the position (`filter.stage.$exists`). On the in-memory driver the refusal covers `find`, `findOne`, `count`, `aggregate`, `updateMany`, `deleteMany` and the analytics face (`query()` and `generateSql()`). There, an `undefined` or object comparand is refused first by that face's comparand-type check, also `INVALID_FILTER` / 400, in its own words. A refused write changes nothing.
+  
+  **What to write instead.** Write the boolean itself. `"$exists": true` matches rows whose field has a value, and `"$exists": false` matches rows whose field has none.
+  
+  **Who is affected.** A caller that sent a non-boolean `$exists` to `InMemoryDriver` or `MongoDBDriver` (a test suite, a local or embedded deployment, a flow or hook calling the engine in-process) and read the answer as a real one. On `SqlDriver` the same filter was already a 400.
+  
+  **Unchanged.** `$exists: true` and `$exists: false` answer exactly as before. The aggregation `filter` and `having` positions, which the engine evaluates itself after the driver, are not changed by this entry.
+
+### Patch Changes
+
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- 53ed3d1: fix(driver-mongodb): `MongoDBDriver` compiles the whole-day comparison it is handed — its own copy of the bare-day upper bound is deleted (ADR-0053 D-D1 items 5, 7 and 9, #20822)
+  
+  Clause-②: no
+  
+  - **What is deleted.** `translateFilter` no longer widens a bare `YYYY-MM-DD` `$lte` to `$lt` the next day, no longer widens a `$between` maximum the same way, and no longer turns `$lte '9999-12-31'` into `$ne: null` or drops a `$between` maximum on that day. Every verb that translates a `where` inherits it: `find`, `findOne`, `count`, `updateMany`, `deleteMany`, `explain`, and the `$match` stage of `aggregate` / `buildAggregationPipeline`.
+  - **A read through the engine or the RLS compile seam is unchanged.** The seam hands the driver a filter the shared `lowerFilterCondition` (`@objectstack/spec/data`) has already rewritten on the declared `datetime` columns: `$lt` the next day, a split `$between`, `$null: false` on the last supported day. The deleted copy gave the same answer on that input. A `date` column answers as before, because its stored calendar-day text orders the same either way.
+  - **Two answers converge on what `SqlDriver` returns** (ADR-0053 D-D1 item 7's scope). On a registered object, a bare-day `$lte` or `$between` maximum is now compared as written on a column that is not declared `datetime`: a `text` column holding ISO instant text, or a column the object does not declare. This driver used to widen it to the whole day.
+  - **A caller that passes no seam gets the comparison it wrote** (item 5): a `MongoDBDriver` verb or `translateFilter` called directly. A bare-day `$lte` compares against that day's midnight, a `$between` is inclusive at both ends, and `$lte '9999-12-31'` compares against that midnight. To keep the seam's reading on a direct call, lower the filter first: `driver.find(object, { where: lowerFilterCondition(where, { isDatetimeColumn }) })`, with `lowerFilterCondition` from `@objectstack/spec/data`.
+  - No exported name changes.
+- e18fea6: fix(objectql,driver-mongodb,formula): the `having` and per-aggregation evaluator compiles the whole-day comparison it is handed, and `$contains` asks membership on a JSON-stored field in `MongoDBDriver` and in `matchesFilterCondition` (ADR-0053 D-D1 items 5 and 9; the `FILTER_OPERATORS` `$contains` contract, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/objectql`: the aggregate evaluator's own whole-day copy is deleted.** The walker behind `having` and `aggregations[i].filter` no longer widens a bare `YYYY-MM-DD` `$lte`, or a `$between` maximum, on a `datetime` column to the whole day, and no longer drops the bound on `9999-12-31`. Through `engine.aggregate` nothing changes: the engine's seam lowers both positions with the shared `lowerFilterCondition` (`@objectstack/spec/data`) before the walker runs, by the object's declared `datetime` fields for the per-aggregation `filter` and by the aggregated column's type for `having`. A caller that passes no seam gets the comparison it wrote: `applyInMemoryAggregation(rows, ast, tz, fields)` called directly now counts `{ at: { $lte: '2026-02-01' } }` against that day's midnight. To keep the seam's reading on a direct call, lower each `filter` first with `lowerFilterCondition(filter, { isDatetimeColumn })`.
+  - **`@objectstack/driver-mongodb`: `$contains` / `$notContains` ask membership on a declared JSON-stored field.** On a field `syncSchema` recorded as `multiple: true`, a multi-option type (`tags`, `multiselect`, `checkboxes`) or a JSON type, `translateFilter` (every verb, and the aggregation `$match`) now emits an array-only `$elemMatch` over the members the comparand names, with the candidate rule the SQL dialects bind (`jsonMembershipCandidates`, `@objectstack/core`): `'1'` names the string `'1'` or the number `1`, `'true'` the string or `true`. It used to emit a `$regex`, which MongoDB applies to each element, so `{ owners: { $contains: 'u1' } }` matched a stored `['u10']` and `{ tags: { $contains: 'red' } }` a stored `['redwood']`. `$notContains` is the exact complement, and still admits a row with no value. A scalar column, and a field whose declaration the driver does not hold (an object never synced, a standalone `translateFilter` call), keep the substring `$regex`.
+  - **`@objectstack/formula`: `matchesFilterCondition` asks membership of a JSON-stored column.** When the caller supplies `options.fields` and it names the column, the declaration decides: membership on a JSON-stored column, substring on any other. Otherwise the stored value decides: an array asks membership, anything else substring. A stored array used to fail `$contains` and pass `$notContains` whatever it held.
+    - **The RLS write check, which evaluates a policy with this function, moves with it.** Under a `check` such as `record.tags.contains('x')` on a multi-valued field, a write whose post-image holds `['x']` (a row the same policy's read shows) is now admitted; it was refused `PERMISSION_DENIED` / 403. `['xy']` stays refused, and the read hides it.
+    - A scalar written to a declared multi-valued field is judged as written, before the write door wraps it in a list. So `tags: 'xy'`, which the check used to admit while the read hides the stored `['xy']`, is now refused 403. And `tags: 'x'` is now refused 403 too, although the read shows the stored `['x']`. Send the list, `tags: ['x']`.
+  - **`@objectstack/spec`: docblock only, in the shipped `src/data/filter.zod.ts`.** The three pointers to the deleted `SqlDriver.calendarDayUpperBoundRewrite` / `calendarDayBetweenRewrite` now name the shared `lowerFilterCondition` at the seams, and the `FILTER_OPERATORS` `$contains` implementation-status list gains `driver-mongodb` and `formula`. No schema, type or export changes.
+  - No exported name changes.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/types@17.6.0
+
+## 17.5.0
+
+### Minor Changes
+
+- 9347c1f: A row-level or sharing-rule predicate comparing a field against a list with `!=` / `==` is refused at the CEL lowering instead of lowering to a filter that widens on driver-mongodb, and driver-mongodb refuses `$ne` with an array comparand (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/driver-mongodb`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing` and `@objectstack/lint` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-list-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS reads on MongoDB and RLS write checks.** A policy written `record.status != ['closed', 'archived']` (or `!(record.status == [...])`, or `!=` against a `current_user` membership set) lowered to `{ status: { $ne: [...] } }` (or `$not` around a bare-array equality). The RLS `using` clause is composed into the query after the engine's comparand-shape check, and driver-mongodb passed the shape to the server, where it selects every scalar row: the read returned the rows the policy was written to hide. A `check` written `!=` against a membership set admitted every write.
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses `==` / `!=` whose comparand is a list (`unsupported`): a list literal, or a `current_user` variable that resolves to an array. The authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports the literal; a resolved array is refused per request.
+  - `@objectstack/plugin-security`: the RLS compiler drops such a policy and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403). A CEL-authored `check` gets this 403; the `INVALID_FILTER` / 400 of `matchesFilterCondition` remains for a filter passed to it directly.
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is skipped at bootstrap and never seeded.
+  - `@objectstack/lint`: the list-literal form is reported (`rls-predicate-unenforceable`, `sharing-rule-unlowerable-condition`). The RLS reference pass probes each kernel-resolved `current_user` key with its runtime type.
+  - `@objectstack/driver-mongodb`: `translateFilter` refuses `$ne` with an array comparand at any depth, with `INVALID_FILTER` / 400, as driver-sql and driver-memory already do.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  **What to change.** "One of these values" is `record.status in ['open', 'pending']`; "none of these values" is `!(record.status in ['closed', 'archived'])`. In a raw filter, use `$in` / `$nin`. `in`, scalar `==` / `!=`, `null` and field-to-field comparisons are unchanged.
+  
+  <!-- adr-0087: registered cel-predicate-list-comparand-refused -->
+- 98f722a: fix(driver-mongodb)!: `translateFilter` refuses a `{ $field }` cross-field reference instead of sending it to MongoDB as a literal value (#19949)
+  
+  Clause-②: no (narrowing)
+  
+  **BREAKING**: an accept-set narrowing, shipped as `minor` under the repo's launch-window convention for accept-set narrowings. **A filter that answered before is now refused**: any filter carrying a `{ $field }` reference gets `INVALID_FILTER` / 400 from `translateFilter`, and so from every driver door that reads a `where` (`find`, `findOne`, `count`, `updateMany`, `deleteMany`, `aggregate`, `explain`).
+  
+  **Security fix for RLS reads on MongoDB.** `compileCelToFilter` lowers a field-to-field comparison such as `record.s != record.t` to `{ s: { $ne: { $field: 't' } } }`. This driver has no lowering for a column-to-column comparison, and `translateFilter` sent the reference to the server as a literal sub-document. The RLS `using` clause is composed into the read after the engine's comparand checks, so nothing stopped it on the way. Measured over the rows `{ s: 'a', t: 'a' }` and `{ s: 'a', t: 'b' }`, with mingo 7.2.4 as the proxy for MongoDB's query semantics:
+  
+  - `$ne` against the reference selected both rows, including the one where `s` equals `t`, and `$eq` selected none;
+  - `$nin: [ref]`, `$notContains: ref`, `$ne` against a reference carrying `addDays`, and `$eq` under `$not` also selected both rows;
+  - through `ObjectQL`, `SecurityPlugin` with a `rowLevelSecurity` policy `using: 's != t'`, and `MongoDBDriver` over a mingo-backed collection, `find` returned both rows, `count` returned `2`, and `findOne` returned the `s == t` row. The policy's read restriction was lost.
+  
+  A live `mongod` was not measured, because this fleet cannot fetch the binary.
+  
+  **What changes.** The driver's filter walk refuses a `{ $field }` reference in every comparand position, at any depth under `$and` / `$or` / `$not`:
+  
+  - the whole comparand of any operator: the orderings, `$eq` / `$ne`, the string operators, `$null`, `$exists`;
+  - a member of a list: `$in` / `$nin` members, either `$between` endpoint, an array given to `$ne` or `$eq`;
+  - the implicit-equality position: the bare `{ field: { $field: … } }` form, or a list holding a reference;
+  - a reference carrying `addDays`, and a malformed reference whose `$field` is not a string.
+  
+  The refusal uses the same envelope as the driver's other filter refusals. Its message names the unsupported feature (field-to-field comparison) and withholds the fields, the operator and the position, because the filter may be an access policy the caller did not write. Through the engine, an RLS read carrying such a policy is now refused with that 400, and the server is never asked. Before, it returned the unfiltered rows. A policy written `s == t`, which used to return no rows, is refused the same way.
+  
+  **What does not change.**
+  
+  - Every literal comparand translates to the same document as before, including literal `$in` / `$nin` / `$between` lists and `$not` around a literal.
+  - `$ne` with an array of literal values keeps its own refusal. An array with no reference in the equality slot still passes through `translateFilter`: the shared comparand-shape face owns that slot.
+  - Field-to-field comparison is not implemented on this driver. It is refused, not lowered to a MongoDB `$expr`. `driver-sql` and the in-memory evaluator are not touched.
+  
+  **What an affected author does.** On a MongoDB datasource, a row-level policy or filter can compare a field only against a literal value or a `current_user` value, not against another field of the same record. A policy that needs a field-to-field comparison cannot be enforced by this driver. Before this change it returned every row.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing at one driver's filter-compile door: no key, Zod schema, object definition or stored representation is added, removed or renamed, and FieldReferenceSchema is unchanged. What moves is which filters driver-mongodb answers. No stored policy can be converted to keep its meaning, because this driver has no field-to-field comparison to convert it to, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. -->
+- fb38607: feat(drivers,formula,objectql): the engine's filter faces answer the staged `$empty` operator (#20444)
+  
+  Clause-②: yes (widening)
+  
+  `$empty: true | false` is declared by `@objectstack/spec` (`FieldOperatorsSchema`) with a per-type meaning: a text-like field is empty when it is null or `''`, a multi-value field (multiselect, checkboxes, tags, or a select / radio / lookup / user / file / image with `multiple: true`) when it is null or `[]`, and every other type only when it is null. `$empty: false` is the exact complement. Until now every face in this list refused it (`INVALID_FILTER` / 400), except `matchesFilterCondition`, which answered `false` for every record. **A driver or evaluator called directly now answers it:**
+  
+  - **By the field's declared type**, through the spec's one expansion (`expandEmptyOperator`): `driver-sql`'s filter compiler (and so `driver-sqlite-wasm` and `driver-turso`'s local transport, which inherit it), `driver-turso`'s remote transport, `driver-memory`'s query path (`find` / `count` / `update` / `delete`) and `driver-mongodb`'s `translateFilter` (its `find`, its aggregate `$match`). The declaration is the one each driver already receives — `initObjects` / `registerObjectMetadata` / `registerExternalObject` on the SQL family, `syncSchema` on the others. On SQL a multi-value field's empty list is tested as stored JSON per dialect (SQLite `json_array_length` behind a `json_valid` guard, PostgreSQL a `jsonb` comparison, MySQL `JSON_LENGTH`), never as an equality comparand.
+  - **By value** — null, a missing value, `''` and `[]` are empty (`isEmptyFilterValue`) — on the faces that read no field declaration: `@objectstack/formula`'s `matchesFilterCondition` (the RLS write-side `check`), `driver-memory`'s reference matcher, and `@objectstack/objectql`'s `having` and per-aggregation `filter`. In `having`, a `count` or `sum` holding `0` is not empty.
+  
+  **Refused, never guessed** (`INVALID_FILTER` / 400): `$empty` on a field whose declaration the driver does not hold (a table built outside its registration, a builtin column such as `id`, a field with no `type`, or `translateFilter` / `RemoteTransport` used standalone without a declaration), a multi-value field on a SQL dialect the driver does not model, and a flag that is not a boolean. `driver-memory`'s analytics (cube) face refuses `$empty` as an operator it cannot compile, as it does `$null`.
+  
+  New optional API: `translateFilter(where, temporalKind?, valueShape?)` in `@objectstack/driver-mongodb` takes a declared-value-shape resolver (type `ValueShapeResolver`), and `buildAggregationPipeline` a `valueShape` option; `RemoteTransport.setDeclaredValueShapeResolver` in `@objectstack/driver-turso`, which `TursoDriver` wires. `@objectstack/spec`'s shared `FILTER_LOGIC_CASES` table gains seven `$empty` cases: a backend that runs it answers `$empty` or goes red, and its harness must declare the fixture's columns.
+  
+  `$empty` stays staged: it is not in `FILTER_OPERATORS`, so the engine's front door still refuses it until the flip card adds it, and the view operators `is_empty` / `is_not_empty` still lower to `$null`.
+
+### Patch Changes
+
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [6d2571f]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [a9fb83e]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [172b4cf]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [fe677ae]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [437bb0d]
+- Updated dependencies [49144fc]
+- Updated dependencies [e2c4e12]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [e5cf27d]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [615c468]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [89f87f2]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [3062e50]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [8255a51]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [f6ceddc]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [6e3462d]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

@@ -47,7 +47,8 @@ export const entry: SemanticMigration = {
     + 'message prescribes the null predicate because a `null` author was reaching for absence, '
     + 'not for a bound',
   reason:
-    'Maintainer ruling A on #18012 (decision batch #146 item 5, 2026-09-17 「146 同意」). '
+    'Maintainer ruling A of 2026-09-17: a blank `$between` endpoint is refused at the '
+    + 'authoring door, and the refusal names the blank side. '
     + '`FieldOperatorsSchema.safeParse({ $between: [1, \'\'] })` answered `success: true` — '
     + 'measured on the card against the installed spec 17.4.0 and re-measured on `origin/main` '
     + 'before the change. This is a NEW RULE narrowing a published face, ⛔ not a pull-back to a '
@@ -56,8 +57,8 @@ export const entry: SemanticMigration = {
     + 'acceptance was conformant. What made it wrong is the other half of the same contract — '
     + '"Closed interval [min, max]" — which no backend can honour against a blank: driver-sql '
     + 'binds it into `whereBetween`, the JS matchers compare it as a value, and the range stops '
-    + 'bounding on that side while still reading as a complete range. #13495 had already taught '
-    + 'the reference matcher to survive the null-bound form of exactly this (a bounded range '
+    + 'bounding on that side while still reading as a complete range. The reference matcher had '
+    + 'already been taught to survive the null-bound form of exactly this (a bounded range '
     + 'answered EVERY valued row, because both of the arm\'s comparisons are false against a '
     + 'missing bound); the door that admitted it was never addressed. The only producer ever '
     + 'measured is a UI builder padding a HALF-TYPED pair with `\'\'` so that a length-based '
@@ -90,7 +91,8 @@ export const entry: SemanticMigration = {
     + 'operator schema itself, which answers at the endpoint\'s own path with the blank side '
     + 'named, and the engine comparand-shape door, which refuses an executed filter carrying '
     + 'one. The objectui half — the builder stops padding a half-typed pair, so '
-    + 'the console never meets this refusal mid-typing — is objectui#9695 and lands on its own '
+    + 'the console never meets this refusal mid-typing — is a change to the console\'s own '
+    + 'filter builder and lands on its own '
     + 'schedule, either side of this one. ADR-0049 / ADR-0078 / ADR-0087.',
   acceptanceCriteria:
     'Grep every authored `$between` array — view, page and component filter rules, dashboard '

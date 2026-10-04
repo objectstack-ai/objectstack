@@ -7,8 +7,10 @@ import { z } from 'zod';
 // ────────────────────────────────────────────────────────────────────────────
 
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
 export type Locale = z.input<typeof LocaleSchema>;
 
@@ -128,6 +130,13 @@ const actionTranslationSchema = (surface: string) => strictObject({
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
+  // `ActionSchema.outcomeMessages` (#21095) — one translated message per
+  // declared outcome, keyed by the same snake_case outcome name, so a bundle
+  // key that could never match a handler's `outcome` is refused here rather
+  // than shipped as a translation nothing selects. Overlaid by
+  // `translateAction` key by key, only for outcomes the action declares.
+  outcomeMessages: z.record(SnakeCaseIdentifierSchema, z.string()).optional()
+    .describe('Translated success copy per handler outcome, keyed by the snake_case outcome name the action\'s `outcomeMessages` declares'),
   params: z.record(z.string(), strictObject({
     surface: 'this action parameter translation',
     history: TRANSLATION_HISTORY,
@@ -335,6 +344,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
    *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
@@ -585,9 +595,9 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than filling the gap from an application. For an '
-  + 'application\'s own copy use the ten groups this bundle does declare, in the order it '
-  + "declares them — 'objects', 'apps', 'messages', 'globalActions', 'dashboards', 'datasets', "
-  + "'pages', 'flows', 'metadataForms', 'settingsCommon'. Note the last one: 'settingsCommon' IS "
+  + 'application\'s own copy use the eleven groups this bundle does declare, in the order it '
+  + "declares them — 'objects', 'picklists', 'apps', 'messages', 'globalActions', 'dashboards', "
+  + "'datasets', 'pages', 'flows', 'metadataForms', 'settingsCommon'. Note the last one: 'settingsCommon' IS "
   + 'on this face, so the Settings UI shell strings an application may translate (the source '
   + 'badges, under `settingsCommon.sourceLabels`) are NOT what is being refused here — only the '
   + "per-namespace manifest copy under 'settings' is. "
@@ -628,7 +638,7 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than overriding it from an application. For an '
-  + 'application\'s own copy use the groups this item does declare — the same ten a per-app '
+  + 'application\'s own copy use the groups this item does declare — the same eleven a per-app '
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
@@ -667,12 +677,12 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  */
 /**
  * The translation groups an APPLICATION may author, as a shape rather than a
- * schema. Ten groups — the eleventh, `settings`, is platform-only and lives in
+ * schema. Eleven groups — the twelfth, `settings`, is platform-only and lives in
  * {@link platformSettingsShape}.
  *
  * Three schemas need exactly these keys: {@link TranslationDataSchema} (one
- * entry of a per-app file-authored bundle — these ten and no more),
- * {@link PlatformTranslationDataSchema} (these ten plus `settings`) and
+ * entry of a per-app file-authored bundle — these eleven and no more),
+ * {@link PlatformTranslationDataSchema} (these eleven plus `settings`) and
  * {@link TranslationItemSchema} (the registered `translation` metadata type —
  * the per-app face plus `locale`, its identity keys and the ADR-0010
  * envelope; it carried the platform face's `settings` too until #19620). The item used to
@@ -687,32 +697,6 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  * building the shape eagerly at module load would defeat the laziness those
  * exist for.
  */
-/**
- * The two measured exclusions on `flows.<flow>.screens.<node>.fields.<field>`.
- *
- * Both are keys an author reaches for from a neighbouring surface — `help` is
- * correct on an object FIELD translation and on a settings key, `options` on
- * both of those too.
- *
- * ⚠️ The REASON for the help exclusion changed with #17306 and the message
- * below changed with it. It used to be that `ScreenFieldConfig` declared
- * nothing help-shaped, so a `help` key here would have translated a string that
- * did not exist. The schema now declares `inlineHelpText`, so the string is
- * real; what is still absent is this TRANSLATION face's key for it, which is a
- * ruled widening of its own (the #7646 enumeration) and not something a
- * resolver-side accretion may grow. Until that lands, a `help` entry here would
- * still translate nothing — the same refusal, on an honest reason.
- *
- * Written as `guidance` rather than an alias because there is still no right
- * key on THIS surface to send them to: pointing `help` at `placeholder` would
- * translate the in-input hint, a different string that means something else.
- */
-const FLOW_SCREEN_FIELD_NO_HELP =
-  'the flows translation face carries `label` and `placeholder` only, so a help entry here would '
-  + 'translate nothing. The screen field itself does declare help copy '
-  + '(`ScreenFieldConfig.inlineHelpText`); what is missing is a translation key for it, not the '
-  + 'string. ⛔ Do not use `placeholder` instead — that is the in-input hint, a different string.';
-
 /**
  * The measured exclusion on `datasets.<name>.dimensions.<d>` and
  * `.measures.<m>`.
@@ -730,15 +714,94 @@ const DATASET_MEMBER_NO_DESCRIPTION =
   + '`description` is declared on the DATASET itself: translate it at '
   + "'datasets.<dataset_name>.description'.";
 
+/**
+ * The measured exclusion on `flows.<flow>.screens.<node>.fields.<field>`.
+ *
+ * `options` is a key an author reaches for from a neighbouring surface — an
+ * object FIELD translation and a settings key both carry it. There is no right
+ * key on THIS surface to send them to, which is why this is `guidance` and not
+ * an alias.
+ *
+ * The face's other neighbouring-surface miss, the help spellings, is no longer
+ * an exclusion: the face carries `inlineHelpText`, the screen field's own key
+ * for its help line, so `help` / `helpText` / `hint` / `tooltip` /
+ * `description` are aliases onto it (#17306).
+ */
 const FLOW_SCREEN_FIELD_NO_OPTIONS =
   'select-option labels are not translatable on a screen field: `ScreenFieldConfig.options[].value` is '
   + 'unconstrained (numbers and booleans are legal), so an option map keyed by value — the shape '
   + '`objects.<object>.fields.<field>.options` uses — cannot address them unambiguously. Author the '
   + "option labels on the node's `config`.";
 
+/**
+ * The tombstone prescription for `dashboards.<name>.widgets.<id>.subCaption`
+ * — the metric sub-caption, retired at both ends by ruling C on
+ * objectui#11389 (batch #264 item 5), which reverses #5428 item 4.
+ *
+ * The key overlaid the widget's `options.description`, a sub-caption key the
+ * dashboard schema never declared and no authored widget wrote (0 producers in
+ * either repository, measured), so the string existed in the served document
+ * only when this key put it there. A widget keeps ONE authored description,
+ * `widget.description`, which renders as the card-header subtitle and is
+ * translated by the widget node's `description` key. If a named user later
+ * needs a caption under a metric's value, it returns as a declared
+ * widget-level key outside `options` — never as `options.description`.
+ */
+const WIDGET_SUB_CAPTION_RETIRED =
+  '`dashboards.<name>.widgets.<id>.subCaption` was removed in @objectstack/spec 17.7.0 '
+  + '(ADR-0049 enforce-or-remove) — it overlaid the metric sub-caption onto the widget\'s '
+  + '`options.description`, a key the dashboard schema never declared and no authored widget '
+  + 'wrote, so it translated a string that existed only when this entry put it there. Delete the '
+  + 'entry. A widget has one authored description, `widget.description`, which renders as the '
+  + "card-header subtitle; translate it through this widget's `description` entry. "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
+ * The former `subtitle → subCaption` alias, re-homed as `guidance` when
+ * `subCaption` became a tombstone (the chart `accessibility` / `ariaProps`
+ * precedent in `ui/chart.zod.ts`): an alias whose target is a tombstone is
+ * the shape `alias-integrity` refuses, because it sends the author to the one
+ * key guaranteed to be rejected next.
+ *
+ * ⛔ Deliberately NOT repointed at `description`. The alias existed because a
+ * `subtitle` on a metric widget meant the caption under the number; a
+ * did-you-mean that now answered `description` would silently change what the
+ * word is taken to mean. The refusal names both readings instead, so the
+ * author picks the one they meant.
+ */
+const WIDGET_SUBTITLE_RETIRED =
+  '`subtitle` was the alias spelling of `subCaption`, which was removed in @objectstack/spec '
+  + '17.7.0 (ADR-0049 enforce-or-remove) — the metric sub-caption it translated is retired, and '
+  + 'no widget renders a caption under its value. If this string is the card-header subtitle, it '
+  + "belongs under this widget's `description` entry, which translates `widget.description`; if "
+  + 'it is a caption under the metric\'s value, delete the key.';
+
 const appTranslationDataShape = () => ({
   /** Object translations */
   objects: z.record(z.string(), ObjectTranslationDataSchema).optional().describe('Object translations keyed by object name'),
+
+  /**
+   * Picklist translations keyed by picklist name (`Picklist.name`,
+   * `data/picklist.zod.ts`).
+   *
+   *   picklists.<name>.label            → the picklist's own `label`
+   *   picklists.<name>.options.<value>  → the label of the option whose `value` matches
+   *
+   * Every field that references the picklist (`Field.select({ picklist })`)
+   * inherits these option labels — the list is translated once, not per
+   * field. A field with inline `options` keeps its own
+   * `objects.<object>.fields.<field>.options`.
+   */
+  picklists: z.record(z.string(), strictObject({
+    surface: 'this picklist translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', values: 'options', choices: 'options' },
+  }, {
+    label: z.string().optional().describe('Translated picklist label'),
+    options: z.record(z.string(), z.string()).describe(
+      'Option value to translated label map — inherited by every field that references the picklist',
+    ),
+  })).optional().describe('Picklist translations keyed by picklist name'),
 
   /** App/Menu translations */
   apps: z.record(z.string(), strictObject({
@@ -774,6 +837,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText
    *   globalActions.<action_name>.params.<param_name>.placeholder
@@ -791,7 +855,6 @@ const appTranslationDataShape = () => ({
    *   dashboards.<name>.actions.<actionUrl>.label
    *   dashboards.<name>.widgets.<widgetId>.title
    *   dashboards.<name>.widgets.<widgetId>.description
-   *   dashboards.<name>.widgets.<widgetId>.subCaption
    *   dashboards.<name>.globalFilters.<filterName>.label
    *   dashboards.<name>.globalFilters.<filterName>.options.<value>
    */
@@ -819,29 +882,25 @@ const appTranslationDataShape = () => ({
       // A widget's headline is `title`; a dashboard's is `label`. Same document,
       // one level apart, opposite spellings — so `label` on a widget is the
       // likeliest mistake on this surface and the least likely to be noticed.
-      //
-      // `subtitle` points at `subCaption`, not `description`: on a metric
-      // widget the string an author calls the "subtitle" is the sub-caption
-      // under the number (`widget.options.description`), a DIFFERENT authored
-      // field from `widget.description` (the copy under the card header). The
-      // #5428 ruling (2026-08-06, item 4) gives each authored field its own
-      // key — 「两个作者字段两个 key」 — so steering `subtitle` authors at
-      // `description` would steer them at exactly the shared key the ruling
-      // forbids (#7862).
-      aliases: { label: 'title', name: 'title', heading: 'title', subtitle: 'subCaption' },
+      aliases: { label: 'title', name: 'title', heading: 'title' },
+      // `subtitle` used to alias `subCaption`; it carries the retirement
+      // instead of a rename now that its target is a tombstone — see
+      // WIDGET_SUBTITLE_RETIRED for why it is not repointed at `description`.
+      guidance: { subtitle: WIDGET_SUBTITLE_RETIRED },
     }, {
       title: z.string().optional().describe('Translated widget title'),
-      description: z.string().optional().describe('Translated widget description'),
+      description: z.string().optional().describe('Translated widget description (overlays `widget.description`, the card-header subtitle)'),
       /**
-       * Overlays the metric widget's sub-caption — the authored
-       * `widget.options.description`, NOT `widget.description`. Two authored
-       * fields, two keys (#5428 item 4, #7862): `description` above translates
-       * `widget.description`; this key translates `options.description`.
-       * Resolved by `translateDashboard` (i18n-resolver.ts); objectui's
-       * client-side renderer half consumes the same
-       * `dashboards.<name>.widgets.<widgetId>.subCaption` path.
+       * RETIRED — the metric sub-caption (ruling C on objectui#11389, which
+       * reverses #5428 item 4). It overlaid `widget.options.description`; the
+       * overlay is gone from `translateDashboard` and a widget keeps one
+       * authored description, `widget.description`, translated by
+       * `description` above. Tombstoned rather than deleted so the rejection
+       * carries the prescription at `tsc` and at the parse; the
+       * `translation-widget-sub-caption-removed` conversion strips the key
+       * from stored bundles and items.
        */
-      subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
+      subCaption: retiredKey(WIDGET_SUB_CAPTION_RETIRED),
     })).optional().describe('Widget translations keyed by widget id'),
     /**
      * Global-filter copy, keyed by the filter's stable `name`
@@ -1038,7 +1097,7 @@ const appTranslationDataShape = () => ({
      * | `placeholder` | `element:record_picker`, `element:text_input` |
      * | `emptyText` | `element:record_picker` |
      *
-     * `submitLabel` LEFT this face in @objectstack/spec 17 (#10926, ADR-0049):
+     * `submitLabel` LEFT this face in @objectstack/spec 17 (commit d173125fb, ADR-0049):
      * its only declarer, `element:form`, retired whole (#9249), which under
      * this table's own measured-not-mirrored rule left the key with no
      * declared component to translate. The maintainer ruled retire over
@@ -1069,7 +1128,7 @@ const appTranslationDataShape = () => ({
      *   declared `content: I18nLabelSchema` (`ui/component.zod.ts`), so it is
      *   localizable at its own authoring site, and adding it to this face would
      *   be the face widening the `submitLabel` retirement declined for the
-     *   identical shape (#10926). The inline locale map is the ruled route for
+     *   identical shape (commit d173125fb). The inline locale map is the ruled route for
      *   page prose, not a workaround. That such maps are invisible to
      *   `os i18n extract` and `check:i18n-coverage` is real, and is its own
      *   question about the extractor (#14749) rather than a second key here.
@@ -1127,6 +1186,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.title
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.label
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.placeholder
+   *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.inlineHelpText
    *
    * **The hole this closes (#7646).** A `type: 'screen'` flow is a wizard the
    * user reads — a heading, a list of labelled inputs — and the bundle had no
@@ -1154,20 +1214,20 @@ const appTranslationDataShape = () => ({
    * keep out.
    *
    * **The key face is measured against the flow schema, not mirrored from the
-   * report.** Two of the three per-field keys the issue proposed are real
-   * (`label`, `placeholder`); `help` is not:
+   * report.** The per-field keys are the screen field's own copy keys, spelled
+   * as `ScreenFieldConfigSchema` spells them, because the overlay writes each
+   * translation back onto the key it names: `label`, `placeholder` and
+   * `inlineHelpText`.
    *
-   * - **`help` is not here.** Originally because `ScreenFieldConfigSchema`
-   *   declared nothing help-shaped at all, so the key would have parsed clean
-   *   and translated nothing — the ADR-0078 shape #6080 removed from the page
-   *   component face for exactly this reason. ⚠️ That premise expired with
-   *   #17306, which gave the screen field `inlineHelpText` (the object field's
-   *   own spelling). The copy now exists; this face's key for it does not, and
-   *   growing the face is a ruled step against the #7646 enumeration rather
-   *   than a resolver-side accretion. So the exclusion stands and the outcome
-   *   is unchanged — a `help` entry still translates nothing — but it is now a
-   *   NOT-YET, and the guidance says so rather than telling an author the field
-   *   has no help copy when it has.
+   * - **Help text is `inlineHelpText`, not the report's `help`.** When #7646
+   *   ruled the face, the screen field declared nothing help-shaped, so a
+   *   `help` key would have parsed clean and translated nothing — the ADR-0078
+   *   shape #6080 removed from the page component face for exactly this
+   *   reason. #17306 gave the screen field `inlineHelpText` (the object
+   *   field's own spelling), and the face gained the key once the console's
+   *   screen dialog drew it, under the control. `help` / `helpText` / `hint` /
+   *   `tooltip` / `description` are aliases onto it, so an author holding a
+   *   neighbouring surface's spelling is told the rename.
    *
    * ⛔ **Runner chrome is NOT here** — the Cancel/Submit buttons the wizard
    * draws around the author's screen belong to the console's own message
@@ -1177,8 +1237,9 @@ const appTranslationDataShape = () => ({
    *
    * The runner half was a separate, downstream change, and it has landed
    * client-side for the per-screen copy. objectui's `FlowRunner` reads
-   * `screens` (each screen's `title`, and each field's `label` and
-   * `placeholder`), measured at the `.objectui-sha` pin `f8a9d0fb`. The flow's own
+   * `screens`: each screen's `title`, and each field's copy over
+   * `FLOW_SCREEN_FIELD_COPY_KEYS` (`label`, `placeholder`, `inlineHelpText`),
+   * measured at the `.objectui-sha` pin `31971ff1e`. The flow's own
    * `label` is read by nothing yet. See the `flows` rows in
    * `liveness/translation.json`: `screens` is `live`, `label` stays `planned`,
    * and the group's author warning names the unread half.
@@ -1222,13 +1283,15 @@ const appTranslationDataShape = () => ({
       fields: z.record(z.string(), strictObject({
         surface: 'this flow screen field translation',
         history: TRANSLATION_HISTORY,
-        aliases: { name: 'label', title: 'label', text: 'label' },
+        // The help spellings are the ones `ScreenFieldConfigSchema` renames
+        // onto `inlineHelpText` (the object field's table), plus
+        // `description`, which an object field uses for its tooltip copy.
+        aliases: {
+          name: 'label', title: 'label', text: 'label',
+          help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
+          description: 'inlineHelpText',
+        },
         guidance: {
-          help: FLOW_SCREEN_FIELD_NO_HELP,
-          helpText: FLOW_SCREEN_FIELD_NO_HELP,
-          hint: FLOW_SCREEN_FIELD_NO_HELP,
-          tooltip: FLOW_SCREEN_FIELD_NO_HELP,
-          description: FLOW_SCREEN_FIELD_NO_HELP,
           options: FLOW_SCREEN_FIELD_NO_OPTIONS,
           choices: FLOW_SCREEN_FIELD_NO_OPTIONS,
           values: FLOW_SCREEN_FIELD_NO_OPTIONS,
@@ -1236,6 +1299,7 @@ const appTranslationDataShape = () => ({
       }, {
         label: z.string().optional().describe('Translated screen field label'),
         placeholder: z.string().optional().describe('Translated screen field placeholder'),
+        inlineHelpText: z.string().optional().describe('Translated screen field help text (drawn under the input)'),
       })).optional().describe('Screen field translations keyed by field name (`ScreenFieldConfig.name`)'),
     })).optional().describe('Screen translations keyed by screen node id (`FlowNode.id`, the client\'s `ScreenSpec.nodeId`)'),
   })).optional().describe('Screen-flow translations keyed by flow name'),
@@ -1434,10 +1498,10 @@ const platformSettingsShape = () => ({
  * One locale of a PER-APP translation bundle — `stack.translations`, and
  * everything {@link defineTranslationBundle} builds.
  *
- * Ten groups: every group the platform bundle declares EXCEPT `settings`,
+ * Eleven groups: every group the platform bundle declares EXCEPT `settings`,
  * which is platform-only and is refused here by name with
  * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
- * {@link PlatformTranslationDataSchema} for the eleven-group face and for why
+ * {@link PlatformTranslationDataSchema} for the twelve-group face and for why
  * the two are separate namespaces.
  */
 export const TranslationDataSchema = lazySchema(() => strictObject({
@@ -1448,7 +1512,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   // `settings`, and an alias prescribing a key the shape rejects is a
   // suggestion the author cannot take (the `alias-integrity` audit judges
   // exactly that). Both spellings are answered by `guidance` above instead.
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', picklist: 'picklists', flow: 'flows', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -1458,7 +1522,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
 export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 /**
- * One locale of a PLATFORM translation bundle — the eleven groups, `settings`
+ * One locale of a PLATFORM translation bundle — the twelve groups, `settings`
  * included.
  *
  * The platform's own bundles are code, not authored metadata
@@ -1493,7 +1557,7 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the platform translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', picklist: 'picklists', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   extraKeys: ['locale'],
 }, {
   ...appTranslationDataShape(),
@@ -1609,7 +1673,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * to whoever — or whatever — authored it.
  *
  * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
- * the item takes the PER-APP face, the same ten groups as
+ * the item takes the PER-APP face, the same eleven groups as
  * {@link TranslationDataSchema}, and refuses `settings` (and the singular
  * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
  * The file door and the item door are two authoring surfaces for one app
@@ -1648,7 +1712,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // this door no longer declares `settings`, and an alias prescribing a key
   // the shape rejects is a suggestion the author cannot take. Both spellings
   // are answered by `guidance` above instead.
-  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', flow: 'flows', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', picklist: 'picklists', flow: 'flows', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...appTranslationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),

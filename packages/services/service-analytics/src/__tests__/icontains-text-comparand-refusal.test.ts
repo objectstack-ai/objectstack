@@ -41,7 +41,7 @@ import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 import { declaredRefusalMessage, resolveThrownHttpError, serverFaultProvenance } from '@objectstack/types';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -73,9 +73,9 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    [['id', 'string'], ['name', 'string'], ['amt', 'number']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
+    [['id', 'string'], ['name', 'string'], ['amt', 'number']].map(([n, t]) => [n, { label: n, type: t, sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } } as never;
 
@@ -88,7 +88,7 @@ const REFUSED_COMPARANDS: Array<[string, unknown]> = [
   ['a Date', new Date('2026-01-01T00:00:00.000Z')],
 ];
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;
@@ -147,10 +147,14 @@ describe('[#20068] the `where` door refuses the two rows, both spellings, in the
     }
   });
 
-  it('in every position: under $not, in an $or beside a TRUE arm, and on a nested relation', () => {
+  it('in every position: under $not, in an $or beside a TRUE arm, and on a relation traversal', () => {
     expectWhereRefusal(refusalOf(() => tree({ $not: { name: { $icontains: '' } } })), 'name', '');
     expectWhereRefusal(refusalOf(() => tree({ $or: [{}, { name: { $icontains: '' } }] })), 'name', '');
-    expectWhereRefusal(refusalOf(() => tree({ acct: { name: { $icontains: '' } } })), 'acct.name', '');
+    // [#20887] The traversal as the dotted cube member. Its NESTED spelling
+    // (`{ acct: { name: { $icontains: '' } } }`) is no longer this door's leaf:
+    // it is carried as written to the engine, which reads the related object
+    // with it and refuses the comparand there, in the same published words.
+    expectWhereRefusal(refusalOf(() => tree({ 'acct.name': { $icontains: '' } })), 'acct.name', '');
   });
 
   it('existing refusals keep their sentence: an array and an object are not re-diagnosed', () => {
@@ -448,9 +452,12 @@ describe('[#20068] ⛔ no widening by analogy — the case-exact family keeps it
 
   it('the `where` door still compiles each of them with an empty comparand', () => {
     for (const op of SIBLINGS) {
-      const node = tree({ name: { [op]: '' } }) as { kind: string; children?: unknown[]; operator?: string };
-      // `$notContains` is NULL-safe (#5298), so it wraps its leaf in an `or`.
-      const leaf = node.kind === 'or' ? (node.children as Array<{ operator: string }>)[1] : node;
+      type Node = { kind: string; children?: Node[]; operator?: string };
+      // `$notContains` is NULL-safe (#5298), so it wraps its leaf in an `or` —
+      // [ADR-0053 D-D1, amended — #5930 step 3] twice now, the shared
+      // lowering's escape around this face's own: descend to the operator leaf.
+      let leaf = tree({ name: { [op]: '' } }) as Node;
+      while (leaf.kind === 'or') leaf = leaf.children![1];
       expect(leaf, op).toMatchObject({ operator: CUBE_OP[op], values: [''] });
     }
   });

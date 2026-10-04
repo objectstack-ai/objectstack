@@ -16,7 +16,7 @@
  *
  * ## Reachability is measured, not argued
  *
- * PR #14409 (landed `3ecb7dc1a`) drove both live client libraries: mysql2
+ * Commit 3ecb7dc1a drove both live client libraries: mysql2
  * 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero
  * `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in
  * 275760..294276 — a range Postgres itself stores. The maintainer ruled option

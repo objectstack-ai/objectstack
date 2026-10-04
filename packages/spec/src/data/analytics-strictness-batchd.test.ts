@@ -70,8 +70,8 @@ function accept(
 const CUBE = {
   name: 'batchd_probe',
   sql: 'batchd_probe_table',
-  measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
-  dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+  measures: { count: { label: 'Count', type: 'count', sql: '*' } },
+  dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
 } as const;
 
 /** A minimal query the REST wrapper accepts (it requires `cube`). */
@@ -93,7 +93,7 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
   it('[#10194] `analytics_cube` now resolves the SAME schema at the saveMetaItem door', () => {
     // This pin used to assert the opposite — `getMetadataTypeSchema` answering
     // `undefined` — and its comment demanded that the ADR-0010 envelope
-    // question be re-asked before the line was "fixed". It was: #10194 bound
+    // question be re-asked before the line was "fixed". It was: commit 2306a765c bound
     // `analytics_cube` in `UNREGISTERED_KIND_SCHEMAS` (so `PUT
     // /meta/analytics_cube/:name` stops storing any JSON as `success: true`),
     // and CubeSchema now declares `...MetadataProtectionFields`, exactly per
@@ -110,7 +110,6 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
       ...CUBE,
       title: 'Probe',
       joins: { other: { name: 'other' } },
-      refreshKey: { every: '1 hour', sql: 'SELECT max(updated_at)' },
       public: true,
     });
     accept(AnalyticsQuerySchema, {
@@ -134,15 +133,24 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     expect(reject(CubeSchema, { ...CUBE, publik: true })).toContain('publik');
   });
 
-  it('`Cube.refreshKey` — one level below an already-closed parent', () => {
-    expect(reject(CubeSchema, { ...CUBE, refreshKey: { every: '1 hour', sqll: 'x' } })).toContain('sqll');
+  // Batch D also closed the nested `Cube.refreshKey` block ("this cube
+  // refreshKey block"), pinned here as `{ every, sqll }` → rejection naming
+  // `sqll`. #20637 retired `refreshKey` whole (ADR-0049 enforce-or-remove:
+  // nothing read `every` or `sql`, and no analytics result is cached), so the
+  // nested surface no longer exists — the batch-D verdict for it is SUPERSEDED,
+  // not reopened. The key itself now rejects with the retirement prescription,
+  // whatever it holds (the full pin set is `cube-refresh-key-retirement.test.ts`):
+  it('`Cube.refreshKey` — REMOVED; the key rejects with the prescription, not as a bare unknown', () => {
+    expect(reject(CubeSchema, { ...CUBE, refreshKey: { every: '1 hour', sqll: 'x' } })).toContain(
+      '`analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove)',
+    );
   });
 
   it('`Metric` — through the cube `measures` record', () => {
     expect(
       reject(CubeSchema, {
         ...CUBE,
-        measures: { m: { name: 'm', label: 'M', type: 'count', sql: '*', drillMembers: [] } },
+        measures: { m: { label: 'M', type: 'count', sql: '*', drillMembers: [] } },
       }),
     ).toContain('drillMembers');
   });
@@ -155,7 +163,7 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
   // The key itself now rejects with the retirement prescription:
   it('`Metric.filters` — REMOVED; the key rejects with the prescription, not as a bare unknown', () => {
     expect(
-      reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
+      reject(MetricSchema, { label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
     ).toContain('was removed in @objectstack/spec 17 (ADR-0049)');
   });
 
@@ -163,7 +171,7 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     expect(
       reject(CubeSchema, {
         ...CUBE,
-        dimensions: { d: { name: 'd', label: 'D', type: 'string', sql: 'd', primaryKey: true } },
+        dimensions: { d: { label: 'D', type: 'string', sql: 'd', primaryKey: true } },
       }),
     ).toContain('primaryKey');
   });
@@ -246,7 +254,7 @@ describe('#4001 batch D — alias claims are true of the surfaces they point at'
     expect(Object.keys(CubeSchema.shape)).not.toContain('label');
     expect(Object.keys(MetricSchema.shape)).toContain('label');
     expect(Object.keys(DimensionSchema.shape)).toContain('label');
-    expect(reject(MetricSchema, { name: 'm', title: 'M', label: 'M', type: 'count', sql: '*' })).toContain('label');
+    expect(reject(MetricSchema, { title: 'M', label: 'M', type: 'count', sql: '*' })).toContain('label');
     expect(reject(CubeSchema, { ...CUBE, label: 'Probe' })).toContain('title');
   });
 

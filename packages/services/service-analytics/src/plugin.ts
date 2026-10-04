@@ -33,7 +33,7 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `string` where the contract declares a six-value enum, and nothing compiled
  * the two against each other.
  *
- * Three of these members could not be named from a contract until #12248
+ * Three of these members could not be named from a contract until commit 8425c17cc
  * landed the #11833 ruling: `resolveEffectiveDatasource` and
  * `getDriverForObject` (fork 1, declared OPTIONAL exactly so seams like this
  * one keep degrading), and `getObject`'s structured `ServiceObject` return
@@ -54,19 +54,20 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
  * what keeps this seam usable against an engine that is not ObjectQL.
  * `judgeFilter` (#20157) is optional on the contract itself, by ruling, and
- * the auto-bridge probes it the same way.
+ * the auto-bridge probes it the same way. So is `hasObjectMiddleware`
+ * (#21080), whose absence the bridge below reads as "cannot say".
  */
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
-  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter'>>;
+  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
  * `temporalFilterValue` / `temporalFilterColumnSql` are first-class contract
  * members since ADR-0053 D-A2, no longer a duck-typed local invention.
  *
- * Since #12248 declared `IDataEngine.getDriverForObject?`, this is the
+ * Since commit 8425c17cc declared `IDataEngine.getDriverForObject?`, this is the
  * RETURN-side narrowing that member's own docblock prescribes, applied at the
  * two call sites below — not a re-declaration of the member. `Pick<IDataDriver,
  * …>` admits the full contract value, so the engine keeps handing back whatever
@@ -97,6 +98,16 @@ type TemporalDriverSurface = Pick<
 type DialectNamingDriver = { readonly dialectName?: unknown };
 
 /**
+ * [#21441] The slice of a SQL driver that renders its OWN date-bucket
+ * expression, `SqlDriver.dateBucketSql`. Read structurally, as
+ * {@link DialectNamingDriver} is and for the same reason: bucketing SQL is a
+ * property of the SQL driver family, not of every driver.
+ */
+type DateBucketingDriver = {
+  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+};
+
+/**
  * Re-parse a bridge-supplied aggregation `method` as the engine contract's
  * `AggregationFunction` before it is forwarded as `function`, refusing
  * anything else.
@@ -104,16 +115,19 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * Both sides now declare the same six-value enum: `IDataEngine.aggregate`'s
  * `aggregations[].function`, and — since #12776 — the analytics strategy
  * contract (`StrategyContext.executeAggregate`) plus the two consumer-local
- * config mirrors this package keeps in lockstep with it (#12940). So this
+ * config mirrors this package keeps in lockstep with it (commit aa16721b6). So this
  * parse is DEFENCE IN DEPTH behind a compile-time check, not the only check
  * (#11833).
  *
- * That is a reason to keep it, not to delete it. Types are erased: a
- * JavaScript app supplying its own `executeAggregate`, or host drift arriving
- * through a cube object that never met `CubeSchema`'s parse (the path
- * `aggregate-bridge-function-vocabulary.test.ts` drives end to end), still
- * reaches this seam carrying a method the engine does not declare. What the
- * refusal buys is in `plugin.ts`'s forward below and in #12209: the engine is
+ * That is a reason to keep it, not to delete it. Types are erased, so the
+ * compile-time check proves nothing about the value a caller hands this seam
+ * at run time. A cube object that never met `CubeSchema`'s parse no longer
+ * reaches it with a non-aggregate type — since #21000 the strategy's resolver
+ * refuses that one step earlier (`aggregateOfMeasure`), in the same tier — so
+ * what this guards is the bridge itself: any method that arrives here, from
+ * whatever produced it, is still parsed before the engine sees it
+ * (`aggregate-bridge-function-vocabulary.test.ts` drives both). What the
+ * refusal buys is in `plugin.ts`'s forward below and in commit 017130a09: the engine is
  * never handed a `function` no driver declares.
  *
  * Parsing with the spec's OWN enum keeps a single vocabulary — no local
@@ -129,10 +143,10 @@ function parseEngineAggregateFunction(
     throw new Error(
       `[Analytics] The aggregate bridge cannot forward the aggregation ` +
       `"${alias}": "${method}" is not one of the engine's aggregate functions ` +
-      `(${AggregationFunction.options.join(', ')}). A custom-SQL measure is ` +
-      `refused earlier, with a caller-facing diagnostic, by ObjectQLStrategy; ` +
-      `reaching this point means the analytics layer produced a method the ` +
-      `engine contract does not declare.`,
+      `(${AggregationFunction.options.join(', ')}). A cube measure whose type ` +
+      `names no aggregate is refused earlier, by ObjectQLStrategy; reaching ` +
+      `this point means the analytics layer produced a method the engine ` +
+      `contract does not declare.`,
     );
   }
   return parsed.data;
@@ -170,7 +184,7 @@ export interface AnalyticsServicePluginOptions {
      *   measure-scoped filter this plugin lowers onto the aggregation
      *   silently never reaches storage.
      * - `method` is the spec's OWN six-value `AggregationFunction`, not
-     *   `string`: #12776 narrowed the contract, #12940 brought this mirror
+     *   `string`: #12776 narrowed the contract, commit aa16721b6 brought this mirror
      *   back into line. This is the declaration a custom-bridge author types
      *   their handler against, so it is where the compile-time vocabulary
      *   #12776 bought for strategy authors reaches them too.
@@ -371,7 +385,7 @@ export class AnalyticsServicePlugin implements Plugin {
             // correct signal, and the one the deleted structural type hid by
             // declaring `function: string` on both sides.
             //
-            // Since #12776 (contract) and #12940 (this plugin's own config
+            // Since #12776 (contract) and commit aa16721b6 (this plugin's own config
             // mirror above), BOTH ends declare the enum, so the rename is
             // enum-to-enum and the parse below is defence in depth behind a
             // compile-time check rather than the only check — see
@@ -385,15 +399,19 @@ export class AnalyticsServicePlugin implements Plugin {
             // so there is one vocabulary, and its own error map already
             // carries the `array_agg`/`string_agg` retirement prescriptions.
             //
-            // TIERING, deliberately: the reachable producer of a non-aggregate
-            // method — a custom-SQL measure (`AggregationMetricType`
-            // `number`/`string`/`boolean`) — is already refused upstream with a
-            // caller-blaming 400 by `ObjectQLStrategy.resolveMeasureAggregation`
-            // (#12209). Anything still arriving here is host drift, which that
-            // refusal's docblock assigns to the undeclared-500 tier — so this
-            // throws rather than re-blaming the caller, and it answers loudly
-            // instead of letting the engine answer `null` per bucket under the
-            // author's own measure name (the #4157 class).
+            // TIERING, deliberately: the producer of a non-aggregate method —
+            // a cube measure whose `type` names no aggregate: a custom-SQL
+            // type (`number`/`string`/`boolean`, retired from
+            // `AggregationMetricType`, #21000) or one the spec never declared
+            // — is already refused upstream by
+            // `ObjectQLStrategy.resolveMeasureAggregation`, in the
+            // undeclared-500 tier with the spec's own words
+            // (`aggregateOfMeasure`). So no cube measure reaches this point
+            // with one; what still could is a method the analytics layer
+            // itself produced, our own drift — so this throws in the same tier
+            // rather than blaming the caller, and it answers loudly instead of
+            // letting the engine answer `null` per bucket under the author's
+            // own measure name (the #4157 class).
             function: parseEngineAggregateFunction(a.method, a.alias),
             field: a.field,
             alias: a.alias,
@@ -557,7 +575,7 @@ export class AnalyticsServicePlugin implements Plugin {
      * has since ADR-0021 D-C), so serving nothing is the same outcome the
      * object-level bridge produces.
      *
-     * [#17130] It needs no NEW error code — and the clause that used to follow,
+     * [commit 54b3d1d4a] It needs no NEW error code — and the clause that used to follow,
      * "and no new envelope here", was the finding. An envelope is not a second
      * outcome, it is what stops the outcome being decided by wording:
      * `queryDataset`'s catch re-throws whatever declares `code` + `status` and
@@ -629,7 +647,7 @@ export class AnalyticsServicePlugin implements Plugin {
             'A security service is wired on this deployment, so analytics must not fall ' +
             'open and serve rows with no row-level policy applied.',
           );
-          // [#17130] Declared, not bare. `resolveReadScopes` replaces this
+          // [commit 54b3d1d4a] Declared, not bare. `resolveReadScopes` replaces this
           // error with its own on the dataset path, but this provider is read
           // by four consumers and a bare refusal is the one kind
           // `queryDataset`'s catch classifies by WORDING — three of the six
@@ -759,6 +777,109 @@ export class AnalyticsServicePlugin implements Plugin {
       };
       autoBridgedReadAdmission = true;
     }
+
+    // [#20917] The FIELD-LEVEL half of the same read
+    // (`AnalyticsServiceConfig.getReadableFields`), bridged the same way and
+    // for the same reasons as the two halves above: resolution at CALL time,
+    // and the three resolutions kept apart. There is no plugin option for it:
+    // the reader is the security service's, and a host that composes its own
+    // reader constructs `AnalyticsService` with it.
+    //
+    //   ABSENT   — no security service: no field-level security anywhere on
+    //              this deployment, `/data` included. The provider answers
+    //              `undefined` ("no answer"), which judges no field.
+    //   UNUSABLE — the service exists but cannot answer: resolving it threw,
+    //              or it carries no `getReadableFields` (a REQUIRED member of
+    //              `ISecurityService`, so a conforming provider never lands
+    //              here). The provider THROWS, and the service refuses the
+    //              query fail-closed: a reader that never answered must not be
+    //              read as "every field readable".
+    //   USABLE   — ask it.
+    interface SecurityReadableFields {
+      getReadableFields?(object: string, context?: ExecutionContext): Promise<string[] | undefined>;
+    }
+    const getReadableFields: AnalyticsServiceConfig['getReadableFields'] = async (object, context) => {
+      let svc: SecurityReadableFields | undefined;
+      try {
+        svc = ctx.getService<SecurityReadableFields>('security');
+      } catch (e) {
+        throw new Error(
+          `resolving the "security" service threw (${String((e as Error)?.message ?? e)})`,
+        );
+      }
+      if (!svc) return undefined;
+      if (typeof svc.getReadableFields !== 'function') {
+        throw new Error(
+          'the registered "security" service exposes no getReadableFields(), so it cannot answer ' +
+          'which fields the caller may read',
+        );
+      }
+      return svc.getReadableFields(object, context);
+    };
+
+    // [#20935] The QUERY-side half (`AnalyticsServiceConfig.getQueryableFields`):
+    // which fields the caller may filter, sort, group or aggregate by. A field
+    // the caller is served MASKED is in the read projection above and is NOT
+    // queryable — the engine's two query guards refuse it — so the gate asks
+    // both. Bridged the same way, with the same three resolutions:
+    //
+    //   ABSENT   — no security service: `undefined`, no answer, as above.
+    //   UNUSABLE — resolving it threw: THROW, the query is refused.
+    //   USABLE   — ask its `getQueryableFields`.
+    //
+    // ⛔ And one more state the read half does not have: a USABLE service that
+    // cannot give THIS answer — it predates the method, or it answered
+    // `undefined`. The fallback is NOT the read projection alone, which counts a
+    // masked field readable and would admit exactly the queries this half
+    // exists to refuse. It fails CLOSED: the read projection less every field
+    // whose declaration carries a `maskingRule`, whoever the caller is. That
+    // over-refuses a caller the rule is lifted for — a system one included —
+    // which is the safe direction and the only one available: an older reader
+    // cannot say for whom a rule is lifted, and deciding that here (reading the
+    // caller's capabilities, or its system bit) would be a second copy of the
+    // masking rule.
+    interface SecurityQueryableFields extends SecurityReadableFields {
+      getQueryableFields?(object: string, context?: ExecutionContext): Promise<string[] | undefined>;
+    }
+    const maskingRuleFields = (object: string): Set<string> => {
+      const fields = dataEngine()?.getObject?.(object)?.fields as unknown;
+      const out = new Set<string>();
+      const collect = (name: unknown, def: unknown) => {
+        const rule = (def as { maskingRule?: unknown } | null | undefined)?.maskingRule;
+        if (typeof name === 'string' && name && rule !== undefined && rule !== null) out.add(name);
+      };
+      if (Array.isArray(fields)) {
+        for (const f of fields) collect((f as { name?: unknown } | null)?.name, f);
+      } else if (fields && typeof fields === 'object') {
+        for (const [name, def] of Object.entries(fields as Record<string, unknown>)) collect(name, def);
+      }
+      return out;
+    };
+    const getQueryableFields: AnalyticsServiceConfig['getQueryableFields'] = async (object, context) => {
+      let svc: SecurityQueryableFields | undefined;
+      try {
+        svc = ctx.getService<SecurityQueryableFields>('security');
+      } catch (e) {
+        throw new Error(
+          `resolving the "security" service threw (${String((e as Error)?.message ?? e)})`,
+        );
+      }
+      if (!svc) return undefined;
+      if (typeof svc.getQueryableFields === 'function') {
+        const answer = await svc.getQueryableFields(object, context);
+        if (answer !== undefined) return answer;
+      }
+      if (typeof svc.getReadableFields !== 'function') {
+        throw new Error(
+          'the registered "security" service exposes neither getQueryableFields() nor getReadableFields(), ' +
+          'so it cannot answer which fields the caller may query on',
+        );
+      }
+      const readable = await svc.getReadableFields(object, context);
+      if (readable === undefined) return undefined;
+      const masked = maskingRuleFields(object);
+      return readable.filter((f) => !masked.has(f));
+    };
 
     // ADR-0021 — relationship → target-object resolver. A dataset's `include`
     // names lookup/master_detail FIELDS on the base object; the joined TABLE is
@@ -1104,6 +1225,68 @@ export class AnalyticsServicePlugin implements Plugin {
       }
     };
 
+    /**
+     * [#21441] The expression the driver that owns the object groups a
+     * date-bucketed dimension by, as SQL text: what `ObjectQLStrategy.generateSql`
+     * echoes for the bucket. Asked of the DRIVER through the same
+     * `getDriverForObject` seam `sqlDialect` uses, so the driver stays the
+     * single source of its bucketing and no second table lives here.
+     *
+     * `undefined` on every tier that cannot answer: no data engine, a driver
+     * without the member (memory, mongo), a granularity the driver leaves to
+     * the engine's in-memory bucketing (it answers `null`), a throw. On
+     * `undefined` the echo refuses the bucket (#21647): it prints a bucket in
+     * no expression but the one answered here.
+     */
+    const dateBucketSql = (objectName: string, field: string, granularity: string): string | undefined => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName) as DateBucketingDriver | undefined;
+        if (typeof driver?.dateBucketSql !== 'function') return undefined;
+        const rendered = driver.dateBucketSql(objectName, field, granularity);
+        return typeof rendered === 'string' && rendered !== '' ? rendered : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    /**
+     * [#21080] The data engine's answer to "is a middleware registered for
+     * this object?" (`IObjectQLEngine.hasObjectMiddleware`), resolved per call
+     * like every bridge above, so plugin order does not matter.
+     *
+     * Asked by `NativeSQLStrategy`, which runs no engine operation and so no
+     * engine middleware: it declines an object this answers `true` for, and the
+     * engine serves it. It FAILS CLOSED: no engine, or an engine without the
+     * member, answers `undefined`, which declines too. The cost of that tier is
+     * the native path for every object on such an engine — its queries are
+     * served by the ObjectQL strategy, and a query that strategy cannot serve
+     * is refused. Said once, at `warn`: the answers stay correct, only the
+     * fast path is gone.
+     */
+    let reportedEngineWithoutMiddlewareAnswer = false;
+    const hasObjectMiddleware = (objectName: string): boolean | undefined => {
+      let svc: DataEngineLike | undefined;
+      try {
+        svc = ctx.getService<DataEngineLike>('data');
+      } catch {
+        return undefined;
+      }
+      if (!svc) return undefined;
+      if (typeof svc.hasObjectMiddleware === 'function') return svc.hasObjectMiddleware(objectName);
+      if (!reportedEngineWithoutMiddlewareAnswer) {
+        reportedEngineWithoutMiddlewareAnswer = true;
+        ctx.logger.warn(
+          `[Analytics] The "data" engine has no hasObjectMiddleware (IObjectQLEngine.hasObjectMiddleware), so ` +
+            `NativeSQLStrategy cannot tell which objects carry a middleware registered for them (first asked: ` +
+            `"${objectName}"). It declines every query, and the ObjectQL strategy serves them through the engine, ` +
+            `where those middlewares run; a query that strategy cannot serve is refused. Register ObjectQLPlugin's ` +
+            `engine as "data" to keep the native path for objects without one. Reported once.`,
+        );
+      }
+      return undefined;
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -1113,6 +1296,8 @@ export class AnalyticsServicePlugin implements Plugin {
       fallbackService,
       getReadScope,
       admitObjectRead,
+      getReadableFields,
+      getQueryableFields,
       getAllowedRelationships: this.options.getAllowedRelationships,
       coerceTemporalFilterValue,
       coerceTemporalFilterColumn,
@@ -1150,15 +1335,26 @@ export class AnalyticsServicePlugin implements Plugin {
       // `formula` on the compatibility table's storage ground, so the pair no
       // longer reaches a response for a type to describe. ⛔ Carrying the key
       // on regardless would relay metadata into a seam nothing reads.
+      //
+      // [#20445] `multiple` IS read: with `type` it is the field's declared
+      // value shape, the input of the `$empty` operator's per-type expansion
+      // on the three SQL compilers (`declaredValueShape`). Relayed as the
+      // field declares it, so a `multiple: true` lookup is list-valued there
+      // exactly as it is in `driver-sql`'s storage.
       sourceFieldMeta: (object: string, field: string) => {
         const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
-          | { type?: string; max?: number; currencyConfig?: { currencyMode?: string; defaultCurrency?: string } }
+          | {
+              type?: string;
+              multiple?: boolean;
+              max?: number;
+              currencyConfig?: { currencyMode?: string; defaultCurrency?: string };
+            }
           | undefined;
         if (!f) return undefined;
         const fixedCurrency = f.currencyConfig?.currencyMode === 'fixed'
           ? f.currencyConfig.defaultCurrency
           : undefined;
-        return { type: f.type, max: f.max, defaultCurrency: fixedCurrency };
+        return { type: f.type, multiple: f.multiple === true, max: f.max, defaultCurrency: fixedCurrency };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
       // actual cause when a dataset's SQL references a table that is not on the
@@ -1178,9 +1374,16 @@ export class AnalyticsServicePlugin implements Plugin {
       getObjectDatasource: (objectName: string) => dataEngine()?.resolveEffectiveDatasource?.(objectName),
       // [#15684] The executing driver's own dialect — see `sqlDialect` above.
       sqlDialect,
+      // [#21441] The executing driver's own bucket expression — see
+      // `dateBucketSql` above.
+      dateBucketSql,
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,
+      // [#21080] The data engine's per-object middleware answer — see
+      // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
+      // middlewares live in the engine either way.
+      hasObjectMiddleware,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.

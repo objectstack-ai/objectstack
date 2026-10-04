@@ -42,7 +42,7 @@ import type {
   MetadataDependency,
   MetadataTypeRegistryEntryParsed,
 } from '@objectstack/spec/kernel';
-import { getMetadataTypeActions } from '@objectstack/spec/kernel';
+import { getMetadataTypeActions, getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import {
   MetadataEventType,
   MetadataEventSchema,
@@ -1174,7 +1174,7 @@ export class MetadataManager implements IMetadataService {
         await this.admitLoaderItems(loader, type, items);
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
-        // [#14921] Same discrimination as `listNames`, and needed for the same
+        // [commit c1d274de7] Same discrimination as `listNames`, and needed for the same
         // reason: `admitLoaderItems` refuses an ambiguous stem BEFORE it
         // contributes anything, so absorbing it here would drop every item
         // this loader holds into a `degraded` partial set — an authoring error
@@ -1239,7 +1239,7 @@ export class MetadataManager implements IMetadataService {
         `declarations this loader holds as "never declared" — which grants or locks out depending on the consumer, silently either way. ` +
         `Fix: check the datasource behind \`${loaderName}\` — connection, credentials, and that its metadata table exists. ` +
         `The read is retried on the next list once the ${MetadataManager.DEGRADED_LIST_CACHE_TTL_MS}ms degraded-result list cache lapses ` +
-        `(a known-partial listing is memoized far more briefly than a complete one — #5184), so a transient cause recovers on its ` +
+        `(a known-partial listing is memoized far more briefly than a complete one), so a transient cause recovers on its ` +
         `own within seconds and the recovery is logged.`,
       error instanceof Error ? error : undefined,
       { loader: loaderName, type, error },
@@ -1586,7 +1586,7 @@ export class MetadataManager implements IMetadataService {
   /**
    * List all names of metadata items of a given type
    *
-   * ## [#14423] One loader's fault does not take the whole enumeration down
+   * ## [commit a56baa2bd] One loader's fault does not take the whole enumeration down
    *
    * This loop used to be bare — `const result = await loader.list(type)` with
    * no `try`, while the two sibling plural reads (`list()` via
@@ -1630,7 +1630,7 @@ export class MetadataManager implements IMetadataService {
         result.forEach(item => names.add(item));
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
-        // [#14921] PROPAGATE, never absorb: an ambiguous metadata stem is an
+        // [commit c1d274de7] PROPAGATE, never absorb: an ambiguous metadata stem is an
         // authoring error, not an outage. Degrading it here would answer with
         // a set that silently omits every name this loader holds while the
         // server keeps reporting healthy — precisely the silence the refusal
@@ -1638,7 +1638,7 @@ export class MetadataManager implements IMetadataService {
         if (isAmbiguousMetadataStemError(e)) {
           throw e;
         }
-        // [#14423] Parity with `loadMany` and `list()` — see this method's
+        // [commit a56baa2bd] Parity with `loadMany` and `list()` — see this method's
         // docblock. Same seam, same verdict, same helper.
         this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
@@ -2124,18 +2124,39 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get the published version of any metadata item (for runtime serving).
    * Returns publishedDefinition if exists, else current definition.
+   *
+   * [#20552] SERVED, and so redacted: this is the body both
+   * `GET /meta/:type/:name/published` doors answer with when no runtime overlay
+   * exists (the REST server's and the dispatcher's), and it was the one
+   * metadata exit that handed a stored body out without the per-type
+   * credential redaction every protocol read exit applies — a code-published
+   * `api` flow served its inbound-hook secret here to any reader of the door.
+   * The type's registered redactor (`@objectstack/spec/kernel`) is applied to
+   * whichever body is returned; a type with none is returned as-is. The item
+   * itself is never mutated — a redactor returns a new object.
+   *
+   * ⛔ Not caught: a throwing redactor fails the read rather than serving the
+   * material it exists to withhold (the metadata protocol's
+   * `redactMetadataItem` takes the same position).
    */
   async getPublished(type: string, name: string): Promise<unknown | undefined> {
     const item = await this.get(type, name);
     if (!item) return undefined;
 
     const meta = item as any;
-    if (meta.publishedDefinition !== undefined) {
-      return meta.publishedDefinition;
-    }
-
     // Fall back to current definition (metadata field or the item itself)
-    return meta.metadata ?? item;
+    const body = meta.publishedDefinition !== undefined ? meta.publishedDefinition : (meta.metadata ?? item);
+    return this.redactServedBody(type, body);
+  }
+
+  /** [#20552] The per-type read-path redaction, applied to one served body. */
+  private redactServedBody(type: string, body: unknown): unknown {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+    // Keyed on the singular type name (Prime Directive #3); a plural spelling folds first.
+    const redactor = getMetadataTypeRedactor(canonicalMetadataServiceType(type));
+    if (!redactor) return body;
+    const result = redactor(body as Record<string, unknown>);
+    return result.redactedKeys.length > 0 ? result.item : body;
   }
 
   // ==========================================
@@ -2320,7 +2341,7 @@ export class MetadataManager implements IMetadataService {
   }
 
   // ==========================================
-  // Overlay / Customization Management — REMOVED (#13135, ADR-0049)
+  // Overlay / Customization Management — REMOVED (commit 9e0ba21a1, ADR-0049)
   // ==========================================
   //
   // The in-memory overlay limb (`getOverlay` / `saveOverlay` / `removeOverlay`
@@ -2744,7 +2765,7 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * [#14423] {@link loadMany}, read under the identity the STORE holds each
+   * [commit a56baa2bd] {@link loadMany}, read under the identity the STORE holds each
    * item by — the keyed plural read, beside the unkeyed one.
    *
    * ## Why a second method and not a widened `loadMany`
@@ -2769,7 +2790,7 @@ export class MetadataManager implements IMetadataService {
    * `register()` registry; a caller wanting that set has those. Reading the
    * loaders alone is also what makes this the enumerable twin of
    * {@link loadDiagnosed}, which walks the same loaders by name — that pairing
-   * is the point on the audit side of #14423, where an enumeration and a
+   * is the point on the audit side of commit a56baa2bd, where an enumeration and a
    * by-name read that disagree about a population make one subsystem accuse
    * another of a defect neither has.
    *
@@ -2817,7 +2838,7 @@ export class MetadataManager implements IMetadataService {
    * own key for each item — {@link loadManyKeyed}'s per-loader body.
    *
    * Distinct from {@link admitLoaderItems} on exactly one axis, and that axis
-   * is the whole of #14423: the fallback for a loader with no
+   * is the whole of the defect commit a56baa2bd fixed: the fallback for a loader with no
    * `loadManyKeyed`. `admitLoaderItems` falls back to `loadMany` keyed by
    * `data.name` — the pre-#14205 behaviour, verbatim, which drops a nameless
    * body. Here the fallback is `list()` + a per-name `load()`, so a loader

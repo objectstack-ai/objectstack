@@ -28,10 +28,11 @@ import { strictObject } from '../shared/strict-object';
 // ==========================================
 
 /**
- * Retired `ToolSchema` keys — the rejection carries the upgrade prescription,
- * because the parse error is the one channel every consumer bumping
+ * Keys REMOVED from `ToolSchema`'s shape — the rejection carries the upgrade
+ * prescription, because the parse error is the one channel every consumer bumping
  * `@objectstack/spec` is guaranteed to hit (pattern of `object.zod.ts`'s
- * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove).
+ * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove). A key retired in place is
+ * a `retiredKey()` tombstone in the shape instead, never a row here.
  */
 const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   permissions:
@@ -186,12 +187,13 @@ export const ToolSchema = lazySchema(() => strictObject({
   /**
    * Optional JSON Schema for the tool output.
    *
-   * ⚠️ EXPERIMENTAL — NOT ENFORCED (liveness #1878/#1893). The runtime folds
-   * the top-level keys into the tool description shown to the LLM
-   * (service-ai action-tools) but performs NO output validation against this
-   * schema, and downstream tool chaining does not consume it either.
+   * ⚠️ EXPERIMENTAL — NOT ENFORCED. Nothing reads this key on a tool record:
+   * an authored `tool` record never becomes a runtime tool definition. Output
+   * validation does exist, but it lives on the ACTION — the cloud AI runtime
+   * validates an action's result against `action.ai.outputSchema` and withholds
+   * one that does not conform. Steer authors there.
    */
-  outputSchema: z.record(z.string(), z.unknown()).optional().describe('[EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated.'),
+  outputSchema: z.record(z.string(), z.unknown()).optional().describe('[EXPERIMENTAL — not enforced] JSON Schema for tool output; nothing reads it on a tool record — declare it as `ai.outputSchema` on the action, where the cloud AI runtime validates the action result against it.'),
 
   /**
    * Associated object name (when the tool operates on a specific data object).

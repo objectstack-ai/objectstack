@@ -48,7 +48,7 @@ import { FieldType } from '../data/field.zod';
 //     error for a blank screen. Localizing means declaring a real action and
 //     naming it in `bulkActions`: THAT path runs through the i18n resolver
 //     (`toBulkActionDef`'s `localize`).
-//   - `params[]` is STRICT (#18177, maintainer ruling batch #146 item 4,
+//   - `params[]` is STRICT (commit adabccf5f, maintainer ruling batch #146 item 4,
 //     letter A). It used to be `.passthrough()`, mirroring the
 //     `[key: string]: unknown` catch-all on objectui's `BulkActionParam` — and
 //     that made its accept a NULL READING: measured against installed spec
@@ -166,7 +166,7 @@ const BULK_PARAM_WIDGET_CONFIG_KEYS = [
  * (merged over the def's static `patch`); for an aggregate `custom` def they
  * ride along as the action's params.
  *
- * STRICT since #18177 — see the module header. An unknown key is refused by
+ * STRICT since commit adabccf5f — see the module header. An unknown key is refused by
  * name, carrying either the rename or the prescription that fixes it, exactly
  * as on `ActionParamSchema`. The sentence this replaced said strictness "would
  * lie" at this level; the measurement said the opposite — the OPEN shape was
@@ -259,7 +259,7 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
 
   /**
    * Cascade binding — the ONE key this close DECLARES rather than refuses
-   * (#18177, ruling batch #146 item 4 letter A).
+   * (commit adabccf5f, ruling batch #146 item 4 letter A).
    *
    * Shape and description mirror the single-record twin. ⚠️ That twin is
    * `FieldSchema.dependsOn` (`data/field.zod.ts`), NOT `ActionParamSchema`,
@@ -362,7 +362,7 @@ export const BulkActionDefSchema = lazySchema(() => strictObject(
   {
   name: SnakeCaseIdentifierSchema.describe('Stable identifier — the audit-log action key, and (for an aggregate def) the name of the object action to dispatch.'),
   label: z.string().optional().describe('Button + dialog-header text. Plain string: an authored def is not i18n-resolved (declare a real action and name it in `bulkActions` to get localization).'),
-  icon: z.string().optional().describe('Lucide icon name (e.g. "user-check", "trash-2").'),
+  icon: z.string().optional().describe('Lucide icon name (e.g. "user-check", "trash").'),
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'outline']).optional().describe('Visual treatment of the button.'),
   operation: BulkActionOperationSchema.describe("What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`)."),
   execution: BulkActionExecutionSchema.optional().describe("For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds`. Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead."),

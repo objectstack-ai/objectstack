@@ -132,7 +132,7 @@ export const ACTION_RECORD_WRITE_DISCARDED = 'action-record-write-discarded';
 export const ACTION_BODY_SOURCE_UNPARSEABLE = 'action-body-source-unparseable';
 
 /**
- * [#8663] The action-surface twin of `hook-body-write-unprovisioned-anchor`.
+ * [commit 192213f66] The action-surface twin of `hook-body-write-unprovisioned-anchor`.
  * Same question, same wording, same `warning` severity — this rule and the hook
  * rule share {@link IMPLICIT_FIELDS}, so they shared its blind spot too.
  */
@@ -314,7 +314,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
   // Built lazily: only the unknown-field check needs it, so a stack whose
   // action bodies never reach `ctx.api` never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
-  // [#8663] Non-empty only for a stack carrying an ADR-0015 `external` object.
+  // [commit 192213f66] Non-empty only for a stack carrying an ADR-0015 `external` object.
   let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   for (const site of sites) {
@@ -368,7 +368,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           message:
             `body assigns ctx.record.${w.field}, but an action's ctx.record is a plain snapshot the runtime ` +
             `never writes back — the action returns success and the assignment is discarded, whether or not ` +
-            `'${w.field}' is a declared field (#4345).`,
+            `'${w.field}' is a declared field. The snapshot stays read-only by design: an action's ` +
+            `write channel is ctx.api.`,
           hint:
             `To persist it, write through the API: ctx.api.object('<object>').updateById(ctx.recordId, ` +
             `{ ${w.field}: … }). Reported only because ctx.record is never passed anywhere in this body — ` +
@@ -399,7 +400,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
       // (it maps a remote column they vouch for) — never either finding.
       if (known.has(w.field)) continue;
       if (IMPLICIT_FIELDS.has(w.field)) {
-        // [#8663] Implicitly writable SOMEWHERE is not provisioned HERE.
+        // [commit 192213f66] Implicitly writable SOMEWHERE is not provisioned HERE.
         if (!anchors.get(w.object)?.has(w.field)) continue;
         reported.add(dedupeKey);
         findings.push({
@@ -428,7 +429,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           // CALLER-supplied and #8682/#8738 refuse it before any driver.
           `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
           `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
-          `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
+          `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver, before ` +
           `any statement is built. The write lands nothing, and the refusal escapes the body and ` +
           `fails the action.`,
         hint: fixHint(w.field, [...known]),

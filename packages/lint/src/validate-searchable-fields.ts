@@ -97,7 +97,7 @@
  *      the runtime would refuse — `created_by` in a view's narrowing — is a
  *      missed finding, not a wrong one.)
  *
- * Skip 3 answers EXISTENCE, and since #8404 it no longer ends the matter. On an
+ * Skip 3 answers EXISTENCE, and since commit b849e6911 it no longer ends the matter. On an
  * ADR-0015 `external` object the platform registers its injected anchors and
  * provisions no storage behind them (#7865 / #8116), so `owner_id` there is
  * addressable and empty on every record. Existence rightly stays silent —
@@ -305,11 +305,11 @@ export function checkSearchableFieldList(
   path: string,
   subject: string,
   role: SearchableFieldRole = 'narrowing',
-  // [#8404] `objectName -> its unprovisioned injected anchors`
+  // [commit b849e6911] `objectName -> its unprovisioned injected anchors`
   // ({@link indexUnprovisionedAnchors}). OPTIONAL, and its absence means
   // exactly one thing: this caller did not build the index, so the provenance
   // question goes unasked and only existence/admissibility are answered — the
-  // pre-#8404 behaviour, preserved for out-of-repo callers of this exported
+  // behaviour before commit b849e6911, preserved for out-of-repo callers of this exported
   // core (cloud graph-lint, the AI authoring path). Every in-repo caller passes
   // it: `validateSearchableFields` below and `validate-react-page-props`.
   unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
@@ -353,13 +353,13 @@ export function checkSearchableFieldList(
             : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
           `Clients echo this declaration verbatim as the '$searchFields' ` +
           `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
-          `search (#4254), not just a quietly narrowed one.` +
+          `search, not just a quietly narrowed one.` +
           (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
       });
       continue;
     }
 
-    // ── [#8404] Provenance — the second question about a name skip 3 kept ──
+    // ── [commit b849e6911] Provenance — the second question about a name skip 3 kept ──
     //
     // Existence answered "yes" (authored, or a registry-injected system
     // column). On a federated object the injected anchor is addressable and
@@ -411,12 +411,12 @@ export function checkSearchableFieldList(
           `'${vtype}' field: its value is computed on read and never stored, so no ` +
           `driver materializes a column for 'search' to scan and the entry can never ` +
           `match. It reads as search coverage and delivers none — the runtime used to ` +
-          `admit it verbatim because the declaration named it (#6674).`,
+          `admit it verbatim because the declaration named it.`,
         hint:
           `Mirror the computed value onto a stored text field on "${objectName}" and ` +
           `declare that instead, or drop "${name}". At runtime the ingress gate now ` +
           `refuses this entry with 400 INVALID_FIELD, the same answer a stale entry ` +
-          `gets (#4254).`,
+          `gets.`,
       });
       continue;
     }
@@ -440,7 +440,7 @@ export function checkSearchableFieldList(
           `searchableFields (${resolution.declaredList.join(', ')}) — the set 'search' ` +
           `scans. Clients echo this declaration verbatim as the '$searchFields' ` +
           `override, and the runtime refuses an entry outside the allowed set: every ` +
-          `toolbar search on this list returns 400 INVALID_FIELD (#4254).`,
+          `toolbar search on this list returns 400 INVALID_FIELD.`,
         hint:
           `Add "${name}" to ${objectName}.searchableFields, or drop it from this ` +
           `view — a view narrows the object's searchable set, never widens it ` +
@@ -473,7 +473,7 @@ export function checkSearchableFieldList(
         `columns (${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}). ` +
         `Clients echo this declaration verbatim as the '$searchFields' override, and ` +
         `the runtime refuses it: every toolbar search on this list returns ` +
-        `400 INVALID_FIELD (#4254).`,
+        `400 INVALID_FIELD.`,
       hint:
         (isReference
           ? `A ${meta?.type} column stores only the referenced record's id, so it ` +
@@ -493,7 +493,7 @@ export function checkSearchableFieldList(
  * (the canonical set, ADR-0061) and the list views that narrow it, including
  * the two standalone `views[]` shapes the `PUT /api/v1/meta/view` door
  * carries and the runtime publish gate snapshots: the flattened list overlay
- * (#9313, top-level set) and the ViewItem record (#10001,
+ * (#9313, top-level set) and the ViewItem record (commit f1b5ad39a,
  * `config.searchableFields` one level down). Returns findings (empty = clean).
  *
  * The react page surface (`<ListView searchableFields={…}>`) is deliberately
@@ -584,7 +584,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     // `viewKind: 'list'` (required on the overlay arm since #7741, refused by
     // name on the strict container schema) with no nested `config` (that
     // shape is a ViewItem RECORD — judged by its own record rung below since
-    // #10001). A `narrowing`, like
+    // commit f1b5ad39a). A `narrowing`, like
     // every list-view surface: the overlay's set is echoed verbatim as the
     // `$searchFields` override and judged by the #4254 ingress gate.
     if (view.viewKind === 'list' && !isRec(view.config)) {
@@ -598,7 +598,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
       );
     }
 
-    // ── [#10001] The RECORD rung: a standalone ViewItem record ──
+    // ── [commit f1b5ad39a] The RECORD rung: a standalone ViewItem record ──
     //
     // The self rung's structural complement — `ViewMetadataSchema`'s member 1
     // (`ViewItemWireSchema`, `{ name, object, viewKind: 'list', config }`),

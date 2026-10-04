@@ -264,6 +264,39 @@ export type DriftOp =
        * row report, old index left in place.
        */
       tightenNullSafeOnly?: boolean;
+    }
+  /**
+   * REPORT ONLY. Metadata declares an index that can never be built, because
+   * a key column is one no declaration will ever materialize: the name is not
+   * a field of the object (a misspelling the Studio save door admits), or it
+   * is a virtual `formula` field, which is computed on read and has no column.
+   * `SqlDriver.syncDeclaredIndexes` skips the whole index and says so at
+   * `error`. For a UNIQUE index, the constraint it declares is NOT enforced
+   * while the object keeps working normally, which is the AGENTS.md
+   * durability-degradation shape.
+   *
+   * ⛔ There is NO reconciler arm, and none can exist: there is no column to
+   * build the index over. The remedy is a metadata edit (name stored fields in
+   * `indexes[].fields`, or drop the index), so `applyMigrationEntries` reports
+   * the entry as skipped, on every dialect. The op sits in
+   * {@link INDEX_DRIFT_OPS} so that skip takes the index path and never
+   * triggers a SQLite table rebuild.
+   *
+   * This op exists so that `os migrate plan` can show the skip. Before it,
+   * {@link expectedIndexes} dropped such an index from the expected set, and
+   * the plan reported nothing at all.
+   *
+   * `missingColumns` lists only the key columns that will never materialize.
+   * A declared column that is merely not added YET is pending additive work,
+   * not this finding.
+   */
+  | {
+      type: 'unbuildable_index';
+      table: string;
+      column?: string;
+      indexName: string;
+      unique: boolean;
+      missingColumns: string[];
     };
 
 /**
@@ -337,11 +370,12 @@ export const INDEX_DRIFT_OPS: ReadonlySet<DriftOp['type']> = new Set([
   'create_index',
   'drop_index',
   'recreate_index',
+  'unbuildable_index',
 ]);
 
 export type IndexDriftOp = Extract<
   DriftOp,
-  { type: 'replace_unique_index' | 'create_index' | 'drop_index' | 'recreate_index' }
+  { type: 'replace_unique_index' | 'create_index' | 'drop_index' | 'recreate_index' | 'unbuildable_index' }
 >;
 /** Ops that act on a single column — the only ones with a guaranteed `column`. */
 export type ColumnDriftOp = Exclude<DriftOp, IndexDriftOp>;
@@ -383,7 +417,7 @@ export const HASH_SHADOW_SUFFIX = '__hash';
  * orphan pass reports as `unmapped_column` with a `drop_column` op. Dropping it
  * would take the UNIQUE index it carries with it, silently returning the object
  * to "registered but its declared uniqueness unenforced" — the very state
- * #11374/#11627 exist to end, reached this time through the migration tool
+ * #11627 and commit d0e3a885b exist to end, reached this time through the migration tool
  * rather than through a refused DDL.
  *
  * Matched by SUFFIX rather than by a registry of known names, deliberately: the
@@ -414,7 +448,7 @@ export function isHashShadowColumn(name: string): boolean {
  * 64-character identifier limit.
  *
  * ⚠️ Lives HERE, beside {@link isHashShadowColumn}, rather than in the driver:
- * #13015 was the price of the split. The ORPHAN-column pass knew the shadow
+ * The defect commit cd1348802 fixed was the price of the split. The ORPHAN-column pass knew the shadow
  * vocabulary and the INDEX differ did not, so a healthy shadow-carried UNIQUE
  * had its column protected from a drop while the index that column carries was
  * proposed for a destructive rebuild. Both passes now ask the same module the
@@ -439,7 +473,7 @@ export function hashShadowColumnFor(indexName: string): string {
 /**
  * One key part a hash shadow hashes: the column identity, and whether the
  * generation expression folds it through the NULL-safe `COALESCE(col, ...)`
- * form (ADR-0120 D3, carried into the shadow by #12998).
+ * form (ADR-0120 D3, carried into the shadow by commit df1c75c4b).
  */
 export interface HashShadowKeyPart {
   column: string;
@@ -448,16 +482,16 @@ export interface HashShadowKeyPart {
 
 /**
  * Read the DECLARED key parts back out of a hash shadow's stored
- * `GENERATION_EXPRESSION` (#13015).
+ * `GENERATION_EXPRESSION` (commit cd1348802).
  *
  * This is what makes a shadow-carried key COMPARABLE rather than merely
- * skippable. Since #12998 the expression carries the NULL-safe parts in their
+ * skippable. Since commit df1c75c4b the expression carries the NULL-safe parts in their
  * COALESCE spelling, so the FORM of the key — which columns, and which of them
  * are folded — survives the round trip, and the differ can ask the real
  * question ("does this shadow enforce what metadata declares?") instead of the
  * blind one ("is this a shadow at all?").
  *
- * ⛔ Why the blind question is not good enough: a shadow created BEFORE #12998
+ * ⛔ Why the blind question is not good enough: a shadow created BEFORE commit df1c75c4b
  * hashes the RAW columns, so `CONCAT` returns NULL for every NULL-organization
  * row and the rows the COALESCE bucket exists to constrain are constrained by
  * nothing (#5030's shape). It is indistinguishable BY NAME from a healthy one.
@@ -824,7 +858,7 @@ export function diffManagedTable(args: {
   columns: PhysicalColumn[];
   dialect: SqlDialectName;
   /**
-   * Which columns an index KEYS ON (#11374), keyed by field name — the exact
+   * Which columns an index KEYS ON (commit d0e3a885b), keyed by field name — the exact
    * map {@link indexedKeyColumns} builds. Consulted ONLY by the varchar-length
    * branch below, through {@link varcharColumnChars}, to answer the same
    * question `createColumn` asks before it sizes a text-family column.
@@ -961,7 +995,7 @@ export function diffManagedTable(args: {
         message:
           `${table}.${fieldName}: the column carries DEFAULT '${field.defaultValue}', but ` +
           `'${field.defaultValue}' is a runtime token the engine resolves per write — the database ` +
-          `has been stamping the literal token into every insert that omitted the field (#4560). ` +
+          `has been stamping the literal token into every insert that omitted the field. ` +
           `Dropping the default is non-destructive: run "os migrate apply". Rows already holding ` +
           `'${field.defaultValue}' are NOT rewritten — the dangling-reference audit reports them.`,
       });
@@ -1108,7 +1142,7 @@ export function diffManagedTable(args: {
           `column is \`${col.type}\` — the database was created while the field was single-value and the ` +
           `additive sync never migrates a column's type. Arrays are being written as the STRINGIFIED ` +
           `literal (e.g. '["a","b"]') and read back as a string, so anything consuming the value ` +
-          `receives one opaque id instead of a list (#11535). REMEDY: run ` +
+          `receives one opaque id instead of a list. REMEDY: run ` +
           `"${MULTI_VALUE_COLUMN_REMEDY_COMMAND}" — it is a DRY RUN by default that executes nothing ` +
           `and prints the statements; take a backup, then re-run it with --apply. ObjectStack never ` +
           `migrates this column on its own: the boot path only reports it and "os migrate apply" ` +
@@ -1256,7 +1290,7 @@ export function diffManagedTable(args: {
     // never revisits an existing column, so a deployment upgrading into that
     // release gets no change AND no diagnostic. The server keeps refusing the
     // same write, and the refusal is a poor substitute for a report: the live
-    // probe behind `objectql`'s `driver-fault-redaction.ts` measured Postgres's
+    // probe behind `types`' `driver-fault-redaction.ts` measured Postgres's
     // `22001` as identifier-only and naming the TYPE rather than the column
     // (`value too long for type character varying(255)`), MySQL's `1406` as
     // `Data too long for column 'label' at row 1`. Meanwhile every
@@ -1313,8 +1347,8 @@ export function diffManagedTable(args: {
           `\`varchar(${col.maxLength})\` and the additive sync never changes a column's type. The ` +
           `column still caps at ${col.maxLength} characters, so the server refuses longer values the ` +
           `declaration ALLOWS (Postgres 22001, MySQL ER_DATA_TOO_LONG) — a data URI in a ` +
-          `\`signature\`/\`qrcode\` field, or an ordinary rich-text body, is routinely past it ` +
-          `(#12121). ObjectStack does NOT migrate this column: "os migrate apply" reports this entry ` +
+          `\`signature\`/\`qrcode\` field, or an ordinary rich-text body, is routinely past it. ` +
+          `ObjectStack does NOT migrate this column: "os migrate apply" reports this entry ` +
           `as skipped. Two operator routes — declare a \`maxLength\` this dialect can express, which ` +
           `turns this into the widen op "os migrate apply" performs; or convert the column to TEXT by ` +
           `hand, with a backup taken first, restating the FULL column definition on MySQL (MODIFY ` +
@@ -1669,7 +1703,7 @@ export interface PhysicalIndex {
   /**
    * When this index is physically carried by a #11627 hash shadow, the
    * DECLARED key parts that shadow hashes, read back from the generation
-   * expression (#13015 via #12998) by `SqlDriver.introspectIndexes`.
+   * expression (commit cd1348802 via commit df1c75c4b) by `SqlDriver.introspectIndexes`.
    *
    * Absent both when the index is NOT shadow-carried and when it is but the
    * expression could not be read. {@link isHashShadowCarrier} tells those two
@@ -1845,10 +1879,13 @@ export function normalizeDeclaredIndex(
  * `true` taken verbatim, `'organization'` scoped through
  * {@link normalizeDeclaredIndex} (ADR-0120 D1).
  *
- * Indexes referencing a column that was never materialized (a virtual `formula`
- * field, a column an earlier sync skipped) are dropped from the expected set —
- * the sync skips creating them, so reporting them as drift would be a finding
- * `os migrate apply` could never clear.
+ * Indexes referencing a column that is not physically present are left out
+ * of the expected set. The sync cannot create them, so a `create_index` for
+ * one would name a remedy that `os migrate apply` can never perform. That does
+ * NOT make them silent. An index whose missing column will never materialize
+ * (a misspelt name, a virtual `formula` field) is reported by
+ * {@link diffUnbuildableIndexes} as a report-only `unbuildable_index` entry,
+ * and the sync logs its skip at `error`.
  */
 export function expectedIndexes(args: {
   table: string;
@@ -1857,13 +1894,131 @@ export function expectedIndexes(args: {
   declaredIndexes?: DeclaredIndexInput[];
   physicalColumns: Set<string>;
 }): ExpectedIndex[] {
-  const { table, fields, tenantField, declaredIndexes, physicalColumns } = args;
+  const { physicalColumns } = args;
+  return declaredIndexSet(args).filter((i) => i.columns.every((c) => physicalColumns.has(c)));
+}
+
+/**
+ * Field-level `unique` plus the object's `indexes[]`, both normalized: the one
+ * composition that {@link expectedIndexes} and {@link diffUnbuildableIndexes}
+ * split between them. It is shared so the two can never disagree about which
+ * indexes metadata asks for.
+ */
+function declaredIndexSet(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+}): ExpectedIndex[] {
+  const { table, fields, tenantField, declaredIndexes } = args;
   const out = uniqueIndexesFromFields(table, fields, tenantField);
   for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
     const norm = normalizeDeclaredIndex(table, idx, tenantField);
     if (norm) out.push(norm);
   }
-  return out.filter((i) => i.columns.every((c) => physicalColumns.has(c)));
+  return out;
+}
+
+/**
+ * Why a declared index key column has no physical column, in words an
+ * operator can act on. The fields are the object's own when they are known.
+ * Without them, as on the drift-op apply path, the column is only named.
+ *
+ * Shared by the sync's `error` line (`SqlDriver.syncDeclaredIndexes`) and the
+ * `unbuildable_index` drift message, so the two cannot give different reasons
+ * for the same column.
+ */
+export function describeMissingIndexColumns(missing: string[], fields?: Record<string, any>): string {
+  return missing
+    .map((column) => {
+      if (!fields) return `'${column}'`;
+      const field = fields[column];
+      if (field == null) return `'${column}' (not a field of the object)`;
+      if (!fieldHasColumn(field)) return `'${column}' (a formula field: computed on read, never stored)`;
+      return `'${column}' (a declared field whose column the table does not have)`;
+    })
+    .join(', ');
+}
+
+/**
+ * Will metadata ever put a physical column under this name? Builtins and the
+ * tenant column always exist. Otherwise it must be a declared field that
+ * materializes a column ({@link fieldHasColumn}: not a virtual `formula`).
+ */
+function columnEverMaterializes(column: string, fields: Record<string, any>, tenantField: string | null): boolean {
+  if (BUILTIN_COLUMNS.has(column) || column === tenantField) return true;
+  const field = fields?.[column];
+  return field != null && fieldHasColumn(field);
+}
+
+/**
+ * Report every declared index that can never be built, as a report-only
+ * `unbuildable_index` drift entry: the half of the declared set that
+ * {@link expectedIndexes} leaves out and could otherwise stay unseen.
+ *
+ * An index qualifies when at least one key column is missing from the table
+ * AND will never materialize: the name is not a field of the object (a
+ * misspelling), or it is a virtual `formula` field. The sync skips such an
+ * index on every run, so the declaration and the database stay apart for good,
+ * and the only remedy is a metadata edit.
+ *
+ * ⛔ A column that is merely not added YET is left out on purpose. A declared,
+ * column-materializing field that the table lacks is pending additive work
+ * (`os migrate plan`'s `add_columns`). The index is created in the same sync
+ * that adds the column, so reporting it here would be a false finding.
+ *
+ * Classified like the other report-only ops (`manual_column_type_change`):
+ * `needs_confirm`, so `os migrate apply` reports it skipped and the
+ * artifact-pinned boot warns about it without refusing to start. A UNIQUE
+ * index is `severity: 'error'`: the constraint it declares is not enforced.
+ * A plain index is `warning`, the same split as `recreate_index`.
+ */
+export function diffUnbuildableIndexes(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+  physicalColumns: Set<string>;
+}): ManagedDriftEntry[] {
+  const { table, fields, tenantField, physicalColumns } = args;
+  const out: ManagedDriftEntry[] = [];
+  const seen = new Set<string>();
+  for (const idx of declaredIndexSet(args)) {
+    if (seen.has(idx.name)) continue;
+    const missing = idx.columns.filter(
+      (c) => !physicalColumns.has(c) && !columnEverMaterializes(c, fields, tenantField),
+    );
+    if (missing.length === 0) continue;
+    seen.add(idx.name);
+    const signature = indexSignature(idx.columns, idx.unique, idx.nullSafeColumns);
+    out.push({
+      kind: 'index_mismatch',
+      remoteName: table,
+      table,
+      column: missing[0],
+      expected: signature,
+      actual: '(absent)',
+      severity: idx.unique ? 'error' : 'warning',
+      category: 'needs_confirm',
+      op: {
+        type: 'unbuildable_index',
+        table,
+        column: missing[0],
+        indexName: idx.name,
+        unique: idx.unique,
+        missingColumns: missing,
+      },
+      message:
+        `${table}: metadata declares index '${idx.name}' ${signature}, but it can never be built: no column for ` +
+        `${describeMissingIndexColumns(missing, fields)}. ` +
+        (idx.unique
+          ? 'The uniqueness it declares is NOT enforced, and duplicate rows are accepted. '
+          : 'The index does not exist. ') +
+        `"os migrate apply" cannot create it and reports it skipped. Fix the metadata: every column in the ` +
+        `index's fields must be a stored field of the object, or remove the index.`,
+    });
+  }
+  return out;
 }
 
 /**
@@ -1874,7 +2029,7 @@ export function expectedIndexes(args: {
  * field-level `unique` through {@link uniqueIndexesFromFields}, object-level
  * `indexes[]` through {@link normalizeDeclaredIndex} — so "which columns end up
  * in a key" has ONE answer, shared by the index sync that creates them and by
- * the DDL that has to make them keyable in the first place (#11374).
+ * the DDL that has to make them keyable in the first place (commit d0e3a885b).
  *
  * ⚠️ Deliberately NOT filtered by `physicalColumns`, unlike `expectedIndexes`:
  * its caller runs BEFORE the columns exist — deciding a column's TYPE is the
@@ -2120,7 +2275,7 @@ function indexSignature(
  * Answerable from the index alone, by NAME: the shadow is derived from the
  * index name ({@link hashShadowColumnFor}), so a carrier is an index whose sole
  * key column is its own shadow. That is what makes this the FAIL-SAFE half of
- * #13015 — it holds even when the generation expression cannot be read, and a
+ * commit cd1348802 — it holds even when the generation expression cannot be read, and a
  * carrier is never a thing this differ may propose destroying on a guess.
  */
 export function isHashShadowCarrier(index: PhysicalIndex): boolean {
@@ -2128,7 +2283,7 @@ export function isHashShadowCarrier(index: PhysicalIndex): boolean {
 }
 
 /**
- * The key an index ENFORCES, which is not always the key it STORES (#13015).
+ * The key an index ENFORCES, which is not always the key it STORES (commit cd1348802).
  *
  * For an ordinary index the two are the same. For a #11627 shadow-carried
  * UNIQUE the stored key is one VARBINARY(32) generated column and the enforced
@@ -2203,7 +2358,7 @@ export function diffManagedIndexes(args: {
       if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated, tenantField)) return false;
       if (!p.unique || p.partial === true) return false;
       if ((p.expressions?.length ?? 0) > 0 || (p.nullSafeColumns?.length ?? 0) > 0) return false;
-      // #13015: nor is a hash-shadow carrier. Its stored key is one generated
+      // Commit cd1348802: nor is a hash-shadow carrier. Its stored key is one generated
       // column, so the identity comparison below already excludes it — stated
       // outright because the exclusion must survive that comparison changing,
       // and because `replace_unique_index` DROPS the legacy name.
@@ -2236,7 +2391,7 @@ export function diffManagedIndexes(args: {
       message:
         `${table}.${l.legacyColumns.join('+')}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
         `uniqueness across ALL tenants, but metadata scopes it per '${l.replacement.columns[0]}' — a second ` +
-        `tenant reusing the value is rejected on insert (#3696). Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
+        `tenant reusing the value is rejected on insert. Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
         `is a pure relaxation: run "os migrate apply".`,
     });
   }
@@ -2273,7 +2428,7 @@ export function diffManagedIndexes(args: {
     // Same normalization on BOTH sides (#4884, ADR-0120 D3): column identity
     // AND key-part form, literal-agnostic on the COALESCE literal — asked of
     // the key the index ENFORCES, which for a #11627 shadow-carried UNIQUE is
-    // not the column it stores (#13015).
+    // not the column it stores (commit cd1348802).
     const pk = enforcedIndexKey(p);
     if (
       p.unique === e.unique &&
@@ -2290,7 +2445,7 @@ export function diffManagedIndexes(args: {
     // (`recreate_index` → drop first) this differ cannot undo. Not ours to
     // reconcile (#4884).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
-    // #13015, fail-safe half: a hash-shadow carrier whose generation
+    // Commit cd1348802, fail-safe half: a hash-shadow carrier whose generation
     // expression could NOT be read (`shadowKey` unresolved). We know by name
     // that the index is driver-owned and that its stored key is a digest, so
     // the identity comparison above is meaningless for it — but we do not know
@@ -2300,7 +2455,7 @@ export function diffManagedIndexes(args: {
     // ⛔ The `!p.shadowKey` half is load-bearing, and was measured: without it
     // this guard swallows the RESOLVED carriers too, which silently demotes the
     // whole fix to the blind skip — every shadow-carried index unreportable,
-    // including a pre-#12998 one hashing the RAW columns whose constraint does
+    // including one from before commit df1c75c4b hashing the RAW columns whose constraint does
     // not cover NULL-organization rows at all. Green, quiet, and the exact
     // trade this fix exists to refuse.
     if (isHashShadowCarrier(p) && !p.shadowKey) continue;
@@ -2316,7 +2471,7 @@ export function diffManagedIndexes(args: {
     // clean → recategorised `safe` (dev autoMigrate may apply); duplicates →
     // blocked with a row report, the old index left in place.
     //
-    // #13015: read through the ENFORCED key, so a pre-#12998 shadow — same
+    // Commit cd1348802: read through the ENFORCED key, so a shadow from before commit df1c75c4b — same
     // columns, hashed RAW instead of through the NULL-safe COALESCE — is
     // recognised as exactly this tightening and gets the same duplicate
     // pre-flight before anything is dropped. The explicit "physical side is
@@ -2375,7 +2530,7 @@ export function diffManagedIndexes(args: {
     // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
     // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
-    // #13015: an orphaned shadow carrier is still an orphan — its declaration
+    // Commit cd1348802: an orphaned shadow carrier is still an orphan — its declaration
     // is gone, and `drop_index` is the right remedy — but the report must name
     // the constraint it enforced, not the digest column it stored.
     const po = enforcedIndexKey(p);

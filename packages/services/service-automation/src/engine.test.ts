@@ -52,7 +52,7 @@ describe('AutomationEngine', () => {
     let engine: AutomationEngine;
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     describe('Execution-log ring buffer (P1-2)', () => {
@@ -250,7 +250,7 @@ describe('AutomationEngine', () => {
                 ],
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'run', type: 'script', label: 'Run' },
+                    { id: 'run', type: 'script', label: 'Run', config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -280,7 +280,7 @@ describe('AutomationEngine', () => {
                 type: 'record_change',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'run', type: 'script', label: 'Run' },
+                    { id: 'run', type: 'script', label: 'Run', config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -304,7 +304,7 @@ describe('AutomationEngine', () => {
                 type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'unknown', type: 'get_record', label: 'Get' },
+                    { id: 'unknown', type: 'get_record', label: 'Get', config: { objectName: 'task' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -348,7 +348,7 @@ describe('AutomationEngine', () => {
                 type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'fail', type: 'script', label: 'Fail' },
+                    { id: 'fail', type: 'script', label: 'Fail', config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -1306,7 +1306,9 @@ describe('AutomationEngine - Execution History', () => {
     const simpleFlow = {
         name: 'test_flow',
         label: 'Test Flow',
-        type: 'api' as const,
+        // Started explicitly (`engine.execute`), never by an inbound post —
+        // an `api` flow is an inbound hook and needs a `config.secret` (ADR-0041).
+        type: 'autolaunched' as const,
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
             { id: 'end', type: 'end' as const, label: 'End' },
@@ -1315,7 +1317,7 @@ describe('AutomationEngine - Execution History', () => {
     };
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     describe('getFlow', () => {
@@ -1332,9 +1334,16 @@ describe('AutomationEngine - Execution History', () => {
         });
     });
 
+    /**
+     * [#20726, ADR-0126 §7.2] The toggle switches PACKAGED flows — a flow no
+     * package ships is refused, and its switch is its `status` — so every
+     * subject toggled below ships from a code package.
+     */
+    const packagedSimpleFlow = { ...simpleFlow, _packageId: 'crm' };
+
     describe('toggleFlow', () => {
         it('should disable a flow', async () => {
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
             await engine.toggleFlow('test_flow', false);
 
             const result = await engine.execute('test_flow');
@@ -1343,7 +1352,7 @@ describe('AutomationEngine - Execution History', () => {
         });
 
         it('should enable a disabled flow', async () => {
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
             await engine.toggleFlow('test_flow', false);
             await engine.toggleFlow('test_flow', true);
 
@@ -1433,7 +1442,7 @@ describe('AutomationEngine - Execution History', () => {
                 name: 'failing_flow',
                 nodes: [
                     { id: 'start', type: 'start' as const, label: 'Start' },
-                    { id: 'bad', type: 'script' as const, label: 'Bad' },
+                    { id: 'bad', type: 'script' as const, label: 'Bad', config: { function: 'noop' } },
                     { id: 'end', type: 'end' as const, label: 'End' },
                 ],
                 edges: [
@@ -1471,7 +1480,7 @@ describe('AutomationEngine - Execution History', () => {
          * assert the opposite — that unregistering a flow FORGOT it had been
          * switched off, so re-registering it came back enabled. That was a
          * faithful pin of the retired `flowEnabled` map: an in-process bit with
-         * no durable home, which is exactly the mechanism #10243 measured
+         * no durable home, which is exactly the mechanism commit 02b41232d measured
          * leaking and ADR-0126 §7.2 retires.
          *
          * Under the activation ledger the answer inverts, and it is ADR-0126 §6
@@ -1483,11 +1492,11 @@ describe('AutomationEngine - Execution History', () => {
          * wall's stated prohibition.
          */
         it('keeps a ledger disable across unregister + re-register (§6 wall 3)', async () => {
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
             await engine.toggleFlow('test_flow', false);
             engine.unregisterFlow('test_flow');
 
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
 
             const result = await engine.execute('test_flow');
             expect(result.success).toBe(false);
@@ -1526,8 +1535,8 @@ describe('AutomationEngine - Fault Edge Support', () => {
             variables: [{ name: 'status', type: 'text', isOutput: true }],
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script', label: 'Risky' },
-                { id: 'handler', type: 'script', label: 'Error Handler' },
+                { id: 'risky', type: 'script', label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script', label: 'Error Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1563,8 +1572,8 @@ describe('AutomationEngine - Fault Edge Support', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script', label: 'Risky' },
-                { id: 'handler', type: 'script', label: 'Handler' },
+                { id: 'risky', type: 'script', label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script', label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1594,7 +1603,7 @@ describe('AutomationEngine - Fault Edge Support', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'fail', type: 'script', label: 'Fail' },
+                { id: 'fail', type: 'script', label: 'Fail', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1668,7 +1677,7 @@ describe('AutomationEngine - Step-Level Execution Logs', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'bad', type: 'script', label: 'Bad' },
+                { id: 'bad', type: 'script', label: 'Bad', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1937,7 +1946,7 @@ describe('AutomationEngine - Node Timeout', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'slow', type: 'script', label: 'Slow', timeoutMs: 50 },
+                { id: 'slow', type: 'script', label: 'Slow', timeoutMs: 50, config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1965,7 +1974,7 @@ describe('AutomationEngine - Node Timeout', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'fast', type: 'script', label: 'Fast', timeoutMs: 5000 },
+                { id: 'fast', type: 'script', label: 'Fast', timeoutMs: 5000, config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -2012,7 +2021,7 @@ describe('AutomationEngine - Node Timeout', () => {
                     id: `n${i}`,
                     type: 'script',
                     label: `Guarded ${i}`,
-                    timeoutMs: GUARD_MS,
+                    timeoutMs: GUARD_MS, config: { function: 'noop' },
                 })),
                 { id: 'end', type: 'end', label: 'End' },
             ];
@@ -2094,7 +2103,7 @@ describe('AutomationEngine - Node Timeout', () => {
                 type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'hangs', type: 'script', label: 'Hangs', timeoutMs: 50 },
+                    { id: 'hangs', type: 'script', label: 'Hangs', timeoutMs: 50, config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -2346,8 +2355,8 @@ describe('AutomationEngine - Parallel Branch Execution', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'branch_a', type: 'script', label: 'Branch A', config: { delay: 10 } },
-                { id: 'branch_b', type: 'script', label: 'Branch B', config: { delay: 10 } },
+                { id: 'branch_a', type: 'script', label: 'Branch A', config: { function: 'noop', delay: 10 } },
+                { id: 'branch_b', type: 'script', label: 'Branch B', config: { function: 'noop', delay: 10 } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -2414,7 +2423,7 @@ describe('AutomationEngine - Node Input Schema Validation', () => {
                     id: 'validated',
                     type: 'script',
                     label: 'Validated',
-                    config: {},
+                    config: { function: 'noop' },
                     inputSchema: {
                         url: { type: 'string', required: true, description: 'URL to call' },
                     },
@@ -2450,7 +2459,7 @@ describe('AutomationEngine - Node Input Schema Validation', () => {
                     id: 'validated',
                     type: 'script',
                     label: 'Validated',
-                    config: { count: 'not_a_number' },
+                    config: { function: 'noop', count: 'not_a_number' },
                     inputSchema: {
                         count: { type: 'number', required: true },
                     },
@@ -2563,7 +2572,7 @@ describe('AutomationEngine - Execution Status', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'bad', type: 'script', label: 'Bad' },
+                { id: 'bad', type: 'script', label: 'Bad', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -2797,6 +2806,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
 
 import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 /**
  * A recording fake trigger: captures bindings/callbacks handed to it by the
@@ -2854,7 +2864,7 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
     let engine: AutomationEngine;
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     it('binds a record-change flow to a matching trigger with a parsed binding', () => {
@@ -2918,7 +2928,8 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
     it('stops/restarts the binding when the flow is disabled/re-enabled', async () => {
         const rec = recordingTrigger('record_change');
         engine.registerTrigger(rec.trigger);
-        engine.registerFlow('rc_flow', recordChangeFlow('rc_flow'));
+        // [#20726] The toggle switches packaged flows only.
+        engine.registerFlow('rc_flow', { ...recordChangeFlow('rc_flow'), _packageId: 'crm' });
 
         await engine.toggleFlow('rc_flow', false);
         expect(rec.stopped).toEqual(['rc_flow']);
@@ -3159,7 +3170,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
     let engine: AutomationEngine;
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     /** start → `bad` (no executor registered for its type) → end. */
@@ -3167,7 +3178,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         name, label: name, type: 'autolaunched' as const,
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
-            { id: 'bad', type: 'script' as const, label: 'Bad' },
+            { id: 'bad', type: 'script' as const, label: 'Bad', config: { function: 'noop' } },
             { id: 'end', type: 'end' as const, label: 'End' },
         ],
         edges: [
@@ -3225,7 +3236,8 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         expect(missing.status).toBeUndefined();
 
         // 2. Registered but disabled.
-        engine.registerFlow('disabled_flow', failingFlow('disabled_flow'));
+        // [#20726] Disabled through the toggle, which switches packaged flows only.
+        engine.registerFlow('disabled_flow', { ...failingFlow('disabled_flow'), _packageId: 'crm' });
         await engine.toggleFlow('disabled_flow', false);
         const disabled = await engine.execute('disabled_flow');
         expect(disabled.success).toBe(false);
@@ -3237,7 +3249,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         // from the trigger door and is not dead code.
         engine.registerFlow('startless', {
             name: 'startless', label: 'Startless', type: 'autolaunched',
-            nodes: [{ id: 'middle', type: 'script', label: 'Middle' }],
+            nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
             edges: [],
         });
         const startless = await engine.execute('startless');
@@ -3262,7 +3274,8 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
      * applied to one copy only is the shape a later reader mistakes for a rule.
      */
     it('says WHICH refusal a never-dispatched exit is — code, and still no status', async () => {
-        engine.registerFlow('disabled_coded', failingFlow('disabled_coded'));
+        // [#20726] Disabled through the toggle, which switches packaged flows only.
+        engine.registerFlow('disabled_coded', { ...failingFlow('disabled_coded'), _packageId: 'crm' });
         await engine.toggleFlow('disabled_coded', false);
         const disabled = await engine.execute('disabled_coded');
         expect(disabled.success).toBe(false);
@@ -3271,7 +3284,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
 
         engine.registerFlow('startless_coded', {
             name: 'startless_coded', label: 'Startless', type: 'autolaunched',
-            nodes: [{ id: 'middle', type: 'script', label: 'Middle' }],
+            nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
             edges: [],
         });
         const startless = await engine.execute('startless_coded');

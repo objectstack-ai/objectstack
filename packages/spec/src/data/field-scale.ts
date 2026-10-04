@@ -68,7 +68,31 @@
  *   private `?? 0` and read the width through {@link resolveFieldScale}, and a
  *   computed result over a no-fixed-width column rounds to the widest decimal
  *   count among the values that entered it — derived from the data, ⛔ never a
- *   constant. Grouping is not this key's to decide:
+ *   constant. That rule binds TODAY only the computed results whose inputs the
+ *   renderer sees: the grid summary footer, which computes over the rows it
+ *   holds, and the `object-metric` tile's `min` / `max`, whose answer is itself
+ *   one of those inputs. A server-side `sum` / `avg` is not one of them: the
+ *   tile receives one number, and `AnalyticsResultResponseSchema`'s column
+ *   metadata (`@objectstack/spec/api`) carries `format` / `currency` /
+ *   `percentScale` and no width. So a `sum` / `avg` over a `number` with no
+ *   declared `scale` does NOT yet show the width this rule derives — measured
+ *   at `.objectui-sha` pin `89cad75d5570`, the `object-metric` tile still shows
+ *   it as a whole number, and the dataset-bound tile, given no measure
+ *   `format`, prints an integer answer as it is and rounds any other to at
+ *   most two decimals. The end-state is ruled (maintainer ruling 5933283974 on
+ *   objectui#11254, batch 261 item 4, letter A deferred, 「其他四张同意」): the
+ *   analytics result REPORTS the width — its column metadata carries the
+ *   widest decimal count among the values the server read, or the field's
+ *   declared `scale` when there is one — and the tile rounds to that. Nothing
+ *   is built before its trigger, the first first-party producer: an
+ *   `object-metric` tile or dataset measure doing `sum` / `avg` over a `number`
+ *   that declares no `scale` and whose author wrote no `format`. Then A is
+ *   built in one go, with no new decision. Until then an author who needs
+ *   decimals there has two declared channels: the field's `scale`, which the
+ *   `object-metric` tile reads through {@link resolveFieldScale}, or a
+ *   `format` — the `object-metric` tile's own, or on a dataset-bound tile the
+ *   measure's, the only channel that reaches that face while its column
+ *   metadata has no width member. Grouping is not this key's to decide:
  *   `FieldSchema.useGrouping` decides, and the renderer's interim heuristic
  *   for an absent `useGrouping` reads the DECLARED `scale` only — a declared
  *   `scale: 0` marks a discrete integer (a year, a fiscal period, an ordinal)

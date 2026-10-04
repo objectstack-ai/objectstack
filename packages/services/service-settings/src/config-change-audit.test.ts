@@ -40,7 +40,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
@@ -228,6 +228,10 @@ async function bootPlugin(opts: BootOptions = {}) {
   await engine.init();
   engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
   engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
+  // [#21516] A secret-typed setting writes through `sys_secret`; the engine
+  // refuses a name its registry does not hold, so the harness registers it as
+  // a boot does (platform-objects owns it).
+  engine.registry.registerObject(SysSecret as any, OWNER_PACKAGE);
   // [#18368] The mount point — see `LEDGER_MOUNT_STANDIN`.
   if (opts.ledgerMounted !== false) {
     engine.registry.registerObject(LEDGER_MOUNT_STANDIN as any, OWNER_PACKAGE);
@@ -578,6 +582,10 @@ describe('#8145 — a refused write emits NO config_change row', () => {
     await engine.init();
     engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
     engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
+    // [#21516] A secret-typed setting writes through `sys_secret`; the engine
+    // refuses a name its registry does not hold, so the harness registers it as
+    // a boot does (platform-objects owns it).
+    engine.registry.registerObject(SysSecret as any, OWNER_PACKAGE);
     // [#18368] This case asserts the sink writes on its NON-VACUITY leg, so the
     // ledger has to be mounted — see `LEDGER_MOUNT_STANDIN`.
     engine.registry.registerObject(LEDGER_MOUNT_STANDIN as any, OWNER_PACKAGE);

@@ -21,8 +21,8 @@ import { MIGRATIONS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR } from '../migrations/regist
 // (`contracts/export-service.ts`) and `ScheduleExportInput` leave the public
 // surface, and `ScheduleState` (`automation/execution.zod.ts`) goes with them
 // unless a live consumer is measured. Landing route A (decision batch #221
-// item 2): objectui retired its side first (objectui#10247, merged as objectui
-// PR #10264), and the pinned `.objectui-sha` already descends from that merge.
+// item 2): objectui retired its side first (objectui#10247, merged as
+// objectui PR #10264), and the pinned `.objectui-sha` already descends from that merge.
 // Scope note: the export-job LIST pair (`ListExportJobsRequestSchema` with its
 // `limit` / `cursor`, and its response) is in, absorbing #19543 door ②; the
 // import-job family in the same module is served and is NOT in.

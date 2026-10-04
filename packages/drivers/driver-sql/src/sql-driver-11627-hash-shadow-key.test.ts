@@ -15,7 +15,7 @@
  *
  * ## Why a shadow and not a prefix index
  *
- * The maintainer's 2026-08-24 ruling on #11374 chose the hash route and
+ * The maintainer's 2026-08-24 ruling, landed as commit 107bb4ba4, chose the hash route and
  * rejected prefix-unique indexes, on measurement: `UNIQUE KEY (token(191))`
  * enforces uniqueness over the PREFIX, so two genuinely distinct tokens that
  * share their first 191 characters collide and the second is refused as

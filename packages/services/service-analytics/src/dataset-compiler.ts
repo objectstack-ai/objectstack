@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@objectstack/spec/data';
+import type { ValueShapeFieldDef } from '@objectstack/spec/data';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   AggregationFunction,
   isAggregateCompatibleWithFieldType,
+  isMultiValueField,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
@@ -159,10 +161,11 @@ export interface DatasetCompileOptions {
    */
   isExternalObject?: (objectName: string) => boolean;
   /**
-   * [#16737 / #16099] The DECLARED `FieldType` of `field` on `objectName`, or
-   * `undefined` when nothing authoritative can answer. Supplied by the host
-   * from the same `AnalyticsServiceConfig.sourceFieldMeta` the result-column
-   * enrichment reads.
+   * [#16737 / #16099] The DECLARATION of `field` on `objectName` — its
+   * `FieldType` and its `multiple` flag — or `undefined` when nothing
+   * authoritative can answer. Supplied by the host from the same
+   * `AnalyticsServiceConfig.sourceFieldMeta` the result-column enrichment
+   * reads, in the shape the strategies' `declaredValueShape` hook carries.
    *
    * It is what makes {@link assertAggregateFieldTypeCompatible} decidable at
    * COMPILE time — the compile leg of the director ruling (decision batch #59,
@@ -170,8 +173,14 @@ export interface DatasetCompileOptions {
    * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in `@objectstack/spec`. Absent hook,
    * unknown object, unknown field → the pair is not judged, matching every
    * other probe on this interface.
+   *
+   * [#20912] It carries the declaration, not the type alone, because the
+   * table is per TYPE and cannot see `multiple: true`: a `select` flagged
+   * `multiple` is a list stored as JSON, and `count_distinct` over it splits
+   * across backends exactly as over `tags`. This option was
+   * `declaredFieldType` (the type alone) until then.
    */
-  declaredFieldType?: (objectName: string, field: string) => string | undefined;
+  declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined;
 }
 
 /** Map a dataset measure's aggregate to the Cube metric `type`. */
@@ -215,11 +224,24 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
  *   the ORDER — collation-dependent for text on every backend, and absent
  *   altogether where the storage form has no ordering operator (`min(jsonb)`
  *   does not exist on PostgreSQL).
+ * - [#20808] `count_distinct` COMPARES the stored values for equality, and
+ *   reaches this sentence only over a JSON-stored field (the table's
+ *   `count_distinct` row refuses the structured-JSON and multi-option types;
+ *   [#20912] `isMultiValueField` refuses a multi-capable type declared
+ *   `multiple: true`, and `column` then names the flag): the in-memory driver
+ *   counted equal documents apart, SQLite compared the serialized text, and
+ *   PostgreSQL has no equality operator for `json`.
  *
- * `count` / `count_distinct` accept every type and never reach this sentence.
+ * `count` accepts every type and never reaches this sentence.
  */
-const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string): string =>
-  aggregate === 'min' || aggregate === 'max'
+const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string, column = `\`${fieldType}\` column`): string =>
+  aggregate === 'count_distinct'
+    ? `"${aggregate}" COMPARES the stored values for equality, so over a ${column} `
+      + 'the answer is decided by how each backend compares a JSON-stored value rather than by '
+      + 'the data — one counts every row apart, one compares the serialized text, another has no '
+      + 'equality for the type and fails at query time — and one dataset would mean two things '
+      + 'on two deployments. '
+  : aggregate === 'min' || aggregate === 'max'
     ? `"${aggregate}" SELECTS one of the stored values, so over a \`${fieldType}\` column the `
       + 'answer is decided by the ORDER the SQL dialect happens to impose rather than by the '
       + 'data — string order is collation-dependent, and some storage forms have no ordering '
@@ -244,19 +266,28 @@ const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string): string =
  * wants. [#17560] The selecting sentence is the third: an author who wrote
  * `min` over a text column wanted a FIRST ROW, and a sort delivers that in one
  * declared order instead of asking each backend for its own smallest value.
+ * [#20808] The distinct sentence is the fourth: `count_distinct` over a
+ * JSON-stored field has no value every backend compares alike, so the author
+ * counts rows, or counts distinct a scalar field holding the part they meant.
+ * The other two non-temporal sentences no longer say `count_distinct` accepts
+ * every type: since #20808 it accepts every type but the JSON-stored ones.
  */
 const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
   TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
     ? 'For a temporal field, `min`/`max` return a real instant; a DURATION has to be '
       + 'stored as a number (a computed "days open" field) and aggregated as one.'
+    : aggregate === 'count_distinct'
+      ? 'For a JSON-stored field, `count` counts the rows; a distinct count has to be taken '
+        + 'over a field that stores one scalar value, so store the part you count in a field '
+        + 'of its own and `count_distinct` that field.'
     : aggregate === 'min' || aggregate === 'max'
-      ? 'For a field with no backend-independent order, `count`/`count_distinct` accept every '
-        + 'type because they read neither arithmetic nor order off the value; a "first" or '
-        + '"last" record is a SORT on the record list, which orders once in a declared '
+      ? 'For a field with no backend-independent order, `count` accepts every type because it '
+        + 'reads no value, and `count_distinct` every type but the JSON-stored ones; a "first" '
+        + 'or "last" record is a SORT on the record list, which orders once in a declared '
         + 'direction, not an aggregate that asks every backend for its own smallest value.'
-      : 'For a non-numeric field, `count`/`count_distinct` accept every type because they '
-        + 'read no arithmetic off the value; a quantity that should be added up has to be '
-        + 'stored as a numeric field and aggregated as one.';
+      : 'For a non-numeric field, `count` accepts every type because it reads no value, and '
+        + '`count_distinct` every type but the JSON-stored ones; a quantity that should be '
+        + 'added up has to be stored as a numeric field and aggregated as one.';
 
 /**
  * [#16737 / #16099 / #17560] Refuse a measure whose AGGREGATE cannot meaningfully
@@ -342,7 +373,7 @@ const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
  *
  * ## Tiering — "cannot answer, do not block", the same as every sibling probe
  *
- * - No `declaredFieldType` hook (no data engine wired) → not judged.
+ * - No `declaredValueShape` hook (no data engine wired) → not judged.
  * - A field the hook cannot resolve → not judged.
  * - A RELATIONSHIP-PATH field (`account.closed_at`) → not judged. The hook
  *   resolves a column on the BASE object, so it would answer about a different
@@ -359,32 +390,45 @@ function assertAggregateFieldTypeCompatible(
   datasetName: string,
   objectName: string,
   measure: DatasetMeasure,
-  declaredFieldType?: (objectName: string, field: string) => string | undefined,
+  declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined,
 ): void {
-  if (!declaredFieldType) return;
+  if (!declaredValueShape) return;
   const aggregate = measure.aggregate;
   const field = measure.field;
   if (!aggregate || !field) return;
   // A dotted reference resolves on a JOINED object; this hook answers for the
   // base one. Not judged rather than judged wrongly.
   if (field.includes('.')) return;
-  const fieldType = declaredFieldType(objectName, field);
-  if (!fieldType) return;
+  const shape = declaredValueShape(objectName, field);
+  if (!shape?.type) return;
+  const fieldType = shape.type;
+  // [#20912] …and the DECLARATION half the per-type table cannot see, asked
+  // the way the engine's `count_distinct` door asks it: `isMultiValueField`
+  // beside the table's row. A multi-capable type flagged `multiple: true`
+  // (`select`, `lookup`, …) is a list stored as JSON — the very storage the
+  // row refuses `tags` for. Only `count_distinct` can be moved by it: the
+  // `sum` / `avg` / `min` / `max` rows accept no multi-capable type, and
+  // `count` reads no value.
+  const flaggedList = aggregate === 'count_distinct'
+    && isMultiValueField(shape)
+    && isAggregateCompatibleWithFieldType(aggregate, fieldType);
   // [#17560] Every aggregate is judged, through this one door. ⛔ There is no
   // scope condition here any more — the VERDICT is the spec table's and only
-  // the spec table's.
-  if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return;
+  // the spec table's, plus the declaration above.
+  if (isAggregateCompatibleWithFieldType(aggregate, fieldType) && !flaggedList) return;
 
   const accepted = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate];
+  const declared = flaggedList ? `\`${fieldType}\` with \`multiple: true\`` : `\`${fieldType}\``;
   // [#5716] `DATASET_INVALID` / 400 — a verdict about the dataset DOCUMENT,
   // decided from metadata alone before any query runs, and fixable only by the
   // author who wrote the pair.
   throw datasetInvalidError(
     `[dataset-compiler] dataset "${datasetName}" measure "${measure.name}" applies aggregate ` +
     `"${aggregate}" to field "${field}", which object "${objectName}" declares as ` +
-    `\`${fieldType}\`. That pair is not accepted: ` +
-    `${DIVERGENCE_BY_AGGREGATE(aggregate, fieldType)}` +
-    `"${aggregate}" accepts: ${accepted.join(', ')}. ` +
+    `${declared}. That pair is not accepted: ` +
+    `${DIVERGENCE_BY_AGGREGATE(aggregate, fieldType, flaggedList ? `${declared} column` : undefined)}` +
+    `"${aggregate}" accepts: ${accepted.join(', ')}` +
+    `${flaggedList ? ', none of them with `multiple: true`' : ''}. ` +
     `${REMEDY_BY_SOURCE_CLASS(fieldType, aggregate)}`,
   );
 }
@@ -431,15 +475,16 @@ const joinAlias = (path: string): string => path.replace(/\./g, '__');
  * (the resolver takes `locale` positionally for exactly that reason).
  *
  * **A compiled Cube is a REGISTRY artifact, not a response.** `registerDataset`
- * writes it into `CubeRegistry` under the dataset's name, `queryDataset`
- * re-registers on every call, and `getMeta()` — the `/analytics/meta` face —
- * reads it back with **no execution context at all** (`IAnalyticsService.getMeta`
- * takes `cubeName?` and nothing else, and the route calls it without one). So
- * the request locale must NOT be baked in here: one `zh-CN` query would leave a
- * Chinese-labelled cube in a registry every later reader shares, and
- * `/analytics/meta` would answer whoever queried last. Request-scoped
- * resolution belongs where a request is in hand — `queryDataset`'s two field
- * enrichment sites, which read `context.locale`.
+ * writes it into `CubeRegistry` under the dataset's name, and `getMeta()` — the
+ * `/analytics/meta` face — reads it back with **no execution context at all**
+ * (`IAnalyticsService.getMeta` takes `cubeName?` and nothing else, and the route
+ * calls it without one). So the request locale must NOT be baked in here: a
+ * cube compiled at one caller's locale and registered would answer every later
+ * reader in that locale. `queryDataset` compiles through this same function and
+ * registers nothing (#20356), so there is one compilation for both doors and
+ * neither takes a locale. Request-scoped resolution belongs where a request is
+ * in hand — `queryDataset`'s two field enrichment sites, which read
+ * `context.locale`.
  *
  * **The fallback stays `d.name`, and that is safe against the `f.label == null`
  * guard** (#5199 route A / #6761). `Metric.label` and `Dimension.label` are
@@ -629,8 +674,11 @@ export function compileDataset(
   const dimensions: Record<string, CubeDimension> = {};
   for (const d of dataset.dimensions) {
     assertDeclared(d.field, 'dimension', d.name);
+    // The dimension's NAME is the key it is filed under (`dimensions[d.name]`
+    // below) — the cube member carries no inner copy: #20300 retired
+    // `Dimension.name` (ADR-0049 enforce-or-remove), because every consumer
+    // resolves a member by its record key and nothing ever read the inner one.
     const dim: CubeDimension = {
-      name: d.name,
       // [#6761] An inline locale map is a label, not a missing one. Before this,
       // the `typeof === 'string'` test dropped the map and substituted the
       // machine name, which `/analytics/meta` then published as a display title
@@ -662,9 +710,10 @@ export function compileDataset(
     // declared type can carry. Placed after the join-declaration check so a
     // dotted field is refused for the reason it is actually wrong (an
     // undeclared relationship) before this gate stands down on it.
-    assertAggregateFieldTypeCompatible(dataset.name, dataset.object, m, options?.declaredFieldType);
+    assertAggregateFieldTypeCompatible(dataset.name, dataset.object, m, options?.declaredValueShape);
+    // Filed under its name (`measures[m.name]` below), with no inner copy —
+    // the same #20300 retirement as the dimension's.
     const metric: Metric = {
-      name: m.name,
       // [#6761] Same as the dimension label above — see {@link REGISTRY_LOCALE}.
       label: resolveI18nLabel(m.label, REGISTRY_LOCALE) ?? m.name,
       type: aggregateToMetricType(m),
@@ -685,7 +734,10 @@ export function compileDataset(
     sql: dataset.object,
     measures,
     dimensions,
-    public: false,
+    // Visible: `queryDataset` runs the selection through `DatasetExecutor`,
+    // which reaches this cube by name through `AnalyticsService.query()` — the
+    // door that refuses a hidden cube (`cube-visibility.ts`).
+    public: true,
   };
   if (Object.keys(joins).length > 0) cube.joins = joins;
 

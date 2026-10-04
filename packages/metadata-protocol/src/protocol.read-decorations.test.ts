@@ -4,9 +4,10 @@
  * #4326 — read decorations must not round-trip into the persisted body.
  *
  * `getMetaItem`/`getMetaItems` stamp `_diagnostics` on every served document
- * (and `_draft` on draft reads), while the write path persists the request body
- * VERBATIM by design (ADR-0005 §Validation — `parsed.data` would strip
- * Studio-only auxiliary fields). The standard Studio round-trip therefore used
+ * (and `_draft` on draft reads), while the write path persisted the request body
+ * VERBATIM by design (ADR-0005 appendix (c); since #20051 only for types other
+ * than `view`, which stores its parsed body — undeclared keys, these among
+ * them, never reach the row). The standard Studio round-trip therefore used
  * to bake a read-time verdict into `sys_metadata.metadata`, into its checksum,
  * and into every history diff.
  *

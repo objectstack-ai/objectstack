@@ -268,7 +268,15 @@ automation.registerFlow?.('escalate_high_priority_case', escalateCase);
 
 const names = await automation.listFlows();     // string[] of machine names
 const parsed = await automation.getFlow?.('escalate_high_priority_case');
-await automation.toggleFlow?.('escalate_high_priority_case', false);
+
+// A flow registered here is authored in the deployment, so its switch is its
+// own `status`: re-register it with 'obsolete' to switch it off ('active' arms it).
+automation.registerFlow?.('escalate_high_priority_case', { ...escalateCase, status: 'obsolete' });
+
+// `toggleFlow` switches PACKAGED flows only — one a code package ships — by
+// writing the ADR-0126 activation ledger. It refuses a flow no package ships
+// with RESOURCE_CONFLICT / 409 and changes nothing.
+await automation.toggleFlow?.('a_packaged_flow', false);
 ```
 
 `registerFlow` validates against the live action registry and rejects unknown `config`
@@ -292,7 +300,7 @@ GET    /api/v1/automation/:name                        # get one flow
 PUT    /api/v1/automation/:name                        # update a flow
 DELETE /api/v1/automation/:name                        # delete a flow
 POST   /api/v1/automation/:name/trigger                # execute a flow
-POST   /api/v1/automation/:name/toggle                 # enable / disable
+POST   /api/v1/automation/:name/toggle                 # enable / disable a packaged flow (a customer flow: its status, via PUT)
 GET    /api/v1/automation/:name/runs                   # list runs
 GET    /api/v1/automation/:name/runs/:runId            # run detail
 GET    /api/v1/automation/:name/runs/:runId/screen     # screen spec of a parked run

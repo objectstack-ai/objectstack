@@ -1014,10 +1014,12 @@ export const FanOutNotifyFlow = defineFlow({
             edges: [],
           },
           {
-            // Slack is a CONNECTOR, not a notify channel (#4343): post through
-            // an incoming webhook, or a `connector_action` with the Slack
-            // connector. The retired `script` + `actionType: 'slack'` shape
-            // logged a line and delivered nothing.
+            // Slack is a CONNECTOR, not a notify channel (#4343). The retired
+            // `script` + `actionType: 'slack'` shape logged a line and
+            // delivered nothing. A real post goes through a connector, as
+            // `TaskCompletedSlackFlow` above does. This branch stays an `http`
+            // node because it is the showcase's `parallel` + `http` fixture
+            // (docs/qa/platform-checklist/areas/automation.json).
             name: 'Post to Slack',
             nodes: [
               {
@@ -1025,6 +1027,14 @@ export const FanOutNotifyFlow = defineFlow({
                 type: 'http',
                 label: 'Slack Notify',
                 config: {
+                  // A placeholder, and it must stay one. This url is served with
+                  // the flow definition to every member who can read flows, and
+                  // an incoming-webhook url's path IS its secret, so a real one
+                  // never goes here. A credentialed call goes through a
+                  // connector whose credential lives outside the definition:
+                  // a declarative instance's `auth.credentialRef`
+                  // (src/system/connectors/index.ts), or the `slack` connector
+                  // `TaskCompletedSlackFlow` uses.
                   url: 'https://hooks.slack.com/services/T000/B000/XXXX',
                   method: 'POST',
                   body: { channel: '#tasks', text: 'Task done: {record.title}' },

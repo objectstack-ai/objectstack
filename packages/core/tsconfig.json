@@ -18,7 +18,8 @@
     // the workspace link to `dist/*.d.ts` — a build artifact — so a stale dist
     // would make this package's type verdict a function of build state rather
     // than of the source in the checkout (`check:type-source-resolution`
-    // refuses exactly that). Anchored to the bare specifier only: nothing here
+    // refused exactly that until it was retired on 2026-09-18, #18373; no gate
+    // checks this rule now). Anchored to the bare specifier only: nothing here
     // imports an `@objectstack/types/*` subpath, and a `paths` target matching
     // nothing on disk would silently fall back to node resolution.
     "paths": {
@@ -26,7 +27,7 @@
     }
   },
   "include": ["src/**/*"],
-  // [#14613] The TEST layer moved to the `tsconfig.test.json` sibling, which
+  // [commit 81208086a] The TEST layer moved to the `tsconfig.test.json` sibling, which
   // `package.json`'s `typecheck` NAMES via `check:test-typecheck --project`.
   // This stays the BUILD config. Splitting the two is what let a `typecheck`
   // script exist here at all: this package carried a `check:type-check-coverage`

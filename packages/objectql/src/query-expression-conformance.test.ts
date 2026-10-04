@@ -1029,7 +1029,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // refused on two axes must not be sent two different ways, which is
         // exactly how #4256 and #6673 drifted apart in the first place.
         //
-        // [#8648] It used to assert only that the four SORT/FILTER doors share
+        // [commit e5eeb499c] It used to assert only that the four SORT/FILTER doors share
         // one stem — which left the claim unpinned in the one place where
         // reading it as word-identity was FALSE. The SEARCH axis cannot match
         // that stem and never did; measured from the running doors on this
@@ -1067,7 +1067,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         //      actionable.
         //
         // ⛔ Unifying the SEARCH wording onto the shared stem is route 3 of
-        // #8648 and was NOT taken: it changes a shipped error message and
+        // the card commit e5eeb499c fixed, and was NOT taken: it changes a shipped error message and
         // needs somewhere for the `text` narrowing to live. Layer 2 is what
         // makes that a decision someone takes on purpose instead of a silent
         // edit — if you are here because it went red, that is the pin working.
@@ -1114,7 +1114,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
                 emit: () => engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] }),
             },
             {
-                // [#8648] The door the claim was missing. SEARCH has no engine
+                // [commit e5eeb499c] The door the claim was missing. SEARCH has no engine
                 // twin to pair with: `search` is expanded at ingress into the
                 // `$or` of `$icontains` the engine receives (ADR-0061), so
                 // this axis has exactly one door — which is why "the three
@@ -1197,7 +1197,11 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         const bare = new ObjectQL();
         bare.registerDriver(makeStubDriver().driver, true);
         await bare.init();
-        await expect(bare.find('unregistered_object', { where: { anything: true } })).resolves.toEqual([]);
+        // [#21516] The engine now refuses the OBJECT first — the door's own
+        // `OBJECT_NOT_FOUND` — so the field door still invents no verdict about
+        // `anything`: the answer is about the object, never `INVALID_FIELD`.
+        await expect(bare.find('unregistered_object', { where: { anything: true } }))
+            .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
     });
 
     // ─────────────────────────────────────────────────────────────
@@ -1221,17 +1225,42 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
     // unjudged — the ruling's carve-out, pinned as a control below.
     // ─────────────────────────────────────────────────────────────
 
-    it('CONTROL — the nested-relation OBJECT form still passes both doors: the refusal targets the dotted-STRING spelling alone', async () => {
-        // `{ project_id: { name: 'x' } }` is a legitimate nested-relation
-        // condition whose inner keys belong to ANOTHER object — the exact
-        // shape the collectors refuse to descend into. If this control goes
-        // red, the verdict has started judging comparand VALUES, which is a
-        // different (and wrong) gate.
-        await expect(protocol.findData({
+    it('CONTROL — the nested-relation OBJECT form is not the dotted verdict\'s at either door: the refusal targets the dotted-STRING spelling alone', async () => {
+        // `{ project_id: { name: 'x' } }` is a nested-relation condition whose
+        // inner keys belong to ANOTHER object — the exact shape the collectors
+        // refuse to descend into. If this control answers the dotted verdict's
+        // INVALID_FIELD, that verdict has started judging comparand VALUES,
+        // which is a different (and wrong) gate. [#20745] The engine refused
+        // the form itself for a while — no driver served it. [#20802] It is
+        // SERVED now: the engine reads the related object with the condition
+        // and hands the driver `$in` on its ids, so both doors answer the rows
+        // the undotted `{ project_id: 'p1' }` control answers.
+        const byFk: any = await protocol.findData({ object: 'showcase_task', query: { where: { project_id: 'p1' } } });
+        const wanted = byFk.records.map((r: any) => r.id).sort();
+        expect(wanted).toHaveLength(5);
+        const viaProtocol: any = await protocol.findData({
             object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } },
-        })).resolves.toMatchObject({ records: expect.any(Array) });
-        await expect(engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } }))
-            .resolves.toEqual(expect.any(Array));
+        });
+        expect(viaProtocol.records.map((r: any) => r.id).sort()).toEqual(wanted);
+        const viaEngine = await engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } });
+        expect(viaEngine.map((r: any) => r.id).sort()).toEqual(wanted);
+        const none = await engine.find('showcase_task', { where: { project_id: { name: 'Gemini' } } });
+        expect(none).toEqual([]);
+    });
+
+    it('[#20802] both doors\' dotted relation refusals name the SAME served nested route', async () => {
+        const ingressErr: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
+            .then(() => null, (e: unknown) => e);
+        const engineErr: any = await engine
+            .find('showcase_task', { where: { 'project_id.name': 'Apollo' } })
+            .then(() => null, (e: unknown) => e);
+        const route = 'nest the condition beneath the relation field: { "project_id": { "name": VALUE } }';
+        expect(String(ingressErr?.message)).toContain(route);
+        expect(String(engineErr?.message)).toContain(route);
+        // The claim this change made false is gone from both doors.
+        expect(String(ingressErr?.message)).not.toContain('a filter reaches only columns');
+        expect(String(engineErr?.message)).not.toContain('a filter reaches only columns');
     });
 
     it('⛔ CONTROL — the structured/JSON head stays UNJUDGED at both doors: the ruled carve-out', async () => {
@@ -1363,7 +1392,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
         expect(err.message).toMatch(/follows the relationship 'project_id' into another object/);
         // The one-vocabulary discipline, emitted-vs-emitted: both doors close
-        // with the SAME remedy sentence the #8648 agreement pin protects.
+        // with the SAME remedy sentence the commit e5eeb499c agreement pin protects.
         const ingressErr: any = await protocol
             .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
             .then(() => null, (e: unknown) => e);
@@ -1778,8 +1807,10 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // the ingress gate makes when `resolveQueryFields` cannot answer).
         // For that host the driver-side #3821 ladder is the documented
         // backstop — which is exactly why the ruling KEEPS the ladder.
+        // [#21516] The object itself is now refused first, with the door's own
+        // `OBJECT_NOT_FOUND` — still no dotted verdict invented about `a.b`.
         await expect(engine.find('unregistered_thing', { fields: ['a.b'] }))
-            .resolves.toEqual([]);
+            .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
     });
 
     it('an `expand` sub-read raises the refusal, which the expand backstop downgrades to a warning', async () => {

@@ -82,6 +82,36 @@ export const fieldForm = defineForm({
         // unit and are declared nowhere.
         { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Total digits' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
+        // `useGrouping` is shown once it is enforced (ruling 5916202706: offer
+        // it) — objectui's `shouldGroupDisplayNumber` answers an authored value
+        // first, so the order is the `valueDomain` row's: declared = enforced =
+        // shown. A plain boolean row, the face of the `allowCreate` row below
+        // (the same `z.boolean().optional()` node, no default): the switch
+        // writes nothing until toggled, so an untouched field stays unset and
+        // the renderer decides. It reads off meanwhile, even where the renderer
+        // groups, and the help text says so in the words of the `object.form.ts`
+        // `userActions` row. Gated like `scale`, a `number`-only hint.
+        { field: 'useGrouping', visibleWhen: "data.type == 'number'", helpText: 'Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped.' },
+        // #19332 G1b (ruling 5861442317, G1) — `currencyConfig` is a strict object
+        // with two keys, and both members of its one enum are spellable option
+        // values, so it takes the `object.form.ts` `access` / `lifecycle` face: a
+        // composite whose sub-rows are DECLARED, so their labels and help text
+        // reach the translation catalogs (a schema-derived sub-field never does).
+        // Schema defaults (`dynamic`, `CNY`) are placeholders the renderer never
+        // writes on mount, so an untouched composite stays absent.
+        {
+          field: 'currencyConfig',
+          type: 'composite',
+          visibleWhen: "data.type == 'currency'",
+          helpText: 'Which currency this field is in. Unset: dynamic mode. The stored value is a bare number in either mode.',
+          fields: [
+            { field: 'currencyMode', type: 'select', helpText: 'dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency.', options: [
+              { label: 'Dynamic — the tenant default currency', value: 'dynamic' },
+              { label: 'Fixed — one currency for this field', value: 'fixed' },
+            ] },
+            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode.' },
+          ],
+        },
         // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:
         // `FieldSchema` accepts each key on any type, and each is mirrored from
         // the key's own contract text and from the same row in the object
@@ -89,6 +119,11 @@ export const fieldForm = defineForm({
         // cannot disagree about when a knob applies.
         { field: 'step', visibleWhen: "data.type == 'slider'", helpText: 'Step increment for the slider (default 1). Renderer-only: the write path does not reject a value off the step grid.' },
         { field: 'maxSize', visibleWhen: "data.type in ['image','file','avatar','video','audio']", helpText: 'Maximum permitted file size in BYTES (positive integer). Enforced server-side on write against the stored file size — a file with no recorded size cannot fail it.' },
+        // #19332 G1b — `accept` is `string[]`, not a union, so it takes the
+        // `app.form.ts` `requiredPermissions` face (`string-tags`, a chip input
+        // over `string[]`). Its gate is `maxSize`'s: both are checked by the same
+        // server-side file-constraint pass, on the same five media types.
+        { field: 'accept', widget: 'string-tags', visibleWhen: "data.type in ['image','file','avatar','video','audio']", helpText: 'Permitted upload types, as MIME types, type/* wildcards or .ext suffixes (e.g. image/*, .pdf). Offered to the file picker and re-checked server-side on write against the stored file. Unset: any type.' },
         { field: 'dimensions', visibleWhen: "data.type == 'vector'", helpText: 'Vector dimensionality — an integer from 1 to 10000 (e.g. 1536 for OpenAI embeddings).' },
         { field: 'language', visibleWhen: "data.type == 'code'", helpText: 'Editor language for syntax highlighting (e.g. javascript, python, sql).' },
         { field: 'autonumberFormat', visibleWhen: "data.type == 'autonumber'", helpText: 'Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}.' },
@@ -190,8 +225,70 @@ export const fieldForm = defineForm({
         { field: 'descriptionField', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Secondary field shown under the label in the quick-select popover.' },
         { field: 'allowCreate', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Let the user create a record from the typed text when the picker finds no match. Best for objects whose only required field is the display field.' },
         { field: 'lookupPageSize', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Rows per page in the record-picker dialog — a positive integer; default 10.' },
+        // #19332 G1b (ruling 5861442317, G1) — the picker's two structured knobs.
+        //
+        // `lookupFilters` is the same key on the same node as the object
+        // designer's per-field row (`object.form.ts`, `fields.lookupFilters`), so
+        // it copies that row: `json`, no inline `options` (`notIn` carries a
+        // capital, which `FormSelectOptionSchema.value` cannot spell).
+        //
+        // `lookupColumns` is an array of a UNION (a field name, or a
+        // `{field, label, width, type}` entry), so the ruling's union rule
+        // applies: `json`, ⛔ never `string-tags`, a chip input for strings only
+        // that renders each entry as chip text, so it cannot show or edit a
+        // stored object entry. `json` is not a registered widget: the renderer
+        // derives the face from the stored value, so an object-entry list edits
+        // as rows and anything else opens the raw JSON editor.
+        { field: 'lookupColumns', widget: 'json', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Columns of the record-picker table: field names of the referenced object, or {field, label, width, type} entries (e.g. ["name", {"field": "status", "label": "Stage"}]). Unset: derived from the referenced object.' },
+        { field: 'lookupFilters', widget: 'json', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Base filter on the picker\'s candidates, as {field, operator, value} rules on the referenced object — operator one of eq, ne, gt, lt, gte, lte, contains, in, notIn (e.g. [{"field": "status", "operator": "eq", "value": "active"}]). Applied to every picker surface, ANDed with any dependsOn filter.' },
+        // `dependsOn` is an array of a union too (a field name, or `{field, param}`),
+        // so it takes `json` for the same reason. Its gate is the six types
+        // whose renderer reads it at the pin: the lookup picker (`lookup`,
+        // `master_detail`) and the four option widgets.
+        { field: 'dependsOn', widget: 'json', visibleWhen: "data.type in ['lookup','master_detail','select','multiselect','radio','checkboxes']", helpText: 'Fields on the same record this field\'s choices depend on: the form holds this field until each is set, and re-evaluates it when one changes. A lookup filters its candidates by them — a name filters the same-named field of the referenced object, {field, param} names a different one. On an option field list the parent field names; the per-option rule lives in each option\'s visibleWhen.' },
         { field: 'relatedListTitle', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Title for this relationship's related list on the parent's detail page." },
+        // `relatedListColumns` is `string[]` by ruling (an object entry is
+        // refused at parse), so it takes `string-tags`, the `app.form.ts`
+        // `requiredPermissions` face. A field picker is not offered: the names
+        // are the CHILD object's (this field's own object), and no widget here
+        // reads a catalog from the field draft.
+        { field: 'relatedListColumns', widget: 'string-tags', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Columns of this relationship's related list on the parent's detail page, as field names of this (the child) object, e.g. name, status. Unset: derived from the child object. Names only — labels, cell types and formatting come from the child's field definitions." },
         { field: 'inlineTitle', visibleWhen: "data.type == 'master_detail'", helpText: 'Title for the inline master-detail grid on the parent record.' },
+        // #19332 (flight G2b of ruling record 5861442317) — the inline grid's
+        // explicit columns, between the grid's title and its total and behind the
+        // same gate. A repeater with declared sub-rows, the `object.form.ts`
+        // `fieldGroups` repeater's face, over a CURATED SUBSET of the twenty
+        // keys `InlineGridColumnSchema` accepts; the reconciliation ledger
+        // records the `subset` row and names what is left out and why.
+        //
+        // The subset is the entry the key's own contract recommends: `name`
+        // alone, which objectui's `hydrateColumns` completes from the child
+        // field (type, options, lookup target, rules, computed expression), plus
+        // the three keys that apply to a column of any type (`label`, `width`,
+        // `defaultHidden`). `type` is not offered because declaring it opts the
+        // column out of that hydration. The keys that apply to one cell type
+        // only are not offered because a column takes its type from the child
+        // field at render, which no sub-row `visibleWhen` here can see, so each
+        // would be offered on every column. The rules (`required`,
+        // `readonlyWhen`, `requiredWhen`) are copies of the child field's own.
+        //
+        // `name` names a field of THIS (the child) object, like
+        // `relatedListColumns` above, and no authoring door judges it: not the
+        // parse, not the publish door, not `os validate`. At render an unknown
+        // name is left unhydrated, a plain text column, which is what the help
+        // text claims.
+        {
+          field: 'inlineColumns',
+          type: 'repeater',
+          visibleWhen: "data.type == 'master_detail'",
+          helpText: 'Columns of the inline grid on the parent\'s form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object\'s editable fields, and past six the rest start in the grid\'s column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source.',
+          fields: [
+            { field: 'name', label: 'Name', type: 'text', required: true, helpText: 'Field of this (the child) object that the column shows and edits (e.g. quantity). Nothing checks it when you save or publish: a name that is not a field of this object renders a plain text column.' },
+            { field: 'label', label: 'Label', type: 'text', helpText: 'Column header. Unset: the field\'s own label.' },
+            { field: 'width', label: 'Width', type: 'number', helpText: 'Fixed column width in pixels. Unset: sized by the cell type, with text columns flexing and number, date and select columns staying narrow.' },
+            { field: 'defaultHidden', label: 'Default Hidden', type: 'boolean', helpText: 'Start the column in the grid\'s column chooser instead of on screen; the user can show it. A column whose field is required is always shown.' },
+          ],
+        },
         { field: 'inlineAmountField', visibleWhen: "data.type == 'master_detail'", helpText: 'Numeric child field summed for the inline grid total.' },
       ],
     },
@@ -253,14 +350,38 @@ export const fieldForm = defineForm({
       fields: [
         // Database & Performance
         { field: 'externalId', colSpan: 1, helpText: 'Mark as external ID for upsert operations' },
+        // #19332 G1b — `storage` is a strict object with one boolean, so it takes
+        // the same declared-composite face as `currencyConfig` above. The one
+        // contradiction the schema refuses (`notNull` beside `requiredWhen`) is
+        // refused at parse, loudly, so the help text names it rather than hiding
+        // either control.
+        {
+          field: 'storage',
+          type: 'composite',
+          colSpan: 2,
+          helpText: 'Physical storage constraints (ADR-0113): the DDL the write contract deliberately does not imply. Unset: none requested.',
+          fields: [
+            { field: 'notNull', type: 'boolean', helpText: 'Emit a database NOT NULL on the column. Unset, the column stays nullable even under required — the engine enforces required on write. Declaring it over existing null rows is a destructive migration gated by schema drift (backfill first). Refused beside requiredWhen.' },
+          ],
+        },
         // UI & Visibility
         { field: 'readonly', colSpan: 1, helpText: 'Field is read-only in forms' },
         { field: 'hidden', colSpan: 1, helpText: 'Hide field from default UI views' },
         { field: 'searchable', colSpan: 1, helpText: 'Include in global search results' },
         { field: 'sortable', colSpan: 1, helpText: 'Allow sorting lists by this field' },
+        // #19332 G1b — the three field-level predicates. Same keys, same node, as
+        // the object designer's per-field rows (`object.form.ts`,
+        // `fields.visibleWhen` / `readonlyWhen` / `requiredWhen`), so they copy
+        // that row: `type: 'code'`, `language: 'expression'`.
+        { field: 'visibleWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.type == 'invoice') — the form shows this field only while it is TRUE." },
+        { field: 'readonlyWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.status == 'paid') — the field is read-only while it is TRUE, enforced server-side: an update's change to a locked field is dropped and the stored value kept. Reads the record's own columns; objectstack validate refuses a read through a reference field." },
+        { field: 'requiredWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record — the field is required while it is TRUE, enforced server-side as a transition gate: a write that leaves the value missing is refused when the record complied before it, so a row already missing the value keeps passing unrelated edits. For a rule every write must meet, use a validations script rule. Refused beside storage.notNull." },
         // Partial masking (#8993): a preset name or a {keepHead, keepTail} JSON
         // object; the runtime FieldMasker enforces it on read AND export.
         { field: 'maskingRule', colSpan: 2, helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions" },
+        // #19332 G1b — the capability gate `maskingRule` above already names.
+        // `string[]`, so the `app.form.ts` `requiredPermissions` face.
+        { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate." },
         { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
         { field: 'trackHistory', colSpan: 1, helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field." },
         { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },

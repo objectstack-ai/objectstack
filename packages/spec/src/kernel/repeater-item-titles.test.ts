@@ -271,7 +271,7 @@ function deriveCarriers(): Carrier[] {
 const CARRIERS = deriveCarriers();
 const OBJECT_ROW_CARRIERS = CARRIERS.filter((c) => !c.scalarItems);
 
-describe('#17232 — the repeater survey itself (controls before verdicts)', () => {
+describe('the repeater survey itself (controls before verdicts)', () => {
   it('walks every form this package exports, and finds repeaters in exactly the forms that declare one', () => {
     // Lit control — the walk really ran.
     expect(FORMS.length).toBe(15);
@@ -314,7 +314,7 @@ describe('#17232 — the repeater survey itself (controls before verdicts)', () 
   });
 });
 
-describe('#17232 — every repeater row property carries a JSON Schema title', () => {
+describe('every repeater row property carries a JSON Schema title', () => {
   for (const carrier of OBJECT_ROW_CARRIERS) {
     const owed = LEDGER.has(carrier.id);
     it(`${carrier.id}${owed ? ' (ledger: still owed titles)' : ''}`, () => {
@@ -343,7 +343,7 @@ describe('#17232 — every repeater row property carries a JSON Schema title', (
     }
   });
 
-  it('dashboard.header.actions stays titled — the one carrier #17227 closed', () => {
+  it('dashboard.header.actions stays titled — the first carrier given item-level names', () => {
     const c = CARRIERS.find((x) => x.id === 'dashboard:header.actions');
     expect(c, 'dashboard.header.actions is a repeater').toBeDefined();
     expect(c!.authorable).toEqual(['label', 'actionUrl', 'actionType', 'icon']);

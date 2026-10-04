@@ -527,7 +527,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 if ((config.api as any)?.requireAuth !== undefined
                     || (config.api as any)?.api?.requireAuth !== undefined) {
                     ctx.logger.warn(
-                        '[security] `api.requireAuth` was removed (#3963) and is IGNORED — anonymous access to '
+                        '[security] `api.requireAuth` was removed and is IGNORED — anonymous access to '
                         + 'object data is always denied. Publish public surfaces by declaration instead: a public '
                         + 'form view, a share link, or `book.audience: \'public\'`.',
                     );
@@ -548,7 +548,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // those are; the route-ledger conformance guard drives the same
             // function, so a registrar added there cannot slip past it.
             if (restServer) {
-                // [#6306] ONE base for the whole surface. This is the same
+                // [commit fec784863] ONE base for the whole surface. This is the same
                 // value `registerRoutes()` mounted everything else under —
                 // asked of the server that owns it, never recomputed here.
                 // The old line was `${basePath}/${version}`, which is

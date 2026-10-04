@@ -145,12 +145,28 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
     // Schema-valid on purpose, like the four above: `field` resolves
     // `FieldSchema`, so a malformed body would 422 before the registry consult
     // and the probe would prove nothing about the code-only gate.
+    //
+    // [#21470] And NAMELESS on purpose: the row is named `<object>.<field>`,
+    // which a dot-free `FieldSchema` `name` can never spell, so a body `name`
+    // would now be refused by the write doors' name judge (`VALIDATION_ERROR`
+    // / 400) once the hatch below opens the door — a different refusal from
+    // the one this probe measures. `FieldSchema` does not require `name`.
     field: {
         name: 'rc3_field_probe.zz_probe',
         item: {
-            name: 'zz_probe',
             label: 'Probe',
             type: 'text',
+        },
+    },
+    // `picklist` is package-owned (`allowRuntimeCreate: false`): a shared option
+    // list ships in a package (`*.picklist.ts`), and a per-org overlay is a later
+    // phase. Schema-valid for the same reason as the rest.
+    picklist: {
+        name: 'rc3_picklist_probe',
+        item: {
+            name: 'rc3_picklist_probe',
+            label: 'Probe',
+            options: [{ label: 'One', value: 'one' }],
         },
     },
 };
@@ -269,7 +285,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
         // auto-enrolment is the point of deriving the set instead of listing it
         // (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job', 'picklist']);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }
@@ -386,7 +402,10 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                 const result = await protocol.saveMetaItem({
                     type: 'hook',
                     name: 'rc3_probe_hook',
-                    item: { name: 'rc3_probe_hook', object: 'task', events: ['beforeUpdate'] },
+                    // [#21689] A body-carrying hook: the save door refuses a hook
+                    // with no `body` (it could never run), and this case measures
+                    // the code-only gate, not that refusal.
+                    item: { name: 'rc3_probe_hook', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
                 });
                 expect(result.success).toBe(true);
                 expect(metaRows(rows).length).toBe(1);
@@ -401,7 +420,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             // so the probe body must be spec-valid — the door under test
             // (authorization) is unchanged, but a malformed body would 422
             // before proving anything about it. (`theme` was the specimen until
-            // #10485 retired that kind out of the spelling contract.)
+            // commit 35ad101bc retired that kind out of the spelling contract.)
             const result = await protocol.saveMetaItem({
                 type: 'webhook',
                 name: 'rc3_probe_webhook',
@@ -495,12 +514,14 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             },
             {
                 type: 'hook', // allowRuntimeCreate only
-                item: { name: 'rc3_receipt_view', object: 'task', events: ['beforeUpdate'] },
+                // [#21689] With a `body`: the door refuses a hook without one,
+                // and this matrix measures the receipt, not that refusal.
+                item: { name: 'rc3_receipt_view', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
             },
             {
                 type: 'webhook', // no static registry entry (plugin-registered)
                 // [#6245] spec-valid body — webhook resolves a schema.
-                // (`theme` was the specimen until #10485 retired that kind.)
+                // (`theme` was the specimen until commit 35ad101bc retired that kind.)
                 item: { name: 'rc3_receipt_view', label: 'Receipt', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
             },
         ];

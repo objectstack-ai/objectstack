@@ -49,8 +49,8 @@ import type {
   ResumeFailureReport,
 } from '@objectstack/spec/contracts';
 // [#7135] The full `resolveAuthzContext` envelope — what `IApprovalService`
-// declares for every one of these context parameters since #6523 (the #6206
-// ruling: enforcement adjudicates on the whole envelope, never a per-site
+// declares for every one of these context parameters since commit aa4b90d9a (the
+// full-envelope ruling: enforcement adjudicates on the whole envelope, never a per-site
 // subset). Annotating the implementation with the retired six-field shape is
 // what forced this file to cast its way out of its own contract to read
 // fields the caller had already supplied.
@@ -60,7 +60,7 @@ import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
-// mechanism for a second producer, and #12493 landed this service's key
+// mechanism for a second producer, and commit aa5994e17 landed this service's key
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { isGrantActive } from '@objectstack/core';
@@ -70,6 +70,16 @@ import {
   type ApproverOrgScopeDeps,
   type ApproverOrgScopeEngine,
 } from './approver-org-scope.js';
+// The ONE equivalence between a slot address and the caller's identity — read
+// by the acting path, the "My Pending" filter, the participant gate, the
+// decision methods' slot test and `can_act` alike (`approver-address.ts`).
+import {
+  actingAddresses,
+  equivalentApproverAddresses,
+  heldSlot,
+  positionAddresses,
+  type ActingCaller,
+} from './approver-address.js';
 import {
   redactSnapshot,
   resolveReadableSnapshotFields,
@@ -218,7 +228,7 @@ export interface ApprovalResumeSurface {
    * evidence of anything. Rejects when a store cannot be read; the inspection
    * counts such a row `undetermined` — but ⛔ unlike a thrown
    * {@link hasSuspendedRun} it does NOT drop the row, because this oracle is
-   * asked only WHICH shape a row already known to be stranded is (#16709).
+   * asked only WHICH shape a row already known to be stranded is (commit 8c7cca1ce).
    * A host that resolves a malformed verdict is treated the same way, and
    * costs no OTHER row its answer.
    */
@@ -277,7 +287,21 @@ export const REMIND_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 export const ESCALATION_JOB_NAME = 'approvals-sla-escalation';
 /** Default interval between SLA escalation scans. */
 export const ESCALATION_SCAN_INTERVAL_MS = 5 * 60 * 1000;
-/** Reserved actor id for machine decisions made by the SLA scanner. */
+/**
+ * The SLA sweep's ACTING identity — what it names as `actorId` when it
+ * auto-decides through `decide()` under {@link SYSTEM_CTX}, because the
+ * system-context arm of `resolveActor` requires an explicit actor.
+ *
+ * ⛔ It is never RECORDED. Every actor column the sweep writes — the
+ * `escalate` row, the auto-decision it then takes, `sys_notification.actor_id`
+ * through `notify` — is a `sys_user` lookup, and under ADR-0118 D1 such a
+ * column holds a user id or `null`, never a sentinel: a machine has no
+ * `sys_user` id, so it records `null` ({@link recordedActor}). That the sweep
+ * acted is the row's own kind (`escalate`, with the configured action in its
+ * comment), and its auto-decision is the `approve` / `reject` the same
+ * request records right after it. Rows stored before this rule carried this
+ * string in `actor_id`; the boot-time `backfillActionSlots` nulls them.
+ */
 export const SLA_ACTOR_ID = 'system:sla';
 /**
  * Read-side legacy window for the #12278 `escalation.enabled` default flip
@@ -309,8 +333,6 @@ export const SLA_ACTOR_ID = 'system:sla';
  * "pick the cheaper transition" instruction.
  */
 export const ESCALATION_ENABLED_FLIP_CUTOFF_MS = Date.parse('2026-08-28T00:00:00Z');
-/** Reserved actor id for requests abandoned because their run died (#3456). */
-export const DEAD_RUN_ACTOR_ID = 'system:dead-run';
 /** How the dead-run sweep must treat one `ExecutionStatus` member. */
 type RunLiveness = 'terminal' | 'live';
 
@@ -657,7 +679,7 @@ function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunSt
  *    was asked and could not answer. Three ways in: the attached surface has
  *    no `inspectConsumedSuspension` (an engine build older than this plugin,
  *    or a test double); the read THREW (a store outage); or the host resolved
- *    a malformed verdict, violating its own declared surface (#16709). Today's
+ *    a malformed verdict, violating its own declared surface (commit 8c7cca1ce). Today's
  *    undifferentiated label, kept on purpose as the fail-closed fallback
  *    (#15358 ruling, item 1): a failure to differentiate is not evidence, so
  *    the row is reported and its repairability left unstated — ⛔ never
@@ -825,6 +847,30 @@ const RECORD_DELETE_CANCEL_LIMIT = 200;
 function actingUserId(context: ExecutionContext | undefined): string | null {
   const userId = context?.userId;
   return typeof userId === 'string' && userId ? userId : null;
+}
+
+/**
+ * The PERSON an action records (ADR-0118 D1): a `sys_user` id, or `null` —
+ * never the slot the action took (that is `acted_as`), never an address the
+ * caller named, and never a machine sentinel. It is the one value written to
+ * `sys_approval_action.actor_id` and the one actor `notify` forwards to
+ * `sys_notification.actor_id`; both are `sys_user` lookups, and a non-id in
+ * one drops the row from every join on it, silently.
+ *
+ * It is the user the CONTEXT vouches for: the session's user, or — on the
+ * ADR-0043 action link, which authenticates by its single-use token — the
+ * account `redeemActionToken` resolved the token's slot to. A named address
+ * (`position:<p>`, an email) proves only that the caller may act under it
+ * (`resolveActor`); it never named the person, and recording it as though it
+ * did left the decider on no record at all — measured on a booted app, not one
+ * of the rows a position-slot decision writes named them (#21411).
+ *
+ * A system context that vouches for nobody records nobody, whatever actor it
+ * names — the SLA sweep's {@link SLA_ACTOR_ID} and the dead-run sweep
+ * included. A machine has no `sys_user` id; what it did is the row's kind.
+ */
+function recordedActor(context: ExecutionContext | undefined): string | null {
+  return actingUserId(context);
 }
 
 /**
@@ -1109,6 +1155,12 @@ function rowFromAction(row: any): ApprovalActionRow {
     // `null` (a row written before the column existed) stays `undefined`:
     // "not recorded" is not the same claim as "not an override".
     via_override: row.via_override == null ? undefined : row.via_override === true,
+    // #21411 / #21458 — the slot the action was taken as, beside the person in
+    // `actor_id`, so the action log shows both: "who" and "as which slot". A
+    // row no slot admitted (the submitter's own actions, a system action, an
+    // override) — or one recorded before the column, whose slot nothing kept —
+    // omits it: the contract's "not recorded" case, never an empty string.
+    acted_as: typeof row.acted_as === 'string' && row.acted_as !== '' ? row.acted_as : undefined,
     // Decision attachments (#3266): rich descriptors carrying the display name +
     // download URL, so consumers label/open them without reading `sys_file`.
     attachments: attachments.length ? attachments : undefined,
@@ -1306,35 +1358,50 @@ export class ApprovalService implements IApprovalService {
     this.messaging = messaging;
   }
 
-  /** Best-effort notification fan-out — failures only log. */
+  /**
+   * Best-effort notification fan-out — failures only log.
+   *
+   * The event's actor is `sys_notification.actor_id` (and, downstream, each
+   * `sys_inbox_message.actor_id`), a `sys_user` lookup. So a caller hands in
+   * the CONTEXT of the action — `actorContext` — never an actor string, and
+   * the actor forwarded is the person that context vouches for
+   * ({@link recordedActor}), or nothing (ADR-0118 D1). There is no string
+   * input to pass a slot address or a machine sentinel through: an address the
+   * caller acted under (`position:<p>`, an email) is not a person, and a
+   * machine sweep vouches for nobody, so it passes no context at all.
+   */
   private async notify(input: {
     topic: string;
     audience: string[];
     payload?: Record<string, unknown>;
     dedupKey?: string;
     source?: { object: string; id: string };
-    actorId?: string;
+    actorContext?: ExecutionContext;
   }): Promise<number> {
-    const audience = input.audience.filter(a => a && !a.includes(':'));
+    const { actorContext, ...event } = input;
+    const audience = event.audience.filter(a => a && !a.includes(':'));
     if (!this.messaging || !audience.length) return 0;
+    const person = actorContext ? recordedActor(actorContext) : null;
     // Deep-link the inbox (#2678 P1.5): a notification about one request should
     // land on that request, not the bare inbox. Rewritten centrally so every
     // call site — and any future one — inherits it; the query param is read by
     // the console inbox to auto-open the drawer.
-    let payload = input.payload;
+    let payload = event.payload;
     if (
       payload?.actionUrl === '/system/approvals'
-      && input.source?.object === 'sys_approval_request'
-      && input.source.id
+      && event.source?.object === 'sys_approval_request'
+      && event.source.id
     ) {
-      payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(input.source.id)}` };
+      payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(event.source.id)}` };
     }
     try {
-      await this.messaging.emit({ severity: 'info', ...input, payload, audience });
+      await this.messaging.emit({
+        severity: 'info', ...event, payload, audience, ...(person ? { actorId: person } : {}),
+      });
       return audience.length;
     } catch (err: any) {
       this.logger?.warn?.('[approvals] notification failed', {
-        topic: input.topic, error: err?.message ?? String(err),
+        topic: event.topic, error: err?.message ?? String(err),
       });
       return 0;
     }
@@ -1378,7 +1445,7 @@ export class ApprovalService implements IApprovalService {
     const perms = Array.isArray(context.permissions) ? context.permissions : [];
     // [#7135] A DECLARED read. `posture` (ADR-0095 D2) is resolved by
     // `resolveAuthzContext` and is a field of the envelope the contract has
-    // named here since #6523 — the doc block above already says it is the
+    // named here since commit aa4b90d9a — the doc block above already says it is the
     // intended signal. Until this parameter widened, reading it meant an
     // unchecked `as any` on an enforcement input: a typo (`postures`,
     // `'PLATFORM-ADMIN'`) would have compiled and silently denied every
@@ -1500,10 +1567,13 @@ export class ApprovalService implements IApprovalService {
    * to the caller"**. Anything else is `FORBIDDEN`.
    *
    * A system context is exempt and keeps its explicit actor: the SLA sweep
-   * passes the reserved {@link SLA_ACTOR_ID} sentinel, and the ADR-0043 action
-   * link passes the approver its single-use token is cryptographically bound to
-   * (having also put them on the context). Those are the only two callers that
-   * hold a trustworthy actor with no session behind them.
+   * passes its acting identity {@link SLA_ACTOR_ID}, and the ADR-0043 action
+   * link passes the approver slot its single-use token is cryptographically
+   * bound to (having put the person behind that slot on the context —
+   * `personForTokenSlot`). Those are the only two callers that hold a
+   * trustworthy actor with no session behind them. The actor is the ADDRESS
+   * acted under; the person an action row records is the context's
+   * ({@link recordedActor}) — `null` for the sweep, which vouches for nobody.
    *
    * A caller with NO identity at all cannot act. Belt-and-suspenders: the REST
    * anonymous-deny now denies every anonymous request (#3963), but this service
@@ -1529,10 +1599,13 @@ export class ApprovalService implements IApprovalService {
     // Named something else — allow it ONLY if the server can prove the caller
     // holds that identity. `positions` is resolved by the shared authz resolver
     // (never client-supplied); `role:` is the ADR-0090 D3 deprecated spelling
-    // that 15.x-era slots and the Console's own identity list still carry.
+    // that 15.x-era slots and the Console's own identity list still carry. The
+    // spellings come from `positionAddresses` — the one equivalence every
+    // reader takes (`approver-address.ts`). Which SLOT the admitted actor then
+    // takes is the decision methods' question (`takenSlot`).
     const named = String(actorId);
     for (const position of context.positions ?? []) {
-      if (named === `position:${position}` || named === `role:${position}`) return named;
+      if (positionAddresses(position).includes(named)) return named;
     }
     // Email last — it costs a read, so only when nothing cheaper matched.
     if (named.includes('@') && await this.callerHasEmail(uid, named)) return named;
@@ -1544,15 +1617,74 @@ export class ApprovalService implements IApprovalService {
 
   /** Does `userId`'s own account carry `email`? (Slots keyed by email, #3800.) */
   private async callerHasEmail(userId: string, email: string): Promise<boolean> {
+    const own = await this.callerAccountEmail(userId);
+    return !!own && own.toLowerCase() === email.toLowerCase();
+  }
+
+  /**
+   * The email `userId`'s own `sys_user` row carries, or `null` — the server's
+   * proof of a caller's email, read by `resolveActor`'s named-email arm and by
+   * the email half of {@link ApprovalService.actingCaller}. A failed read
+   * answers `null`, so the email arm admits nothing: it fails closed.
+   */
+  private async callerAccountEmail(userId: string): Promise<string | null> {
     try {
       const rows = await this.engine.find('sys_user', {
         where: { id: userId }, limit: 1, context: SYSTEM_CTX,
       });
       const row: any = Array.isArray(rows) ? rows[0] : null;
-      return !!row?.email && String(row.email).toLowerCase() === email.toLowerCase();
+      return row?.email ? String(row.email) : null;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  /**
+   * The caller's server-resolved acting identity (`approver-address.ts`'s
+   * `ActingCaller`): the context's user id, the email that user's own account
+   * carries, and `context.positions` — or `null` for a context with no user id,
+   * which acts under nothing. The one context that names a user beside the
+   * system flag — the ADR-0043 action link, which puts the token's bound
+   * approver on it — reads that approver's own account, which is the identity
+   * the token proves.
+   */
+  private async actingCaller(context: ExecutionContext): Promise<ActingCaller | null> {
+    const userId = context?.userId != null ? String(context.userId) : '';
+    if (!userId) return null;
+    const email = await this.callerAccountEmail(userId);
+    return { userId, email, positions: context?.positions ?? [] };
+  }
+
+  /**
+   * The pending slot `actorId` takes on `pending`, or `undefined` — the ONE
+   * slot test (`heldSlot`, `approver-address.ts`) every decision method reads,
+   * with `actorId` exactly as {@link ApprovalService.resolveActor} returned it.
+   *
+   * The default actor (the caller's own user id) takes a slot under their user
+   * id, their account's email or any spelling of a position they hold; a named
+   * position address takes its position's slot under either spelling. That is
+   * the set `resolveActor` already admitted — a holder could always decide a
+   * `position:<p>` slot by naming that exact spelling — so this widens nobody:
+   * it makes the default actor and the console's `role:<p>` reach the same
+   * slot. A user who holds a different position takes nothing.
+   *
+   * ⭐ What a slot-gated action records: TWO facts, each in its own column.
+   * `sys_approval_action.acted_as` is the slot it was admitted under — the
+   * slot's own stored spelling — and `actor_id` is the person
+   * ({@link recordedActor}). The slot has to be recorded in its stored
+   * spelling: the multi-approver tally (`decideNode`, `attachDecisionProgress`)
+   * counts approvals by matching `acted_as` against the slate's slots, so a
+   * decision recorded under any other spelling would leave its slot pending
+   * after its holder approved. The already-acted probe in `visibleRequestIds`
+   * reads the same addresses back from `acted_as`. ⛔ No slot reader falls back
+   * to `actor_id` (#21411).
+   */
+  private async takenSlot(
+    pending: readonly string[],
+    actorId: string,
+    context: ExecutionContext,
+  ): Promise<string | undefined> {
+    return heldSlot(pending, actorId, await this.actingCaller(context));
   }
 
   /**
@@ -1762,7 +1894,9 @@ export class ApprovalService implements IApprovalService {
     // least visible to operators.
     if (type === 'queue') {
       this.logger?.warn?.(
-        `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody (#3508)`,
+        `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody, because the `
+        + `platform has no ownership queue to expand it from (the type is deprecated and no longer offered `
+        + `for authoring). Route this step to a team, department or position instead.`,
         { value: a.value },
       );
     } else if (GRAPH_APPROVER_TYPES.has(type)) {
@@ -1777,7 +1911,7 @@ export class ApprovalService implements IApprovalService {
       // stops being invisible.
       this.logger?.warn?.(
         `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot routes to no one `
-        + `and the request cannot advance until someone is added or the approver is re-pointed (#3807)`,
+        + `and the request cannot advance until someone is added or the approver is re-pointed`,
         { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
@@ -2039,7 +2173,7 @@ export class ApprovalService implements IApprovalService {
     if (!teamOrg) return false;                  // no tenancy fact on this team
     if (teamOrg === requestOrg) return false;    // it is this org's team — route as before
     this.logger?.warn?.(
-      `[approvals] #10230: team '${teamId}' was dropped from the approver slate — `
+      `[approvals] team '${teamId}' was dropped from the approver slate — `
       + `'sys_team.organization_id' is '${teamOrg}', not the request's organization `
       + `'${requestOrg}', so routing this approval to its members would put approval `
       + `authority over the record outside its tenant. Point the approver at a team in `
@@ -2108,7 +2242,7 @@ export class ApprovalService implements IApprovalService {
     if ((rows?.length ?? 0) >= MEMBER_SCREEN_READ_LIMIT) {
       // Possibly truncated ⇒ the evidence is incomplete ⇒ no evidence.
       this.logger?.warn?.(
-        `[approvals] #10547: the membership screen for team '${teamId}' read `
+        `[approvals] the membership screen for team '${teamId}' read `
         + `${rows.length} 'sys_member' rows, at or above its ${MEMBER_SCREEN_READ_LIMIT}-row `
         + `cap, so the result may be truncated. Routing is left unchanged rather than risk `
         + `dropping a member whose proof of membership fell outside the read.`,
@@ -2134,7 +2268,7 @@ export class ApprovalService implements IApprovalService {
     }
     if (dropped.length) {
       this.logger?.warn?.(
-        `[approvals] #10547: ${dropped.length} member(s) of team '${teamId}' were dropped from `
+        `[approvals] ${dropped.length} member(s) of team '${teamId}' were dropped from `
         + `the approver slate — ${dropped.map(d => `'${d.userId}'`).join(', ')} hold membership `
         + `in other organization(s), none of them the request's organization '${requestOrg}', so `
         + `routing this approval to them would put approval authority over the record outside its `
@@ -2292,7 +2426,7 @@ export class ApprovalService implements IApprovalService {
    * `plugin-sharing`, whatever the shared method name suggests. Both answer
    * "who holds position P"; this one reads the directory RAW — neither the
    * ADR-0091 D2 validity window nor the `sys_position.active` catalogue flag is
-   * applied. Maintainer ruling, 2026-08-15 (#8710, inheriting #8613), verbatim:
+   * applied. Maintainer ruling, 2026-08-15 (commit 04d03c3a0, inheriting #8613), verbatim:
    *
    * > Access-conferring paths filter deactivated positions; addressing paths
    * > do not.
@@ -2315,7 +2449,7 @@ export class ApprovalService implements IApprovalService {
    *     projects `user_id` too). The table carries no window columns at all and
    *     `isGrantActive` reads an absent bound as unbounded, so there is nothing
    *     a filter could do here; membership tier names have no `sys_position`
-   *     row either (#8710's "a name with no row is untouched" fallback), so no
+   *     row either (commit 04d03c3a0's "a name with no row is untouched" fallback), so no
    *     catalogue flag either. This limb cannot be brought into parity by
    *     adding a filter — see {@link expandMembershipTierUsers}.
    *  3. `sys_position.active` — the sharing engine's gate for it lives at the
@@ -2326,7 +2460,7 @@ export class ApprovalService implements IApprovalService {
    * The omission is per-READ, not a missing dependency: `isGrantActive` is
    * imported in this file and IS applied to `sys_approval_delegation` in
    * {@link lookupActiveDelegation}. ⛔ So do not "fix" this by adding the window
-   * filter here — that is the option #8710 rejected, on the reasoning above.
+   * filter here — that is the option the ruling (commit 04d03c3a0) rejected, on the reasoning above.
    */
   private async expandPositionUsers(positionName: string, organizationId?: string | null): Promise<string[]> {
     if (!positionName) return [];
@@ -2360,7 +2494,7 @@ export class ApprovalService implements IApprovalService {
    * filter even if it were not: `sys_member` carries no ADR-0091 D2 window
    * columns, and a tier name has no `sys_position` row to read `active` off.
    * {@link expandPositionUsers} carries the ruling both reads inherit
-   * (#8613 / #8710) — this method is also the second limb of that union, so a
+   * (#8613 / commit 04d03c3a0) — this method is also the second limb of that union, so a
    * change here changes position routing too.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
@@ -2469,7 +2603,7 @@ export class ApprovalService implements IApprovalService {
     if (!orgs.length) return false;          // no tenancy fact recorded for this user
     if (orgs.includes(requestOrg)) return false; // he is a member here — route as before
     this.logger?.warn?.(
-      `[approvals] #10153: manager '${managerId}' was dropped from the approver slate — `
+      `[approvals] manager '${managerId}' was dropped from the approver slate — `
       + `'sys_user.manager_id' points across an organization boundary. He holds membership in `
       + `${orgs.length} organization(s), none of them the request's organization '${requestOrg}', `
       + `so routing this approval to him would put approval authority over the record outside its `
@@ -2624,13 +2758,15 @@ export class ApprovalService implements IApprovalService {
       if (live) return live;
       this.logger?.warn?.(
         `[approvals] live record ${object}/${recordId} not found at node entry — `
-        + 'resolving approvers against the trigger snapshot (#3447 fallback).',
+        + 'resolving approvers against the trigger snapshot instead of the live record they are '
+        + 'normally resolved from.',
         { object, recordId },
       );
     } catch (err: any) {
       this.logger?.warn?.(
         `[approvals] live record re-read failed for ${object}/${recordId}: ${err?.message ?? err} — `
-        + 'resolving approvers against the trigger snapshot (#3447 fallback).',
+        + 'resolving approvers against the trigger snapshot instead of the live record they are '
+        + 'normally resolved from.',
       );
     }
     return fallback ?? {};
@@ -3039,7 +3175,8 @@ export class ApprovalService implements IApprovalService {
     // hold no slot — the escape hatch for an approval routed to an unstaffed
     // position or to approvers who have all left.
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
-    const isSlotHolder = pendingApprovers.includes(actorId);
+    const slot = await this.takenSlot(pendingApprovers, actorId, context);
+    const isSlotHolder = slot !== undefined;
     if (!isSlotHolder && !isOverride) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
@@ -3133,7 +3270,11 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: input.decision,
-      actor_id: actorId, comment: input.comment ?? null,
+      // Two facts (#21411): the PERSON who decided, and the slot the decision
+      // took (see `takenSlot`) — the tally below counts it against the slate
+      // by this very value. An override holds no slot and records none.
+      actor_id: recordedActor(context), acted_as: slot ?? null,
+      comment: input.comment ?? null,
       // #4466: the override is recorded on the DECISION, not inferred later.
       // Written as an explicit `false` for an ordinary decision so a reader can
       // tell "checked, and it was not an override" from a legacy row's `null`.
@@ -3155,7 +3296,9 @@ export class ApprovalService implements IApprovalService {
       const acts = await this.engine.find('sys_approval_action', {
         where: { request_id: requestId, step_index: 0, action: 'approve' }, limit: 1000, context: SYSTEM_CTX,
       });
-      const approved = new Set<string>((acts ?? []).map((a: any) => String(a.actor_id ?? '')).filter(Boolean));
+      // The SLOTS approved so far — `acted_as`, never `actor_id`: a slot is
+      // compared only with the slot column (#21411).
+      const approved = new Set<string>((acts ?? []).map((a: any) => String(a.acted_as ?? '')).filter(Boolean));
 
       // Tally against the OPEN-time snapshot (already OOO-substituted) for
       // every behavior that carries one. Re-resolution survives ONLY as the
@@ -3662,7 +3805,7 @@ export class ApprovalService implements IApprovalService {
       // id), kept where a developer reads them and a user never does.
       const developerMessage =
         `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
-        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no #3424 override `
+        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no admin override `
         + `for a '${raw.status}' request (the override reaches pending requests only)`;
       this.logger?.warn?.(developerMessage, {
         request: requestId,
@@ -3687,7 +3830,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
-      actor_id: actorId, comment: input.comment ?? null, created_at: now,
+      actor_id: recordedActor(context), comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     await this.engine.update('sys_approval_request', {
@@ -3983,7 +4126,8 @@ export class ApprovalService implements IApprovalService {
     const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId);
     const pending = csvSplit(raw.pending_approvers);
-    if (!context.isSystem && !pending.includes(actorId)) {
+    const slot = await this.takenSlot(pending, actorId, context);
+    if (!context.isSystem && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
 
@@ -4014,7 +4158,8 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'revise',
-      actor_id: actorId, comment: input.comment ?? null, created_at: now,
+      actor_id: recordedActor(context), acted_as: slot ?? null,
+      comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     if (priorSendBacks >= maxRevisions) {
@@ -4022,7 +4167,7 @@ export class ApprovalService implements IApprovalService {
       await this.engine.insert('sys_approval_action', {
         id: uid('aact'), request_id: requestId, organization_id: org,
         step_name: nodeId, step_index: 0, action: 'reject',
-        actor_id: actorId,
+        actor_id: recordedActor(context), acted_as: slot ?? null,
         comment: `Auto-rejected: revision limit (${maxRevisions}) exceeded`, created_at: now,
       }, { context: SYSTEM_CTX });
       await this.engine.update('sys_approval_request', {
@@ -4053,7 +4198,7 @@ export class ApprovalService implements IApprovalService {
         await this.notify({
           topic: 'approval.returned',
           audience: [String(raw.submitter_id)],
-          actorId: actorId,
+          actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
@@ -4096,7 +4241,7 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.returned',
         audience: [String(raw.submitter_id)],
-        actorId: actorId,
+        actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
@@ -4164,7 +4309,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'resubmit',
-      actor_id: actorId, comment: input.comment ?? null, created_at: now,
+      actor_id: recordedActor(context), comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     let resumed = false;
@@ -4238,7 +4383,7 @@ export class ApprovalService implements IApprovalService {
         (targetType === undefined ? ' which the flow does not declare' : ` of type '${targetType || '(untyped)'}'`) +
         `, but the revise window must be an '${APPROVAL_REVISE_NODE_TYPE}' node — that pause continues only ` +
         'through this service (submitter-only, audited, and refusing a colliding pending request), and any ' +
-        `other node type there is resumable by anyone with the run id (amended ADR-0044, #3823). Fix the flow: ` +
+        `other node type there is resumable by anyone with the run id (amended ADR-0044). Fix the flow: ` +
         `set node '${target || '<revise target>'}' to type '${APPROVAL_REVISE_NODE_TYPE}'.`,
       );
     }
@@ -4289,17 +4434,20 @@ export class ApprovalService implements IApprovalService {
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
-    const from = String(input.from ?? actorId).trim();
+    // The slot the actor takes (`takenSlot`) — and, when `from` is not named,
+    // the slot being handed over.
+    const slot = await this.takenSlot(pending, actorId, context);
+    const from = String(input.from ?? slot ?? actorId).trim();
     // #4466 — same rule as `decideNode`: the marker records that the actor was
     // admitted only by the privileged branch, holding no slot themselves. A
     // reassign is the other action #3424 lets an admin take over a slate they
     // are not on, so it carries the same fact.
-    const viaOverride = isOverride && !pending.includes(actorId);
+    const viaOverride = isOverride && slot === undefined;
     let next: string[];
     if (pending.includes(from)) {
       // Normal hand-off: the actor holds the slot being moved (or is a
       // system/admin caller acting on a real holder's slot).
-      if (!context.isSystem && !isOverride && actorId !== from && !pending.includes(actorId)) {
+      if (!context.isSystem && !isOverride && slot === undefined) {
         throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
       }
       next = pending.map(a => (a === from ? to : a));
@@ -4320,7 +4468,14 @@ export class ApprovalService implements IApprovalService {
       // The hand-off parties are STRUCTURED fields (#4365) — the old default
       // comment (`"<from> → <to>"`) baked raw user ids into user-facing text.
       // `comment` is pure user input: absent unless the actor wrote one.
-      actor_id: actorId, reassign_from: from, reassign_to: to,
+      // They hold the two SLOT ADDRESSES in their stored spelling — a user id,
+      // an email or a `type:value` literal, exactly as on the slate — because
+      // a reassignment moves a slot, not necessarily a person. That is why
+      // they are slot-address columns like `acted_as`, not `sys_user` lookups
+      // (ADR-0118 D1: a lookup holds an id or null). The person who moved it
+      // is `actor_id`.
+      actor_id: recordedActor(context), acted_as: slot ?? null,
+      reassign_from: from, reassign_to: to,
       via_override: viaOverride,
       comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
@@ -4345,7 +4500,7 @@ export class ApprovalService implements IApprovalService {
     await this.notify({
       topic: 'approval.reassigned',
       audience: [to],
-      actorId: actorId,
+      actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
@@ -4389,7 +4544,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'remind',
-      actor_id: actorId, comment: input.comment ?? null, created_at: nowIso,
+      actor_id: recordedActor(context), comment: input.comment ?? null, created_at: nowIso,
     }, { context: SYSTEM_CTX });
 
     // Per-approver fan-out: concrete identities (user ids / emails) each get
@@ -4404,7 +4559,7 @@ export class ApprovalService implements IApprovalService {
         notified += await this.notify({
           topic: 'approval.reminder',
           audience: [approver],
-          actorId: actorId,
+          actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
@@ -4427,7 +4582,7 @@ export class ApprovalService implements IApprovalService {
       notified += await this.notify({
         topic: 'approval.reminder',
         audience: literals,
-        actorId: actorId,
+        actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
@@ -4531,19 +4686,65 @@ export class ApprovalService implements IApprovalService {
     await this.engine.update('sys_approval_token', {
       id: res.token.id, consumed_at: this.clock.now().toISOString(),
     }, { context: SYSTEM_CTX });
+    // The token IS the authentication (#3783): it is single-use, hashed at rest
+    // and bound to one approver SLOT, which `resolveActionToken` has just
+    // re-checked is still pending. The person behind that slot goes on the
+    // context — so the action row's `actor_id`, the status mirror and every
+    // flow it cascades into are attributed exactly like a decision made
+    // through the UI — and the slot stays the acting address, so the decision
+    // takes that slot (`takenSlot`) and records it as `acted_as` (#21411).
+    // Elevation is unchanged: `isSystem` still stands in for the missing
+    // session.
+    const person = await this.personForTokenSlot(String(res.token.approver_id));
     const out = await this.decide(res.token.request_id, {
       decision: res.token.action,
       actorId: res.token.approver_id,
       comment: 'Via action link',
-      // The token IS the authentication (#3783): it is single-use, hashed at
-      // rest and bound to one approver, who `resolveActionToken` has just
-      // re-checked still holds a pending slot. So this decision has a real
-      // acting user even though no session carried it — name them on the
-      // context, so the status mirror and every flow it cascades into are
-      // attributed exactly like a decision made through the UI. Elevation is
-      // unchanged: `isSystem` still stands in for the missing session.
-    }, { ...SYSTEM_CTX, userId: res.token.approver_id });
+    }, person ? { ...SYSTEM_CTX, userId: person } : SYSTEM_CTX);
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
+  }
+
+  /**
+   * The person an action-link token's slot belongs to — the `sys_user` id to
+   * vouch for on the decision's context — or `null` when no person can be
+   * named without guessing.
+   *
+   * Tokens are minted for concrete slots only (`remind`'s fan-out), so the
+   * slot is a user id or an email:
+   *
+   *   - a user id IS the person;
+   *   - an email names the ONE account carrying exactly that email — the same
+   *     proof `resolveActor` takes for a named email, and the recipient
+   *     resolver's own rule for delivering to it. No account, or more than one,
+   *     names nobody;
+   *   - a `type:value` literal names no person (no first-party path mints one).
+   *
+   * Before this the slot itself went on the context, so an email-bound link
+   * recorded the email as the acting user — on the action row and in the
+   * status mirror alike (#21411).
+   */
+  private async personForTokenSlot(slot: string): Promise<string | null> {
+    if (!slot) return null;
+    if (slot.includes('@')) {
+      try {
+        const rows = await this.engine.find('sys_user', {
+          where: { email: slot }, fields: ['id'], limit: 2, context: SYSTEM_CTX,
+        });
+        const list: any[] = Array.isArray(rows) ? rows : [];
+        return list.length === 1 && list[0]?.id ? String(list[0].id) : null;
+      } catch (err) {
+        // Fails closed: an unreadable directory names nobody, and the decision
+        // still takes its slot — it is the token, not the person, that admits
+        // it. Said once here, because the row it leads to reads exactly like a
+        // decision whose decider was never known.
+        this.logger?.warn?.('[approvals] action link: could not resolve the account for an email-bound token — the decision records no person', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    }
+    if (slot.includes(':')) return null;
+    return slot;
   }
 
   /**
@@ -4559,7 +4760,8 @@ export class ApprovalService implements IApprovalService {
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
     const raw = await this.loadPendingRow(requestId);
     const pending = csvSplit(raw.pending_approvers);
-    if (!context.isSystem && !pending.includes(actorId)) {
+    const slot = await this.takenSlot(pending, actorId, context);
+    if (!context.isSystem && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
 
@@ -4567,14 +4769,15 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'request_info',
-      actor_id: actorId, comment: input.comment.trim(), created_at: now,
+      actor_id: recordedActor(context), acted_as: slot ?? null,
+      comment: input.comment.trim(), created_at: now,
     }, { context: SYSTEM_CTX });
 
     if (raw.submitter_id) {
       await this.notify({
         topic: 'approval.request_info',
         audience: [String(raw.submitter_id)],
-        actorId: actorId,
+        actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'More information requested',
@@ -4599,7 +4802,10 @@ export class ApprovalService implements IApprovalService {
     const raw = await this.loadPendingRow(requestId);
     const pending = csvSplit(raw.pending_approvers);
     const isSubmitter = raw.submitter_id && String(raw.submitter_id) === String(actorId);
-    if (!context.isSystem && !isSubmitter && !pending.includes(actorId)) {
+    // The submitter speaks as themselves; anyone else speaks from the slot
+    // they take (`takenSlot`).
+    const slot = isSubmitter ? undefined : await this.takenSlot(pending, actorId, context);
+    if (!context.isSystem && !isSubmitter && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not on this request`);
     }
 
@@ -4607,7 +4813,8 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'comment',
-      actor_id: actorId, comment: input.comment.trim(),
+      actor_id: recordedActor(context), acted_as: slot ?? null,
+      comment: input.comment.trim(),
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -4617,7 +4824,7 @@ export class ApprovalService implements IApprovalService {
     await this.notify({
       topic: 'approval.comment',
       audience,
-      actorId: actorId,
+      actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
       payload: {
         title: 'New comment on an approval',
@@ -4717,8 +4924,9 @@ export class ApprovalService implements IApprovalService {
    *
    * `recalled` is the finalisation because it is the platform's existing terminal
    * state for *a live request that ended without a decision*; the audit row names
-   * the real cause and {@link DEAD_RUN_ACTOR_ID} the real actor, so a dead-run
-   * release is never mistaken for a submitter's withdrawal.
+   * the real cause (the dead run and its status) and records no person
+   * (`actor_id` null, ADR-0118 D1 — a sweep is no user), so a dead-run release
+   * is never mistaken for a submitter's withdrawal, which records the submitter.
    */
   /**
    * Read-only inspection for the OTHER dead-run shape: a request that is
@@ -4793,7 +5001,7 @@ export class ApprovalService implements IApprovalService {
    * A surface without that member leaves the row `'failed'` — reported,
    * undifferentiated — because absence of the discriminator is not evidence
    * of anything. So does a read that THREW or answered a malformed verdict
-   * (#16709): by the time this oracle is asked the row is already known to be
+   * (commit 8c7cca1ce): by the time this oracle is asked the row is already known to be
    * stranded, so a failure to differentiate it is not a reason to drop it from
    * a report — it is counted `undetermined` as telemetry AND reported.
    *
@@ -4820,7 +5028,7 @@ export class ApprovalService implements IApprovalService {
      * outage must not be published as a lost run); a thrown or malformed THIRD
      * read leaves its row in `stranded` as the undifferentiated `'failed'` and
      * is counted here as well — the row is known to be stranded, only its
-     * shape could not be told (#16709). So this counter and `stranded.length`
+     * shape could not be told (commit 8c7cca1ce). So this counter and `stranded.length`
      * overlap on purpose, and neither one alone sizes the scan's blind spot.
      */
     undetermined: number;
@@ -4890,7 +5098,7 @@ export class ApprovalService implements IApprovalService {
       // the other two oracles. See `refineFailedRunState` and
       // `StrandedRunState` for the three answers and why none is folded.
       if (runState === 'failed' && typeof this.automation.inspectConsumedSuspension === 'function') {
-        // ⚠️ [#16709 item 3] The REFINEMENT runs inside this `try`, with the
+        // ⚠️ [commit 8c7cca1ce, item 3] The REFINEMENT runs inside this `try`, with the
         // read it refines. `refineFailedRunState` dereferences the verdict, so
         // a host that violates the declared surface — resolving `undefined`
         // where a verdict is declared — used to throw a `TypeError` out of
@@ -4903,7 +5111,7 @@ export class ApprovalService implements IApprovalService {
         try {
           refined = refineFailedRunState(await this.automation.inspectConsumedSuspension(runId));
         } catch (err: any) {
-          // [#16709 item 2 — PM ruling, 2026-09-08] The row STAYS in the
+          // [commit 8c7cca1ce, item 2 — PM ruling, 2026-09-08] The row STAYS in the
           // report, as the undifferentiated `'failed'`. This oracle is not
           // asked WHETHER the row is stranded: the first two already answered
           // that (no live pause, terminal `failed`). It is asked only WHICH of
@@ -5590,7 +5798,11 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: raw.id, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
-      actor_id: DEAD_RUN_ACTOR_ID,
+      // ADR-0118 D1: no person did this, so `actor_id` is null — never a
+      // sentinel in the `sys_user` lookup. The row still reads apart from a
+      // submitter's withdrawal, which records the submitter: this one records
+      // nobody and names the dead run and its status below.
+      actor_id: null,
       comment: `owning flow run ${runId} is ${runStatus} — request abandoned and record lock released`,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -5636,11 +5848,16 @@ export class ApprovalService implements IApprovalService {
       if (!escalatees.length) escalatees = [escalateTo];
     }
 
-    // Audit first — this row IS the idempotency marker (ADR-0042 §1).
+    // Audit first — this row IS the idempotency marker (ADR-0042 §1), and the
+    // marker is its KIND (`escalate`), not its actor. A machine has no
+    // `sys_user` id, so `actor_id` is null (ADR-0118 D1); the configured
+    // action is in the comment. The notifications below forward no actor for
+    // the same reason, and the auto-decision runs under SYSTEM_CTX, which
+    // vouches for nobody, so it records nobody either.
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: raw.id, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'escalate',
-      actor_id: SLA_ACTOR_ID,
+      actor_id: null,
       comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -5653,7 +5870,6 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.escalated',
         audience: escalatees,
-        actorId: SLA_ACTOR_ID,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval escalated to you',
@@ -5672,7 +5888,6 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.sla_breached',
         audience: [...pending, ...escalatees],
-        actorId: SLA_ACTOR_ID,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval SLA breached',
@@ -5686,7 +5901,6 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.sla_breached',
         audience: [String(raw.submitter_id)],
-        actorId: SLA_ACTOR_ID,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Your approval request breached its SLA',
@@ -6224,17 +6438,26 @@ export class ApprovalService implements IApprovalService {
    * `sys_approval_approver` index — the indexed replacement for the old
    * in-memory CSV scan, and what makes approver-filtered pagination correct
    * past any scan window (issue #1745). A request matches when ANY of the
-   * caller's identities (user id / email / role:<r>) holds a pending slot.
-   * Returns null when the filter is absent (callers skip the id constraint).
+   * caller's identities (user id / email / a position address) holds a pending
+   * slot. Returns null when the filter is absent (callers skip the id
+   * constraint).
+   *
+   * A position address matches under EVERY spelling of that position — the
+   * index stores the slot as it was written (`position:<p>` for a slot opened
+   * on an unstaffed position, `role:<p>` for a 15.x-era one), while a client
+   * may ask under either. The spellings come from `equivalentApproverAddresses`,
+   * the same equivalence `resolveActor` admits a caller under; ⛔ never a
+   * second fold written here.
    */
   private async approverRequestIds(
     targets: string[],
     tenantOrg: string | null,
   ): Promise<string[] | null> {
     if (!targets.length) return null;
-    const where: any = targets.length === 1
-      ? { approver: targets[0] }
-      : { approver: { $in: targets } };
+    const addresses = [...new Set(targets.flatMap(equivalentApproverAddresses))];
+    const where: any = addresses.length === 1
+      ? { approver: addresses[0] }
+      : { approver: { $in: addresses } };
     if (tenantOrg) where.organization_id = tenantOrg;
     const rows = await this.engine.find('sys_approval_approver', {
       where, fields: ['request_id'],
@@ -6265,22 +6488,54 @@ export class ApprovalService implements IApprovalService {
    * commenter). Admins with override authority keep the unrestricted view the
    * "all requests" console surface depends on.
    *
-   * Keying on the concrete user id is sufficient rather than an approximation:
-   * position/team/manager/field approvers are resolved to concrete user ids at
-   * open time, and the `type:value` literal is only the fallback for a spec
-   * that resolved to NOBODY — a slot no one can act on either way (`can_act`
-   * is a plain membership test over the resolved ids). So this cannot hide a
-   * request from someone who could actually act on it.
+   * "Current approver" means a pending slot the caller could ACT under, which
+   * is wider than their concrete user id: position/team/manager/field
+   * approvers are resolved to concrete user ids at open time, but a position
+   * that nobody held at open time leaves the literal `position:<p>` slot (and a
+   * 15.x-era slot reads `role:<p>`), a `user` approver authored as an email
+   * leaves the email, and the default actor takes any of those — a position
+   * `p` the caller holds (server-resolved `context.positions`, never
+   * client-supplied) under either spelling, the email their own account
+   * carries. Keying on the user id alone hid exactly those requests from the
+   * people who could decide them: absent from "My Pending" under every
+   * spelling the client asked for, `404` on the request itself. So the probe
+   * asks for the caller's acting addresses (`actingAddresses`,
+   * `approver-address.ts`) — the set the decision methods' slot test reads, so
+   * no request becomes visible here that the caller could not decide.
+   *
+   * "Already acted" asks two questions, each of its own column and each
+   * against its own kind of identity (#21411):
+   *
+   *   - did the CALLER act on it — `actor_id` (the person) equal to the
+   *     caller's user id. A past approver keeps sight of what they decided, and
+   *     so does a submitter or admin who acted on it;
+   *   - did anyone act under a SLOT the caller acts under — `acted_as` among
+   *     the caller's acting addresses, the current-approver probe's set. The
+   *     flip side is the position's: a decision taken as `position:<p>` stays
+   *     visible to whoever holds `p`.
+   *
+   * ⛔ Neither is a fallback for the other: a slot address is never compared
+   * with `actor_id`, and `acted_as` is compared only with slot addresses (a
+   * user-id slot's address is that user id). Rows written before `acted_as`
+   * existed are read by their person; the boot-time `backfillActionSlots`
+   * moved the slot literals.
+   *
+   * `caller` is the caller's resolved {@link ActingCaller} when the read
+   * already holds it (it also feeds `attachViewers`); absent, it is resolved
+   * here.
    */
   private async visibleRequestIds(
     context: ExecutionContext,
     tenantOrg: string | null,
     target?: { object?: string | null; recordId?: string | null },
+    caller?: ActingCaller | null,
   ): Promise<Set<string> | null> {
     if (this.isOverrideActor(context, tenantOrg)) return null;
-    const uid = context?.userId != null ? String(context.userId) : '';
+    const who = caller === undefined ? await this.actingCaller(context) : caller;
     // A tokenless/anonymous caller participates in nothing. Fail closed.
-    if (!uid) return new Set<string>();
+    if (!who) return new Set<string>();
+    const uid = who.userId;
+    const acting = actingAddresses(who);
 
     const ids = new Set<string>();
     const cap = ApprovalService.APPROVER_INDEX_CAP;
@@ -6297,8 +6552,10 @@ export class ApprovalService implements IApprovalService {
 
     try {
       // Current approver — via the normalized index, so every identity form
-      // the write path recorded is covered.
-      for (const id of (await this.approverRequestIds([uid], tenantOrg)) ?? []) ids.add(id);
+      // the write path recorded is covered: the user id, the account's email,
+      // and every slot address of a position the caller holds (see the doc
+      // block above).
+      for (const id of (await this.approverRequestIds(acting, tenantOrg)) ?? []) ids.add(id);
 
       const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
       add(
@@ -6309,10 +6566,18 @@ export class ApprovalService implements IApprovalService {
         'id',
       );
       // Already acted on it: a past approver whose slot has moved on, or a
-      // commenter. They saw it legitimately; keep it that way.
+      // commenter. They saw it legitimately; keep it that way. Two facts, each
+      // compared only with its own identity kind (see the doc block): the
+      // person who acted (`actor_id` = the caller's user id), and the slot it
+      // was taken as (`acted_as` among the current-approver probe's addresses).
       add(
         await this.engine.find('sys_approval_action', {
-          where: { actor_id: uid },
+          where: {
+            $or: [
+              { actor_id: uid },
+              { acted_as: acting.length === 1 ? acting[0] : { $in: acting } },
+            ],
+          },
           fields: ['request_id'], limit: cap, context: SYSTEM_CTX,
         }),
         'request_id',
@@ -6471,9 +6736,10 @@ export class ApprovalService implements IApprovalService {
     // what this caller actually participates in.
     // [#8652] The filter's own `object`/`recordId` is what names the target
     // record the read-only tier anchors on; without them nothing is widened.
+    const caller = await this.actingCaller(context);
     if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg, {
       object: filter?.object, recordId: filter?.recordId,
-    }))) return [];
+    }, caller))) return [];
 
     const findOpts: any = {
       where,
@@ -6493,7 +6759,7 @@ export class ApprovalService implements IApprovalService {
     // [#10749] Redact before enrichment — see `redactPayloads`.
     await this.redactPayloads(list, context);
     await this.enrichRows(list);
-    this.attachViewers(list, context);
+    this.attachViewers(list, context, caller);
     return list;
   }
 
@@ -6591,6 +6857,7 @@ export class ApprovalService implements IApprovalService {
       where, limit: 1, context: SYSTEM_CTX,
     });
     if (!Array.isArray(rows) || !rows[0]) return null;
+    const caller = await this.actingCaller(context);
     // #3590: tenant scoping alone let any authenticated user read any request
     // — and, once decision attachments derived their access from the request
     // (#3580), its files too. Participation is the rest of the rule.
@@ -6600,7 +6867,7 @@ export class ApprovalService implements IApprovalService {
       // decision-attachment gate follow this rule without a second copy of it.
       const visible = await this.visibleRequestIds(context, tenantOrg ?? null, {
         object: rows[0].object_name, recordId: rows[0].record_id,
-      });
+      }, caller);
       if (visible && !visible.has(String(rows[0].id))) return null;
     }
     const row = rowFromRequest(rows[0]);
@@ -6609,7 +6876,7 @@ export class ApprovalService implements IApprovalService {
     await this.enrichRows([row]);
     await this.attachFlowSteps(row);
     await this.attachDecisionProgress(row, rows[0]);
-    this.attachViewers([row], context);
+    this.attachViewers([row], context, caller);
     return row;
   }
 
@@ -6633,7 +6900,9 @@ export class ApprovalService implements IApprovalService {
       const acts = await this.engine.find('sys_approval_action', {
         where: { request_id: row.id, step_index: 0, action: 'approve' }, limit: 1000, context: SYSTEM_CTX,
       });
-      const approved = new Set<string>((acts ?? []).map((a: any) => String(a.actor_id ?? '')).filter(Boolean));
+      // The approved SLOTS — `acted_as`, exactly what the decision tally reads
+      // (#21411); never `actor_id`, which holds the person.
+      const approved = new Set<string>((acts ?? []).map((a: any) => String(a.acted_as ?? '')).filter(Boolean));
 
       const snapshot = cfg?.__approverGroups as Record<string, string[]> | undefined;
       const slate = snapshot ? Object.keys(snapshot) : [...approved, ...(row.pending_approvers ?? [])];
@@ -6676,10 +6945,13 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * Attach the per-viewer capability block (#3310) from the caller's context.
-   * `can_act` mirrors the exact authorization the decision methods enforce — the
-   * caller's user id is in the resolved `pending_approvers` while the request is
-   * still `pending` (position/team/manager approvers are already resolved to
-   * concrete user ids at open time, so a plain membership test is faithful).
+   * `can_act` mirrors the exact authorization the decision methods enforce: the
+   * request is still `pending` and the DEFAULT actor takes one of its slots —
+   * `heldSlot` (`approver-address.ts`), the very function the decision methods'
+   * slot test calls. A plain user-id membership test is NOT faithful: a
+   * position nobody held at open time leaves its literal `position:<p>` slot,
+   * an email-authored `user` approver leaves the email, and the default actor
+   * decides either. `caller` is the viewer's resolved acting identity.
    * `is_submitter` is a straight owner check. `can_override` (#3424) is true for
    * a platform/tenant admin on a PENDING request — the recovery path for an
    * approval routed to an unstaffed position or to approvers who have all left;
@@ -6688,12 +6960,16 @@ export class ApprovalService implements IApprovalService {
    * `can_act`/`is_submitter` block (system gets `can_override` too — it may act
    * on anything). Cheap + synchronous — safe on list reads.
    */
-  private attachViewers(rows: ApprovalRequestRow[], context: ExecutionContext): void {
+  private attachViewers(
+    rows: ApprovalRequestRow[],
+    context: ExecutionContext,
+    caller: ActingCaller | null,
+  ): void {
     const uid = context?.userId != null ? String(context.userId) : null;
     for (const row of rows) {
       const pending = row.pending_approvers ?? [];
       (row as any).viewer = {
-        can_act: row.status === 'pending' && !!uid && pending.includes(uid),
+        can_act: row.status === 'pending' && !!caller && heldSlot(pending, caller.userId, caller) !== undefined,
         is_submitter: !!uid && row.submitter_id != null && String(row.submitter_id) === uid,
         can_override: row.status === 'pending'
           && this.isOverrideActor(context, (row as any).organization_id ?? null),
@@ -6755,9 +7031,13 @@ export class ApprovalService implements IApprovalService {
       context: SYSTEM_CTX,
     });
     const actions = Array.isArray(rows) ? rows.map(rowFromAction) : [];
-    // Timeline display: resolve actor ids to names so the audit trail never
-    // shows a raw identifier. Role/team literals are already readable. The
-    // reassign hand-off parties (#4365) resolve through the same batch.
+    // Timeline display: resolve the PERSON in `actor_id` to a name so the
+    // audit trail never shows a raw identifier. The slot the action was taken
+    // as travels beside it in `acted_as`, as stored — the "acting as" half of
+    // the line (#21411). The reassign hand-off parties (#4365) are slot
+    // addresses, not people, and resolve through the same batch only where an
+    // address names an account: a user id, or an email an account carries. A
+    // `type:value` literal (a position) is skipped and shows as the address.
     const names = await this.resolveUserNames(
       actions
         .flatMap(a => [a.actor_id, a.reassign_from, a.reassign_to])

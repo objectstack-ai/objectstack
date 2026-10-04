@@ -44,17 +44,25 @@ export const SysOauthRefreshToken = ObjectSchema.create({
       readonly: true,
     }),
 
+    // [#21197] `internal: true` — a bearer credential's stored form (a digest
+    // under the provider's default token storage) is withheld from every
+    // generic exit, the compliance ledger's CRUD mirror included. The provider
+    // only ever FILTERS by this column (introspection, revocation, rotation);
+    // no route reads it back off a row, so it needs no readback row in
+    // plugin-auth. ⛔ Not `Field.secret`: a `sys_secret` ref would destroy the
+    // lookup (ADR-0100 §B.4).
     token: Field.text({
       label: 'Token',
       required: true,
       maxLength: 1024,
+      internal: true,
       description: 'Opaque refresh token value',
     }),
 
     client_id: Field.text({
       label: 'Client ID',
       required: true,
-      // [#11374] Bound from the referenced column: this is a foreign key to
+      // [commit 3954fb7df] Bound from the referenced column: this is a foreign key to
       // sys_oauth_application.client_id, which declares maxLength: 255 (and
       // upstream @better-auth/oauth-provider's oauthClient.clientId is a
       // unique string — varchar(255) on MySQL). A referencing column takes the

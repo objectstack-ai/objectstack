@@ -268,16 +268,27 @@ describe('the committed RENAMED_DEFS table', () => {
     expect(RENAMED_DEFS['shared/RateLimitConfig']).toBeUndefined();
   });
 
-  it('records the #4703 tri-source FieldMapping renames — both of them', () => {
-    expect(RENAMED_DEFS['integration/FieldMapping']).toBe(
-      'integration/ConnectorFieldMapping',
-    );
+  it('records the surviving #4703 FieldMapping rename, and not the retired one', () => {
     expect(RENAMED_DEFS['data/FieldMapping']).toBe('data/ImportFieldMapping');
+    // The connector side's target, `integration/ConnectorFieldMapping`, left
+    // whole in protocol 18 with `connector.fieldMappings` (ADR-0049), and so did
+    // `integration/ConnectorConflictResolution` with `connector.syncConfig`.
+    // A retirement rides the tombstone + D2 conversion + deliberate manifest
+    // deletion, never this table — re-adding either entry would claim the def
+    // still exists under its new name.
+    for (const [from, to] of [
+      ['integration/FieldMapping', 'integration/ConnectorFieldMapping'],
+      ['integration/ConflictResolution', 'integration/ConnectorConflictResolution'],
+    ] as const) {
+      expect(RENAMED_DEFS[from]).toBeUndefined();
+      expect(Object.values(RENAMED_DEFS)).not.toContain(to);
+    }
   });
 
   it('leaves the shared BASE alone — `shared/FieldMapping` keeps the bare name', () => {
-    // `integration/ConnectorFieldMapping` (and `data/ExternalFieldMapping`,
-    // until #8075 retired that family whole) `.extend()` it. Renaming the base
+    // `integration/ConnectorFieldMapping` (until protocol 18 retired it with
+    // `connector.fieldMappings`) and `data/ExternalFieldMapping` (until #8075
+    // retired that family whole) `.extend()`ed it. Renaming the base
     // would move keys under other defs and change nothing about the collision,
     // which was between the two domain-specific sides and the base's own name.
     expect(RENAMED_DEFS['shared/FieldMapping']).toBeUndefined();

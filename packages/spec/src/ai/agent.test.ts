@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
+
+import { defineStack } from '../stack.zod';
 import {
   AgentSchema,
   AIModelConfigSchema,
   StructuredOutputFormatSchema,
   StructuredOutputConfigSchema,
+  TransformPipelineStepSchema,
   defineAgent,
   type Agent,
+  type StructuredOutputFormat,
+  type TransformPipelineStep,
 } from './agent.zod';
 
 describe('AIModelConfigSchema', () => {
@@ -391,26 +396,9 @@ Be precise, data-driven, and clear in your explanations.`,
       expect(() => AgentSchema.parse(agent)).not.toThrow();
     });
 
-    it('should valid agent with lifecycle state machine', () => {
-      const agentWithLifecycle = {
-        name: 'approval_bot',
-        label: 'Approval Bot',
-        role: 'Approver',
-        instructions: 'Approve if valid',
-        lifecycle: {
-          id: 'bot_lifecycle',
-          initial: 'idle',
-          states: {
-            idle: { on: { TASK: 'working' } },
-            working: { on: { DONE: 'idle' } }
-          }
-        }
-      };
-
-      const result = AgentSchema.parse(agentWithLifecycle);
-      expect(result.lifecycle).toBeDefined();
-      expect(result.lifecycle?.initial).toBe('idle');
-    });
+    // The `lifecycle` state-machine case that stood here pinned a key nothing
+    // ever read. It is REFUSED now (#21320) — the tombstone, the conversion and
+    // the tree-scoped absence are pinned in `agent-lifecycle-retirement.test.ts`.
   });
 
   describe('Autonomous Reasoning', () => {
@@ -462,7 +450,10 @@ Be precise, data-driven, and clear in your explanations.`,
   });
 
   describe('Memory Management', () => {
-    it('should accept agent with memory configuration', () => {
+    // Flipped from the old acceptance: `store` is retired and the two numbers
+    // are required once long-term memory is enabled (ADR-0049, #20274). The
+    // refusals themselves are pinned in "agent memory contract" below.
+    it('should accept agent with memory configuration, and materialize no store', () => {
       const agent = AgentSchema.parse({
         name: 'memory_agent',
         label: 'Memory Agent',
@@ -471,7 +462,6 @@ Be precise, data-driven, and clear in your explanations.`,
         memory: {
           longTerm: {
             enabled: true,
-            store: 'vector',
             maxEntries: 10000,
           },
           reflectionInterval: 5,
@@ -479,23 +469,23 @@ Be precise, data-driven, and clear in your explanations.`,
       });
 
       expect(agent.memory?.longTerm?.enabled).toBe(true);
-      expect(agent.memory?.longTerm?.store).toBe('vector');
+      expect(agent.memory?.longTerm?.maxEntries).toBe(10000);
       expect(agent.memory?.reflectionInterval).toBe(5);
+      // The retired key's old default no longer appears: absence stays absence.
+      expect(agent.memory?.longTerm).not.toHaveProperty('store');
     });
 
-    it('should accept all memory store backends', () => {
-      const stores = ['vector', 'database', 'redis'] as const;
-
-      stores.forEach(store => {
+    it('should accept memory without enabled long-term memory', () => {
+      for (const memory of [{}, { longTerm: {} }, { longTerm: { enabled: false } }, { longTerm: { enabled: false, maxEntries: 5 } }]) {
         const agent = AgentSchema.parse({
           name: 'test_agent',
           label: 'Test',
           role: 'Test',
           instructions: 'Test',
-          memory: { longTerm: { enabled: true, store } },
+          memory,
         });
-        expect(agent.memory?.longTerm?.store).toBe(store);
-      });
+        expect(agent.memory?.reflectionInterval).toBeUndefined();
+      }
     });
   });
 
@@ -567,7 +557,8 @@ Be precise, data-driven, and clear in your explanations.`,
 
 describe('StructuredOutputFormatSchema', () => {
   it('should accept all output formats', () => {
-    const formats = ['json_object', 'json_schema', 'regex', 'grammar', 'xml'] as const;
+    // JSON only: `regex` / `grammar` / `xml` were retired (pinned below).
+    const formats = ['json_object', 'json_schema'] as const;
     formats.forEach(format => {
       expect(StructuredOutputFormatSchema.parse(format)).toBe(format);
     });
@@ -608,12 +599,13 @@ describe('StructuredOutputConfigSchema', () => {
   });
 
   it('should accept config with transform pipeline', () => {
+    // `coerce_types` was retired (pinned below); the three live steps remain.
     const config = StructuredOutputConfigSchema.parse({
       format: 'json_object',
-      transformPipeline: ['trim', 'parse_json', 'validate', 'coerce_types'],
+      transformPipeline: ['trim', 'parse_json', 'validate'],
     });
 
-    expect(config.transformPipeline).toHaveLength(4);
+    expect(config.transformPipeline).toEqual(['trim', 'parse_json', 'validate']);
   });
 
   it('should enforce maxRetries min constraint', () => {
@@ -625,11 +617,100 @@ describe('StructuredOutputConfigSchema', () => {
 
   it('should accept fallbackFormat', () => {
     const config = StructuredOutputConfigSchema.parse({
-      format: 'regex',
+      format: 'json_schema',
+      schema: { type: 'object' },
       fallbackFormat: 'json_object',
     });
 
     expect(config.fallbackFormat).toBe('json_object');
+  });
+});
+
+// ==========================================
+// Retired structured-output members (ADR-0049 enforce-or-remove)
+// ==========================================
+//
+// The cloud AI runtime refused `regex` / `grammar` / `xml` and `coerce_types`
+// before an agent's first turn, so the spec retired them (value-level,
+// `enumWithRetiredValues`). On the assertion set: a schema refusal raises a
+// ZodError whose issues carry `code` and `path` but no ADR-0112 `status` — that
+// envelope belongs to the API error surface — so these pins assert refusal,
+// the issue `code`, the `path` naming the position, and the prescription text.
+
+const MIGRATE_SENTENCE =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const AGENT_BASE = {
+  name: 'answer_agent',
+  label: 'Answer Agent',
+  role: 'Formatter',
+  instructions: 'Answer in the declared format.',
+} as const;
+
+describe('structured output — the retired members are refused at parse with their prescription', () => {
+  const RETIRED_FORMATS = ['regex', 'grammar', 'xml'] as const;
+
+  for (const position of ['format', 'fallbackFormat'] as const) {
+    for (const retired of RETIRED_FORMATS) {
+      it(`refuses \`${position}: '${retired}'\` at its path, naming the JSON formats`, () => {
+        const structuredOutput = position === 'format'
+          ? { format: retired }
+          : { format: 'json_object', fallbackFormat: retired };
+        const result = AgentSchema.safeParse({ ...AGENT_BASE, structuredOutput });
+        expect(result.success).toBe(false);
+        const issues = result.error!.issues;
+        expect(issues).toHaveLength(1);
+        expect(issues[0].code).toBe('invalid_value');
+        expect(issues[0].path).toEqual(['structuredOutput', position]);
+        const message = issues[0].message;
+        expect(message.split(' — ')[0]).toBe(
+          `\`${retired}\` was removed from \`StructuredOutputFormat\` in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove)`,
+        );
+        expect(message).toContain('Structured output is JSON-only.');
+        expect(message).toContain('use `json_schema` with a JSON Schema in `schema`, or `json_object`');
+        expect(message.endsWith(MIGRATE_SENTENCE)).toBe(true);
+      });
+    }
+  }
+
+  it('refuses `coerce_types` at its index in `transformPipeline`, naming the fix', () => {
+    const result = AgentSchema.safeParse({
+      ...AGENT_BASE,
+      structuredOutput: { format: 'json_object', transformPipeline: ['trim', 'coerce_types', 'validate'] },
+    });
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('invalid_value');
+    expect(issues[0].path).toEqual(['structuredOutput', 'transformPipeline', 1]);
+    const message = issues[0].message;
+    expect(message.split(' — ')[0]).toBe(
+      '`coerce_types` was removed from `TransformPipelineStep` in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove)',
+    );
+    expect(message).toContain('Delete the step and declare the exact types in `schema`');
+    expect(message.endsWith(MIGRATE_SENTENCE)).toBe(true);
+  });
+
+  it("keeps zod's own message for a value that was never legal", () => {
+    const format = StructuredOutputFormatSchema.safeParse('yaml');
+    expect(format.success).toBe(false);
+    expect(format.error!.issues[0].code).toBe('invalid_value');
+    expect(format.error!.issues[0].message).not.toContain('was removed');
+
+    const step = TransformPipelineStepSchema.safeParse('coerce');
+    expect(step.success).toBe(false);
+    expect(step.error!.issues[0].code).toBe('invalid_value');
+    expect(step.error!.issues[0].message).not.toContain('was removed');
+  });
+
+  it('tsc refuses each retired member at its typed position', () => {
+    // @ts-expect-error — `regex` left StructuredOutputFormat (ADR-0049).
+    const format: StructuredOutputFormat = 'regex';
+    // @ts-expect-error — `coerce_types` left TransformPipelineStep (ADR-0049).
+    const step: TransformPipelineStep = 'coerce_types';
+    // The parse half of the same fact, so neither local is unused.
+    expect(StructuredOutputFormatSchema.safeParse(format).success).toBe(false);
+    expect(TransformPipelineStepSchema.safeParse(step).success).toBe(false);
   });
 });
 
@@ -674,5 +755,131 @@ describe('defineAgent', () => {
       role: 'Tester',
       instructions: 'Test.',
     })).toThrow();
+  });
+});
+
+// ─── The agent memory contract (ADR-0049, ruling record 5950198150, letter A′) ──
+//
+// The cloud AI runtime, the one runtime that executes agents, enforces
+// long-term memory from `enabled`, `maxEntries` and `reflectionInterval`, and
+// refused before an agent's first turn exactly the declarations the spec still
+// accepted. Authoring now refuses them, by name, with a prescription; and the
+// storage backend left the spec as a whole key — that retirement's pins, its D2
+// conversion and its tree-scoped absence walk live in
+// `agent-memory-store-retirement.test.ts`. On the assertion set: a schema
+// refusal is a ZodError whose issues carry `code` and `path` but no ADR-0112
+// `status` — so the schema pins assert refusal, the issue `code`, the `path`
+// naming the key and the prescription text, and the authoring door
+// (`defineStack`) is pinned with its envelope's `code` and `status`.
+
+const MEMORY_AGENT = {
+  name: 'memory_agent',
+  label: 'Memory Agent',
+  role: 'Assistant',
+  instructions: 'Remember what the user told you.',
+} as const;
+
+/** A stack an authoring door accepts, carrying one agent. */
+const stackWith = (agent: Record<string, unknown>) => ({
+  manifest: { id: 'com.example.agent-memory', name: 'agent_memory', version: '1.0.0', type: 'app' },
+  agents: [agent],
+});
+
+/** The one refusal `defineStack` raised, as its ADR-0112 envelope. */
+const stackRefusal = (agent: Record<string, unknown>) => {
+  let thrown: unknown;
+  try {
+    defineStack(stackWith(agent) as never);
+  } catch (e) {
+    thrown = e;
+  }
+  return thrown as { code?: string; status?: number; issues?: Array<{ path: PropertyKey[]; message: string }> };
+};
+
+describe('agent memory contract — what the runtime honours is what authoring accepts', () => {
+  it('accepts an enabled long-term memory carrying both numbers', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 20 }, reflectionInterval: 5 } });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+
+  it('refuses an enabled longTerm without `maxEntries`, at its path, naming the key and the fix', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true }, reflectionInterval: 5 } });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['memory', 'longTerm', 'maxEntries']);
+    expect(issues[0].message.split(' — ')[0]).toBe(
+      '`agent.memory.longTerm.maxEntries` is required when `agent.memory.longTerm.enabled` is true',
+    );
+    expect(issues[0].message).toContain('the spec declares no default for it');
+    expect(issues[0].message).toContain('Declare it as an integer of at least 1');
+  });
+
+  it('refuses an enabled longTerm without `reflectionInterval` — the declaration cloud refused at turn time', () => {
+    // `{ enabled: true, maxEntries: 5 }` is the most natural declaration, and the
+    // one the runtime refused before the first round: no reflection, no note.
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 5 } } });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['memory', 'reflectionInterval']);
+    expect(issues[0].message.split(' — ')[0]).toBe(
+      '`agent.memory.reflectionInterval` is required when `agent.memory.longTerm.enabled` is true',
+    );
+    expect(issues[0].message).toContain('the spec declares no default for it');
+  });
+
+  it('names BOTH missing numbers in one pass, each at its own path', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true } } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['memory', 'longTerm', 'maxEntries']],
+      ['custom', ['memory', 'reflectionInterval']],
+    ]);
+  });
+
+  it('refuses `reflectionInterval` without an enabled longTerm — absent, empty or disabled', () => {
+    for (const longTerm of [undefined, {}, { enabled: false }, { enabled: false, maxEntries: 5 }]) {
+      const memory = longTerm === undefined ? { reflectionInterval: 5 } : { longTerm, reflectionInterval: 5 };
+      const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory });
+      expect(r.success, `longTerm: ${JSON.stringify(longTerm)}`).toBe(false);
+      const issues = r.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      expect(issues[0].path).toEqual(['memory', 'reflectionInterval']);
+      expect(issues[0].message.split(' — ')[0]).toBe(
+        '`agent.memory.reflectionInterval` requires `agent.memory.longTerm.enabled: true`',
+      );
+      expect(issues[0].message).toContain('or delete `reflectionInterval`');
+    }
+  });
+
+  it('declares no default for either number: an omitted one is never filled in', () => {
+    const parsed = AgentSchema.parse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: false } } });
+    expect(parsed.memory?.longTerm).toEqual({ enabled: false });
+    expect(parsed.memory).not.toHaveProperty('reflectionInterval');
+  });
+
+  it('a malformed number keeps its own type complaint — the contract check adds none on top', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 0 }, reflectionInterval: 5 } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues).toHaveLength(1);
+    expect(r.error!.issues[0].code).toBe('too_small');
+    expect(r.error!.issues[0].path).toEqual(['memory', 'longTerm', 'maxEntries']);
+  });
+
+  it('the authoring door, defineStack, refuses a missing number with the STACK_SCHEMA_INVALID envelope', () => {
+    const refusal = stackRefusal({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 5 } } });
+    expect(refusal?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refusal?.status).toBe(422);
+    expect(refusal.issues).toHaveLength(1);
+    expect(refusal.issues?.[0]?.path).toEqual(['agents', 0, 'memory', 'reflectionInterval']);
+    expect(refusal.issues?.[0]?.message).toContain('`agent.memory.reflectionInterval` is required');
+    // CONTROL: the same agent with both numbers is accepted by the same door.
+    expect(() =>
+      defineStack(stackWith({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 5 }, reflectionInterval: 3 } }) as never),
+    ).not.toThrow();
   });
 });

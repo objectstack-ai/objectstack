@@ -11,9 +11,11 @@ import {
   lintUnknownAuthoringKeys,
   lintUnknownStackKeys,
   formatUnknownAuthoringKey,
+  stackConversionsOf,
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
+import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
@@ -59,6 +61,12 @@ import {
   formatPermissionSetNameCollisions,
 } from '../utils/permission-set-name-collisions.js';
 import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
+// [#20393] The boot registrar's divergent view-container `name` refusal — the
+// walk `os validate` step 2c runs, over `@objectstack/objectql`'s one judge.
+import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// A field `picklist` that names no picklist the stack declares — the walk
+// `os validate` step 2d runs, over the same judge.
+import { judgePicklistReferences, printPicklistReferenceNotices } from '../utils/picklist-references.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -173,6 +181,13 @@ export default class Compile extends Command {
     // computes the identical record so the residue pin holds, and it reports
     // without ever refusing. Appended LAST, in `os validate`'s order.
     let jsxGateNotices: ReturnType<typeof resolveJsxGateManifest>['notices'] = [];
+    // The `info` records of a field `picklist` reference that resolves nowhere
+    // in the stack while the declaring package depends on packages outside it
+    // (step 3a-bis). A member of `warningsSoFar()`, ⛔ not a payload key, for
+    // the reasons the three lists above record: it reports without refusing,
+    // and `os validate` computes the identical records. Appended LAST, in
+    // `os validate`'s order.
+    let picklistReferenceNotices: ReturnType<typeof judgePicklistReferences>['notices'] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -181,6 +196,7 @@ export default class Compile extends Command {
       ...navGroupWarnings,
       ...permissionSetCollisionWarnings,
       ...jsxGateNotices,
+      ...picklistReferenceNotices,
     ];
     // [#18780] ONE rendering of the author-time advisory block, from the
     // COMPLETE list — hoisted here for the same reason the lists above are.
@@ -224,7 +240,7 @@ export default class Compile extends Command {
       // one. See `printAuthoringAdvisories` for the measurement.
       printAuthoringAdvisories(ruleAdvisories);
     };
-    // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
+    // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the four lists above — one field over. The
     // notices were computed at step 2 (below) and reached the terminal SUCCESS
     // payload alone, so all nine failure exits dropped a list already in hand.
@@ -235,7 +251,10 @@ export default class Compile extends Command {
     // the same `const` array the `onConversionNotice` sink pushes into, moved
     // above the `try` only so the catch-all exit can read it. `normalizeStackInput`
     // still runs at exactly step 2, so a run that throws in `loadConfig` — above
-    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there.
+    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there,
+    // unless what it threw is a stack producer's refusal: that carries the
+    // conversions the producer applied before refusing, and the catch-all
+    // folds them (#20583) — step 1b's fold for the run whose load threw.
     //
     // ⛔ NOT FOLDED INTO `warningsSoFar()`, in either direction. The success
     // payload keeps these separate deliberately (see its note at `conversions:`
@@ -249,7 +268,24 @@ export default class Compile extends Command {
     try {
       // 1. Load Configuration
       if (!flags.json) printStep('Loading configuration...');
-      const { config, absolutePath, duration, namedExports } = await loadConfig(args.config);
+      const loaded = await loadConfig(args.config);
+      const { config, absolutePath, duration, namedExports } = loaded;
+      // 1a. [#20367 ruling B] One authoring shape: refuse a default export no
+      //     stack producer built, BEFORE any other judgement — the `STACK_*`
+      //     cross-field refusals run inside `defineStack` only, so an unbuilt
+      //     export would otherwise pass this door unjudged. Throws into the
+      //     catch-all below (`--json`: `error` + `code`, exit 1), the same
+      //     envelope a `defineStack` refusal raised at load reaches.
+      refuseUnbuiltStack(loaded);
+      // 1b. The ADR-0087 D2 conversions the PRODUCER applied — the same fold
+      //     `os validate` makes at its step 1b, for the same reason: `defineStack`
+      //     converts at load, so step 2's pass below finds nothing of the
+      //     default export left to convert, and `conversions` read `[]` on every
+      //     `defineStack` config. Read by `loadConfig` off the default export
+      //     before its named-export merge (`stackConversionsOf`). ⛔ Folded,
+      //     never recomputed. Rendered on the text face at step 2 with the
+      //     pass's own findings, in this one list.
+      conversionNotices.push(...loaded.stackConversions);
 
       if (!flags.json) {
         printKV('Config', path.relative(process.cwd(), absolutePath));
@@ -265,7 +301,10 @@ export default class Compile extends Command {
       //    bites harder than it reads, because the notice is the ONLY warning an
       //    old-shape author gets before the conversion retires and their metadata
       //    stops loading. Five conversions are live today (protocol 11 and 15),
-      //    so the gap is real, not hypothetical.
+      //    so the gap is real, not hypothetical. After step 1b the pass can still
+      //    find what the producer never saw — a key `loadConfig` merged onto the
+      //    stack from a NAMED export of the config module — and appends it to
+      //    the same list.
       if (!flags.json) printStep('Normalizing stack definition...');
       // The sink is declared above the `try` (see its note there); the CALL that
       // fills it stays right here, at the step that owns it.
@@ -378,6 +417,79 @@ export default class Compile extends Command {
         this.exit(1);
       }
 
+      // 3a. [#20393] The boot registrar's divergent view-container `name`
+      //     refusal — the SAME walk `os validate` runs at its step 2c, over the
+      //     same judge (`viewContainerNameRefusal`, `@objectstack/objectql`)
+      //     `ObjectQL.registerMetadataCollections` throws the answer of. This
+      //     door used to exit 0 on `{ name: 'order_line', object:
+      //     'my_app_order_line', list: {…} }` and WRITE an artifact carrying
+      //     it, which `os serve` then refused at boot — the command that ships
+      //     shipping the failure.
+      //
+      //     ⛔ One judge, not a second rule, and not a second walk: the call is
+      //     the one `validate.ts` makes, so the two doors cannot disagree about
+      //     which `views:` entries boot registers or under which package id,
+      //     and the message is the runtime's own, verbatim.
+      //
+      //     The input is `result.data`, the parsed stack this command
+      //     serializes: every `views:` entry the artifact carries — top level,
+      //     or each `packages[i].manifest` body — is the one judged here
+      //     (step 4 adds docs and `runtimeModule`, never a view). So the
+      //     verdict is the one boot reaches on the artifact.
+      //
+      //     Right after the parse, ahead of the rule table and of every
+      //     artifact write, mirroring `os validate`: this is the runtime's own
+      //     accept set, the same class as the schema. The `--json` face is the
+      //     schema exit's envelope just above (`errors`, as `os validate --json`
+      //     carries these rows); the text face is `os validate`'s. No step
+      //     line, as on `os validate`: a passing build prints what it printed.
+      const containerNameRefusals = findViewContainerNameRefusals(result.data as Record<string, unknown>);
+      if (containerNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: containerNameRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = containerNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} view container${n > 1 ? 's' : ''})`);
+        printBulletList(
+          containerNameRefusals.map((r) => r.message),
+          { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-bis. A field `picklist`, or a `picklistExtensions` entry's `extend`,
+      //     that names no picklist the stack declares is REFUSED — the SAME call
+      //     `os validate` makes at its step 2d, so the two doors cannot disagree
+      //     about which references resolve. Without it this door wrote the
+      //     artifact carrying the misspelt reference, and the command that ships
+      //     shipped a choice with nothing to choose.
+      //
+      //     A reference the stack cannot resolve while the declaring package
+      //     depends on packages outside the stack is an `info` notice instead
+      //     (see `utils/picklist-references.ts`): the list may live there, and
+      //     this command cannot read it. Printed here, carried in
+      //     `warningsSoFar()`, never gating.
+      //
+      //     Right after the parse and ahead of every artifact write, like 3a.
+      //     The `--json` face is 3a's envelope (`errors`); the text face is
+      //     `os validate`'s.
+      const picklistJudgement = judgePicklistReferences(result.data as Record<string, unknown>);
+      picklistReferenceNotices = [...picklistJudgement.notices];
+      if (!flags.json) printPicklistReferenceNotices(picklistReferenceNotices);
+      if (picklistJudgement.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: picklistJudgement.refusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = picklistJudgement.refusals.length;
+        console.log('');
+        printError(`A picklist reference names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
+        this.exit(1);
+      }
+
       // 3b. The author-time rule registry (#4409) — one table, three commands.
       //     `os build` was the WEAKEST of the three authoring gates before it:
       //     it published stacks `os validate` or `os lint` refuse, because the
@@ -415,7 +527,9 @@ export default class Compile extends Command {
       //     too; it never changes this command's exit status. A project
       //     manifest that exists but cannot be used is refused instead
       //     (already reported on stderr; the catch-all exits 1).
-      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
+      //     [#20166] Read beside the config this run was given, never in the
+      //     invoker's working directory.
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>, path.dirname(absolutePath));
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const parsedUnion = authoringRuleUnionStack(result.data as Record<string, unknown>);
@@ -636,7 +750,7 @@ export default class Compile extends Command {
       //     `os start` crash. Absent-but-installable is a `pnpm add` hint.
       //
       //     Not a registry rule: it reads `node_modules`, not the stack.
-      if (!flags.json) printStep('Checking capability providers (#3366)...');
+      if (!flags.json) printStep('Checking that every required capability has a provider installable in this edition...');
       const capPreflight = preflightRequiredCapabilities({
         requires: Array.isArray((config as { requires?: unknown[] }).requires)
           ? ((config as { requires?: unknown[] }).requires as unknown[])
@@ -686,9 +800,10 @@ export default class Compile extends Command {
       // 3d. [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and so
       //     drop silently on the way to storage. PRE-parse, since the parse is
       //     what strips them. `defineStack` already warns for configs authored
-      //     through it; this covers the ones that skip it (a plain object
-      //     default-export, `strict: false`) and would otherwise emit an
-      //     artifact with the key quietly gone. Advisory, never fatal.
+      //     through it; this covers the ones that skip it (`strict: false`;
+      //     a plain-object default export no longer gets this far — step 1a
+      //     refuses it) and would otherwise emit an artifact with the key
+      //     quietly gone. Advisory, never fatal.
       //
       //     [#11643] FORMATTED HERE, once, and consumed by BOTH faces — the
       //     text block just below and the `--json` payload at the end of this
@@ -706,7 +821,7 @@ export default class Compile extends Command {
         ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
       if (unknownKeyWarnings.length > 0 && !flags.json) {
-        printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load (#3786)`);
+        printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load; reported here, never refused`);
         // [#11642] The header already states the true total, so before this
         // notice the block printed two numbers that disagreed and explained
         // neither. The pointer resolves because #11643 put this exact list
@@ -926,9 +1041,14 @@ export default class Compile extends Command {
               await emitJson({ success: false, error: `runtime bundle failed: ${err.message}`, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
               this.exit(1);
             }
+            // The `✗` line below is this refusal's one rendering. It used to end
+            // in `this.error(err.message)`, which has oclif's entry point render
+            // the same message again as an `Error:` block on stderr; `this.exit(2)`
+            // raises the same signal with the status `this.error` raised, and
+            // renders nothing.
             console.log('');
             printError(`Runtime bundle failed: ${err.message}`);
-            this.error(err.message);
+            this.exit(2);
           }
         }
       }
@@ -1066,6 +1186,16 @@ export default class Compile extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
+        // [#20583] The ADR-0087 D2 conversions a stack PRODUCER applied before
+        // it REFUSED — `os validate`'s catch-all fold, one door over, for the
+        // same reason: a refusing `defineStack` / `composeStacks` returns no
+        // stack, so step 1b never ran, and the producer stamps what it had
+        // applied on the ADR-0112 refusal it throws. `stackConversionsOf`
+        // answers `[]` for any other throw. ⛔ Folded, never recomputed, never
+        // read off stderr. Cannot double-count: this command calls no producer
+        // itself, so only the config module's load can raise a stamped
+        // refusal, and a throwing load precedes both other fillers of this list.
+        conversionNotices.push(...stackConversionsOf(error));
         await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
@@ -1079,17 +1209,20 @@ export default class Compile extends Command {
       printAdvisoriesOnce();
       // [#15547] `resolveConfigPath()` already wrote its refusal and hint lines
       // to stderr before throwing, so this face has nothing left to render —
-      // and `this.error()` below is NOT a no-op for it: it re-renders the same
-      // sentence as an oclif `›   Error:` block AND raises this face's exit
+      // and an oclif `this.error()` here is NOT a no-op for it: it re-renders
+      // the same sentence as an `›   Error:` block AND raises this face's exit
       // status from 1 to 2. Measured on the published entry, `os compile
       // ./missing.ts` (and `os build`, which inherits this catch): exit 2 with
       // 483 stderr bytes, where the other eight faces answer exit 1 with 296.
       // `this.exit(1)` throws the ExitError the `--json` branch already relies
       // on, so the status and the bytes both stay where they were.
       if (isReportedError(error)) this.exit(1);
+      // Any other failure is rendered here, once, by `printError`, and ends in
+      // `this.exit(2)`: the status the `this.error()` that stood here raised
+      // (its entry-point `Error:` block was the same sentence a second time).
       console.log('');
       printError(error.message || String(error));
-      this.error(error.message || String(error));
+      this.exit(2);
     }
   }
 }

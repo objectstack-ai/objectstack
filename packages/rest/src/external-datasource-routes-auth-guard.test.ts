@@ -3,7 +3,7 @@
 /**
  * [#9686] The `/api/v1/datasources/:name/external/*` federation family requires
  * an authenticated caller — on every route, read and write alike — and
- * [#9901/#10255] a CAPABILITY above that on every route.
+ * [#9901 / commit 6ce58a735] a CAPABILITY above that on every route.
  *
  * ## What this pins, and why it is driven through the real plugin
  *
@@ -56,10 +56,10 @@
  * here, which is what makes the read/write split falsifiable rather than
  * merely written down.
  *
- * [#10255] `POST /external/validate` was the one route the #9901 ruling did
+ * [commit 6ce58a735] `POST /external/validate` was the one route the #9901 ruling did
  * not name: no admin twin, no metadata created, so it kept the #9686
  * authentication floor — pinned here as an explicit `capability: null` row so
- * that gating it later had to change the table. That later card is #10255,
+ * that gating it later had to change the table. That later edit is commit 6ce58a735,
  * ruled 2026-08-20 (verbatim: 「同意你的意见。」, accepting option A): validate
  * takes the READ capability, because validation drives the same live
  * remote-schema introspection the read twins gate and reports on it. The row
@@ -102,14 +102,14 @@ type Handler = (req: any, res: any) => any;
  * runtime-origin federated object, the refresh rewrites the cached catalog
  * snapshot. Both are asserted to be unreachable without an identity.
  *
- * [#10255] There is no `capability: null` row any more: `POST
+ * [commit 6ce58a735] There is no `capability: null` row any more: `POST
  * /external/validate` carried one — spelled as an explicit `null` rather than
  * omitted, so that a later edit gating it had to change this table — and the
- * 2026-08-20 #10255 ruling is that later edit: validate is a read
+ * 2026-08-20 ruling, landed as commit 6ce58a735, is that later edit: validate is a read
  * (validation drives the same live remote introspection the read twins
  * gate), so its row now carries `READ_CAPABILITY` like its two read siblings.
  *
- * [#10537] The validate row's `call` is the SCOPED composition
+ * [commit e634ecf6a] The validate row's `call` is the SCOPED composition
  * (`validateDatasource`), which is what the route dispatches to since the
  * fan-out fix; the fixture keeps a `validateAll` spy beside it precisely so a
  * regression to the whole-farm sweep is visible here rather than silent.
@@ -179,7 +179,7 @@ function federationServiceSpies() {
     generateObjectDraft: vi.fn(async () => ({ name: 'customers' })),
     importObject: vi.fn(async () => ({ name: 'customers' })),
     refreshCatalog: vi.fn(async () => ({ tables: {} })),
-    // [#10537] `POST /external/validate` dispatches to the SCOPED composition
+    // [commit e634ecf6a] `POST /external/validate` dispatches to the SCOPED composition
     // now. The whole-farm `validateAll` stays in the set, spied and never
     // expected to run: "the service never ran" then means the method the
     // route actually reaches, and a regression to the sweep shows up as a
@@ -414,7 +414,7 @@ describe('[#9686] the same boot still serves an entitled caller', () => {
 
 describe('[#9901] the family requires a capability above authentication', () => {
   it('refuses an authenticated caller holding NOTHING on all five routes — 403 PERMISSION_DENIED, before the service', async () => {
-    // [#10255] Five, not four: `POST /external/validate` joined the ruled set
+    // [commit 6ce58a735] Five, not four: `POST /external/validate` joined the ruled set
     // on 2026-08-20, so there is no `capability: null` row left to filter out
     // and this loop runs the whole family.
     const { table, service, lookups } = await bootFederation({
@@ -483,10 +483,10 @@ describe('[#9901] the family requires a capability above authentication', () => 
 
   it('[#10255] POST /external/validate requires the READ capability — the authentication-floor era is over', async () => {
     // This case is the previous pin FLIPPED, deliberately. Until the
-    // 2026-08-20 #10255 ruling it asserted the exact opposite — an
+    // 2026-08-20 ruling (commit 6ce58a735) it asserted the exact opposite — an
     // authenticated caller holding nothing was SERVED here while refused the
     // other four — because #9901's ruling did not name this route. The ruling
-    // that changed it is recorded on #10255 (option A): validation drives
+    // that changed it is recorded in commit 6ce58a735's message (option A): validation drives
     // the same live remote-schema introspection the read twins gate, so
     // validate is a read and answers to the read capability.
     const { table, service } = await bootFederation({
@@ -521,7 +521,7 @@ describe('[#9901] the family requires a capability above authentication', () => 
     expect(statusCode).toBe(validate.ok);
     expect(body?.success).toBe(true);
     expect(service.validateDatasource).toHaveBeenCalledWith(DS);
-    // [#10537] …and the served request did NOT fan out across every datasource.
+    // [commit e634ecf6a] …and the served request did NOT fan out across every datasource.
     expect(service.validateAll).not.toHaveBeenCalled();
   });
 

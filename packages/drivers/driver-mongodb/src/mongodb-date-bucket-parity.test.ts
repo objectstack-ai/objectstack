@@ -294,8 +294,8 @@ describe('the published capability record and the lowering are the same set', ()
 
   it('advertises exactly the five granularities @objectstack/spec declares', () => {
     // MongoDB has both halves of the ISO-8601 week date (`%G`/`%V`), which is why
-    // this record carries `week: true` where `driver-sql` on SQLite carries
-    // `week: false` — the dialects genuinely differ, and the records say so.
+    // this record carries `week: true`. (`driver-sql` on SQLite carries it too,
+    // computing the ISO week without `%V`.)
     expect(MONGODB_DATE_GRANULARITIES).toEqual({
       day: true, week: true, month: true, quarter: true, year: true,
     });

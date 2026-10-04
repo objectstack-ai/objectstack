@@ -9,7 +9,11 @@ export const entry: SemanticMigration = {
     + '(system/object-storage.zod.ts)',
   replacement: 'maxAgeSeconds and timeoutMs — rename each key; both values are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'AccessControlConfig.maxAge is the one key in this stack where the two structural '
     + 'exemptions and the rename look alike from a distance, so the reasoning is recorded '
     + 'rather than assumed. It was CONSIDERED for an externalVocabulary marker and demoted on '
@@ -24,7 +28,7 @@ export const entry: SemanticMigration = {
     + 'Both are retiredKey() tombstones; the shapes are not strict, so a bare deletion would '
     + 'strip in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts declares '
     + 'no objectStorage collection, and neither shape is a registered metadata kind stored as '
-    + 'a sys_metadata row. #15679, #14478, ADR-0087.',
+    + 'a sys_metadata row. ADR-0087.',
   acceptanceCriteria:
     'Every bucket access-control block spells maxAgeSeconds and every storage connection '
     + 'spells timeoutMs. Authoring either old spelling fails to compile (input type `never`) '

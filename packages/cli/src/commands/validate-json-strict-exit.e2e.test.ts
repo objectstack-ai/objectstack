@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11174 — `os validate --strict` reaches the SAME exit status with `--json` as
+ * Commit ab23c67ab — `os validate --strict` reaches the SAME exit status with `--json` as
  * without it, over the real CLI process.
  *
  * ## The defect this pins shut
@@ -18,7 +18,7 @@
  * Actions step — and inert. A pipeline gating on the exit status of the exact
  * documented invocation read 0 and concluded the stack was clean.
  *
- * This is the second half of a pair. The first (#10953) made the four structural
+ * This is the second half of a pair. The first (commit be7262e72) made the four structural
  * advisories *reachable* in the payload, so a pipeline could at least gate on
  * `warnings.length` itself; it did not touch the exit code, and a pipeline
  * trusting the exit status still could not.
@@ -64,8 +64,19 @@
  * was written: `description` → text `--strict` 1, `--json --strict` 1, `--json`
  * 0, `warnings: []`, one notice; `subtitle` → 0 on every face, no notices.
  *
- * The non-empty `conversions` assertion is the anti-vacuity guard, and it is
- * load-bearing rather than decorative. `page-header-subtitle-alias` is a LIVE
+ * Under the one-authoring-shape ruling (#20367) every accepted config is
+ * `defineStack` output, and `defineStack` applies the conversion itself at
+ * load — so the door's own pass converts nothing, and for one release this
+ * cell was unreachable: both faces exited 0 with `conversions: []`. It is
+ * reachable again (#20476) because the producer RECORDS the conversions it
+ * applied on the stack it returns (`stackConversionsOf`) and the door folds
+ * that record into the list `--strict` gates on and into `conversions`. The
+ * cell below is back to the measurement above: `description` → both `--strict`
+ * faces 1, `--json` alone 0, `warnings: []`, the one notice.
+ *
+ * The live-notice assertion (the payload entry, and the producer's one
+ * stderr line) is the anti-vacuity guard, and it is load-bearing rather than
+ * decorative. `page-header-subtitle-alias` is a LIVE
  * window that retires from the load path at protocol 18; the day it retires,
  * this fixture raises nothing and, without that assertion, the file would keep
  * passing while pinning an empty cell — precisely the failure this test exists
@@ -104,10 +115,24 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * The fixture projects are `defineStack` configs (`os validate` refuses any
+ * other default export — #20367 ruling B), so each OS-tmpdir project gets a
+ * `node_modules/@objectstack/spec` link to the package this one depends on —
+ * the `test/helpers/define-stack-fixture.ts` spelling, local here because this
+ * file lives under `src/`, outside the test helpers' tsconfig root.
+ */
+const SPEC_PACKAGE_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+function linkSpec(dir: string): void {
+  mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+  symlinkSync(SPEC_PACKAGE_ROOT, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
+}
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../../bin/run-dev.js');
@@ -121,15 +146,19 @@ const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
  * before any advisory is computed.
  */
 const WARNS_SOURCE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   objects: [],
   apps: [],
-};
+}, { strict: false });
 `;
 
 /** The zero-warning control — pins the other end of the matrix. */
 const CLEAN_SOURCE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.strictexit', name: 'strictexit', version: '1.0.0', type: 'app', namespace: 'strictexit' },
   objects: [{
     name: 'strictexit_ticket',
@@ -138,7 +167,7 @@ export default {
     fields: { title: { type: 'text', label: 'Title' } },
   }],
   apps: [{ name: 'strictexit_app', label: 'Strict Exit App' }],
-};
+}, { strict: false });
 `;
 
 /**
@@ -151,7 +180,9 @@ export default {
  * assumed to be.
  */
 const headerPageSource = (headerTextKey: 'description' | 'subtitle'): string => `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.strictexit', name: 'strictexit', version: '1.0.0', type: 'app', namespace: 'strictexit' },
   objects: [{
     name: 'strictexit_ticket',
@@ -167,7 +198,7 @@ export default {
       { type: 'page:header', properties: { title: 'Tickets', ${headerTextKey}: 'All open tickets' } },
     ] }],
   }],
-};
+}, { strict: false });
 `;
 
 interface Run {
@@ -201,12 +232,16 @@ let conversionsCanonDir: string;
 beforeAll(() => {
   warnsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-warns-'));
   writeFileSync(join(warnsDir, 'objectstack.config.ts'), WARNS_SOURCE);
+  linkSpec(warnsDir);
   cleanDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-clean-'));
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CLEAN_SOURCE);
+  linkSpec(cleanDir);
   conversionsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-'));
   writeFileSync(join(conversionsDir, 'objectstack.config.ts'), headerPageSource('description'));
+  linkSpec(conversionsDir);
   conversionsCanonDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-canon-'));
   writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), headerPageSource('subtitle'));
+  linkSpec(conversionsCanonDir);
 });
 
 afterAll(() => {
@@ -261,46 +296,67 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(0);
   }, 120_000);
 
-  it('conversions-only: the cell where --strict is decided by a collection the payload keeps OUT of `warnings`', async () => {
+  it('conversions-only: a retiring conversion the PRODUCER applied fails --strict on BOTH faces', async () => {
+    // [#20476] `defineStack` converts at load and records what it applied on
+    // the stack it returns; the door folds that record into the list `--strict`
+    // gates on and into `conversions`. So the #11301 cell holds for the one
+    // authoring shape the door accepts: `{ valid: true, warnings: [],
+    // conversions: [the notice] }` at exit 1.
     const text = await runCli(['validate', '--strict'], conversionsDir);
     const json = await runCli(['validate', '--json', '--strict'], conversionsDir);
 
-    // Same floor as the first case: equality is only worth asserting over a run
-    // that genuinely had something to fail on.
-    expect(
-      text.code,
-      `text --strict must fail on the conversions-only config:\n${text.stdout}\n${text.stderr}`,
-    ).not.toBe(0);
-
-    expect(
-      json.code,
-      `--json --strict exited ${json.code} where --strict exited ${text.code}, same config.\n` +
-        `json stdout:\n${json.stdout}\njson stderr:\n${json.stderr}`,
-    ).toBe(text.code);
+    // Floor, then parity — the contract commit ab23c67ab set, which this file exists for.
+    expect(text.code, `text --strict must fail on a retiring conversion:\n${text.stdout}\n${text.stderr}`).toBe(1);
+    expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(text.code);
+    expect(text.stdout).toContain('Strict mode: warnings treated as errors');
 
     const payload = JSON.parse(json.stdout) as {
       valid?: unknown;
       warnings?: unknown;
-      conversions?: unknown;
+      conversions?: Array<Record<string, unknown>>;
     };
-
-    // The cell spelled out. `warnings: []` is asserted, not tolerated: it is the
-    // whole point — narrow the gate to this field and the run above drops to 0
-    // while the text face stays at 1.
+    // `valid: true` beside exit 1: the stack is schema-valid; `--strict` is what
+    // promotes the conversion to a failure.
     expect(payload.valid).toBe(true);
+    // The cell's defining property: the exit is decided by `conversions`, a
+    // collection absent from `warnings`.
     expect(payload.warnings).toEqual([]);
     expect(
-      Array.isArray(payload.conversions) && (payload.conversions as unknown[]).length,
-      'the fixture raised NO conversion — the alias has most likely retired from ' +
-        'the load path; re-point `headerPageSource` at a live entry in ' +
-        '`packages/spec/src/conversions/registry.ts` rather than deleting this line',
-    ).toBeGreaterThan(0);
+      (payload.conversions ?? []).map((n) => ({ conversionId: n.conversionId, path: n.path, from: n.from, to: n.to })),
+      'the producer-applied conversion reaches the payload, once',
+    ).toEqual([
+      {
+        conversionId: 'page-header-subtitle-alias',
+        path: 'pages[0].regions[0].components[0].properties.subtitle',
+        from: 'description',
+        to: 'subtitle',
+      },
+    ]);
+    expect(typeof payload.conversions?.[0]?.retiresIn, 'the expiry rides the entry').toBe('number');
 
-    // Separates "gates on --strict" from "fails whenever a conversion is seen".
-    // The warnings fixture's own without-strict control cannot cover this: it
-    // raises no conversions, so it passes under either behaviour.
-    const loose = await runCli(['validate', '--json'], conversionsDir);
-    expect(loose.code, `--json without --strict must stay 0:\n${loose.stdout}\n${loose.stderr}`).toBe(0);
+    // The text face names what failed it, in its `⚠` block.
+    expect(text.stdout).toContain("conversion 'page-header-subtitle-alias'");
+
+    // Anti-vacuity AND the one-stderr-line property: the conversion is LIVE —
+    // it fired, in the producer, once per run — and no door-side line repeats it
+    // on stderr. The day `page-header-subtitle-alias` retires this goes red;
+    // re-point `headerPageSource` at a live entry in
+    // `packages/spec/src/conversions/registry.ts`.
+    for (const run of [text, json]) {
+      expect(
+        run.stderr.split("conversion 'page-header-subtitle-alias'").length - 1,
+        'defineStack reported the conversion at load, on exactly one stderr line',
+      ).toBe(1);
+    }
+  }, 120_000);
+
+  it('conversions-only, without --strict: the same config exits 0 and still lists the conversion', async () => {
+    // Separates "gates on --strict" from "fails whenever a conversion is
+    // listed": the notice is advisory until `--strict` promotes it.
+    const json = await runCli(['validate', '--json'], conversionsDir);
+    expect(json.code, `--json without --strict must stay 0:\n${json.stdout}\n${json.stderr}`).toBe(0);
+    const payload = JSON.parse(json.stdout) as { conversions?: Array<{ conversionId?: unknown }> };
+    expect((payload.conversions ?? []).map((n) => n.conversionId)).toEqual(['page-header-subtitle-alias']);
   }, 120_000);
 
   it('control: the same page under the CANONICAL key converts nothing and exits 0 on both faces', async () => {
@@ -315,6 +371,8 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     const payload = JSON.parse(json.stdout) as { warnings?: unknown; conversions?: unknown };
     expect(payload.warnings).toEqual([]);
     expect(payload.conversions).toEqual([]);
+    // The discriminator's other half: the canonical key raises no notice anywhere.
+    expect(json.stderr).not.toContain("conversion 'page-header-subtitle-alias'");
   }, 120_000);
 
   it('control: without --strict, the same advisory-raising config still exits 0 under --json', async () => {

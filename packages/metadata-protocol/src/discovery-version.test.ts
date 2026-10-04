@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11235 — the `version` field `getDiscovery()` serves must be DERIVED: an
+ * Commit 376c70f98 — the `version` field `getDiscovery()` serves must be DERIVED: an
  * injected `OS_RUNTIME_VERSION` stamp, falling back to the resolved
  * `@objectstack/metadata-protocol` package version — never the `'1.0'` literal
  * this producer hardcoded before the fix, and never any other constant.

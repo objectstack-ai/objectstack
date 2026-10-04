@@ -770,7 +770,9 @@ describe('#19403 round 8 — the provenance table agrees these leaves are now au
     it(`${locale}: no decided leaf is still recorded as an extractor fill`, () => {
       // Lit — the table really loaded, so "no entry" cannot pass by the import
       // having come back empty.
-      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(100);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(0);
       const stillFilled = DECISIONS.filter((d) => table[provenanceKey(d)] !== undefined).map(idOf);
       expect(stillFilled, 'these leaves are still byte copies of their source revision').toEqual([]);
     });
@@ -807,7 +809,9 @@ describe('#19403 round 8 — the provenance table agrees these leaves are now au
       const authored = [...enObjectPaths]
         .filter(([path, en]) => localeObjects.has(path) && localeObjects.get(path) !== en)
         .map(([path]) => path);
-      expect(echoing.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(50);
+      // At least one of each is what makes a positive AND a negative; since
+      // #20462 zh-CN's echoing objects leaves are its 42 declared English ones.
+      expect(echoing.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(0);
       expect(authored.length, `${locale} has no authored objects leaf to sample`).toBeGreaterThan(50);
       expect(
         echoing.filter((path) => table[`objects.${path}`] === undefined),
@@ -848,7 +852,9 @@ describe('#19403 round 8 — the provenance table agrees these leaves are now au
       // The strongest form the verdict above can take for this class: not "none
       // of my eleven", but "nothing this population reaches, outside the
       // declared deferral". Lit by the table being large.
-      expect(Object.keys(table).length).toBeGreaterThan(100);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(Object.keys(table).length).toBeGreaterThan(0);
       const stillFilled = PANEL_LEAVES.filter(
         (l) => !inDeferral(l) && table[`metadataForms.object.fields.${l.path}.${l.prop}`] !== undefined,
       ).map((l) => `${l.path}.${l.prop}`);
@@ -895,10 +901,27 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // ratchet further down still reads zero. The population is DERIVED from the
     // form, so the arrival needed no edit here; these counts are the measured
     // facts that moved with it.
-    expect(PANEL_LEAVES.length).toBe(55);
+    // 61 since #20349: that card gave `advanced` the two ADR-0066 access rows —
+    // `access` (a composite over one declared `default` select) and
+    // `requiredPermissions` — a label and a help text each, three rows and six
+    // leaves, all eighteen translated leaves authored by the same card. `advanced`
+    // reads 46 → 52; `capabilities` is untouched.
+    // 69 since #19332 flight G2a: that flight gave `advanced` the `indexes`
+    // repeater beside `datasource` — the row and its three declared sub-rows
+    // (`name`, `fields`, `unique`), a label and a help text each, four rows and
+    // eight leaves, all twenty-four translated leaves authored by the same
+    // flight. `advanced` reads 52 → 60; `capabilities` is untouched.
+    // 105 since #19332 flight G2b: that flight gave `advanced` three more rows —
+    // the `activityMilestones` repeater beside `validations` (four declared
+    // sub-rows), the `publicSharing` composite after `requiredPermissions` (six)
+    // and the `userActions` composite under `managedBy` (five) — eighteen rows,
+    // a label and a help text each, thirty-six leaves, all hundred and eight
+    // translated leaves authored by the same flight. `advanced` reads 60 → 96;
+    // `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(105);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(46);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(96);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
@@ -908,8 +931,14 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 96 since #19331 gave `basics` its `nameField` row — the ADR-0079
     // record-title pointer the schema declared and no control offered — whose
     // label and help text are authored in all three locales by that same card,
-    // so the `openEchoes` reading below is unchanged at zero.
-    expect(OPEN_LEAVES.length).toBe(96);
+    // so the `openEchoes` reading below is unchanged at zero. 100 since #20349
+    // gave `basics` the object's two own field-name lists, `highlightFields` and
+    // `searchableFields`, beside `nameField` — four leaves, their twelve
+    // translated leaves authored by that card, so `openEchoes` stays at zero.
+    // 114 since #19332 flight G2a gave `basics` the `fieldGroups` repeater — the
+    // row and its six declared sub-rows, fourteen leaves, their forty-two
+    // translated leaves authored by that flight, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(114);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {

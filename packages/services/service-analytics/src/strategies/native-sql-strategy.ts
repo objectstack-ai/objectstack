@@ -2,22 +2,60 @@
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
+import { AggregationMetricType, NUMERIC_VALUE_TYPES, type AggregationFunction } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
+  declaredDatetimeLowering,
+  findNestedRelationCondition,
+  invalidFilterError,
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
+  normalizeDateRangeWindow,
   toSqlBindValue,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
+// [#21376, #21426] The two comparand verdicts the engine's `where` door
+// consults at its one field-aware walk — boolean
+// (`@objectstack/objectql`'s `boolean-comparand-declared-type-door.ts`) and
+// number (`number-comparand-declared-type-door.ts`) — read from the same spec
+// modules: one verdict, one set of accepted spellings, one refusal sentence
+// each, run as the two arms of one walk on every filter this compiler compiles
+// ({@link judgedComparands}).
+import {
+  BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS,
+  BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS,
+  booleanComparandDoorVerdict,
+  booleanComparandFieldVerdict,
+  booleanComparandRefusalMessage,
+  NUMBER_COMPARAND_DOOR_LIST_OPERATORS,
+  NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS,
+  numberComparandDoorVerdict,
+  numberComparandFieldVerdict,
+  numberComparandRefusalMessage,
+} from '@objectstack/spec/data';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
+import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
+// [#20986] The one resolver of the object a relationship-path hop reads.
+import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
-import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
+import { whereContainsMembershipSql } from '../contains-membership-sql.js';
+import { isJsonStoredShape } from '../contains-membership-sql.js';
+import { expandEmptyOperator } from '@objectstack/spec/data';
+import { resolveAnalyticsDateRangeString } from '@objectstack/core';
+// [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
+// the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
+import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
+// [#21042] What each aggregate's operand accumulates in, the PostgreSQL
+// boolean-aggregand cast, and the one column-class predicate both read — the
+// operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
+import { aggregandColumnClass, aggregandOperandSql } from '@objectstack/core';
+import { emptyGroupValueFor } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -32,9 +70,10 @@ import { explicitDateRangeWindow } from '../date-range-array-arm.js';
  * `default: COUNT(*)`, so an aggregate the spec grew would have returned a row
  * count instead of the number the author asked for, silently. objectui#2945.
  *
- * Non-aggregate metric types (`number`/`string`/`boolean`) are deliberately
- * absent — they are handled by {@link EXPRESSION_METRIC_TYPES}, which emits the
- * author's expression rather than wrapping it.
+ * [#21000] These six are also the whole cube metric vocabulary: the
+ * custom-SQL-expression metric types (`number`/`string`/`boolean`) were retired
+ * from `AggregationMetricType`, so a measure type this table does not key is
+ * one the spec does not declare, refused by {@link aggregateOfMeasure}.
  */
 const AGGREGATE_SQL: Record<string, (col: string) => string> = {
   // [#10298] `count` takes its COLUMN when the measure declares one. The
@@ -92,27 +131,119 @@ export const SUPPORTED_AGGREGATE_SQL_KEYS = Object.keys(AGGREGATE_SQL);
 export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_SQL);
 
 /**
- * Metric types that are a custom SQL *expression*, not an aggregate to wrap.
+ * [#21000] The ONE verdict both strategies give a cube measure's `type`: the
+ * aggregate it names, or a refusal.
  *
- * `AggregationMetricType` (`data/analytics.zod.ts`) documents these three as
- * "Custom SQL expression returning a number / string / boolean" — the measure's
- * `sql` IS the whole computation (a ratio, a `CASE`, a window function), so the
- * only correct emission is the expression itself. They used to fall through to
- * `resolveMeasureSql`'s `COUNT(*)` fallback, which threw the expression away and
- * returned a row count. #4157.
+ * The cube metric vocabulary IS the six aggregates {@link AGGREGATE_SQL}
+ * lowers. It used to carry three more — `number` / `string` / `boolean`, "a
+ * custom SQL expression returning …", which this strategy emitted verbatim and
+ * `ObjectQLStrategy` refused, partitioned by a shared `EXPRESSION_METRIC_TYPES`
+ * set. A cube member's `sql` became a column reference, so the three had
+ * nothing left to compute (this strategy emitted the column UNAGGREGATED in a
+ * grouped statement), and they were retired from `AggregationMetricType` with
+ * a prescription. The partition went with them.
  *
- * Named rather than derived as "everything that is not an aggregate": deriving it
- * would silently classify a *new* aggregate the spec grows (`median`, …) as an
- * expression and emit a bare column. `metric-type-coverage.test.ts` asserts these
- * two sets partition `AggregationMetricType`, so a new member fails a test
- * instead of picking a default.
+ * So a type outside the table is one the spec does not declare, and only a
+ * cube that never met `CubeSchema`'s parse can carry one: every door that
+ * parses a cube — `defineStack`, the artifact boot, the `analytics_cube` write
+ * door — refuses it first. What still arrives here is a cube a host registered
+ * in-process from a literal (`CubeRegistry.register` never parses), one stored
+ * under the retired vocabulary included. It is REFUSED, never stood down:
+ * served, a retired type answered one row's value per group on this path, and
+ * the engine path would hand the engine a method no driver declares.
  *
- * [#12209] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
- * this same set — the engine aggregate AST cannot carry a raw SQL expression,
- * so the ObjectQL path REFUSES exactly what this strategy emits verbatim. One
- * set, two strategies, so the partition cannot fork per path.
+ * The words are the SPEC's, read off the enum itself — no local list of metric
+ * types, retired or otherwise, to drift. For a retired member the enum's error
+ * map answers the retirement prescription (the aggregate to write instead);
+ * for a value it never declared, zod's own message listing the six. An
+ * operator reads the sentence `os validate` would have printed for the cube.
+ *
+ * Bare `Error` — the undeclared-500 tier, unchanged: no spec-valid cube can
+ * reach it, and `dataset-refusal.ts`'s header assigns a cube registered
+ * without the parse to that tier, never to a 400 that would tell a dashboard
+ * user to fix metadata they cannot see. The message is self-authored, so the
+ * analytics doors still relay it readable.
+ *
+ * Keyed on what this runtime can LOWER, with the spec supplying the verdict:
+ * `metric-type-coverage.test.ts` pins the table's keys equal to the enum's
+ * options, so a member the spec grows fails a test before it reaches the
+ * drift sentence below.
  */
-export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
+export function aggregateOfMeasure(cube: string, member: string, type: unknown): AggregationFunction {
+  if (typeof type === 'string' && Object.prototype.hasOwnProperty.call(AGGREGATE_SQL, type)) {
+    return type as AggregationFunction;
+  }
+  const verdict = AggregationMetricType.safeParse(type);
+  const why = verdict.success
+    ? `@objectstack/spec declares it, but no aggregate here lowers it (${SUPPORTED_AGGREGATE_SQL_KEYS.join(', ')}) — the two vocabularies have drifted.`
+    : (verdict.error.issues[0]?.message ?? 'It is not a declared metric type.');
+  throw new Error(
+    `[Analytics] measure "${member}" on cube "${cube}" cannot be served: its type ` +
+      `${JSON.stringify(type)} is not one of the aggregates a cube measure declares. ${why}`,
+  );
+}
+
+/**
+ * [#21365] The `LIMIT` an offset-only window carries, per dialect — `null`
+ * where the dialect takes `OFFSET` with no `LIMIT` in front of it.
+ *
+ * An `offset` with no `limit` is a valid window (every row after the offset),
+ * and PostgreSQL runs it as written. SQLite and MySQL do not: their grammar
+ * has no `OFFSET` without a `LIMIT`, so `… ORDER BY "note" ASC OFFSET 1`
+ * answered `near "OFFSET": syntax error`, a 500, on SQLite — measured at
+ * `POST /analytics/query`, where PostgreSQL and the ObjectQL face both
+ * answered rows. The cell for a named dialect is that dialect's own "no upper
+ * bound", the spelling the driver's query compiler emits for the same window
+ * (knex 3.3.0: `limit -1` in the sqlite3 compiler, `limit
+ * 18446744073709551615` in the mysql one, nothing in the base compiler
+ * PostgreSQL uses), so the native statement and the engine agree on it.
+ *
+ * `unknown` is not a dialect: it is everything the `sqlDialect` hook could not
+ * name, SQLite among it (`text-match-sql.ts` lists the embedder compositions
+ * that reach it). Its cell is the largest `LIMIT` every LIMIT dialect parses —
+ * SQLite's signed 64-bit maximum, PostgreSQL's `bigint` maximum, inside
+ * MySQL's unsigned range — so an unnamed SQLite runs the window too, and an
+ * unnamed PostgreSQL answers the rows a bare `OFFSET` answers.
+ *
+ * ⚠️ The `mysql` cell is NOT MEASURED: no MySQL server is provisionable where
+ * this landed, the same declared skip as the `mysql` arm in
+ * `text-match-sql.ts`.
+ */
+const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
+  sqlite: 'LIMIT -1',
+  mysql: 'LIMIT 18446744073709551615',
+  postgres: null,
+  unknown: 'LIMIT 9223372036854775807',
+};
+
+/**
+ * [#21365] The window clause a statement ends with, for `dialect`: ` LIMIT n`,
+ * ` OFFSET n`, both, or `''` for no window.
+ *
+ * `limit` and `offset` are non-negative integers by contract
+ * (`AnalyticsQuerySchema`), refused `400 VALIDATION_FAILED` at the
+ * `/analytics` door otherwise, so they are written verbatim. An offset with no
+ * limit takes the dialect's no-limit spelling ({@link OFFSET_ONLY_LIMIT_SQL})
+ * in front of it.
+ *
+ * Exported so a face that echoes a statement for the same window can render
+ * it with the same bytes rather than a second spelling.
+ */
+export function windowClauseSql(
+  limit: number | undefined,
+  offset: number | undefined,
+  dialect: AnalyticsSqlDialect,
+): string {
+  let sql = '';
+  if (limit != null) {
+    sql += ` LIMIT ${limit}`;
+  } else if (offset != null) {
+    const noLimit = OFFSET_ONLY_LIMIT_SQL[dialect];
+    if (noLimit) sql += ` ${noLimit}`;
+  }
+  if (offset != null) sql += ` OFFSET ${offset}`;
+  return sql;
+}
 
 /**
  * A dot-separated chain of bare identifiers — `amount`, `account.amount`,
@@ -121,6 +252,292 @@ export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
  * expression that merely contains a dot. #4157.
  */
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+/**
+ * [#21129] The column a measure's `sql` aggregates, located on the object that
+ * declares it — `undefined` for `'*'` and for an expression. A bare identifier
+ * is a column of `parentTable`; a relationship path is its last segment, on
+ * the object the path's last hop reaches ({@link columnObjectOf}, the one hop
+ * resolver: the object this statement joins for that path). The aggregand's
+ * operand policy and the presenter both read the column here, so the column
+ * whose class shapes the statement and the column whose type presents its
+ * answer are one column.
+ */
+function measureColumnOf(
+  cube: Cube,
+  parentTable: string,
+  sql: string,
+  referenceOf: HopReference | undefined,
+): { readonly object: string; readonly field: string } | undefined {
+  if (sql === '*' || !IDENTIFIER_PATH.test(sql)) return undefined;
+  return { object: columnObjectOf(cube, parentTable, sql, referenceOf), field: sql.slice(sql.lastIndexOf('.') + 1) };
+}
+
+/**
+ * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
+ * and the object it reads — the object {@link resolvePathHops} named for that
+ * hop, which `generateSql` then scopes the alias as. One value for both, so
+ * the object a statement joins and the object whose read scope it applies to
+ * that join cannot differ.
+ *
+ * Carries the host's {@link HopReference} (the context's
+ * `relationshipReference`) so every path the statement walks — a dimension, a
+ * measure, a filter member, a time dimension — is resolved with the answer the
+ * door admitted the query with.
+ *
+ * [#21249] …and whether the statement qualifies its base-table columns:
+ * `true` exactly when this statement joins something, which
+ * {@link NativeSQLStrategy.generateSql} reads off the joins a first compile of
+ * the same query registered. See {@link NativeSQLStrategy.qualifyAndRegisterJoin}.
+ */
+class StatementJoins extends Map<string, { readonly sql: string; readonly object: string }> {
+  constructor(
+    readonly referenceOf: HopReference | undefined,
+    readonly qualifyBaseColumns: boolean,
+  ) {
+    super();
+  }
+}
+
+/**
+ * [#21249] The clauses one compile of a query produces, before the join
+ * allowlist and the read scopes are applied and the statement is assembled.
+ */
+interface StatementClauses {
+  readonly tableName: string;
+  readonly params: unknown[];
+  readonly selectClauses: string[];
+  readonly groupByClauses: string[];
+  readonly whereClauses: string[];
+  readonly joins: StatementJoins;
+}
+
+// ── [#21376, #21426] The comparand verdicts, on every filter this compiler compiles ──
+//
+// The engine judges a comparand against a declared boolean or number column at
+// its one field-aware filter walk (`@objectstack/objectql`'s
+// `number-comparand-declared-type-door.ts`, whose walk carries the boolean arm
+// too), by the spec's verdicts (`@objectstack/spec/data`):
+//
+// - boolean (`booleanComparandDoorVerdict`): `true` / `false` pass, `"true"` /
+//   `"false"`, `"1"` / `"0"` and `1` / `0` narrow to the boolean each names,
+//   anything else it refuses (`'yes'`, `2`) is `INVALID_FILTER` / 400;
+// - number (`numberComparandDoorVerdict`): a number passes, a string the
+//   platform's numeric grammar reads (`"12"`, `"1e3"`) narrows to its number,
+//   and a string it does not read (`"abc"`, `""`, `"+5"`), a boolean, a `Date`
+//   or an array is `INVALID_FILTER` / 400.
+//
+// This strategy compiles its filters to SQL itself, past that walk, so a
+// comparand reached the driver as written. Boolean: on SQLite a stored boolean
+// is `1` / `0`, and the string `'true'` equals neither — `{ flag: 'true' }`
+// counted no row, and `{ flag: 'yes' }` answered 200 with zero where the engine
+// answers 400. Number: `{ amount: 'abc' }` counted no row on SQLite and was a
+// `DATABASE_ERROR` / 500 on PostgreSQL, `{ amount: true }` bound `1` and
+// answered 200 on both, and `{ amount: { $lte: '9999-12-31' } }` met the bare-day
+// window rule and counted every row — each a 400 at the engine door. So the
+// same verdicts run here, as the two arms of ONE walk (the engine's shape: the
+// two classes are disjoint, so at most one arm judges a member), on the
+// caller's `where` (the dataset door's `runtimeFilter` arrives merged into it),
+// each measure's own `filter` and the dataset's own scope — every filter that
+// reaches `compileFilterNode` — and the strategy answers what the engine door
+// answers. ⛔ Nothing here reads a spelling or a number: the verdicts do. ⛔ No
+// second rule, and ⛔ no second walk.
+
+/**
+ * The declared type of the column a filter member binds against, or
+ * `undefined` when the host cannot answer.
+ */
+type MemberDeclaredType = (member: string) => string | undefined;
+
+/**
+ * One arm of {@link narrowComparands}: which columns it judges (its spec's
+ * field verdict), the positions it judges there (its spec's operator lists,
+ * never a re-listing) and its judgment of ONE comparand at one of them.
+ */
+interface ComparandArm {
+  /** Does this arm judge a column of `declaredType`? The spec's field verdict, `judged` alone. */
+  readonly judges: (declaredType: string) => boolean;
+  /** The operators whose one comparand the arm judges. */
+  readonly scalarOperators: ReadonlySet<string>;
+  /** The operators each of whose MEMBERS the arm judges. */
+  readonly listOperators: ReadonlySet<string>;
+  /** The comparand as the verdict leaves it — narrowed or unchanged — or a thrown refusal. */
+  readonly judge: (member: string, declaredType: string, comparand: unknown, path: string) => unknown;
+}
+
+/** A plain object: a filter node or an operator map, never a comparand (a `Date` is data). */
+function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * The member reader for {@link judgedComparands}: the declared type the
+ * host's `declaredFieldType` hook answers for the column `target` resolves a
+ * member to — the same (object, column) every other declared-type question in
+ * this compiler asks (the datetime lowering, the text-operator constant,
+ * `$empty`). `null` when the host wired no hook: "cannot answer, do not block",
+ * the tiering every such hook here takes.
+ */
+function memberDeclaredType(
+  ctx: StrategyContext,
+  target: (member: string) => { object: string; field: string },
+): MemberDeclaredType | null {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (typeof declared !== 'function') return null;
+  return (member) => {
+    const { object, field } = target(member);
+    return declared.call(ctx, object, field);
+  };
+}
+
+/**
+ * One comparand at a judged position on a boolean column, by the spec's
+ * verdict: the boolean an accepted spelling names, the comparand unchanged, or
+ * a refusal in the `where` door's envelope (`invalidFilterError`,
+ * `INVALID_FILTER` / 400) carrying the spec's sentence.
+ */
+function judgedBooleanComparand(member: string, declaredType: string, comparand: unknown, path: string): unknown {
+  const verdict = booleanComparandDoorVerdict({ type: declaredType }, comparand);
+  if (verdict.verdict === 'narrows') return verdict.value;
+  if (verdict.verdict !== 'door-refusal') return comparand;
+  throw invalidFilterError(
+    `[analytics] ${booleanComparandRefusalMessage({ field: member, declaredType, path, value: comparand, form: verdict.form })}`,
+  );
+}
+
+/**
+ * [#21426] One comparand at a judged position on a number column, by the
+ * spec's verdict: the number a numeric string denotes (so the statement binds
+ * what the engine door hands its driver — `12`, never `"12"`), the comparand
+ * unchanged, or a refusal in the same envelope as the boolean arm's
+ * (`invalidFilterError`, `INVALID_FILTER` / 400) carrying the spec's sentence.
+ * Every position this compiler compiles is bound by the driver (a measure's
+ * own `filter` too, inside its conditional aggregate), so the sentence takes
+ * the spec's default, driver-bound reading.
+ */
+function judgedNumberComparand(member: string, declaredType: string, comparand: unknown, path: string): unknown {
+  const verdict = numberComparandDoorVerdict({ type: declaredType }, comparand);
+  if (verdict.verdict === 'narrows') return verdict.value;
+  if (verdict.verdict !== 'door-refusal') return comparand;
+  throw invalidFilterError(
+    `[analytics] ${numberComparandRefusalMessage({ field: member, declaredType, path, value: comparand, form: verdict.form })}`,
+  );
+}
+
+/** [#21426] The number arm: the numeric class (`NUMBER_COMPARAND_DOOR_JUDGED_TYPES`), by its spec's field verdict. */
+const NUMBER_ARM: ComparandArm = {
+  judges: (type) => numberComparandFieldVerdict({ type }) === 'judged',
+  scalarOperators: new Set(NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS),
+  listOperators: new Set(NUMBER_COMPARAND_DOOR_LIST_OPERATORS),
+  judge: judgedNumberComparand,
+};
+
+/** [#21376] The boolean arm: the boolean class, by its spec's field verdict. */
+const BOOLEAN_ARM: ComparandArm = {
+  judges: (type) => booleanComparandFieldVerdict({ type }) === 'judged',
+  scalarOperators: new Set(BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS),
+  listOperators: new Set(BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS),
+  judge: judgedBooleanComparand,
+};
+
+/**
+ * The arm that judges a column of `declaredType`, or `null`. The two classes
+ * are disjoint (a column is a number or a boolean, never both), so at most one
+ * arm answers — the engine walk's own order, number first. A `formula`
+ * reaches here with no `returnType` (the host relays none) and is `deferred`
+ * by both verdicts, as the spec defers one; never a list here.
+ */
+function comparandArmFor(declaredType: string): ComparandArm | null {
+  if (NUMBER_ARM.judges(declaredType)) return NUMBER_ARM;
+  if (BOOLEAN_ARM.judges(declaredType)) return BOOLEAN_ARM;
+  return null;
+}
+
+/** One judged member's constraint, `{ amount: <spec> }`, with its comparands judged by `arm`. Copy-on-write. */
+function narrowedFieldSpec(arm: ComparandArm, member: string, declaredType: string, spec: unknown, path: string): unknown {
+  // Not filter structure: the implicit-equality comparand.
+  if (!isPlainFilterNode(spec)) return arm.judge(member, declaredType, spec, path);
+  // A `{ $field }` reference is not a literal, and a plain object with no `$`
+  // key is not a verdict's subject — each is left for the face that owns it.
+  if (typeof spec.$field === 'string' || !Object.keys(spec).some((k) => k.startsWith('$'))) return spec;
+  let out: Record<string, unknown> | undefined;
+  for (const [op, comparand] of Object.entries(spec)) {
+    if (arm.scalarOperators.has(op)) {
+      const judged = arm.judge(member, declaredType, comparand, `${path}.${op}`);
+      if (judged !== comparand) (out ??= { ...spec })[op] = judged;
+      continue;
+    }
+    if (!arm.listOperators.has(op) || !Array.isArray(comparand)) continue;
+    let members: unknown[] | undefined;
+    comparand.forEach((value, index) => {
+      const judged = arm.judge(member, declaredType, value, `${path}.${op}[${index}]`);
+      if (judged !== value) (members ??= [...comparand])[index] = judged;
+    });
+    if (members) (out ??= { ...spec })[op] = members;
+  }
+  return out ?? spec;
+}
+
+/**
+ * The lowered condition with every comparand on a declared boolean or number
+ * column judged by its arm ({@link comparandArmFor}): through `$and`, `$or`
+ * and `$not`, at every member key (another `$` key at node level is not a
+ * member), at each arm's spec positions. A member is judged at the column it
+ * binds against, so the cube-qualified spelling (`<cube>.amount`) and a
+ * relationship path (the related object's declared column) are judged at
+ * their column too. Copy-on-write: a subtree nothing narrowed is returned by
+ * reference, so a filter the dataset registry holds is never edited.
+ */
+function narrowComparands(node: unknown, typeOf: MemberDeclaredType, path: string, depth = 0): unknown {
+  if (depth > 32 || !isPlainFilterNode(node)) return node;
+  let out: Record<string, unknown> | undefined;
+  for (const [key, value] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    let next: unknown = value;
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) continue;
+      let arms: unknown[] | undefined;
+      value.forEach((arm, index) => {
+        const walked = narrowComparands(arm, typeOf, `${here}[${index}]`, depth + 1);
+        if (walked !== arm) (arms ??= [...value])[index] = walked;
+      });
+      if (arms) next = arms;
+    } else if (key === '$not') {
+      next = narrowComparands(value, typeOf, here, depth + 1);
+    } else {
+      if (key.startsWith('$')) continue;
+      const declaredType = typeOf(key);
+      if (declaredType === undefined) continue;
+      const arm = comparandArmFor(declaredType);
+      if (!arm) continue;
+      next = narrowedFieldSpec(arm, key, declaredType, value, here);
+    }
+    if (next !== value) (out ??= { ...node })[key] = next;
+  }
+  return out ?? node;
+}
+
+/**
+ * `source` (a `{ where }` carrier, as {@link normalizeAnalyticsFilterTree}
+ * takes it) with the spec's boolean and number verdicts applied to its
+ * lowered condition: `source` itself when nothing narrows (or the host cannot
+ * answer), else a `{ where }` carrying the narrowed condition. A refusal is
+ * thrown.
+ *
+ * The condition is lowered by `lowerAnalyticsWhere` — the shared comparand
+ * faces' door, which refuses what it refuses first, in its own words — and
+ * `normalizeAnalyticsFilterTree` lowers the narrowed condition again: the
+ * faces are idempotent on their own output.
+ */
+function judgedComparands(source: unknown, typeOf: MemberDeclaredType | null): unknown {
+  if (!typeOf) return source;
+  const condition = lowerAnalyticsWhere(source);
+  if (!condition) return source;
+  const judged = narrowComparands(condition, typeOf, 'where');
+  return judged === condition ? source : { where: judged };
+}
 
 /**
  * NativeSQLStrategy — Priority 1
@@ -132,8 +549,9 @@ const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
  * `resolveMeasureSql` used to answer `COUNT(*)` to three different questions it
  * could not otherwise answer — an undeclared measure, a custom-SQL-expression
  * metric type, and an unrecognised type. All three returned a plausible number
- * for a query that asked for something else. They now emit the expression or
- * throw; see that method. #4157.
+ * for a query that asked for something else. They now throw; see that method
+ * (#4157). The expression metric types, once emitted verbatim here, were
+ * retired from the spec (#21000) and are refused with the rest.
  */
 export class NativeSQLStrategy implements AnalyticsStrategy {
   readonly name = 'NativeSQLStrategy';
@@ -250,8 +668,193 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // filter the engine door answers 400 for — two envelopes for one mistake,
     // which is the drift this card exists to remove.
     if (this.carriesUninterpretableTemporalComparand(query, ctx)) return false;
+    // ── [#20887] DECLINE the nested-relation form ─────────────────────────
+    //
+    // `{ relation: { field: value } }` is served by the ENGINE (#20802's
+    // ruling, lowered at the #5930 seam): the related object is read AS THE
+    // CALLER — its row scope AND its field permissions — and a match past the
+    // engine's cap is refused, never truncated. This strategy compiles SQL
+    // itself and can do neither without a second copy of that rule (it holds no
+    // field permissions and reads no related object), which is what it used to
+    // do instead: flatten the form to a dotted member and LEFT JOIN the related
+    // table, filtering by a field the caller may not read and bounded by
+    // nothing. So it declines, and the query routes to the ObjectQL strategy,
+    // which hands the form to the engine as written. The mechanism of the
+    // #7598 decline above, for the same reason — one rule, in one place. Every
+    // filter a caller or a dataset writes is read (see
+    // {@link nestedRelationConditionIn}); a READ SCOPE is not, deliberately —
+    // it is a policy this strategy compiles to SQL, and that compile keeps its
+    // fail-closed refusal of the form (`read-scope-sql.ts`). The DOTTED member
+    // (`account.region`) is a cube member, not this form, and stays here.
+    if (this.nestedRelationConditionIn(query, ctx)) return false;
+    // ── [#20987] DECLINE a JSON function on a dialect nobody named ──────────
+    //
+    // The seat's decision on #20987 (5927023075, option A). A `$contains` /
+    // `$notContains` on a field declared multi-valued or JSON-stored is a
+    // MEMBERSHIP test, and `$empty` on a multi-valued one tests for the empty
+    // list. All three compile to a JSON function that differs per SQL dialect,
+    // and on the `'unknown'` dialect this strategy has none to emit: its
+    // emitters refuse there, the read scope with `READ_SCOPE_COMPILE_FAILED` /
+    // 500 and the `where` with `INVALID_FILTER` / 400, rather than read the
+    // stored JSON text as a substring.
+    //
+    // Those refusals fire at COMPILE time, and `'unknown'` is also what a
+    // NON-SQL datasource (memory, mongodb) answers. There the plugin's raw-SQL
+    // bridge would have answered `RAW_SQL_UNSUPPORTED` at EXECUTE time and
+    // `AnalyticsService` would have handed the query to the ObjectQL strategy,
+    // whose engine answers membership. The compile-time refusal preempted that
+    // hand-off and refused a query the platform answers. So the query routes
+    // here instead, before anything compiles: the mechanism of the declines
+    // above, for the same reason. The engine answers through its own driver;
+    // with no ObjectQL bridge nothing can answer and the query is refused,
+    // fail-closed. The emitters' refusals stay as the backstop. See
+    // {@link jsonConstructOnUnknownDialectIn}.
+    if (this.jsonConstructOnUnknownDialectIn(query, ctx)) return false;
+    // ── [#21080] DECLINE an object an engine middleware is registered for ──
+    //
+    // Triage's ruling on #21080 (5925681388): 「The engine answers, read-only,
+    // whether an object carries an engine middleware registered for that
+    // object … The native-SQL strategy's `canHandle` declines such an
+    // object. The declined query routes to the ObjectQL strategy, and the
+    // engine's middlewares run.」 ⛔ No per-object list here, ⛔ no gate
+    // registers twice.
+    //
+    // This strategy executes raw SQL through the driver, so no engine
+    // operation runs and no engine middleware does. It applies the security
+    // service's object admission and read filter (`read-admission.ts`,
+    // `read-scope-sql.ts`) and nothing else, and the per-object read gates
+    // live in the engine as middlewares: a member admitted to such an object
+    // read grouped results and counts over rows the engine never serves it.
+    // Declining hands the query to the ObjectQL strategy, which hands it to
+    // the engine with the caller's context. The mechanism of the declines
+    // above, for the same reason: what this strategy cannot serve as the
+    // engine would, the engine serves.
+    //
+    // ⚠️ It FAILS CLOSED, unlike the "cannot answer, do not block" hooks: an
+    // `undefined` answer (no engine, or one without the member) declines
+    // too. A gate this strategy cannot see is not one it may skip. The cost
+    // is the native fast path for every gated object, and on an engine that
+    // cannot answer, for every object. See {@link readsObjectWithEngineMiddleware}.
+    if (this.readsObjectWithEngineMiddleware(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [#21080] Does this query read an object the engine holds a middleware
+   * for — or one it cannot answer about? See the decline at {@link canHandle}.
+   *
+   * The objects are the ones the statement reads: the set the door admitted
+   * and scoped (`readScopedObjects` — the base object, every declared join and
+   * every object a relationship path reaches), or, for a context built
+   * without that set, the cube's base object and declared joins, as
+   * {@link crossFieldComparisonIn} reads them. Each is asked of the context's
+   * `hasObjectMiddleware`; `true` and `undefined` both decline.
+   *
+   * A context with no hook asks nothing: it is one a host built without the
+   * engine's answer, and `AnalyticsService` says so once when it wires raw SQL.
+   */
+  private readsObjectWithEngineMiddleware(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const scopedCtx = ctx as DatasetScopedStrategyContext;
+    if (typeof scopedCtx.hasObjectMiddleware !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const objects = scopedCtx.readScopedObjects
+      ? [...scopedCtx.readScopedObjects]
+      : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    return objects.some((object) => scopedCtx.hasObjectMiddleware!(object) !== false);
+  }
+
+  /**
+   * [#20987] Would compiling this query need a JSON function on a datasource
+   * whose SQL dialect the host cannot name? See the decline at
+   * {@link canHandle}.
+   *
+   * Three operators need one on a declared field: `$contains` / `$notContains`
+   * on a multi-valued or JSON-stored field (`isJsonStoredShape`, the population
+   * `contains-membership-sql.ts` compiles membership for), and `$empty` on a
+   * multi-valued one (the spec's `multi_value` row, `empty-operator-sql.ts`).
+   * Each is judged per OBJECT, from the hooks those emitters ask (the host's
+   * declared value shape and its dialect), so the decline fires where an
+   * emitter's `'unknown'` refusal would and nowhere else.
+   *
+   * It reads every filter this strategy would compile through those emitters:
+   * - the caller's `where`, lowered, plus the compiled dataset's own `filter`
+   *   and the `filter` of each requested measure, as
+   *   {@link nestedRelationConditionIn} reads them. Each member is resolved to
+   *   its column's (object, field) by {@link resolveStorageTarget}, as
+   *   `buildFilterClause` resolves it.
+   * - the read scope of every object the statement scopes: the set the door
+   *   resolved (`readScopedObjects`), or the cube's own objects for a context
+   *   built without it, as {@link crossFieldComparisonIn} reads them.
+   *
+   * A member this cannot resolve is not judged. `generateSql` refuses it with
+   * its own message.
+   */
+  private jsonConstructOnUnknownDialectIn(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const baseTable = this.extractObjectName(cube);
+    const referenceOf = relationshipReferenceOf(ctx);
+    type Target = { object: string; field: string } | undefined;
+    const needsJson = (target: Target, op: string): boolean => {
+      if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
+      if (sqlDialectFor(ctx, target.object) !== 'unknown') return false;
+      const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
+      if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
+      return isJsonStoredShape(shape);
+    };
+    // One filter condition: `$and` / `$or` / `$not` recurse, and a field key
+    // whose value is an operator object is judged operator by operator. A
+    // plain object under a field key is the nested-relation form, which its
+    // own decline above routes.
+    const carries = (node: unknown, targetOf: (key: string) => Target): boolean => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === '$and' || key === '$or') {
+          if (Array.isArray(value) && value.some((child) => carries(child, targetOf))) return true;
+          continue;
+        }
+        if (key === '$not') {
+          if (carries(value, targetOf)) return true;
+          continue;
+        }
+        if (key.startsWith('$') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const ops = Object.keys(value as Record<string, unknown>);
+        if (ops.length === 0 || !ops.every((op) => op.startsWith('$'))) continue;
+        const target = targetOf(key);
+        if (ops.some((op) => needsJson(target, op))) return true;
+      }
+      return false;
+    };
+    const memberTarget = (member: string): Target => {
+      try {
+        return this.resolveStorageTarget(cube, member, baseTable, referenceOf);
+      } catch {
+        return undefined;
+      }
+    };
+    let where: unknown = null;
+    try {
+      where = lowerAnalyticsWhere(query);
+    } catch {
+      // A `where` this compiler cannot even lower is refused downstream, with
+      // its own message. Nothing to route.
+    }
+    if (carries(where, memberTarget)) return true;
+    const datasetScope = query.cube
+      ? (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube)
+      : undefined;
+    if (carries(datasetScope?.filter, memberTarget)) return true;
+    for (const measure of query.measures ?? []) {
+      if (carries(datasetScope?.measureFilters?.[measure], memberTarget)) return true;
+    }
+    if (typeof ctx.getReadScope !== 'function') return false;
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped
+      ? [...scoped]
+      : [baseTable, ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    return objects.some((object) => carries(ctx.getReadScope!(object), (field) => ({ object, field })));
   }
 
   /**
@@ -330,15 +933,67 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (typeof ctx.getReadScope !== 'function') return null;
     const cube = query.cube ? ctx.getCube(query.cube) : undefined;
     if (!cube) return null;
-    const objects = [this.extractObjectName(cube)];
-    for (const alias of Object.keys(cube.joins ?? {})) {
-      objects.push(cube.joins?.[alias]?.name ?? alias);
+    // [#20933] The scopes the door resolved, over the set it resolved them for:
+    // an object read through a relationship path carries its scope too, and a
+    // reference in it declines the query exactly as one in a declared join's
+    // does. The cube's own objects stand in only for a context built without
+    // that set.
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped ? [...scoped] : [this.extractObjectName(cube)];
+    if (!scoped) {
+      for (const alias of Object.keys(cube.joins ?? {})) {
+        objects.push(cube.joins?.[alias]?.name ?? alias);
+      }
     }
     for (const objectName of objects) {
       const scope = ctx.getReadScope(objectName);
       if (scope === undefined || scope === null) continue;
       const inScope = findCrossFieldComparand(scope);
       if (inScope) return { source: `the read scope of "${objectName}"`, ...inScope };
+    }
+    return null;
+  }
+
+  /**
+   * [#20887] The first nested-relation condition in a filter this strategy
+   * would compile for `query` — or `null`. See the decline at {@link canHandle}.
+   *
+   * Every filter the caller or the dataset writes, as {@link generateSql}
+   * compiles them: the caller's `where` (lowered, so the `FilterArray` spelling
+   * is read as the object it lowers to), the compiled dataset's own `filter`,
+   * and the `filter` of each REQUESTED measure (one it does not ask for is never
+   * compiled).
+   *
+   * ⛔ NOT the read scope. A read scope is a policy, compiled to SQL here by
+   * `compileScopedFilterToSql` — a synchronous string builder that holds the
+   * caller's context for placeholders and no data engine, so it cannot read the
+   * related object as the caller. It keeps its fail-closed refusal of the form
+   * (`READ_SCOPE_COMPILE_FAILED` / 500, the policy withheld), in words that name
+   * the route; routing the query away would trade that declared refusal for
+   * whatever the next strategy answers, on a host that has none a generic fault.
+   */
+  private nestedRelationConditionIn(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): { source: string; field: string; path: string } | null {
+    let where: unknown = null;
+    try {
+      where = lowerAnalyticsWhere(query);
+    } catch {
+      // A `where` this compiler cannot even lower is refused downstream, with
+      // its own message. Nothing to route.
+    }
+    const inWhere = findNestedRelationCondition(where);
+    if (inWhere) return { source: 'the query\'s `where`', ...inWhere };
+
+    const datasetScope = query.cube
+      ? (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube)
+      : undefined;
+    const inScope = findNestedRelationCondition(datasetScope?.filter, 'filter');
+    if (inScope) return { source: 'the dataset\'s own `filter`', ...inScope };
+    for (const measure of query.measures ?? []) {
+      const inMeasure = findNestedRelationCondition(datasetScope?.measureFilters?.[measure], 'filter');
+      if (inMeasure) return { source: `the \`filter\` of measure "${measure}"`, ...inMeasure };
     }
     return null;
   }
@@ -379,9 +1034,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       `[native-sql-strategy] ${hit.source} carries a field reference ` +
       `{ "$field": "${hit.ref}" } under "${hit.op}" on "${hit.field}", which this strategy does not ` +
       `compile into a column-to-column comparison — it would BIND the reference object as the ` +
-      `comparison's value and answer a wrong row set silently (#7598). \`canHandle\` declines such a ` +
+      `comparison's value and answer a wrong row set silently. \`canHandle\` declines such a ` +
       `query so it routes to the ObjectQL/engine path, whose driver compiles it and enforces the ` +
-      `#5222 rulings with metadata it owns; reaching this throw means the decline and this emitter ` +
+      `cross-field rules (declared same-table columns only, never the tenant-isolation column, one ` +
+      `comparison class) with metadata it owns, so those rules are enforced in one place, next to ` +
+      `the metadata they read; reaching this throw means the decline and this emitter ` +
       `stopped agreeing, which is our bug and must never degrade to a silent answer.`,
     );
   }
@@ -392,6 +1049,76 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const objectName = this.extractObjectName(cube);
 
     const rows = await ctx.executeRawSql!(objectName, sql, params);
+
+    // [#21042, #15546] A measure whose aggregate answers NULL over nothing — SQL
+    // `SUM` over a group whose aggregand is NULL in every row, or over no row a
+    // measure-scoped filter admits — answers the identity the platform declares
+    // for that aggregate over NOTHING (`emptyGroupValueFor`, spec
+    // `data/aggregation-policy.ts`): summing nothing is `0`, a measured fact.
+    // The engine and the ObjectQL face fold it (`driver-sql`'s
+    // `foldEmptyAggregateAnswers`, the rows path); this face answered `null` for
+    // the same group. Read from the policy, never restated, for EVERY measure —
+    // a measure-scoped one carries its aggregate in the same `type` — so
+    // `avg` / `min` / `max` (no identity, `undefined`) keep their NULL. Only `null` folds, before the
+    // presenter, in `driver-sql`'s order: an `undefined` would be a column
+    // never projected, a different defect that must stay visible. The dataset
+    // door's `DatasetExecutor` fill still runs after this and is idempotent on
+    // a folded row.
+    const folds: Array<readonly [string, number]> = [];
+    for (const member of query.measures ?? []) {
+      const identity = emptyGroupValueFor(this.lookupMember(cube, member, 'measure')?.type);
+      if (identity !== undefined) folds.push([member, identity]);
+    }
+    if (folds.length > 0 && Array.isArray(rows)) {
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const [member, identity] of folds) {
+          if (row[member] === null) row[member] = identity;
+        }
+      }
+    }
+
+    // [#20889] A measure column `fields[]` declares `number` answers a number,
+    // on every dialect. The SQL client hands an aggregate back as the wire type
+    // of its expression: node-postgres parses `bigint` (`count`, `sum` over an
+    // integer column) and `numeric` (`sum` / `avg` over the exact-decimal
+    // column, `avg` over an integer one, `min` / `max` over a decimal one) to
+    // STRINGS, mysql2 does the same for `DECIMAL`, and better-sqlite3 answers
+    // numbers. `driver-sql`'s own `aggregate()` presents those answers
+    // (#20335); this statement reaches the client through the host's raw-SQL
+    // bridge instead, so it is presented here, with the same table and the same
+    // presenter (`@objectstack/core`) — never a second coercion.
+    //
+    // Keyed on each measure's DECLARED aggregate function, never on whether a
+    // value looks numeric: `count` / `count_distinct` / `sum` / `avg` answer a
+    // number whatever the column held; `min` / `max` answer a value OF the
+    // column, so they are presented only when that column is declared numeric
+    // (`driver-sql`'s `readPresentationKind` rule), asked through
+    // `declaredFieldType` on the object that declares the column
+    // ({@link measureColumnOf}) — [#21129] for a relationship path, the object
+    // its last hop reaches, as the statement joined it. A host that cannot
+    // answer leaves the value as the client gave it. Rows are presented in
+    // place, as the driver presents its own.
+    const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    const referenceOf = relationshipReferenceOf(ctx);
+    const numberMeasures = (query.measures ?? []).filter((member) => {
+      const measure = this.lookupMember(cube, member, 'measure');
+      if (!measure?.type || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)) return false;
+      if (AGGREGATE_ANSWER_KIND[measure.type as AggregationFunction] === 'number') return true;
+      const target = measureColumnOf(cube, objectName, measure.sql, referenceOf);
+      const sourceType = target && typeof declaredType === 'function'
+        ? declaredType.call(ctx, target.object, target.field)
+        : undefined;
+      return sourceType !== undefined && NUMERIC_VALUE_TYPES.has(sourceType);
+    });
+    if (numberMeasures.length > 0 && Array.isArray(rows)) {
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const member of numberMeasures) {
+          if (row[member] !== undefined) row[member] = presentAsNumber(row[member]);
+        }
+      }
+    }
 
     // Build field metadata
     const fields = this.buildFieldMeta(query, cube);
@@ -409,13 +1136,47 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // See {@link assertNoCrossFieldComparison} for why it is asserted anyway.
     this.assertNoCrossFieldComparison(query, ctx);
 
+    // [#21249] A base-table column is qualified exactly when THIS statement
+    // joins something, and what it joins is known only once every member has
+    // been resolved: joins are registered lazily, by whichever member walks a
+    // relationship path first, and an absorbed `$or` takes back the joins its
+    // branches registered. So the query is compiled once with bare base
+    // columns, and, when that compile registered any join, once more with
+    // every base column qualified. The predicate is the hop resolver's own
+    // answer for this query, never `cube.joins`: a cube that declares no join
+    // still joins a lookup's declared `reference` (`hop-object.ts`, tier 2),
+    // and reading the declaration left `note` bare beside a joined target that
+    // also declares `note` — "ambiguous column" on SQLite and PostgreSQL. Both
+    // compiles walk the same members through the same resolver, so the second
+    // registers the same joins; a statement that joins nothing is compiled
+    // once and keeps its bare columns.
+    let clauses = this.compileClauses(query, ctx, cube, false);
+    if (clauses.joins.size > 0) clauses = this.compileClauses(query, ctx, cube, true);
+    return this.assembleStatement(query, ctx, cube, clauses);
+  }
+
+  /**
+   * [#21249] Compile a query's SELECT, GROUP BY and WHERE clauses — the
+   * dimensions, the measures with their scoped filters, the `where`, the
+   * dataset's own scope and the time-dimension windows — registering the joins
+   * its relationship paths walk. `qualifyBaseColumns` is whether its base-table
+   * columns are written `"<table>"."<column>"`; see {@link generateSql}.
+   */
+  private compileClauses(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+    cube: Cube,
+    qualifyBaseColumns: boolean,
+  ): StatementClauses {
     const params: unknown[] = [];
     const selectClauses: string[] = [];
     const groupByClauses: string[] = [];
     const tableName = this.extractObjectName(cube);
-    // Map of relation alias → JOIN clause. Populated lazily as dotted
-    // dimensions/measures/filters are resolved.
-    const joins = new Map<string, string>();
+    // Map of relation alias → JOIN clause and the object it reads. Populated
+    // lazily as dotted dimensions/measures/filters are resolved. [#20986] Each
+    // hop's object comes from the one resolver, with the host's answer for a
+    // relationship field's declared target — the door's own.
+    const joins = new StatementJoins(relationshipReferenceOf(ctx), qualifyBaseColumns);
 
     // Build SELECT for dimensions
     if (query.dimensions && query.dimensions.length > 0) {
@@ -436,6 +1197,26 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // dataset, which is why an inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
+    // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] The column-type reader the
+    // `where` door's shared lowering applies at every filter position below —
+    // the measure filters, the `where`, the dataset's own scope and the
+    // `dateRange` windows (items 7 and 8): a member is `datetime` when the
+    // column it binds against is declared so, asked of the SAME target
+    // `compileFilterNode` coerces for. It is the ONE source of the whole-day
+    // rule on this face: `buildFilterClause` compiles the bound it is handed.
+    // A column the host cannot name a type for is read type-blind (item 7):
+    // this face is the last seam before its statement runs, so nothing
+    // downstream reads the declaration.
+    const lowering = declaredDatetimeLowering(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf),
+      'type-blind',
+    );
+    // [#21376, #21426] The comparand verdicts' member reader (both arms read
+    // it), asked of the SAME target, and applied at the same three filter
+    // positions, before each is normalized ({@link judgedComparands}).
+    const comparandTypeOf = memberDeclaredType(ctx, (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf));
+
     // Build SELECT for measures
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
@@ -448,7 +1229,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         const measureFilter = datasetScope?.measureFilters?.[measure];
         const predicate = measureFilter
           ? this.compileFilterNode(
-              normalizeAnalyticsFilterTree({ where: measureFilter }),
+              normalizeAnalyticsFilterTree(judgedComparands({ where: measureFilter }, comparandTypeOf), lowering),
               cube,
               tableName,
               joins,
@@ -456,7 +1237,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
               ctx,
             )
           : null;
-        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate);
+        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate, ctx);
         selectClauses.push(`${aggExpr} AS "${measure}"`);
       }
     }
@@ -466,7 +1247,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // used to be dropped instead of compiled.
     const whereClauses: string[] = [];
     const filterSql = this.compileFilterNode(
-      normalizeAnalyticsFilterTree(query),
+      normalizeAnalyticsFilterTree(judgedComparands(query, comparandTypeOf), lowering),
       cube,
       tableName,
       joins,
@@ -483,7 +1264,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // predicate with itself selects the same rows.
     if (datasetScope?.filter) {
       const scopeSql = this.compileFilterNode(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree(judgedComparands({ where: datasetScope.filter }, comparandTypeOf), lowering),
         cube,
         tableName,
         joins,
@@ -496,7 +1277,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // Build time dimension filters
     if (query.timeDimensions && query.timeDimensions.length > 0) {
       for (const td of query.timeDimensions) {
-        const colExpr = this.resolveFieldSql(cube, td.dimension, tableName, joins);
+        // Resolved for every time dimension, window or not, as it always was:
+        // it registers the join a relationship-path member walks.
+        this.resolveFieldSql(cube, td.dimension, tableName, joins);
         if (td.dateRange) {
           // [#16322] The STRING arm is the CLOSED preset vocabulary (#16041),
           // lowered by the ONE shared resolver `driver-memory` and the ObjectQL
@@ -510,48 +1293,63 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           const resolved = Array.isArray(td.dateRange)
             ? null
             : resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
-          const range = resolved
-            ? ([resolved.start, resolved.end] as [string, string])
-            // [#17124] An oddly-sized array is REFUSED, by the one
+          const [start, end] = resolved
+            ? [resolved.start, resolved.end]
+            // [commit 86c505286] An oddly-sized array is REFUSED, by the one
             // `explicitDateRangeWindow` every face in this package calls. ⛔ What
             // this replaced was a silent `if (range.length === 2)` DROP: a
             // one-element array emitted no time clause at all, so the query read
             // ALL of history — "plot all of history" is the very failure #16322
             // repaired for the string arm, and it was still live on this arm.
             : explicitDateRangeWindow(td.dateRange as readonly unknown[]);
-          // Same epoch-vs-text root cause as buildFilterClause: a dateRange on a
-          // SQLite `Field.datetime` column compares ISO TEXT against an INTEGER
-          // epoch and matches nothing. Coerce both bounds to the storage form —
-          // and normalise the column to that form too, because the column holds
-          // BOTH forms at once and coercing only the bounds still empties the
-          // half the writer stored the other way (#3912).
-          const td2 = this.resolveStorageTarget(cube, td.dimension, tableName);
-          const column = this.temporalColumn(ctx, td2, colExpr);
-          // A bare-day window end means "through that whole day" (#3777). A
-          // BETWEEN's inclusive upper bound anchors a bare `YYYY-MM-DD` to
-          // midnight on a datetime column, dropping the final day's rows, so
-          // the window compiles half-open — `>= start AND < end+1day` — the
-          // same `[gte, lt)` the drill ranges emit. Equivalent to the old
-          // BETWEEN for a `date` column (plain `YYYY-MM-DD` ordering), which
-          // is what lets this path stay column-type-blind.
+          // [ADR-0053 D-D1 item 8, amended — #5930 step 4] The window is the
+          // `{ $gte, $lte }` pair the ObjectQL strategy hands the engine, lowered
+          // by the same reader as this statement's `where`
+          // ({@link normalizeDateRangeWindow}) and compiled by the same
+          // `compileFilterNode`, so its bounds take the storage-form coercion and
+          // the column normalisation every `where` bound takes (#3912). A bare-day
+          // explicit end means "through that whole day" (#3777): on a `datetime`
+          // column, or one whose type the host cannot name, the lowering rewrites
+          // it to `< end+1day`, the same `[gte, lt)` the drill ranges emit, and on
+          // the last supported day it drops the end (#20600); on a column declared
+          // anything else the end stays inclusive, the comparison the typed
+          // drivers run. This face kept its own type-blind copy of that rule
+          // until #5930 step 4.
           //
-          // [#16322] A RESOLVED window already states its own upper reading
-          // and is never a bare day, so it never takes the widening branch:
-          // the ten calendar presets stop BEFORE their end instant (`<`), the
-          // three rolling ones end at NOW and reach it (`<=`). ⛔ An explicit
-          // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
-          // had — the #16179 separation, on this side too.
-          const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
-          const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
-          params.push(this.coerceTemporal(ctx, td2, range[0]));
-          const lower = `${column} >= $${params.length}`;
-          params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
-          whereClauses.push(
-            `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
+          // [#16322] A RESOLVED window states its own upper reading, and its ends
+          // are instants the lowering never widens: the ten calendar presets stop
+          // BEFORE their end instant (`$lt`), the three rolling ones end at NOW
+          // and reach it (`$lte`). ⛔ An explicit `[a, b]` a CALLER wrote keeps the
+          // inclusive reading it has always had — the #16179 separation, on this
+          // side too.
+          const bounds = resolved?.endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };
+          const windowSql = this.compileFilterNode(
+            normalizeDateRangeWindow(td.dimension, bounds, lowering),
+            cube,
+            tableName,
+            joins,
+            params,
+            ctx,
           );
+          if (windowSql) whereClauses.push(windowSql);
         }
       }
     }
+
+    return { tableName, params, selectClauses, groupByClauses, whereClauses, joins };
+  }
+
+  /**
+   * [#21249] Enforce the join allowlist, inject the read scopes and assemble
+   * the statement from the clauses {@link compileClauses} produced.
+   */
+  private assembleStatement(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+    cube: Cube,
+    clauses: StatementClauses,
+  ): { sql: string; params: unknown[] } {
+    const { tableName, params, selectClauses, groupByClauses, whereClauses, joins } = clauses;
 
     // ── ADR-0021 D-C — enforce the join allowlist + inject per-object RLS ──
     // 1. Reject any join not backed by a relationship the dataset declared.
@@ -589,17 +1387,18 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // 2. Inject the tenant/RLS read scope for the base table AND every joined
     //    object — this is the predicate the raw-SQL path would otherwise skip.
     this.applyReadScope(this.extractObjectName(cube), tableName, ctx, whereClauses, params);
-    for (const alias of joins.keys()) {
-      // The joined OBJECT (for the RLS lookup) is the target table from the
-      // cube's join map; the ALIAS is how it's referenced in SQL. These differ
-      // for namespaced objects (alias `account` → object `crm_account`).
-      const joinedObject = cube.joins?.[alias]?.name ?? alias;
-      this.applyReadScope(joinedObject, alias, ctx, whereClauses, params);
+    for (const [alias, join] of joins) {
+      // The joined OBJECT (for the RLS lookup) is the object the join reads;
+      // the ALIAS is how it's referenced in SQL. These differ whenever the
+      // relationship is named differently from its target (alias `account` →
+      // object `crm_account`). [#20986] Read off the registered join itself —
+      // the object `qualifyAndRegisterJoin` joined, never a second resolution.
+      this.applyReadScope(join.object, alias, ctx, whereClauses, params);
     }
 
     let sql = `SELECT ${selectClauses.join(', ')} FROM "${tableName}"`;
     if (joins.size > 0) {
-      sql += ' ' + Array.from(joins.values()).join(' ');
+      sql += ' ' + Array.from(joins.values(), (join) => join.sql).join(' ');
     }
     if (whereClauses.length > 0) {
       sql += ` WHERE ${whereClauses.join(' AND ')}`;
@@ -611,12 +1410,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (query.limit != null) {
-      sql += ` LIMIT ${query.limit}`;
-    }
-    if (query.offset != null) {
-      sql += ` OFFSET ${query.offset}`;
-    }
+    // [#21365] The dialect of the driver `execute()` hands this statement to —
+    // the base object's, the one `executeRawSql` is called with.
+    sql += windowClauseSql(query.limit, query.offset, sqlDialectFor(ctx, this.extractObjectName(cube)));
 
     return { sql, params };
   }
@@ -655,10 +1451,23 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // (`{current_user_id}`, `{today}`) binds the value the ObjectQL face's
     // engine resolves for this caller, on this hop, rather than its literal
     // text; one it cannot resolve is refused in the read-scope envelope.
+    // [#20445] …and so does the declared value shape, so a policy's `$empty`
+    // is answered by the field's row of the ruled per-type table.
+    // [#21505] …and so does the driver's temporal coercion pair (ADR-0053
+    // D-A1 / D-A2), bound to the OBJECT (never the alias), so a temporal
+    // comparand binds in the column's storage form and the scope admits the
+    // rows the engine admits.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
       dialect: sqlDialectFor(ctx, objectName),
       context: ctx.context,
+      declaredValueShape: declaredValueShapeResolver(ctx, objectName),
+      coerceTemporalFilterValue: ctx.coerceTemporalFilterValue
+        ? (field, value) => ctx.coerceTemporalFilterValue!(objectName, field, value)
+        : undefined,
+      coerceTemporalFilterColumn: ctx.coerceTemporalFilterColumn
+        ? (field, columnSql) => ctx.coerceTemporalFilterColumn!(objectName, field, columnSql)
+        : undefined,
     });
     // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
     // not an echo: `execute()` runs this method's output through
@@ -682,13 +1491,6 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     whereClauses.push(`(${rendered})`);
   }
 
-  /** SQL-safe join alias for a relationship path (dots → `__`); single-segment
-   *  paths are unchanged. Mirrors the dataset compiler's `cube.joins` keying so
-   *  alias, allowlist, and per-hop RLS all agree on one valid identifier. */
-  private joinAlias(path: string): string {
-    return path.replace(/\./g, '__');
-  }
-
   /**
    * Resolve a dimension/measure/filter SQL expression that may reference a
    * related table via dot notation (e.g. `account.industry`).
@@ -701,28 +1503,37 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    *
    *   <parentTable>.<lookupField> = <lookupField>.id
    *
-   * i.e. the lookup field name on the parent table equals the related
-   * table name. This holds for all `Field.lookup({ object: '...' })`
-   * declarations where the field is named after its target object.
+   * and the joined TABLE at each hop is the object {@link resolvePathHops}
+   * names for it ([#20986]): the cube's declared join, else the lookup
+   * field's declared target, else the alias itself. A lookup named after its
+   * target joins `LEFT JOIN "account" ON …`; one named differently joins its
+   * target under the field's alias, `LEFT JOIN "crm_person" "owner" ON …`.
    *
    * Returns the qualified SQL reference (e.g. `"account"."industry"`).
-   * Pure column references (no dot) are returned as-is.
+   * A base-table column (no dot) is returned qualified with the base table
+   * when the statement joins something, and as-is otherwise.
    */
   private qualifyAndRegisterJoin(
     rawSql: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
     cube?: Cube,
   ): string {
     if (!rawSql.includes('.')) {
-      // Base-table column. When the cube can join other tables, a bare column
-      // that also exists on a joined table (e.g. base `status` vs joined
+      // Base-table column. When the statement joins another table, a bare
+      // column that also exists on a joined table (e.g. base `status` vs joined
       // `account.status`) makes the SQL engine raise "ambiguous column name".
       // Qualify plain identifiers with the base table; leave SQL expressions
-      // and `*` untouched. Single-object cubes (no joins) keep bare columns so
-      // their generated SQL is byte-for-byte unchanged.
-      const canJoin = !!cube?.joins && Object.keys(cube.joins).length > 0;
-      if (canJoin && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
+      // and `*` untouched. A statement that joins nothing keeps bare columns,
+      // so its generated SQL is byte-for-byte unchanged.
+      //
+      // [#21249] "Joins something" is THIS statement's joins, as the hop
+      // resolver registered them — `joins.qualifyBaseColumns`, set by
+      // `generateSql` — never whether the cube declares a join. The declaration
+      // answers for the cube, not the statement: a cube declaring no join still
+      // joins a lookup's declared `reference`, and its base columns were left
+      // bare beside it.
+      if (joins.qualifyBaseColumns && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
         return `"${parentTable}"."${rawSql}"`;
       }
       return rawSql;
@@ -744,22 +1555,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const hops = segments.slice(0, -1);
     if (hops.length === 0 || !column) return rawSql;
     let parentAlias = parentTable;
-    let prefix = '';
-    for (const seg of hops) {
-      prefix = prefix ? `${prefix}.${seg}` : seg;
-      const alias = this.joinAlias(prefix);
+    // [#20986] The joined TABLE at each hop is the object the one resolver
+    // names — the cube's join keyed by the same alias (emitted by the dataset
+    // compiler), else the relationship field's declared target, else the alias
+    // for a host that cannot answer — and the join records it, so the read
+    // scope `generateSql` applies to the alias is that object's.
+    for (const hop of resolvePathHops(cube, parentTable, hops, joins.referenceOf)) {
+      const alias = hop.alias;
       if (!joins.has(alias)) {
-        // The joined TABLE is resolved from the Cube's `joins` map (emitted by
-        // the dataset compiler, keyed by the same alias); fall back to the alias
-        // as the table for legacy/same-name cubes.
-        const joinTable = cube?.joins?.[alias]?.name ?? alias;
         // Only emit an explicit alias when the table differs from it; when they
         // match, `LEFT JOIN "account" ON …` is cleaner (and back-compat).
-        const tableRef = joinTable === alias ? `"${alias}"` : `"${joinTable}" "${alias}"`;
-        joins.set(
-          alias,
-          `LEFT JOIN ${tableRef} ON "${parentAlias}"."${seg}" = "${alias}"."id"`,
-        );
+        const tableRef = hop.object === alias ? `"${alias}"` : `"${hop.object}" "${alias}"`;
+        joins.set(alias, {
+          sql: `LEFT JOIN ${tableRef} ON "${parentAlias}"."${hop.field}" = "${alias}"."id"`,
+          object: hop.object,
+        });
       }
       parentAlias = alias;
     }
@@ -811,7 +1621,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     member: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
   ): string {
     const dim = this.lookupMember(cube, member, 'dimension');
     const raw = dim ? dim.sql : (member.includes('.') ? member.split('.')[1] : member);
@@ -822,13 +1632,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * @param predicate - The measure's own scoped filter, already compiled to a
    *   SQL boolean (`null` = the measure declares none, or declares one that
    *   constrains nothing — `compileFilterNode`'s TRUE). #10298.
+   * @param ctx - [#21042] The host's answers this compile reads for the
+   *   aggregand: the column's declared shape (`declaredValueShape`) and the
+   *   dialect the statement runs on (`sqlDialect`).
    */
   private resolveMeasureSql(
     cube: Cube,
     member: string,
     parentTable: string,
-    joins: Map<string, string>,
-    predicate: string | null = null,
+    joins: StatementJoins,
+    predicate: string | null,
+    ctx: StrategyContext,
   ): string {
     const measure = this.lookupMember(cube, member, 'measure') as
       | { sql: string; type: string }
@@ -853,70 +1667,83 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       );
     }
 
-    const col = measure.sql === '*'
+    // [#21000] The aggregate the measure names — or the one refusal both
+    // strategies give a type no aggregate lowers ({@link aggregateOfMeasure}):
+    // a retired custom-SQL-expression type (`number` / `string` / `boolean`),
+    // whose column this path used to emit unaggregated, or a type the spec
+    // never declared. Asked before anything is lowered, so nothing else the
+    // statement carries can route around it.
+    const aggregate = aggregateOfMeasure(cube.name, member, measure.type);
+
+    const column = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
 
+    // [#21042] The OPERAND each aggregate wraps, per the engine's own policies
+    // (`aggregandOperandSql`, `@objectstack/core`, the rule `driver-sql`'s
+    // `aggregate()` applies): on PostgreSQL and MySQL `sum` over a fractional
+    // column and `avg` over every numeric or boolean one accumulate in double
+    // (#20387), and on PostgreSQL a boolean aggregand is cast to `int` for
+    // `sum` / `avg` / `min` / `max` (#11635), never for the counts. Without it
+    // this face added exact decimals where the engine adds doubles, and
+    // answered `500` for a boolean `sum` the engine answers. The column's
+    // class is the one predicate's, over the declaration the host relays for
+    // the object the column lives on — the base object, or the object a
+    // relationship path's last hop reads ({@link measureColumnOf}, through the
+    // one hop resolver). An expression, a column the host cannot describe, or a host
+    // that names no dialect gets no class or no policy, and is aggregated as
+    // stored.
+    const target = measureColumnOf(cube, parentTable, measure.sql, joins.referenceOf);
+    const col = column === '*' || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, aggregate)
+      ? column
+      : aggregandOperandSql(
+          aggregate,
+          target
+            ? aggregandColumnClass(declaredValueShapeResolver(ctx, target.object)?.(target.field))
+            : undefined,
+          sqlDialectFor(ctx, parentTable),
+          column,
+        );
+
     if (predicate !== null) {
-      const wrapConditional = CONDITIONAL_AGGREGATE_SQL[measure.type];
+      const wrapConditional = CONDITIONAL_AGGREGATE_SQL[aggregate];
       if (wrapConditional) return wrapConditional(col, predicate);
-      // [#10298] Deliberately BARE — an undeclared 500, same tier and same
-      // reasoning as the "unrecognised type" throw below. A measure filter only
-      // ever arrives here from a COMPILED DATASET, and `DatasetMeasure.aggregate`
-      // is `AggregationFunction`, whose every member is a key of the table
-      // above — so an expression metric type (`number`/`string`/`boolean`,
-      // where `sql` IS the whole computation and there is no aggregate to make
-      // conditional) cannot carry one. What would reach here is our own drift.
-      // Emitting the unfiltered aggregate instead is precisely the defect this
-      // card closes: a 200 carrying different arithmetic than the author declared.
+      // [#10298] Deliberately BARE — an undeclared 500, the tier
+      // {@link aggregateOfMeasure} answers in. The conditional table is keyed
+      // identically to {@link AGGREGATE_SQL} (`aggregation-lockstep.test.ts`),
+      // and the aggregate above was admitted from that table, so what would
+      // reach here is our own drift between the two. Emitting the unfiltered
+      // aggregate instead is precisely the defect this card closes: a 200
+      // carrying different arithmetic than the author declared.
       throw new Error(
         `[native-sql-strategy] measure "${member}" on cube "${cube.name}" carries a ` +
-          `scoped filter, but its type "${measure.type}" has no conditional form ` +
+          `scoped filter, but its type "${aggregate}" has no conditional form ` +
           `(conditional: ${CONDITIONAL_AGGREGATE_SQL_KEYS.join(', ')}).`,
       );
     }
 
-    const wrap = AGGREGATE_SQL[measure.type];
-    if (wrap) return wrap(col);
-    // A custom SQL expression: the measure's `sql` IS the computation, so emit
-    // it unwrapped. In a grouped query the expression must itself be
-    // aggregate-shaped — measures never join `GROUP BY` (only dimensions do), so
-    // a scalar expression there is invalid SQL. That is the author's contract to
-    // keep; silently substituting `COUNT(*)` did not keep it for them.
-    if (EXPRESSION_METRIC_TYPES.has(measure.type)) return col;
-
-    // [#5716] Deliberately BARE — an undeclared 500, and the one site on that
-    // issue's list of nine that is NOT the author's mistake. `Metric.type` is the
-    // CLOSED `AggregationMetricType` enum; `metric-type-coverage.test.ts` pins
-    // that {@link AGGREGATE_SQL} ∪ {@link EXPRESSION_METRIC_TYPES} partitions it
-    // exactly, `dataset-compiler` only ever writes a `SUPPORTED_AGGREGATES`
-    // member into a cube, and `inferMeasure` mints six known types. So no
-    // spec-valid cube can arrive here: what does is our own drift or a host
-    // registering a cube object that never met `CubeSchema`. Answering the
-    // CALLER 400 for that would hide a platform bug from ops alerting and tell a
-    // dashboard user to fix metadata they cannot see. Same tier as
-    // `dataset-compiler`'s "non-derived measure has no aggregate"; the reasoning
-    // is written once in `dataset-refusal.ts`'s header.
-    throw new Error(
-      `[native-sql-strategy] measure "${member}" on cube "${cube.name}" has ` +
-        `unrecognised type "${measure.type}" — expected an aggregate ` +
-        `(${SUPPORTED_AGGREGATE_SQL_KEYS.join(', ')}) or a custom-expression type ` +
-        `(${[...EXPRESSION_METRIC_TYPES].join(', ')}).`,
-    );
+    // [#5716 → #21000] Never `COUNT(*)` for a type this table does not key —
+    // {@link aggregateOfMeasure} admitted `aggregate` FROM this table, and
+    // refused (bare, undeclared 500, the spec's own words) every type it does
+    // not key, before anything was lowered.
+    return AGGREGATE_SQL[aggregate](col);
   }
 
   private resolveFieldSql(
     cube: Cube,
     member: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
   ): string {
     const dim = this.lookupMember(cube, member, 'dimension');
     if (dim) return this.qualifyAndRegisterJoin(dim.sql, parentTable, joins, cube);
     const measure = this.lookupMember(cube, member, 'measure');
     if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
     const fieldName = member.includes('.') ? member.split('.')[1] : member;
-    return fieldName;
+    // [#21249] A member the cube does not declare is a base-table column too
+    // (`where: { id }`), so it takes the same qualification as a declared one:
+    // returned bare it sat beside a joined target's own `id`, ambiguous.
+    return this.qualifyAndRegisterJoin(fieldName, parentTable, joins, cube);
   }
 
   /**
@@ -926,9 +1753,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * Mirrors `resolveFieldSql`'s `sql` resolution but yields the *logical*
    * target rather than the qualified SQL:
    *   - A dotted column (`account.region`, emitted for a relation traversal)
-   *     belongs to the JOINED object — resolve the alias → target table via the
-   *     cube's `joins` map (alias `account` → object `crm_account` when
-   *     namespaced) and take the tail as the column.
+   *     belongs to the JOINED object — the object the path's last hop reads,
+   *     as {@link resolvePathHops} names it for the join itself ([#20986]: the
+   *     cube's join, else the lookup field's declared target, else the alias)
+   *     — and the tail is the column.
    *   - Otherwise the column lives on the cube's BASE table. Use the dimension's
    *     resolved `sql` (the real column, which may differ from the member name,
    *     e.g. dimension `assessed` → column `assessed_at`) rather than the member.
@@ -937,18 +1765,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     member: string,
     baseTable: string,
+    referenceOf: HopReference | undefined,
   ): { object: string; field: string } {
     const dim = this.lookupMember(cube, member, 'dimension');
     const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
     const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
 
     if (rawSql.includes('.')) {
-      // Multi-hop (ADR-0071): the column's owning object is the join at the
-      // relationship PATH (all segments but the last); the column is the last.
+      // Multi-hop (ADR-0071): the column's owning object is the object the
+      // relationship PATH (all segments but the last) reaches; the column is
+      // the last.
       const segments = rawSql.split('.');
       const field = segments[segments.length - 1];
-      const relPath = segments.slice(0, -1).join('.');
-      const object = cube.joins?.[this.joinAlias(relPath)]?.name ?? relPath;
+      const object = columnObjectOf(cube, baseTable, rawSql, referenceOf);
       return { object, field };
     }
     return { object: baseTable, field: rawSql };
@@ -1018,10 +1847,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * through the combinators. `null` = no constraint.
    *
    * Leaves go through {@link buildFilterClause} exactly as they did when this
-   * was a flat loop, so the storage-form coercion and the calendar-day
-   * upper-bound rule (#3777) apply at every depth — including inside an `$or`,
-   * where a second, combinator-aware implementation would have been free to
-   * drift from the first.
+   * was a flat loop, so the storage-form coercion applies at every depth —
+   * including inside an `$or`, where a second, combinator-aware implementation
+   * would have been free to drift from the first. The calendar-day upper-bound
+   * rule (#3777) is not applied here at any depth: the tree arrives with it
+   * already applied by the shared lowering (#5930 step 4).
    *
    * Parenthesisation is explicit rather than left to SQL's precedence: `AND`
    * does bind tighter than `OR`, so `a AND b OR c` happens to be right, but
@@ -1051,7 +1881,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     node: NormalizedFilterNode | null,
     cube: Cube,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
     params: unknown[],
     ctx: StrategyContext,
   ): string | null {
@@ -1061,11 +1891,30 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
     }
 
+    if (node.kind === 'relation') {
+      // [#20887] Unreachable by construction: {@link canHandle} declines every
+      // query that carries a nested-relation condition, reading the same
+      // producers this compiler reads. Kept because the failure mode if the two
+      // ever disagree is the one #20887 closed — a JOIN that filters by a field
+      // the caller may not read, with no cap — and a routing regression must
+      // be a loud fault, never that. Deliberately BARE, an undeclared 500: the
+      // caller's filter is legal and is served on the engine path, so arriving
+      // here is our own drift, not the caller's 400 (the tier and the reasoning
+      // of {@link assertNoCrossFieldComparison}).
+      throw new Error(
+        `[native-sql-strategy] the nested-relation condition on "${node.member}" reached the SQL ` +
+        `compiler. It is served by the engine, which reads the related object as the caller — ` +
+        `\`canHandle\` declines such a query so it routes to the ObjectQL/engine path; reaching ` +
+        `this throw means the decline and this compiler stopped agreeing, which is our bug and ` +
+        `must never degrade to a joined statement.`,
+      );
+    }
+
     if (node.kind === 'leaf') {
       const colExpr = this.resolveFieldSql(cube, node.member, parentTable, joins);
       // Resolve the (object, column) this member binds against so the value
       // can be coerced to the column's storage form (see buildFilterClause).
-      const target = this.resolveStorageTarget(cube, node.member, parentTable);
+      const target = this.resolveStorageTarget(cube, node.member, parentTable, joins.referenceOf);
       return this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
     }
 
@@ -1090,7 +1939,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         if (node.kind !== 'or') continue;
         params.length = paramBase;
         joins.clear();
-        for (const [alias, clauseSql] of joinBase) joins.set(alias, clauseSql);
+        for (const [alias, join] of joinBase) joins.set(alias, join);
         return null;
       }
       parts.push(clause);
@@ -1146,6 +1995,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // so only the value comparisons take the normalised reference.
     if (operator === 'set') return `${rawCol} IS NOT NULL`;
     if (operator === 'notSet') return `${rawCol} IS NULL`;
+    // [#20445] `$empty`'s leaf, answered by the field's DECLARED row of the
+    // ruled per-type table (null or `''`, null or `[]`, null only) — the host's
+    // declared value shape expanded by the spec, compiled per dialect. Reads
+    // the column as stored, like the null predicates: emptiness is a property
+    // of the stored value, not of its temporal normalisation. Refused, before
+    // anything binds, when the host cannot name the declaration.
+    if (operator === 'empty' || operator === 'notEmpty') {
+      return whereEmptyLeafSql({
+        ctx,
+        target,
+        column: rawCol,
+        empty: operator === 'empty',
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
+    }
 
     if (operator === 'in' || operator === 'notIn') {
       if (!values || values.length === 0) return null;
@@ -1174,6 +2038,24 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const polarity = textOperatorPolarity(operator);
       if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
         return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+      }
+      // [#20987] On a column the host DECLARES multi-valued or JSON-stored,
+      // `contains` / `notContains` are MEMBERSHIP, not a substring of the
+      // stored JSON text: the read scope's question, from the same
+      // `@objectstack/core` construct `driver-sql` emits. Refused
+      // `INVALID_FILTER` / 400 on the `'unknown'` dialect, before anything
+      // binds. `null` keeps the text match below. See
+      // `contains-membership-sql.ts`.
+      if (operator === 'contains' || operator === 'notContains') {
+        const membership = whereContainsMembershipSql({
+          ctx,
+          target,
+          column: rawCol,
+          value: values[0],
+          negate: operator === 'notContains',
+          bind: (v) => { params.push(v); return `$${params.length}`; },
+        });
+        if (membership !== null) return membership;
       }
       // [#15684] The case-EXACT family picks its construct per DIALECT, because
       // a plain `LIKE` folds ASCII case on SQLite and follows the collation on
@@ -1211,17 +2093,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       });
     }
 
-    // A bare-day `lte` bound means "through that whole day" (#3777): compile
-    // half-open (`< day+1`) so a datetime column keeps the final day's rows.
-    // Equivalent to `<=` for a `date` column, so no column-type lookup needed.
-    if (operator === 'lte') {
-      const nextDay = nextUtcCalendarDay(values[0]);
-      if (nextDay != null) {
-        params.push(this.coerceTemporal(ctx, target, nextDay));
-        return `${this.temporalColumn(ctx, target, rawCol)} < $${params.length}`;
-      }
-    }
-
+    // [ADR-0053 D-D1, amended — #5930 step 4] An `lte` compiles the bound it is
+    // handed, like every other comparison. A bare-day upper bound means
+    // "through that whole day" (#3777) on a `datetime` column, and the shared
+    // lowering already rewrote such a bound to `lt` the next day (or, on the
+    // last supported day, to `set`) before this compiler saw the tree — with the
+    // column's declared type in hand ({@link compileClauses}' `lowering`). An
+    // `lte` that reaches this line is on a column declared something else
+    // (`date`, text, a number), where the comparison as written is the typed
+    // drivers' answer. This compiler kept a type-blind copy of the rule here,
+    // which widened a bare day on every column, until #5930 step 4.
+    //
     // Coerce so booleans/numbers bind as their native SQL types AND so a
     // relative-date / ISO-string comparand on a SQLite `Field.datetime` column
     // is converted to that column's storage form (#16737: the ONE statement of

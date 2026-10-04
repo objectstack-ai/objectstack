@@ -11,6 +11,7 @@ import {
 import {
   createRecordedBySentinelPlan,
   findSentinelHistoryRows,
+  METADATA_HISTORY_OBJECT,
   RECORDED_BY_SENTINEL,
   RECORDED_BY_SENTINEL_PLAN_ID,
 } from '@objectstack/metadata-protocol';
@@ -25,6 +26,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -66,7 +68,8 @@ async function confirm(question: string): Promise<boolean> {
  */
 export default class MigrateRecordedBy extends Command {
   static override description =
-    "Rewrite the legacy 'system' sentinel in sys_metadata_history.recorded_by to NULL (#4556). " +
+    "Rewrite the legacy 'system' sentinel in sys_metadata_history.recorded_by to NULL, the value a " +
+    'system-initiated write stores now. ' +
     'Dry-run by default; --apply runs the conversion through the migration journal.';
 
   static override examples = [
@@ -95,10 +98,15 @@ export default class MigrateRecordedBy extends Command {
 
     let stack;
     try {
+      // [#21391] The dry run boots READ-ONLY, the boot `os migrate plan`
+      // takes: `deferSchemaDdl` holds schema DDL back on every SQL datasource,
+      // and `readOnlyProbe` keeps a missing sqlite file from being created.
+      // `--apply` keeps the plain boot: the tables must exist before it writes.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins(),
+        ...(flags.apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -123,7 +131,13 @@ export default class MigrateRecordedBy extends Command {
         plans?.register?.(plan);
       } catch { /* no registry composed — resume reports it, this run still works */ }
 
-      const pending = await findSentinelHistoryRows(engine);
+      // [#21529] Not asked: the dry run's read-only boot measured whether the
+      // history table exists, and a table that does not exist holds no
+      // sentinel rows. Reading it anyway answered a fresh project's "nothing to
+      // convert" with a query fault and exit 1. `--apply` booted plain, so its
+      // table exists by now.
+      const historyAbsent = !flags.apply && stack.tableAbsent(METADATA_HISTORY_OBJECT);
+      const pending = historyAbsent ? [] : await findSentinelHistoryRows(engine);
 
       // ── dry run (default): read-only ─────────────────────────────────
       if (!flags.apply) {
@@ -132,7 +146,12 @@ export default class MigrateRecordedBy extends Command {
           return;
         }
         if (pending.length === 0) {
-          printSuccess(`No sys_metadata_history row holds the '${RECORDED_BY_SENTINEL}' sentinel — nothing to convert.`);
+          printSuccess(
+            historyAbsent
+              ? `No ${METADATA_HISTORY_OBJECT} row holds the '${RECORDED_BY_SENTINEL}' sentinel — this database ` +
+                  'has no such table yet, so there is nothing to convert.'
+              : `No sys_metadata_history row holds the '${RECORDED_BY_SENTINEL}' sentinel — nothing to convert.`,
+          );
           return;
         }
         printWarning(`${pending.length} sys_metadata_history row(s) hold recorded_by = '${RECORDED_BY_SENTINEL}'.`);
@@ -187,6 +206,10 @@ export default class MigrateRecordedBy extends Command {
         this.exit(1);
       }
     } catch (error: any) {
+      // [#21434] The `this.exit(…)` calls above throw oclif's exit signal from
+      // inside this `try`. Re-reporting it printed a second `--json` document
+      // (`{"error":"EEXIT: 0"}`) and turned a completed apply's exit 0 into 1.
+      if (isExitSignal(error)) throw error;
       const msg = error instanceof MigrationJournalRefusal
         ? `Refused (${error.code}): ${error.message}`
         : (error?.message || String(error));

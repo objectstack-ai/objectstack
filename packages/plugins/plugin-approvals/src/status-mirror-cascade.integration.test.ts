@@ -46,7 +46,8 @@ import { ApprovalService } from './approval-service.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
-// [#11081] `@objectstack/runtime`'s shared expected-noise capture. This import
+import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
+// [commit c28e4cfae] `@objectstack/runtime`'s shared expected-noise capture. This import
 // escapes the package on PURPOSE, so it is DECLARED rather than left for CI to
 // discover: `CROSS_PACKAGE_TEST_INPUTS` in
 // `scripts/check-cross-package-test-inputs.mjs` names the one file, and
@@ -59,7 +60,7 @@ import { captureExpectedReadRefusals } from '../../../runtime/src/expected-read-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * [#11081] The tables this fixture deliberately never provisions — and so the
+ * [commit c28e4cfae] The tables this fixture deliberately never provisions — and so the
  * ONLY read refusals whose log frames may be withheld here.
  *
  * `beforeEach` boots a kernel with no datasource and attaches sqlite late, then
@@ -193,11 +194,11 @@ const authzResolverObjects = [
   },
 ] as const;
 
-/** [#11081] Shared by both kernels this file boots; asserted once in `afterAll`. */
+/** [commit c28e4cfae] Shared by both kernels this file boots; asserted once in `afterAll`. */
 const noise = captureExpectedReadRefusals([...EXPECTED_ABSENT_PROBE_TABLES]);
 
 /**
- * [#11081] The PIN half. ⛔ Repairing a failure here means re-deriving the list
+ * [commit c28e4cfae] The PIN half. ⛔ Repairing a failure here means re-deriving the list
  * above or finding out why a probe stopped firing — NEVER deleting the channel.
  * In particular a silent `sys_approval_delegation` means the out-of-office
  * delegation lookup stopped running on a decision, which is a finding.
@@ -294,7 +295,7 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
     // The engine's own `init()` ran during bootstrap, before this driver
     // existed, so the connect the engine would have done is done here.
     const driver = makeSqliteDriver();
-    // [#11081] Before `connect()` — i.e. before the driver runs any statement.
+    // [commit c28e4cfae] Before `connect()` — i.e. before the driver runs any statement.
     // The sink also RESTORES a loud channel: an unexpected driver fault reaches
     // the real console from here even though the kernel logger is `silent`.
     noise.captureDriver(driver);
@@ -313,6 +314,17 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
     // Real DDL for all four objects — including the three sys_approval_* tables
     // the ApprovalService writes through.
     await objectql.syncSchemas();
+    // [#21516] The two probes this fixture EXPECTS to be refused (above) are
+    // registered here, AFTER the DDL, so they stay unprovisioned. The engine
+    // refuses a name its registry does not hold before any driver, so the
+    // single-tenant org probe and the delegation lookup reach the driver — and
+    // its missing-table refusal — only through registered objects, as they do
+    // in production (the approvals plugin registers `sys_approval_delegation`).
+    objectql.registry.registerObject(SysApprovalDelegation as any, 'approvals-test', 'approvals-test');
+    objectql.registry.registerObject(
+      { name: 'sys_organization', label: 'Organization', fields: { name: { type: 'text', label: 'Name' } } } as any,
+      'approvals-test',
+    );
     automation.registerFlow('on_approved', onApprovedFlow as any);
 
     svc = new ApprovalService({ engine: objectql });

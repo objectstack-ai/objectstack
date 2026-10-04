@@ -44,7 +44,6 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { SysUser } from '@objectstack/platform-objects';
 import { secretFromTotpUri, totp } from './totp.js';
 
-const SYS = { context: { isSystem: true } };
 const ADMIN_PASSWORD = 'admin123';
 
 /** Resolve a dot path the way the console action runtime does. */
@@ -210,11 +209,15 @@ describe('#10681 — the declared reveal resolves against the live response', ()
   });
 
   it('and they are genuinely unrecoverable afterwards — storage holds no plaintext', async () => {
-    const rows = await ql.find(
-      'sys_two_factor',
-      { where: { user_id: adminUserId }, limit: 1 },
-      SYS,
-    );
+    // STORAGE, read at driver level. `backup_codes` is declared `internal: true`
+    // (#21197), so the engine's read path — `ql.find`, system context included —
+    // omits it, and a guard reading through it would see "nothing stored" for a
+    // column that holds a value. The question here is what the column HOLDS, so
+    // it is read below the strip, where the stored bytes are.
+    const driverRows = await ql
+      .getDriver('sys_two_factor')
+      .find('sys_two_factor', { where: { user_id: adminUserId } });
+    const rows = (Array.isArray(driverRows) ? driverRows : [driverRows]).filter(Boolean);
     const stored = String(rows[0]?.backup_codes ?? '');
     expect(stored.length, 'no backup_codes column value was stored at all').toBeGreaterThan(0);
 

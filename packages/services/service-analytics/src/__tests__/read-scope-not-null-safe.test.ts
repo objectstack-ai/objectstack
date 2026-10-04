@@ -39,10 +39,13 @@
  * Measured, not reasoned: the fixture is row-for-row the one in
  * `driver-sql`'s `sql-driver-not-null-safe.test.ts`, and every id set below is
  * the answer that file and the two JS-backend pins
- * (`formula/src/matches-filter-not-null-safe.test.ts`,
- * `driver-memory/src/memory-matcher-not-null-safe.test.ts`) assert for the same
+ * (`formula/src/matches-filter-not-null-safe.test.ts` and
+ * `driver-memory/src/memory-driver-document-not.test.ts`) assert for the same
  * filter — all three suites were run against this fixture while writing these
- * cases. Moving an expectation here re-opens the divergence #5146 closed.
+ * cases, the `driver-memory` one as `memory-matcher-not-null-safe.test.ts`,
+ * whose cells `memory-driver-document-not.test.ts` holds since commit
+ * `8fec76a2b` deleted it with the reference matcher. Moving an expectation here
+ * re-opens the divergence #5146 closed.
  *
  * `sql.js` (pure WASM) is the engine, for the reason spelled out at the top of
  * `read-scope-sql-conformance.test.ts`: a native binding cannot be relied on to
@@ -91,9 +94,9 @@ const cube: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
-  dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
-  public: false,
+  measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
+  dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
+  public: true,
 };
 
 const query: AnalyticsQuery = {
@@ -240,6 +243,10 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
 
     it('the guard rides the leaf, so the emitted SQL negates a TOTAL predicate', () => {
       const { sql } = compileScopedFilterToSql({ $not: { stage: 'won' } } as FilterCondition, ALIAS);
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering at this
+      // compiler's entry totalises the operand, and it is the guard's one
+      // source: this compiler's own copy, which guarded the leaf a second time,
+      // is deleted. The id sets in this block are the guarantee.
       expect(sql).toBe('NOT (("t"."stage" IS NOT NULL AND "t"."stage" = ?))');
     });
 
@@ -399,8 +406,10 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
      * different row sets — the defect, not a smaller version of the fix.
      */
     it('$ne / $nin / $notContains are NULL-safe outside a $not too (#5298)', () => {
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's NULL
+      // escape, once — this compiler's own wrap is deleted. The same rows.
       expect(compileScopedFilterToSql({ stage: { $ne: 'won' } } as FilterCondition, ALIAS).sql)
-        .toBe('("t"."stage" IS NULL OR "t"."stage" <> ?)');
+        .toBe('(("t"."stage" IS NULL OR "t"."stage" <> ?))');
       expect(ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
       expect(ids({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
       expect(ids({ stage: { $notContains: 'wo' } })).toEqual(['2', '3', '4']);
@@ -449,7 +458,7 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
 
     it('a nested relation / bare array / zero-operator spec inside a `$not` still THROWS', () => {
       expect(() => compileScopedFilterToSql({ $not: { account: { region: 'NA' } } } as FilterCondition, ALIAS))
-        .toThrowError(/nested\/relation value/);
+        .toThrowError(/carries a nested-relation condition/);
       expect(() => compileScopedFilterToSql({ $not: { stage: ['won'] } } as FilterCondition, ALIAS))
         .toThrowError(/bare array value/);
       expect(() => compileScopedFilterToSql({ $not: { stage: {} } } as FilterCondition, ALIAS))

@@ -102,9 +102,20 @@ export const SysShareLink = ObjectSchema.create({
     }),
 
     // ── Token (the secret) ───────────────────────────────────────
+    //
+    // [#21197] `internal: true` on this object's two credential columns: the
+    // capability token below and `password_hash` further down. The generic
+    // data path's get/list doors and the compliance ledger's CRUD mirror both
+    // honour the flag, so neither column leaves through them. Storage, the
+    // unique index and the `where: { token }` lookup are untouched. This
+    // plugin's own routes read both back through the engine's privileged
+    // accessor (`readShareLinkInternalColumn` in `share-link-service.ts`):
+    // redemption verifies the password against the recovered hash, and the
+    // creator's own link list gets its tokens back to build each URL.
     token: Field.text({
       label: 'Token',
       required: true,
+      internal: true,
       maxLength: 64,
       description: 'Opaque URL-safe random token (≥ 22 chars). The only secret in this row.',
       group: 'Token',
@@ -144,7 +155,7 @@ export const SysShareLink = ObjectSchema.create({
       //
       // ⚠️ ORDERING CONSTRAINT — this id half is `required: true`, and that
       // makes it ORDER-DEPENDENT in seeds even though a pointer pair
-      // contributes no static ordering edge (#11674, measured against the real
+      // contributes no static ordering edge (commit 1cba33f16, measured against the real
       // engine in `packages/objectql/src/engine-seed-required-deferral.test.ts`):
       // the seed loader defers an unresolvable reference by DELETING the column
       // from the pass-1 insert, required-validation rejects that row, and pass 2
@@ -152,7 +163,7 @@ export const SysShareLink = ObjectSchema.create({
       // an OPTIONAL id half order-independent (`sys_audit_log`) does not reach
       // this one. ⇒ SEED THE TARGET DATASET FIRST. The failure if you do not is
       // loud in three places — a write error naming this column, a
-      // dropped-deferral error, and `success: false` — and since #11674 the
+      // dropped-deferral error, and `success: false` — and since commit 1cba33f16 the
       // loader also WARNS at load time, before the engine rejects the row.
       referenceVia: 'object_name',
     }),
@@ -201,8 +212,10 @@ export const SysShareLink = ObjectSchema.create({
       group: 'Access Policy',
     }),
 
+    // [#21197] `internal: true` — see the note on `token` above.
     password_hash: Field.text({
       label: 'Password Hash',
+      internal: true,
       maxLength: 256,
       description: 'Argon2/bcrypt hash. When set, the UI prompts for a password before rendering.',
       group: 'Access Policy',

@@ -31,7 +31,7 @@ export const entry: SemanticMigration = {
     + 'with no `conditions` the node routes by its out-edges alone, so the out-edge that branch '
     + 'labelled is no longer held back',
   reason:
-    'Card #19961. `DecisionConditionSchema` declares a branch `{ label, expression }` with '
+    '`DecisionConditionSchema` declares a branch `{ label, expression }` with '
     + '`expression` a required `z.string()`, but nothing parses a decision node\'s open config '
     + 'against it, and the expression-ledger resolver skipped an absent value as "not authored" — '
     + 'so a branch with no predicate passed `FlowSchema.parse`, `AutomationEngine.registerFlow` and '

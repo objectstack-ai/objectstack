@@ -682,7 +682,7 @@ export class SettingsService {
    * of a setting that genuinely has no persisted row must answer the manifest
    * `default`, and that is an ordinary, common thing for a boot-time reader to
    * do. Refusing it would turn a correct startup sequence into an error — which
-   * is why #10159's fix deliberately left reads open.
+   * is why commit 1ec36b730's write refusal deliberately left reads open.
    *
    * What is wrong is not the answer, it is that the answer was produced WITHOUT
    * CONSULTING the store. In the window {@link loadRows} takes its `this.memory`
@@ -1679,7 +1679,9 @@ export class SettingsService {
           // handle id in sys_setting.value_enc. Otherwise fall back to
           // the legacy inline crypto adapter path for back-compat.
           if (this.cryptoProvider && this.secretStore) {
+            // ADR-0128 D1: the settings producer's own scope.
             const handle = await this.cryptoProvider.encrypt(plain, {
+              scope: 'settings',
               namespace,
               key,
               tenantId: ctx.tenantId,
@@ -2592,7 +2594,7 @@ export class SettingsService {
               version: secret.version,
               ciphertext: secret.ciphertext,
             },
-            { namespace: row.namespace, key: row.key },
+            { scope: 'settings', namespace: row.namespace, key: row.key },
           );
         } else {
           plain = await this.crypto.decrypt(row.value_enc, {

@@ -142,7 +142,7 @@ export async function probeOrganizations(
   pkg: string = ORGANIZATIONS_PKG,
 ): Promise<OrganizationsProbe> {
   const root = hostRoot ?? process.cwd();
-  // #10943: hand the helper THIS module's resolver. Its undeclared fallback is
+  // Commit 46d34ab7c: hand the helper THIS module's resolver. Its undeclared fallback is
   // documented as "the importing package's own resolution", and a bare
   // `import()` written inside `@objectstack/types` is that package's
   // resolution, not this one's — it can see only `@objectstack/spec`. It makes
@@ -181,7 +181,7 @@ export async function probeOrganizations(
             'problem — the package publishes no entry Node can load, and the importer\'s ' +
             'message below is the authority on what it has to publish'
           : `declare ${pkg} in ${root}'s own package.json and install it — being ` +
-            'reachable as somebody else\'s transitive dependency is not enough (#4719)';
+            'reachable as somebody else\'s transitive dependency is not enough';
     if (declared) {
       throw new Error(
         `${MULTI_ORG_ENV}=1 declares that ${pkg} (enterprise, ADR-0105 D12) is ` +

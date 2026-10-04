@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8796 — the resume body's OUTER envelope is a closed set.
+ * Commit a4331227b — the resume body's OUTER envelope is a closed set.
  *
  * `POST /automation/:name/runs/:runId/resume` assembles its engine signal
  * field-by-field from the body — deliberately (#3801: never spread the body, or
@@ -10,7 +10,7 @@
  * ones read. Measured on GA: `{"nodeId":"ask","values":{…}}` — no key of which
  * the route reads — answered HTTP 200 `success:true` with the screen submission
  * treated as EMPTY; the run completed and the submitted value never reached the
- * flow. Maintainer ruling 2026-08-15 (Option A, on #8796): an unknown top-level
+ * flow. Maintainer ruling 2026-08-15 (Option A, landed in commit a4331227b): an unknown top-level
  * key is refused, located, naming the offending key(s) and the accepted set —
  * exactly `inputs` / `variables` / `output` / `branchLabel`.
  *

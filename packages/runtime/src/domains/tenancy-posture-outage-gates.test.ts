@@ -419,7 +419,7 @@ describe('[#15900] the install-wide activation write — a tenancy service that 
         expect(isAuthzStoreUnavailableError(err)).toBe(true);
         expect((err as { status?: unknown }).status).toBe(OUTAGE_STATUS);
         expect((err as { code?: unknown }).code).toBe(OUTAGE_CODE);
-        // Refused BEFORE the write — a gate that refuses afterwards is #10243
+        // Refused BEFORE the write — a gate that refuses afterwards is the leak commit 02b41232d measured,
         // with an audit trail.
         expect(setActionActive).not.toHaveBeenCalled();
     });
@@ -530,7 +530,7 @@ describe('[#15900] the automation toggle — the same install-wide gate, reached
         expect((err as { status?: unknown }).status).toBe(OUTAGE_STATUS);
         expect((err as { code?: unknown }).code).toBe(OUTAGE_CODE);
         // Refused BEFORE the durable row — ADR-0126 made this switch survive a
-        // cold boot, so a refusal after the write is the #10243 leak with an
+        // cold boot, so a refusal after the write is the leak commit 02b41232d measured, with an
         // audit trail.
         expect(toggleFlow).not.toHaveBeenCalled();
     });

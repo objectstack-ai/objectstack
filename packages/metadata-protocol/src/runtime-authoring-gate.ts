@@ -62,8 +62,34 @@ import {
 // may only reach that package through its kernel-safe `/runtime` entry (the
 // wiring guard's third invariant), and `walkFlowNodes` is not on it.
 import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
+// [#20312] The ADR-0080 compiler itself — the function behind the CLI-only
+// `validateJsxPages` rule, imported rather than re-implemented, so the save
+// door and `os validate` judge a page's source with one compiler. Imported from
+// its own package, never through `@objectstack/lint`: the wiring guard allows
+// this file only the kernel-safe `/runtime` entry and no registry rule by name.
+// The parser is pure (no dependencies, never executes the source), so it adds
+// nothing the kernel boot path may not load (`runtime-lazy-deps.test.ts`).
+import {
+    compile as compileSduiSource,
+    type CompileResult as SduiCompileResult,
+    type Manifest as SduiManifest,
+} from '@objectstack/sdui-parser';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { TenancyPosture } from '@objectstack/spec/security';
+// [#21476] The ONE answer to "can this open public form take anonymous intake
+// on this posture, and why not" — the same export both anonymous form doors and
+// the administrator's read of the view call (`@objectstack/rest`), so the
+// advisory below is raised exactly when the doors withhold the form, at the
+// location and in the words the admin read uses.
+import {
+    anonymousFormIntakeCandidates,
+    anonymousFormIntakeUnavailability,
+    anonymousFormIntakeUnavailableMessage,
+    anonymousFormIntakeUnavailableRemedy,
+    anonymousFormObjectName,
+    anonymousFormSharingPath,
+} from '@objectstack/metadata-core';
 
 /**
  * The structured issue shape a 422 carries — D3's "reuse the Zod envelope".
@@ -329,7 +355,8 @@ export function findPlatformScheduleOrgGaps(args: {
             hint:
                 `Declare the owning organization on this node: `
                 + `config.fields.${ORGANIZATION_FIELD}. An author-supplied value always wins over the `
-                + `engine's fill (#6153), so this is the one place the answer can come from for a `
+                + `engine's fill, and the engine fills only an organization the run resolved — so this is `
+                + `the one place the answer can come from for a `
                 + `scheduled run. A NULL ${ORGANIZATION_FIELD} is not merely untidy: an `
                 + `(${ORGANIZATION_FIELD}, …) unique index does not constrain across NULL and org-scoped `
                 + `queries never see the row. Alternatively, publish this flow into an organization, or `
@@ -337,6 +364,95 @@ export function findPlatformScheduleOrgGaps(args: {
         });
     }
 
+    return issues;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #21476 — the save/publish advisory for an open public form this deployment's
+// posture cannot take anonymous intake for.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A `view` opens a form to anonymous intake, and on this deployment's posture
+ * the object it submits into cannot take an anonymous submission.
+ *
+ * ## What the author is told, and why on this channel
+ *
+ * An anonymous submission carries no organization, and on a walled posture the
+ * engine refuses an insert without one into an object walled by an organization
+ * column. So both anonymous form doors withhold such a form (they answer it as
+ * a withdrawn form), and the administrator's read of the view states why. This
+ * is the third reader of the same answer: the author who SAVES or PUBLISHES the
+ * form is told on the response the write earns, before any visitor meets the
+ * not-found. One predicate, `anonymousFormIntakeUnavailability`
+ * (`@objectstack/metadata-core`), decides for all three, and the advisory's
+ * `message` is the admin read's reason byte for byte.
+ *
+ * ## Why a warning, never a refusal
+ *
+ * The write is legitimate: the form is valid metadata, and it becomes servable
+ * the moment the posture or the object's tenancy changes. Refusing it would
+ * make a deployment fact block an authoring act — the triage ruling asks for
+ * the reason to be stated, located and named, and nothing more.
+ *
+ * ## Why it is gate-local, beside the #6285 rule
+ *
+ * Its input is a fact about the DEPLOYMENT (the posture in force), which a
+ * build machine cannot know, so `AUTHORING_RULES` must not judge it — the
+ * reason {@link findPlatformScheduleOrgGaps} lives here (#6155 Q3=A).
+ */
+export const PUBLIC_FORM_INTAKE_UNAVAILABLE = 'public-form-intake-unavailable';
+
+/**
+ * Judge one about-to-be-published `view` body: one `warning` per open public
+ * form whose object cannot take anonymous intake on `tenancyPostureInForce`.
+ *
+ * PURE — the posture arrives as an argument and the object schemas come from
+ * the resolution universe the gate already holds (`objects`, the live universe
+ * plus this batch's pending drafts). It reads no service, no store and no
+ * environment.
+ *
+ * The location is the form's `sharing` as `anonymousFormSharingPath` places it,
+ * under the write's own root: a `view` write is the sole member of its
+ * snapshot collection, so `views[0]` IS this write (`RuntimeAuthoringIssue.path`).
+ */
+export function findPublicFormIntakeGaps(args: {
+    /** Singular metadata type of the item being written. */
+    type: string;
+    /** Metadata name, for the diagnostic `where`. */
+    name: string;
+    /** The body as it will be persisted. */
+    body: unknown;
+    /** The object declarations a form's target resolves against. */
+    objects: readonly unknown[];
+    /** The tenancy posture IN FORCE (`anonymousFormIntakePosture`); absent = no tenancy service. */
+    tenancyPostureInForce?: TenancyPosture;
+}): RuntimeAuthoringIssue[] {
+    if (args.type !== 'view' || !isRec(args.body)) return [];
+    const view = args.body;
+    const candidates = anonymousFormIntakeCandidates(view);
+    if (candidates.length === 0) return [];
+
+    const viewName = typeof view.name === 'string' && view.name ? view.name : args.name;
+    const issues: RuntimeAuthoringIssue[] = [];
+    for (const candidate of candidates) {
+        const object = anonymousFormObjectName(view, candidate.form);
+        if (!object) continue;
+        const unavailable = anonymousFormIntakeUnavailability(
+            object,
+            args.tenancyPostureInForce,
+            (): unknown => args.objects.find((o) => isRec(o) && o.name === object),
+        );
+        if (!unavailable) continue;
+        issues.push({
+            severity: 'warning',
+            rule: PUBLIC_FORM_INTAKE_UNAVAILABLE,
+            where: `view "${viewName}" · public form "/forms/${candidate.slug}"`,
+            path: `views[0].${anonymousFormSharingPath(view, candidate)}`,
+            message: anonymousFormIntakeUnavailableMessage(candidate.slug, unavailable),
+            hint: anonymousFormIntakeUnavailableRemedy(unavailable),
+        });
+    }
     return issues;
 }
 
@@ -517,6 +633,211 @@ export function mergePendingDeclarations(
     return [...kept, ...pending];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #20312 — an html page's source is compiled at save against the deployment's
+// SDUI component manifest (ADR-0080 §5).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The service key a host registers its deployment's ADR-0080 SDUI component
+ * manifest under — the parsed `sdui.manifest.json` object, a JSON object with a
+ * `components` map. `os serve` resolves it once at boot through the CLI's
+ * `resolveSduiManifest` and registers the result here; a host that registers
+ * nothing keeps the save door exactly as it was before this key existed.
+ *
+ * A plain service key, deliberately not a `CoreServiceName` slot: the manifest
+ * is a fact about the console this deployment serves, not a kernel capability.
+ * The protocol reads it per publish (`resolveSduiManifest` on the protocol,
+ * the `resolveFlowCanonicalizer` pattern), never at construction, so a value
+ * registered after the protocol is assembled is still seen by the next publish.
+ */
+export const SDUI_MANIFEST_SERVICE = 'sdui-manifest' as const;
+
+/**
+ * The gate-local rule that refuses a page whose hand-written `requires`
+ * disagrees with the namespaces its compiled source uses. A namespace the
+ * deployment's manifest does not carry at all always disagrees: the compiled
+ * `requires` holds only namespaces of components the manifest declares.
+ */
+export const PAGE_REQUIRES_DISAGREES_WITH_SOURCE = 'page-requires-disagrees-with-source';
+
+/**
+ * The `rulesRun` name for the save door's own compile of an html page's
+ * source. Its findings carry the compiler's diagnostic codes as `jsx-CODE` —
+ * the rule ids `os validate` / `os build` report for the same source against
+ * the same manifest, so a page refused here is refused under the same name on
+ * the CLI.
+ */
+export const HTML_PAGE_SOURCE_COMPILE = 'html-page-source-compile';
+
+/** The page kinds whose `source` is constrained JSX (the deprecated `jsx` spells `html`). */
+const COMPILED_PAGE_KINDS: ReadonlySet<unknown> = new Set(['html', 'jsx']);
+
+/**
+ * Whether a value can be compiled against: an object with a `components` map,
+ * the one key `compile()` dereferences unconditionally — the same floor the
+ * CLI's `resolveSduiManifest` holds a manifest file to.
+ */
+export function isUsableSduiManifest(value: unknown): value is SduiManifest {
+    return isRec(value) && isRec(value.components);
+}
+
+/**
+ * The plugin namespaces a manifest's components carry — the deployment's
+ * answer to "which plugins does the console this deployment serves load".
+ * The one derivation both moments of ADR-0080 §5's plugin-presence check read:
+ * the save door's `requires` judgement ({@link findHtmlPageSourceGaps}) and the
+ * load-time report ({@link findPageRequiresAbsentFromManifest}).
+ */
+function manifestNamespaces(manifest: SduiManifest): Set<string> {
+    return new Set(
+        Object.values(manifest.components)
+            .map((c) => c?.namespace)
+            .filter((ns): ns is string => typeof ns === 'string'),
+    );
+}
+
+/**
+ * The load half of ADR-0080 §5 ("`requires` is inferred at parse and validated
+ * at save **and** load — plugin presence"): the namespaces a stored page's
+ * `requires` names that no component in the deployment's manifest carries,
+ * i.e. the plugins it needs that the console this deployment serves does not
+ * load. Each name once, in the order the page lists them; `[]` when every one
+ * is present.
+ *
+ * `null` when nothing was judged — not a page, no `requires` list, or no
+ * usable manifest. That last case is the save door's posture on the same
+ * host: with no manifest registered nothing is compiled or checked, and the
+ * host that registered nothing is the one that says so at boot.
+ *
+ * Kind-agnostic on purpose: what is judged is the declaration itself (a
+ * namespace the page says it needs), not the source it was derived from, so a
+ * load needs no compile. A page whose source names a component no manifest
+ * carries never gets this far as an html page on a host with a manifest — the
+ * save door refuses it.
+ */
+export function findPageRequiresAbsentFromManifest(
+    type: string,
+    body: unknown,
+    sduiManifest: unknown,
+): string[] | null {
+    if (type !== 'page' || !isRec(body) || !isUsableSduiManifest(sduiManifest)) return null;
+    const declared = body.requires;
+    if (!Array.isArray(declared)) return null;
+    const provided = manifestNamespaces(sduiManifest);
+    return [...new Set(declared.filter((ns): ns is string => typeof ns === 'string' && !provided.has(ns)))];
+}
+
+/** The compile of one html page body, or `undefined` when the save door does not compile it. */
+function compileHtmlPage(
+    type: string,
+    body: unknown,
+    sduiManifest: unknown,
+): { name: string; result: SduiCompileResult } | undefined {
+    if (type !== 'page' || !isRec(body) || !COMPILED_PAGE_KINDS.has(body.kind)) return undefined;
+    if (!isUsableSduiManifest(sduiManifest)) return undefined;
+    // An empty source is PageSchema's refusal, already made before this gate.
+    if (typeof body.source !== 'string' || body.source.trim() === '') return undefined;
+    const name = typeof body.name === 'string' && body.name !== '' ? body.name : 'page';
+    return { name, result: compileSduiSource(body.source, sduiManifest) };
+}
+
+const sameNamespaces = (a: readonly string[], b: readonly string[]): boolean => {
+    const left = new Set(a);
+    const right = new Set(b);
+    return left.size === right.size && [...left].every((ns) => right.has(ns));
+};
+
+/**
+ * Judge an html page's source against the deployment's manifest: every
+ * compiler diagnostic becomes a finding (errors refuse, warnings advise), and
+ * a hand-written `requires` that disagrees with the compiled one is refused
+ * with each disagreeing namespace named.
+ *
+ * Returns `null` when nothing was judged — not a page, not an html page, or
+ * no usable manifest — so the caller discloses these rules only when they ran.
+ */
+export function findHtmlPageSourceGaps(args: {
+    type: string;
+    body: unknown;
+    sduiManifest?: unknown;
+}): AuthoringFinding[] | null {
+    const compiled = compileHtmlPage(args.type, args.body, args.sduiManifest);
+    if (!compiled) return null;
+    const { name, result } = compiled;
+    const findings: AuthoringFinding[] = result.diagnostics.map((d) => ({
+        severity: d.severity === 'error' ? 'error' : 'warning',
+        rule: `jsx-${d.code}`,
+        where: d.tag ? `page "${name}" › <${d.tag}>` : `page "${name}"`,
+        path: `pages.${name}.source`,
+        message: d.message,
+        hint: 'The source is compiled at save against the SDUI component manifest of the console this '
+            + 'deployment serves — fix the JSX; a component the manifest does not declare needs the plugin '
+            + 'that provides it installed in that console.',
+    }));
+    // A source that does not compile has no trustworthy namespace set to
+    // compare against; its own errors are the verdict.
+    if (!result.ok) return findings;
+
+    const declared = (args.body as AnyRec).requires;
+    if (declared === undefined) return findings;
+    const declaredList: unknown[] = Array.isArray(declared) ? declared : [declared];
+    const declaredNames = declaredList.filter((ns): ns is string => typeof ns === 'string');
+    if (declaredNames.length === declaredList.length && sameNamespaces(declaredNames, result.requires)) {
+        return findings;
+    }
+
+    const provided = manifestNamespaces(args.sduiManifest as SduiManifest);
+    const used = new Set(result.requires);
+    const unprovided = declaredNames.filter((ns) => !provided.has(ns));
+    const unused = declaredNames.filter((ns) => provided.has(ns) && !used.has(ns));
+    const missing = result.requires.filter((ns) => !declaredNames.includes(ns));
+    const clauses = [
+        ...unprovided.map((ns) => `'${ns}' is a namespace no component in this deployment's manifest carries`),
+        ...unused.map((ns) => `'${ns}' is not used by the source`),
+        ...missing.map((ns) => `'${ns}' is used by the source but not listed`),
+    ];
+    if (declaredNames.length !== declaredList.length) clauses.push('every entry must be a namespace string');
+    findings.push({
+        severity: 'error',
+        rule: PAGE_REQUIRES_DISAGREES_WITH_SOURCE,
+        where: `page "${name}"`,
+        path: `pages.${name}.requires`,
+        message: `\`requires\` disagrees with the source: ${clauses.join('; ')}.`,
+        hint: `\`requires\` is derived from the source at save — omit it, or write exactly `
+            + `${JSON.stringify(result.requires)}.`,
+    });
+    return findings;
+}
+
+/**
+ * The body to persist for an html page saved on a host with a manifest: its
+ * `requires` stamped from the compiled source. Returned unchanged — the same
+ * reference — when there is nothing to stamp: not an html page, no usable
+ * manifest, a source that does not compile, or a hand-written `requires` that
+ * disagrees. The last two are refusals on a publish and are left as written on
+ * a draft (drafts are not gated, #4463 D1), so the draft's own publish refuses
+ * them rather than a stamp silently replacing what the author wrote.
+ *
+ * The draft → active promotion applies the same function to the promoted
+ * body, so the active row a publish writes carries what an active save of
+ * that body would have stored — never the draft's own stamp, which was
+ * computed against whatever manifest the host had at the draft's save (or
+ * none at all).
+ */
+export function stampHtmlPageRequires(type: string, body: unknown, sduiManifest: unknown): unknown {
+    const compiled = compileHtmlPage(type, body, sduiManifest);
+    if (!compiled || !compiled.result.ok) return body;
+    const declared = (body as AnyRec).requires;
+    if (declared !== undefined) {
+        const agrees = Array.isArray(declared)
+            && declared.every((ns) => typeof ns === 'string')
+            && sameNamespaces(declared as string[], compiled.result.requires);
+        if (!agrees) return body;
+    }
+    return { ...(body as AnyRec), requires: [...compiled.result.requires] };
+}
+
 const toIssue = (f: AuthoringFinding): RuntimeAuthoringIssue => ({
     rule: f.rule,
     path: f.path,
@@ -621,7 +942,15 @@ export function evaluateRuntimeAuthoringGate(args: {
      * publish.
      */
     pending?: RuntimePendingDeclarations;
-    /** ADR-0080 SDUI manifest when the host has one. */
+    /**
+     * ADR-0080 SDUI manifest when the host has one — the value registered under
+     * {@link SDUI_MANIFEST_SERVICE}, read by the caller per publish.
+     *
+     * [#20312] A usable one (a `components` map) makes the gate compile an html
+     * page's `source` against it ({@link findHtmlPageSourceGaps}): an unknown
+     * component or a `requires` that disagrees with the source refuses the
+     * write. Absent, an html page is judged exactly as before.
+     */
     sduiManifest?: unknown;
     /**
      * [#9612] The package this write belongs to, and the transitive closure of
@@ -661,6 +990,19 @@ export function evaluateRuntimeAuthoringGate(args: {
      */
     orgWallEnforced?: boolean;
     /**
+     * [#21476] The tenancy posture IN FORCE — what the `tenancy` service reports
+     * (`anonymousFormIntakePosture`), the value the anonymous form doors and the
+     * engine read. Absent ⇒ no tenancy service, so no wall to judge against.
+     *
+     * ⛔ Deliberately NOT {@link orgWallEnforced}, and the two are not to be
+     * merged. That input is the REQUESTED posture (#6155 Q3=A names
+     * `postureEnforcesWall(resolveTenancyPosture())` verbatim), read fail-closed,
+     * and it arms a refusal. This one feeds an advisory that must agree with
+     * what the doors do, and the doors read the posture in force: on a degraded
+     * walled deployment the two differ, and each is the input its rule names.
+     */
+    tenancyPostureInForce?: TenancyPosture;
+    /**
      * [#20158] The host engine's judge-only filter admission
      * (`IObjectQLEngine.judgeFilter`, #19995 ruling C), BOUND to that engine.
      *
@@ -673,10 +1015,30 @@ export function evaluateRuntimeAuthoringGate(args: {
      * double), that judgement is skipped and every rule answers as before.
      */
     judgeFilter?: IObjectQLEngine['judgeFilter'];
+    /**
+     * [#20611] The positions in `body` where the write path will restore a
+     * credential the read path withheld — dotted, item-relative
+     * (`nodes.1.config.secret`), as `redactedPathsCarriedForward` answers
+     * them from the stored row. The fourth input of the #6285 kind: a fact only
+     * the host holds (the row at rest), gathered by the impure caller and passed
+     * in so this function stays pure.
+     *
+     * The carry-forward itself runs AFTER this gate, deliberately, so no rule
+     * handles a restored credential; this hands the rules the positions and
+     * nothing else. A rule judging whether a credential is present then reads a
+     * listed position as present (withheld and stored), and an unlisted one on
+     * the body as sent (absent and not stored is missing). Absent, every
+     * position is judged on the body as sent.
+     */
+    restoredCredentialPaths?: readonly string[];
 }): RuntimeAuthoringVerdict {
     // D1 — drafts are never gated. Publishing one runs this same function.
     // No rules ran, so there is nothing to report on either half.
     if (args.state !== 'active') return { error: null, advisories: [] };
+
+    // The object universe, folded once: the shared rules resolve names against
+    // it and the #21476 rule reads a form's target object out of it.
+    const objects = mergePendingDeclarations(args.objects ?? [], args.pending?.objects);
 
     const result = runRuntimeAuthoringRules({
         type: args.type,
@@ -689,13 +1051,16 @@ export function evaluateRuntimeAuthoringGate(args: {
         // had been threaded, `datasets` had not, and the difference was
         // invisible until an error-severity rule landed on the un-threaded one.
         context: {
-            objects: mergePendingDeclarations(args.objects ?? [], args.pending?.objects),
+            objects,
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
         ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),
+        ...(args.restoredCredentialPaths !== undefined
+            ? { restoredCredentialPaths: args.restoredCredentialPaths }
+            : {}),
     });
 
     // [#6285] The gate-local refusal, folded into the SAME verdict set as the
@@ -705,7 +1070,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     // wiring guard's invariant that this file names no REGISTRY rule is
     // untouched, and everything downstream — the 422, the issues array, the
     // migration hatch, the `rulesRun` disclosure — treats it identically.
-    const localIssues = findPlatformScheduleOrgGaps({
+    const scheduleOrgGaps = findPlatformScheduleOrgGaps({
         type: args.type,
         name: args.name,
         body: args.body,
@@ -713,15 +1078,50 @@ export function evaluateRuntimeAuthoringGate(args: {
         orgWallEnforced: args.orgWallEnforced === true,
     });
 
+    // [#20312] The save door's own compile of an html page's source against
+    // the deployment's manifest (ADR-0080 §5) — gate-local for the reason the
+    // #6285 refusal above is: the manifest is a fact about the deployment, and
+    // the registry's `validateJsxPages` is CLI-only. Same verdict set, same
+    // 422, same hatch. `null` when it did not run (no usable manifest, not an
+    // html page), which keeps an html page on a manifest-less host judged
+    // exactly as before.
+    const pageSourceFindings = findHtmlPageSourceGaps({
+        type: args.type,
+        body: args.body,
+        ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
+    });
+    // [#21476] The gate-local advisory for an open public form this posture
+    // cannot take anonymous intake for. Warning-only by construction, so it
+    // joins the advisory half and never the refusal: the write lands, and the
+    // author reads why the anonymous doors withhold the form on the response.
+    const publicFormIntakeGaps = findPublicFormIntakeGaps({
+        type: args.type,
+        name: args.name,
+        body: args.body,
+        objects,
+        ...(args.tenancyPostureInForce !== undefined
+            ? { tenancyPostureInForce: args.tenancyPostureInForce }
+            : {}),
+    });
+    const localIssues = [
+        ...scheduleOrgGaps,
+        ...(pageSourceFindings ?? []).filter((f) => f.severity === 'error').map(toIssue),
+    ];
+    const advisoryFindings = [
+        ...result.advisories,
+        ...(pageSourceFindings ?? []).filter((f) => f.severity !== 'error'),
+        ...publicFormIntakeGaps,
+    ];
+
     // [#4717] The advisory half of D3, now with somewhere to go. The deduped
     // log below is KEPT — it is the operator's channel and costs one Set lookup
     // — but it is no longer the only one: these travel back to the caller in
     // `advisories` and `saveMetaItem` puts them on the 2xx response, which is
     // the channel the Studio / MCP / AI author this gate exists for can
     // actually read.
-    const advisories = result.advisories.map(toIssue);
+    const advisories = advisoryFindings.map(toIssue);
 
-    for (const advisory of result.advisories) {
+    for (const advisory of advisoryFindings) {
         const key = `${args.type}|${args.name}|${advisory.rule}|${advisory.path}`;
         if (_advisoryWarned.has(key)) continue;
         _advisoryWarned.add(key);
@@ -762,9 +1162,12 @@ export function evaluateRuntimeAuthoringGate(args: {
     // applicable to this type. `rulesRun` exists so a caller can tell "clean"
     // from "nothing ran"; a judgement that can refuse a write and never appears
     // here would reintroduce exactly the ambiguity it was added to remove.
-    const rulesRun = args.type === 'flow'
-        ? [...result.rulesRun, PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING]
-        : result.rulesRun;
+    const rulesRun = [
+        ...result.rulesRun,
+        ...(args.type === 'flow' ? [PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
+        ...(args.type === 'view' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
+        ...(pageSourceFindings !== null ? [HTML_PAGE_SOURCE_COMPILE, PAGE_REQUIRES_DISAGREES_WITH_SOURCE] : []),
+    ];
 
     if (unlintedWritesAllowed()) {
         // Loud by construction (#4463 acceptance): the operator who set the

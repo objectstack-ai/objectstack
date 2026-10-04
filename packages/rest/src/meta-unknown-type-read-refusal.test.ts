@@ -20,7 +20,7 @@
 //
 //   * types in the static spelling contract (`sharing_rule`, `webhook`,
 //     `objects`, `api`) — declared, addressable, frequently empty
-//     (`theme` was one of them until #10485 retired its carrier out of the
+//     (`theme` was one of them until commit 35ad101bc retired its carrier out of the
 //     contract — it now earns the refusal, pinned below);
 //   * live-only keys an ordinary `registerApp` produces (`data`, `kind`,
 //     `package`, `policy`) — outside the static contract but ENUMERATED by
@@ -101,7 +101,15 @@ function setup(overrides: Record<string, unknown> = {}) {
         protocol,
         { api: { requireAuth: false } } as any,
     );
-    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: ['manage_metadata'] });
+    // [#21087] `manage_platform_settings` beside `manage_metadata`: a read of a
+    // datasource-family type (`external_catalogs` below) is admitted on that
+    // capability before any handler runs, and this file is about the verdict
+    // a type NAME earns from the handler — so its caller holds what every
+    // declared type's read requires.
+    (rest as any).resolveExecCtx = async () => ({
+        userId: 'u1',
+        systemPermissions: ['manage_metadata', 'manage_platform_settings'],
+    });
     rest.registerRoutes();
     return { rest, protocol };
 }
@@ -184,7 +192,7 @@ describe('[#9488] a type that EXISTS and has no items still answers 200 with an 
     it.each(['theme', 'themes'])(
         '[#10485] retired spelling %s is refused — it left the static contract with its carrier',
         async (type) => {
-            // Until #10485 both spellings answered 200-empty here. The
+            // Until commit 35ad101bc both spellings answered 200-empty here. The
             // retirement removed the `themes: 'theme'` fold, so a read now
             // gets the same ADR-0112 refusal an invented name does.
             const { rest } = setup();

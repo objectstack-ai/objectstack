@@ -45,7 +45,9 @@ import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /** Config keys the fake's `notify` descriptor declares (the #4277 legal set). */
-const NOTIFY_DECLARED_CONFIG_KEYS = ['message', 'recipients', 'channel'];
+// `title` joined the set when the flow parse began refusing a notify node with
+// neither `title` nor `template` (#20316) — the real notify descriptor declares it.
+const NOTIFY_DECLARED_CONFIG_KEYS = ['title', 'message', 'recipients', 'channel'];
 
 /**
  * The #4277 refusal, reproduced from `service-automation/src/engine.ts`
@@ -127,12 +129,16 @@ function makeDispatcher() {
  */
 const CTX = { request: {}, executionContext: { userId: 'user_1', systemPermissions: ['manage_metadata'] } } as any;
 
-/** A definition that is legal at every gate the fake runs. */
+/**
+ * A definition that is legal at every gate the fake runs. The notify node
+ * carries the `recipients` and `title` its executor contract requires — the
+ * flow parse refuses a node that leaves them out (#20316).
+ */
 const WELL_FORMED = {
     name: 'welcome_flow',
     label: 'Welcome',
     type: 'autolaunched',
-    nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { message: 'hi' } }],
+    nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { recipients: ['user_1'], title: 'Welcome', message: 'hi' } }],
     edges: [],
 };
 
@@ -141,12 +147,12 @@ const BAD_BODIES = {
     /** 1 — a node with no `label` (`FlowSchema.parse`). */
     missingNodeLabel: {
         ...WELL_FORMED,
-        nodes: [{ id: 'n', type: 'notify', config: { message: 'hi' } }],
+        nodes: [{ id: 'n', type: 'notify', config: { recipients: ['user_1'], title: 'Welcome', message: 'hi' } }],
     },
     /** 2 — a node key the schema does not declare (`unrecognized_keys`). */
     unknownNodeKey: {
         ...WELL_FORMED,
-        nodes: [{ id: 'n', type: 'notify', label: 'Notify', next: 'other' }],
+        nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { recipients: ['user_1'], title: 'Welcome', message: 'hi' }, next: 'other' }],
     },
     /** 3 — a `try_catch` whose `try` region is an array, not a region object. */
     malformedRegion: {
@@ -161,7 +167,7 @@ const BAD_BODIES = {
         ...WELL_FORMED,
         nodes: [{
             id: 'n', type: 'notify', label: 'Notify',
-            config: { message: 'hi', totallyBogusKey: 'oops' },
+            config: { recipients: ['user_1'], title: 'Welcome', message: 'hi', totallyBogusKey: 'oops' },
         }],
     },
 } as const;

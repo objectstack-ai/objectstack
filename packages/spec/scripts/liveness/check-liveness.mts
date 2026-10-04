@@ -234,20 +234,25 @@ import {
   type ContainerCoverage,
 } from './drill.mts';
 import {
+  LEGACY_STATE_COUNTS_FILE,
   README_ORPHAN_ROW_GUIDANCE,
   README_TABLE_GUIDANCE,
-  STATE_COUNTS_FILE,
+  STATE_COUNTS_DIR,
   STATE_COUNTS_GUIDANCE,
   STATE_COUNTS_PATH,
   STATE_COUNTS_TOTALS_GUIDANCE,
   STATUS_COLUMNS,
   foldStateCounts,
+  formatStateCountsTotal,
   parseStateTable,
   reconcileReadmeTable,
   reconcileStateCountTotals,
   reconcileStateCounts,
-  renderStateCounts,
+  renderStateCountShards,
+  sumStateCounts,
+  type StateCountsTotal,
 } from './readme-table.mts';
+import { readTextShardDir } from '../lib/sharded-artifacts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -271,7 +276,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'picklist', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
 
 // Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -365,11 +370,13 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 // was withdrawn on 2026-08-08 in favour of enforce. Governing it here is the
 // half of that ruling that keeps the surface honest going forward: the runner
 // reads a real, measured subset of the declared keys, and a key nothing reads is
-// recorded as such instead of being invisible. `suite.name` and `scenario.tags`
-// were two of those and have since gained readers in `os test` (the suite
-// heading; the `--tags` selection); `scenario.requires` is the one still unread —
-// declared, NOT CHECKED, and its row stays dead. Like `query`, there is no
-// registry to fold it back onto — the override IS its governance.
+// recorded as such instead of being invisible. `suite.name`, `scenario.tags`
+// and `scenario.requires` were three of those and have since gained readers
+// (the suite heading and the `--tags` selection in `os test`; the TestRunner's
+// precondition judgement, which skips a scenario whose `params` or `services`
+// do not hold — `requires.plugins`, which nothing could judge, is a tombstone).
+// Like `query`, there is no registry to fold it back onto — the override IS its
+// governance.
 // `manifest` is the THIRD category the override has had to reach, and the one
 // that showed the escape hatch was load-bearing rather than a webhook special
 // case. `ManifestSchema` (src/kernel/manifest.zod.ts) is what an author writes
@@ -443,6 +450,8 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 //
 // The census filed with #14446 found the two members that make governing it
 // worth the row: `events[].type` accepts `RealtimeEventType`, whose four members
+// (as measured at `5f5511f0`, before #20288 repointed the enum at the emitted
+// `DataEventType` + `BulkDataEventType` names)
 // are spelled `record.created` / `record.updated` / `record.deleted` /
 // `field.changed` while the engine publishes `data.record.*` (DataEventType,
 // src/api/events.zod.ts) — DISJOINT vocabularies, so every member of the
@@ -703,6 +712,8 @@ const report: any = {
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
   tombstonedLive: [] as string[], // a `retiredKey()` tombstone whose row still claims a forbidden status (#19062)
   tombstones: [] as string[], // every `[REMOVED]` tombstone the walk reached — enumerated, not totalled, so the population is checkable (#18133's reason)
+  authorWarnRows: [] as string[], // every row, at every depth, that opts into `authorWarn` — `<type>/<path> (<status>)`, enumerated for the same reason
+  authorWarnOnLive: [] as string[], // ...of which these are graded `live` — the author-side lint throws on them, so they FAIL
   authorable: [] as string[], // the governance DENOMINATOR itself — printed and emitted so "never looked" cannot pass for "nothing to report" (#18133)
   authorableRegistered: 0, // how many of it are registered KINDS (listMetadataTypeSchemaTypes)
   authorableUnregisteredKinds: [] as string[], // …and which are unregistered-kind stack collections (#6245/#6931)
@@ -720,8 +731,9 @@ const report: any = {
   readmeHeadingErrors: [] as string[], // "N governed types" disagrees with the rows / with GOVERNED
   readmeMalformedRows: [] as string[], // a table line the row parser could not read — never silently skipped
   readmeRowCount: 0, // rows the parser found, printed every run so the number is visible rather than believed
-  countsArtifactErrors: [] as string[], // state-counts.md is missing, or its bytes are not what the gate measures (#7377)
-  countsRowSetErrors: [] as string[], // the README's row set and the artifact's disagree
+  countsArtifactErrors: [] as string[], // a state-counts/ shard is missing, stale or stray, or the retired single file is back (#7377, #20361)
+  countsRowSetErrors: [] as string[], // the README's row set and the shards' disagree
+  countsTotal: null as StateCountsTotal | null, // the table's total, summed at read time — no file commits it (#20361)
   countsHandEdited: [] as string[], // a count column is back in the README — a hand-maintained number in the merge path
   countsTotalErrors: [] as string[], // the four columns and the walk's own `classified` disagree — the fold dropped a status (#13083)
   unknownStatus: [] as string[], // a ledger `status` outside STATUS_COLUMNS — counted by the walk, dropped by the fold (#13083)
@@ -1073,11 +1085,74 @@ function drillChildren(
   }
 }
 
+// ── author warnings: a `live` row never opts in (#21127) ──
+//
+// `authorWarn: true` asks the author-side lint
+// (packages/lint/src/lint-liveness-properties.ts) to warn whoever authors the
+// key, and the lint picks the verdict it shows from the row's STATUS:
+// `describe()` there answers experimental / planned / dead / live-elsewhere and
+// THROWS on `live`, deliberately — a live key has its runtime effect, so there
+// is nothing to warn about, and a warned `live` row is a shipped-ledger
+// integrity bug. Thrown from inside a lint, that integrity error is the whole
+// answer `os validate` and `os lint` give (exit 1) on EVERY stack that authors
+// the key, and the runtime metadata door returns it as an
+// `authoring-rule-threw` advisory. `mapping.connectorSource` shipped exactly
+// that row: re-graded `live` with its `authorWarn` kept.
+//
+// Nothing here caught it, because the combination is legal for every other
+// check: the status is in the vocabulary, the evidence resolves, and the walk
+// above never even reads the row — a container that drills into `children`
+// has only its CHILDREN graded, while the lint reads the container's own row
+// (and its direct children) for `authorWarn`. So this pass walks the RAW rows,
+// at every depth `children` nests, rather than the graded population.
+//
+// Census before switching it on, across all 41 governed ledgers on 665cab338f:
+// 924 rows walked, 3 opt in with `authorWarn` — `planned` 2, `live` 1 (the
+// `mapping.connectorSource` row this change re-grades). So the rule starts
+// green on the population it measured, and only a NEW warned `live` row can
+// red it — the zero-census argument the tombstone join was switched on under.
+function scanAuthorWarnRows(type: string, rows: Record<string, any>, prefix = ''): void {
+  for (const [key, row] of Object.entries(rows)) {
+    if (!row || typeof row !== 'object') continue;
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (row.authorWarn === true) {
+      report.authorWarnRows.push(`${type}/${path} (${row.status})`);
+      if (row.status === 'live') report.authorWarnOnLive.push(`${type}/${path}`);
+    }
+    if (row.children && typeof row.children === 'object') scanAuthorWarnRows(type, row.children, path);
+  }
+}
+
+/**
+ * The prescription printed under the warned-`live` list. The tempting wrong
+ * fix is the lint's sentinel, so it is ruled out in the same breath.
+ */
+const AUTHOR_WARN_ON_LIVE_GUIDANCE = [
+  'A `live` row says authoring the key changes runtime behaviour, so an author',
+  'has nothing to be warned about — and the author-side lint has no verdict for',
+  'it: `describe()` in packages/lint/src/lint-liveness-properties.ts throws its',
+  'ledger-integrity error on a warned `live` row, so `os validate` and `os lint`',
+  'exit 1 on every stack that authors the key instead of warning.',
+  '',
+  'Fix the ROW: drop `authorWarn` (and its `authorHint`). A caveat an author still',
+  'needs about a live key — a cadence nothing schedules yet, a limit of the',
+  'executor — goes in the key\'s `.describe()`, where every author reads it.',
+  '',
+  'If nothing reads the key yet, the STATUS is what is wrong: grade it `planned`',
+  '(a consumer is being built against it), `experimental` or `dead`, and keep',
+  'the warning.',
+  '',
+  '⛔ Do NOT teach `describe()` a `live` branch: its throw is the loud answer to',
+  'exactly this row, and a warning on a working key is noise an author learns',
+  'to skim.',
+];
+
 for (const type of GOVERNED) {
   const ledger = loadLedger(type);
   const props = ledger.props || {};
   const cat = { classified: 0, unclassified: 0, byStatus: {} as Record<string, number> };
   const walked = topProps(type);
+  scanAuthorWarnRows(type, props);
 
   // ── reverse direction: a row whose property is gone (see orphans.mts) ──
   // Runs off the SAME walk the forward pass classifies against, so the two
@@ -1215,6 +1290,14 @@ report.deferredChildKeys = coverage.deferredChildKeys;
 // reason: a gate that fails is worth exactly as much as the proof that it fails,
 // and this table is complete on a green tree.
 const readmeFile = join(ledgerRoot, 'README.md');
+// The rows every shard is rendered from, and the table's total, which is summed
+// HERE — at read time — because no file commits it any more (#20361): a
+// committed total was the one line every liveness PR rewrote.
+const countRows = foldStateCounts(
+  GOVERNED,
+  Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
+);
+report.countsTotal = sumStateCounts(countRows);
 if (!existsSync(readmeFile)) {
   report.readmeHeadingErrors.push(`${readmeFile} does not exist — the ledger index is gone`);
 } else {
@@ -1228,21 +1311,16 @@ if (!existsSync(readmeFile)) {
   report.readmeMalformedRows = readme.malformed;
   report.readmeRowCount = stateTable.rows.length;
 
-  // ── the count columns, now a generated artifact (#7377) ──
+  // ── the count columns, now a generated artifact (#7377), one shard per type (#20361) ──
   // Read from `ledgerRoot` for the same reason the table above is: it is what
   // lets the self-test point the REAL gate at a copy with one number skewed and
   // read the exit code. An artifact the gate could only ever find in its own
   // green state is an artifact whose check is unproven.
-  const countsFile = join(ledgerRoot, STATE_COUNTS_FILE);
   const counts = reconcileStateCounts({
     table: stateTable,
-    rendered: renderStateCounts(
-      foldStateCounts(
-        GOVERNED,
-        Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
-      ),
-    ),
-    onDisk: existsSync(countsFile) ? readFileSync(countsFile, 'utf8') : null,
+    rendered: renderStateCountShards(countRows),
+    onDisk: readTextShardDir(join(ledgerRoot, STATE_COUNTS_DIR)),
+    legacyOnDisk: existsSync(join(ledgerRoot, LEGACY_STATE_COUNTS_FILE)),
   });
   report.countsArtifactErrors = counts.artifactErrors;
   report.countsRowSetErrors = counts.rowSetErrors;
@@ -1410,6 +1488,11 @@ const failed =
   // only a NEW false claim can red the gate. A check that starts at (nearly)
   // zero can be red; that is why the census came first.
   report.tombstonedLive.length > 0 ||
+  // A `live` row that opts into `authorWarn` (#21127). Red from day one on the
+  // census stated at scanAuthorWarnRows: the one such row is re-graded by the
+  // change that switched this on, so only a NEW one can red it — and each one
+  // is a crash of `os validate` / `os lint` waiting for the first author.
+  report.authorWarnOnLive.length > 0 ||
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
   report.producerMissing.length > 0 ||
@@ -1648,7 +1731,7 @@ if (asJson) {
     console.log(
       '\n   This is the shape UNCLASSIFIED above cannot catch, and it is worse than\n' +
       '   UNCLASSIFIED because it looks DONE: the row has a verdict, the forward pass is\n' +
-      `   satisfied, the walk counts it — and then ${STATE_COUNTS_FILE} drops it, because\n` +
+      `   satisfied, the walk counts it — and then ${STATE_COUNTS_DIR}/ drops it, because\n` +
       `   the fold reads ${STATUS_COLUMNS.join(' / ')} and nothing else. The published\n` +
       '   total comes out short by exactly these rows, and every other check in this gate\n' +
       '   compares that total against itself and agrees (#13083).\n\n' +
@@ -1704,6 +1787,14 @@ if (asJson) {
     report.tombstonedLive.forEach((s: string) => console.log(`    ${s}`));
     console.log('');
     TOMBSTONE_STATUS_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.authorWarnOnLive.length) {
+    console.log(
+      `\n✗ ${report.authorWarnOnLive.length} \`live\` ledger row(s) opt into \`authorWarn\` — the author-side lint throws on them:`,
+    );
+    report.authorWarnOnLive.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    AUTHOR_WARN_ON_LIVE_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
   }
   if (report.undrilledNew.length) {
     console.log(`\n✗ ${report.undrilledNew.length} UNDECLARED container inheritance — a blanket verdict covers keys nothing classified:`);
@@ -1769,7 +1860,7 @@ if (asJson) {
   }
   if (report.countsRowSetErrors.length) {
     console.log(
-      `\n✗ ${report.countsRowSetErrors.length} row(s) where README.md and ${STATE_COUNTS_FILE} disagree:`,
+      `\n✗ ${report.countsRowSetErrors.length} row(s) where README.md and ${STATE_COUNTS_DIR}/ disagree:`,
     );
     report.countsRowSetErrors.forEach((s: string) => console.log(`    ${s}`));
     console.log(
@@ -1796,7 +1887,7 @@ if (asJson) {
   }
   if (report.countsTotalErrors.length) {
     console.log(
-      `\n✗ ${report.countsTotalErrors.length} governed type(s) where ${STATE_COUNTS_FILE}'s columns ` +
+      `\n✗ ${report.countsTotalErrors.length} governed type(s) where the ${STATE_COUNTS_DIR}/ shard's columns ` +
       "do not add up to the walk's own count:",
     );
     report.countsTotalErrors.forEach((s: string) => console.log(`    ${s}`));
@@ -1871,6 +1962,21 @@ if (asJson) {
     `${report.tombstones.length - report.tombstonedLive.length} graded with a status the tombstone allows` +
     (report.tombstonedLive.length ? `, ${report.tombstonedLive.length} FORBIDDEN` : '') + '.',
   );
+  // ── author warnings: asked at every depth, and how many sit on a `live` row ──
+  // Two numbers again: "0 on a live row" reads identically whether no row is
+  // wrong or the raw-row walk reached nothing.
+  const warnedByStatus = new Map<string, number>();
+  for (const row of report.authorWarnRows as string[]) {
+    const status = /\(([^)]*)\)$/.exec(row)?.[1] ?? '?';
+    warnedByStatus.set(status, (warnedByStatus.get(status) ?? 0) + 1);
+  }
+  const warnedParts = [...warnedByStatus].sort(([a], [b]) => a.localeCompare(b)).map(([s, n]) => `${s} ${n}`);
+  console.log(
+    `\nauthor warnings: ${report.authorWarnRows.length} ledger row(s) opt into \`authorWarn\`, at any depth` +
+    (warnedParts.length ? ` (${warnedParts.join(', ')})` : '') +
+    `; ${report.authorWarnOnLive.length} on a \`live\` row` +
+    (report.authorWarnOnLive.length ? ' — FORBIDDEN' : '') + '.',
+  );
 
   // ── container coverage: how much rides on inheritance? ──
   // Printed every run, pass or fail. The gate used to say "all properties are
@@ -1929,7 +2035,7 @@ if (asJson) {
       '\n✓ every governed-type property, at every depth the ledger drills, is classified, every ' +
       'authorable type — registered kind or unregistered-kind stack collection — is governed or ' +
       'explicitly pending, no ledger row outlives its property, no tombstoned key\'s row claims a ' +
-      'status the tombstone forbids, ' +
+      'status the tombstone forbids, no `live` row opts into an author warning, ' +
       `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
       '`path#symbol` anchor names a symbol its file contains, and every cited ' +
@@ -1940,8 +2046,11 @@ if (asJson) {
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );
     console.log(
-      `✓ ${STATE_COUNTS_PATH} is current — the same ${report.readmeRowCount} row(s), ` +
-      'no count column left in the README.',
+      `✓ ${STATE_COUNTS_PATH} is current — one shard per governed type, the same ` +
+      `${report.readmeRowCount} row(s) as the README, no count column left in the README.`,
+    );
+    console.log(
+      `  total across the shards, summed at read time and committed nowhere: ${formatStateCountsTotal(report.countsTotal)}.`,
     );
     if (report.undrilledChildKeys) {
       console.log(

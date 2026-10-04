@@ -2,7 +2,7 @@
 
 /**
  * [#15989] The kernel→driver supply seam for the ADR-0104 media arm, from the
- * ENGINE's side — the ruling on #15041 step 2, as amended by the director
+ * ENGINE's side — sequencing step 2 of ADR-0104's 2026-09-05 addendum, as amended by the director
  * ruling (decision batch #120 item 1).
  *
  * The driver has accepted `SqlDriverConfig.fileColumnsMoved` since PR #17403,

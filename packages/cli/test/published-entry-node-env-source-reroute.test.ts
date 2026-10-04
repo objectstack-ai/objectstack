@@ -6,7 +6,7 @@
  *
  * ## The defect
  *
- * `@oclif/core@4.13.3`'s `lib/config/ts-path.js` skips its TypeScript path
+ * `@oclif/core@5.1.2`'s `lib/config/ts-path.js` skips its TypeScript path
  * lookup only when `isProd()`, which `lib/util/util.js` defines as a negated
  * `['development', 'test'].includes(process.env.NODE_ENV ?? '')`. So an ambient
  * `NODE_ENV=development` — exported by a developer, or inherited by any child
@@ -253,6 +253,16 @@ describe('#12271 - the published entry does not reroute to src/ on an ambient NO
    * THE CONTROL. If this ever goes green the three assertions above have
    * stopped measuring anything, and the correct response is to repair the
    * fixture - never to delete this case because "the bug is fixed".
+   *
+   * ⚠️ It arms only if oclif can REGISTER tsx (`registerTsx` in `ts-path`).
+   * When that fails, oclif logs `Could not find tsx` under
+   * `DEBUG=oclif:config:ts-path` and stays on `dist/`. This leg then prints
+   * the version line and nothing else, and the legs above pass with the
+   * declaration deleted. tsx 4.23.15's CommonJS ESM API fails that way on any
+   * Node without tsx's `registerHooks` path (below 22.22.3 on the 22 line).
+   * That is why the workspace patches it: see `tsx@4.23.15` under
+   * `patchedDependencies` in `pnpm-workspace.yaml`. A red here with that
+   * output is a registration failure. Repair the registration; never this leg.
    */
   it('CONTROL: neutralising the declaration in the child reproduces the card verbatim', () => {
     const { status, output } = runPublishedEntry({ NODE_ENV: 'development' }, { neutralise: true });

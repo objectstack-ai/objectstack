@@ -16,8 +16,9 @@
     // `exports` map — `dist/index.d.ts`, a BUILD ARTIFACT — so this package's
     // typecheck would render a verdict about the last `pnpm build` rather than
     // about the producer's source in the checkout, which
-    // `check:type-source-resolution` refuses (its header states why the dangerous
-    // case is a typecheck that PASSES).
+    // `check:type-source-resolution` refused — the dangerous case being a
+    // typecheck that PASSES against a stale `dist` — until it was retired on
+    // 2026-09-18 (#18373); no gate checks this rule now.
     //
     // `tsconfig.test.json` inherits this map rather than declaring its own — a
     // child that declared `paths` would REPLACE it, silently sending a

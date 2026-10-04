@@ -235,7 +235,7 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
       + 'better-auth-schema-parity.test.ts.',
   },
   // (The rc.1-era `sys_scim_provider` exemption retired with its object under
-  // #11757 — the stale-entry assertion below is what forced it out.)
+  // commit 4d25d22d4 — the stale-entry assertion below is what forced it out.)
   // The stable @better-auth/scim 1.7.x model set (#3653). Same bridge shape as
   // sys_sso_provider: SCIMOptions still accepts no `schema`/`modelName`/`fields`
   // option on the installed 1.7.1 (re-measured 2026-08-27), so getAuthTables()

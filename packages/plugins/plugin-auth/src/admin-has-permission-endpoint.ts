@@ -26,7 +26,7 @@
  * who is a platform admin under ADR-0068 (`isPlatformAdminUser`, the same
  * predicate every shaded `/admin/*` mount trusts) sending a body the vendor's
  * own handler would EVALUATE. Every other caller and every other body shape
- * is DELEGATED through `AuthManager.handleRequest` — the #12029 gate-then-
+ * is DELEGATED through `AuthManager.handleRequest` — commit 6dd3e6968's gate-then-
  * delegate seam — so the vendor's native bytes stand: an anonymous caller
  * still gets the enveloped 401, a plain member still gets its own
  * `200 {"error":null,"success":false}` negative (pinned by the non-admin

@@ -87,6 +87,7 @@ import {
 } from '@objectstack/formula';
 import {
   collectFlowGraphs,
+  flowNodeConfigRefusals,
   predicateSlotRefusal,
   resolveFlowNodeExpressions,
   resolveFlowNodeValueSlots,
@@ -524,7 +525,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * ## Why this is a rule of its own rather than a missing root
  *
- * Until #6290 the same rejection fell out of `@objectstack/formula`'s
+ * Until commit e9b526597 the same rejection fell out of `@objectstack/formula`'s
  * `SCOPE_ROOTS` not listing `current_user` — a global baseline, doing a
  * per-surface job by accident. Two things were wrong with that:
  *
@@ -567,7 +568,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * A denylist cannot track `SCOPE_ROOTS`: every root added there is unreported
  * here until somebody remembers to copy it across (`current_user` itself
- * arrived in #6290 and needed #6584 to be noticed). The allowlist inverts the
+ * arrived in commit e9b526597, and needed that same change (#6584) to be noticed). The allowlist inverts the
  * maintenance burden onto the three roots that are pinned by three anchors and
  * change only when the evaluators do.
  *
@@ -766,7 +767,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * `SCOPE_ROOTS`' own docblock made the original widening measurable rather than
  * a matter of taste: its `current_user` entry claims to be "the last one this
- * list was missing (#6290)". `app` is that sentence's second counterexample —
+ * list was missing" (commit e9b526597 wrote it). `app` is that sentence's second counterexample —
  * the same mechanism (#6713's point: a hand-maintained list doing a per-surface
  * job drifts), a second sighting, not an analogy to the first.
  *
@@ -859,19 +860,20 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     // inside the message registers `sectionFields` as a read receiver of this
     // rule. Measured — it went red on the first run, exactly as the sibling did.
     '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
-    '`resolveFieldRuleState` evaluates it with the host scope bound, objectui#6010) — so the ' +
+    '`resolveFieldRuleState` evaluates it with the host scope bound, the `current_user` binding ' +
+    'ADR-0089 D1 gives every runtime record surface) — so the ' +
     'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
     '`visibleWhen` at all: the record still carries the value and every other reader still ' +
     'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
     '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
     'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
-    '`fallback: true`), leaving the field the test was meant to hide showing for everyone ' +
-    '(#6146). The gap is the WORSE of the two — a visible fail-open gets reported, and a ' +
+    '`fallback: true`), leaving the field the test was meant to hide showing for everyone. ' +
+    'The gap is the WORSE of the two — a visible fail-open gets reported, and a ' +
     'silent one does not',
   readonlyWhen:
     'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
     'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
-    'evaluate, #4889) and drops your value from the payload, while the form still renders the ' +
+    'evaluate) and drops your value from the payload, while the form still renders the ' +
     'field editable (`fallback: false`). The server is the one that decides: ' +
     'the field looks writable, the save reports success, and the value silently never lands',
   requiredWhen:
@@ -927,7 +929,8 @@ export function fieldRuleRootIssue(
       `holds server-side. To hide the FIELD by role, declare field-level security on a ` +
       `permission set (\`fields: { '<object>.<field>': { readable: false } }\`), which the ` +
       `server enforces. To gate on record state, rewrite the predicate against \`record\`. ` +
-      `Note that a form VIEW's own field predicate HAS bound these roots since objectui#6010 — ` +
+      `Note that a form VIEW's own field predicate HAS bound these roots since the form renderer ` +
+      `took up the \`current_user\` binding ADR-0089 D1 gives every runtime record surface — ` +
       `but only in the renderer, so moving a server-enforced object rule there swaps a loud ` +
       `error for a silent enforcement gap; it is not a fourth answer.`
     : root === 'data'
@@ -1620,6 +1623,28 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // `loop.collection`). The ledger records them regardless, so the
         // reconciliation ratchet still sees the marker.
         const nodeType = typeof node.type === 'string' ? node.type : '';
+        // [#20316] What the node's executor needs its `config` to carry — a key
+        // its contract requires, left out, and a `decision` branch list it
+        // cannot read. The spec's one judge, the same call `FlowSchema.parse`
+        // makes (and `registerFlow` meets through that parse), so a stack
+        // handed to `validateStackExpressions` without a parse in front of it
+        // is held to the same bar. `error`: the flow would register and then
+        // refuse — or, for a branch with no label, misroute — every run.
+        const configRefusals = flowNodeConfigRefusals(nodeType, node.config)
+          // A `script`'s `function` stays the callable check's below (#1870,
+          // #4343): this pass may be handed a pre-conversion source, and that
+          // check reads what such a source spells — the `functionName` alias,
+          // the retired dispatch keys — and names each, where the judge would
+          // only see `function` absent.
+          .filter((configRefusal) => !(nodeType === 'script' && configRefusal.path === 'function'));
+        for (const configRefusal of configRefusals) {
+          issues.push({
+            where: `${at} · node '${node.id}' (${nodeType}) config.${configRefusal.path}`,
+            message: configRefusal.message,
+            source: configRefusal.source,
+            severity: 'error',
+          });
+        }
         for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
           const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
           // [#15137] `value` slots are checkable too, by their own rule — see
@@ -1709,7 +1734,8 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
               where: `${at} · node '${node.id}' (script) callable`,
               message:
                 `script node carries \`${retired.map((k) => `config.${k}`).join('`, `')}\` — retired in ` +
-                `@objectstack/spec 17 (#4343). The built-in 'email'/'slack' actions were logger-backed ` +
+                `@objectstack/spec 17, which made \`script\` a call to a registered function and nothing ` +
+                `else. The built-in 'email'/'slack' actions were logger-backed ` +
                 `stubs that delivered nothing, and inline \`config.script\` was never executed. ` +
                 (action && action !== 'invoke_function' && !['email', 'slack'].includes(action)
                   ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `
@@ -1867,7 +1893,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
         }
       }
-      // [#6290] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
+      // [commit e9b526597] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
       // option's own predicate (`SelectOptionSchema.visibleWhen`,
       // `field.zod.ts:143`). It had no traversal here at all, so the whole
       // option surface reached compile, validate and run time unvalidated:
@@ -1877,7 +1903,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       //
       // Deliberately checked on the SAME `record` scope as the field-level
       // slots, and that is the whole of the difference between the two faces
-      // after #6290: `current_user` is a declared root platform-wide (ADR-0068
+      // after commit e9b526597: `current_user` is a declared root platform-wide (ADR-0068
       // D1), so it passes here — options resolve through
       // `resolveCascadingOptions` against the host's predicate scope, which
       // binds it (ADR-0068 / objectui#2284), and the showcase's

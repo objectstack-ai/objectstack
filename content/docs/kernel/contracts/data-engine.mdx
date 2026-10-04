@@ -184,6 +184,35 @@ where: {
 }
 ```
 
+A nested relation filter is a condition on a related record's own fields, written
+beneath a relation field (`lookup`, `master_detail`, `user` or `tree`, single or
+multiple). The engine serves it in `where`, the same on every driver: it reads the
+related object with the condition **as the caller** — that object's row scope and field
+permissions apply, so a condition on a field the caller cannot read is refused
+(`PERMISSION_DENIED` / 403), never answered with an empty list — and then matches the
+relation field against the ids that read returns: `$in` on a single-valued relation, any
+member on a multi-valued one (`multiple: true`). No related record matching selects no
+rows; under `$not`, a record whose relation is empty satisfies the negation.
+
+It reaches **one level**: every key must be a field the related object declares
+(`{ account: { owner: { region: 'NA' } } }` and the dotted `{ account: { 'owner.region': 'NA' } }`
+are refused), and a condition matching more than 1,000 related records is refused with
+`INVALID_FILTER` / 400 rather than run over a cut-off list. For either, run the two steps
+yourself — filter the related object, then match its ids:
+
+```typescript
+const tech = await engine.find('account', { where: { industry: 'tech' }, fields: ['id'] });
+where: { account: { $in: tech.map((a) => a.id) } }
+// On a multi-valued lookup, one $contains per id:
+where: { $or: tech.map((a) => ({ accounts: { $contains: a.id } })) }
+```
+
+An aggregation's own `filter` and `having` do not serve the nested form (put the
+condition in `where`), and a plain object with no `$` operator beneath a `json` field —
+`{ meta: { a: 1 } }`, a whole-value match — is refused with `INVALID_FILTER` / 400 on
+every driver. A dotted path (`{ 'account.industry': 'tech' }`) is refused with
+`INVALID_FIELD` / 400: write it nested instead.
+
 **Supported operators:** `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$between`, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, `$null`, `$exists`
 
 **Logical operators:** `$and`, `$or`, `$not`
@@ -308,6 +337,7 @@ The strips these two options cover are the engine's legal ones:
 | A TRUE `readonlyWhen` predicate (#3042) | `readonly_when` | `update` | none at the API boundary — every caller, `isSystem` included; a value a `beforeUpdate` hook derived or overwrote is not a caller write and is never stripped (#9107) |
 | Implicitly-readonly runtime-owned type (#5503 — `RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`) | `readonly` | `insert` **and** `update` | `isSystem`, `preserveAudit` (#3493) |
 | Primary-key strip of a payload `id` the update dispatch already ruled is not an identifier (#6437) | `primary_key` | `update` | none |
+| A value for a `formula` field, which the engine computes on read and no driver has a column for (#20805) | `computed` | `insert` **and** `update` | none — every context, `isSystem` included |
 
 Of the two AUTHOR-DECLARED strips only `readonlyWhen` is insert-exempt at this seam
 (a conditional lock has no prior record on a create); the static `readonly` strip runs
@@ -325,7 +355,7 @@ interface DroppedFieldsEvent {
   fields: string[]; // caller-supplied fields that were dropped
   // why they were dropped — an OPEN vocabulary that grows with the write
   // path's legal strips; branch on it exhaustively, never with a binary test
-  reason: 'readonly' | 'readonly_when' | 'primary_key';
+  reason: 'readonly' | 'readonly_when' | 'primary_key' | 'computed';
 }
 ```
 
@@ -459,14 +489,11 @@ const result = await engine.aggregate('task', {
 
 ### EngineAggregateOptions
 
-```typescript
-interface EngineAggregateOptions {
-  where?: FilterCondition;                 // Pre-aggregation filter (WHERE)
-  groupBy?: string[];                      // GROUP BY fields
-  aggregations?: AggregationNode[];        // Aggregation definitions
-  context?: ExecutionContext;
-}
+The option keys are listed in the generated
+[`EngineAggregateOptions` reference](/docs/references/data/data-engine#engineaggregateoptions).
+`aggregations` takes `AggregationNode` entries:
 
+```typescript
 interface AggregationNode {
   function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;           // Field to aggregate (optional for COUNT(*))

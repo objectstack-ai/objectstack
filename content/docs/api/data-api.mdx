@@ -430,6 +430,15 @@ in its own `sql`.
 Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `FilterCondition` accepted by `find()`), not a `filters` array.
 </Callout>
 
+<Callout type="info">
+**An `order` key names a column the answer carries.** Each key must be one of the query's own
+`dimensions` or `measures` entries, or a `timeDimensions` entry that carries a `granularity`,
+spelled exactly as it is selected. Any other key — a field the query does not select, a
+relationship path it does not group by, a time dimension that only sets a `dateRange` window — is
+refused with `400 INVALID_FIELD` naming the key and the members the query does select, and nothing
+is executed. `POST /analytics/sql` refuses the same keys. To order by a member, select it.
+</Callout>
+
 **Response**: the runtime dispatcher wraps the `AnalyticsResult` as `{ success: true, data: { rows, fields, sql?, totals? } }`:
 ```json
 {
@@ -461,12 +470,13 @@ never as guaranteed present.
 The **cube's metric/dimension definition** (`MetricSchema.label` / `MetricSchema.format`,
 `DimensionSchema.label`) is the *declaration* surface, not a substitute for this one.
 `GET /analytics/meta` below publishes a deliberately narrow projection of it — `name`,
-`type` and `title` (the definition's `label`) only, with `format` dropped
+`type`, `title` (the definition's `label`), `description`, and on a measure its declared
+`format`; never `sql` or `granularities`
 ([#6442](https://github.com/objectstack-ai/objectstack/issues/6442)). So a client that
 renders table headers or formats amounts takes `label` / `format` / `currency` /
-`percentScale` off the query result's `fields[]`: those are resolved server-side (the
-currency chain below, the percent-scale chain), and `format` is not reachable through
-the metadata endpoint at all.
+`percentScale` off the query result's `fields[]`: those are resolved server-side, per
+column (the currency chain below, the percent-scale chain), and `currency` and
+`percentScale` are not reachable through the metadata endpoint at all.
 
 The currency chain runs on the dataset query (`POST /analytics/dataset/query`). A
 monetary measure column takes the measure's own `currency`; then, only when the source
@@ -479,10 +489,12 @@ so its column shows the tenant default. The cube query on this page carries no c
 
 ### `GET /analytics/meta`
 
-Get metadata for all registered cubes. Cubes are explicitly defined (via `defineCube`
-or the analytics service's `cubes` config) — a cube referenced by a query that isn't
-yet registered is lazily auto-inferred from that query's shape, but metadata isn't
-proactively generated for every object.
+Get metadata for all registered cubes, except those declared `public: false`, which are
+omitted (and refused by `POST /analytics/query` and `POST /analytics/sql` with the same
+`404 CUBE_NOT_FOUND` an unknown cube name gets). Cubes are explicitly defined (via
+`defineCube` or the analytics service's `cubes` config) — a cube referenced by a query
+that isn't yet registered is lazily auto-inferred from that query's shape, but metadata
+isn't proactively generated for every object.
 
 Pass `?cube=<name>` to filter the listing to a single cube (this is what
 `client.analytics.meta(cube)` sends).

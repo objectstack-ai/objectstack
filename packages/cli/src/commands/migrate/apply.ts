@@ -13,6 +13,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
@@ -339,7 +340,7 @@ export default class MigrateApply extends Command {
       // ⛔ The detection mechanism is deliberately not "drop it and let the
       // constraint fail". On this table it would not fail: `syncDeclaredIndexes`
       // logs a plain UNIQUE whose CREATE fails on existing duplicates and lets
-      // the boot continue (#14902 / #15479), so a database holding the class
+      // the boot continue (commit 61821e54c / #15479), so a database holding the class
       // carries no such constraint to violate. The drop would simply make the
       // rows indistinguishable and let a sign-in resolve onto the wrong user's
       // account — silently. Hence a row-level pre-flight, run against the live
@@ -447,6 +448,10 @@ export default class MigrateApply extends Command {
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {
+      // [#21434] The account-issuer pre-flight refusals above `this.exit(1)`
+      // from inside this `try`; re-reporting the signal printed a second
+      // error line, `EEXIT: 1`, under the refusal.
+      if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);

@@ -19,7 +19,7 @@
  * pins the encoding half against a live Postgres; this file pins the boot half:
  * that the flag routes to the DDL-FREE registration instead of to nothing.
  *
- * It is the same ruling #7737/#10629 already made for FEDERATED objects — that
+ * It is the same ruling #7737 already made for FEDERATED objects (commit 199ec4712) — that
  * flag is about DDL, and a binding that is DDL-free must not ride on it —
  * extended to the managed ones.
  */
@@ -150,7 +150,7 @@ describe('OS_SKIP_SCHEMA_SYNC boot registers object metadata without DDL (#10995
     const { driver, calls } = recordingDriver();
     await install(true, [PREF, external], driver);
 
-    // The managed one only — #7737/#10629 already bind the federated one at
+    // The managed one only — #7737 and commit 199ec4712 already bind the federated one at
     // `kernel:ready`, and handing it to the managed route would register it
     // under its OBJECT name instead of its remote table.
     expect(calls.registerObjectMetadata[0]).toEqual(['sys_user_preference']);

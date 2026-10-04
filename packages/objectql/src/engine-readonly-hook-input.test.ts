@@ -409,7 +409,7 @@ describe('#16344 — caller-forged readonly values are hidden from beforeUpdate'
 });
 
 /**
- * [#17219] The OTHER half of the same hide pass: what an author is told when a
+ * [commit 706ad0fcc] The OTHER half of the same hide pass: what an author is told when a
  * hook reaches THROUGH a key #16344 withheld.
  *
  * ⛔ The refusal itself is not under test here and is not moved: a body's

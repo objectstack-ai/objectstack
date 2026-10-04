@@ -19,7 +19,7 @@
  *
  * The refusal now renders through the shared Operation Message Catalog
  * (`@objectstack/spec/system`, key `record_write_denied`, landed ahead of this
- * consumer half by #12493) instead of a package-local string.
+ * consumer half by commit aa5994e17) instead of a package-local string.
  *
  * ⚠️ These tests assert the SENTENCE A USER READS, in zh-CN specifically, as a
  * LITERAL. Asserting only that a catalog key was passed — or comparing the

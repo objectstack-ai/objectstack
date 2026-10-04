@@ -28,8 +28,9 @@
  *    `FilterCondition` consumer and fails closed on an operator it cannot
  *    compile, so it THREW on the filter this strategy produced.
  * 3. **The row set depends on which driver answers.** A backend that evaluates
- *    `$regex` as a real regex (driver-memory's `memory-matcher.ts`:
- *    `new RegExp(target, condition.$options || '')`, `catch { return false }`)
+ *    `$regex` as a real regex (driver-memory's `memory-matcher.ts` was one:
+ *    `new RegExp(target, condition.$options || '')`, `catch { return false }`,
+ *    until #4706 retired `$regex` and commit `8fec76a2b` retired the matcher)
  *    reads `a.b` as "a, any character, b" and reads `50% (+)` as a SyntaxError →
  *    zero rows, in silence. `driver-sql` compiles the same `$regex` to a
  *    substring LIKE. One dashboard, two row sets.
@@ -81,12 +82,12 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    stage: { label: 'Stage', type: 'string', sql: 'stage' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const query = (where: unknown): AnalyticsQuery =>
@@ -100,13 +101,15 @@ const query = (where: unknown): AnalyticsQuery =>
 
 /**
  * An engine face that evaluates the four LIKE operators the way
- * `driver-memory`'s `memory-matcher.ts` does, `$regex` arm included.
+ * `driver-memory`'s `memory-matcher.ts` did, `$regex` arm included (#4706
+ * retired `$regex`, and commit `8fec76a2b` retired that matcher).
  *
  * Mirrored rather than imported: `service-analytics` does not depend on any
- * driver (see its `package.json`), and the point is not "driver-memory is
- * broken" — driver-memory's `$regex` arm is deliberate and serves a real
- * producer (plugin-auth's ObjectQL adapter, see `filter-refusal.ts`'s
- * `SUPPORTED_FIELD_OPERATORS` note). The point is that a filter carrying
+ * driver (see its `package.json`), and the point was never "driver-memory is
+ * broken" — driver-memory's `$regex` arm was deliberate while it served a real
+ * producer (plugin-auth's ObjectQL adapter; the `[#5702]` note over
+ * `filter-refusal.ts`'s `SUPPORTED_FIELD_OPERATORS` records that producer's move
+ * to `$contains`). The point is that a filter carrying
  * `$regex` MEANS something different on a regex-evaluating face than the
  * substring the analytics author wrote, and this strategy has no business
  * choosing between those readings on the author's behalf.
@@ -115,8 +118,9 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
   const value = row.stage;
   for (const [op, target] of Object.entries(cond)) {
     switch (op) {
-      // `memory-matcher.ts`: `new RegExp(target, condition.$options || '')`,
-      // `catch (e) { return false; }` — an uncompilable pattern is zero rows.
+      // As the retired `memory-matcher.ts` did: `new RegExp(target,
+      // condition.$options || '')`, `catch (e) { return false; }` — an
+      // uncompilable pattern is zero rows.
       case '$regex':
         try {
           if (!new RegExp(String(target)).test(String(value))) return false;
@@ -148,7 +152,7 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
  * not just its `stage` entry.
  *
  * `$notContains` is NULL-safe now, so the strategy emits it as
- * `{$or: [{stage: null}, {stage: {$notContains: …}}]}` and the condition no
+ * `{$or: [{stage: {$null: true}}, {stage: {$notContains: …}}]}` and the condition no
  * longer has `stage` at the top level. Reading `filter.stage` alone therefore
  * found `undefined`, handed {@link matchesLikeFamily} an EMPTY operator object,
  * and every row passed the empty loop — the whole fixture came back and the
@@ -156,6 +160,12 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
  * particular. A stand-in engine that cannot read the shape under test measures
  * the stand-in, so it walks the tree.
  */
+/** `{ $null: true | false }` — the null predicate the strategy hands the engine. */
+function isNullFlag(value: unknown): value is { $null: boolean } {
+  return typeof value === 'object' && value !== null && Object.keys(value).length === 1
+    && typeof (value as { $null?: unknown }).$null === 'boolean';
+}
+
 function matchesCondition(row: (typeof FIXTURE)[number], cond: Record<string, unknown>): boolean {
   for (const [key, value] of Object.entries(cond)) {
     if (key === '$and') {
@@ -167,10 +177,10 @@ function matchesCondition(row: (typeof FIXTURE)[number], cond: Record<string, un
       continue;
     }
     if (key !== 'stage') throw new Error(`[test] this face only scopes "stage", got "${key}"`);
-    // A bare `null` comparand is the null PREDICATE — the guard's own disjunct,
-    // and the spelling every driver reads as IS NULL.
-    if (value === null) {
-      if (row.stage !== null) return false;
+    // `{ $null: true }` is the null PREDICATE — the guard's own disjunct, in
+    // the engine's own spelling (#20918; it was the bare `null` before).
+    if (isNullFlag(value)) {
+      if ((row.stage === null) !== value.$null) return false;
       continue;
     }
     if (!matchesLikeFamily(row, value as Record<string, unknown>)) return false;
@@ -255,8 +265,11 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
       // the null-predicate disjunct. What THIS case asserts is unaffected and
       // still exact: the operator key is the declared `$notContains` and the
       // comparand is the author's literal `'a.b'`, not a `$regex` pattern.
+      // [ADR-0053 D-D1, amended — #5930 step 4] …once: the shared lowering's
+      // escape, its one source since this face's own copy was deleted. Same
+      // operator key, same literal comparand, same rows.
       expect(await engineFilter({ stage: { $notContains: 'a.b' } })).toEqual({
-        $and: [{ $or: [{ stage: null }, { stage: { $notContains: 'a.b' } }] }],
+        $and: [{ $or: [{ stage: { $null: true } }, { stage: { $notContains: 'a.b' } }] }],
       });
       expect(await engineFilter({ stage: { $startsWith: 'a.b' } })).toEqual({
         stage: { $startsWith: 'a.b' },
@@ -293,7 +306,7 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
   describe('on a face that evaluates `$regex` as a real regex', () => {
     /**
      * Row ids the ObjectQL path returns when the engine reads the LIKE family
-     * the way `memory-matcher.ts` does.
+     * the way the retired `memory-matcher.ts` did.
      */
     const ids = async (where: unknown): Promise<string[]> => {
       const ctx = {

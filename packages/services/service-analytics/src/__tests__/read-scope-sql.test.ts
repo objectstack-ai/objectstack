@@ -84,7 +84,8 @@ describe('compileScopedFilterToSql', () => {
   });
 
   it('THROWS on a nested relation value (cannot join in a flat scope)', () => {
-    expect(() => compileScopedFilterToSql({ account: { region: 'NA' } }, 't')).toThrowError(/nested\/relation value/);
+    // [#20887] Still refused; the words now name the route that serves the form.
+    expect(() => compileScopedFilterToSql({ account: { region: 'NA' } }, 't')).toThrowError(/carries a nested-relation condition/);
   });
 
   it('empty combinators reduce to their boolean identities (#5322)', () => {

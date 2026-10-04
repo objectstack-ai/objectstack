@@ -734,12 +734,21 @@ export class DevPlugin implements Plugin {
       // NOTE: @objectstack/studio is intentionally NOT default-loaded — the
       // console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>,
       // so Studio no longer needs to exist as a navigable app tile.
+      //
+      // [#20376] Each entry carries its own LITERAL `import('…')`, as every
+      // other declared-dependency load in this method does. A variable
+      // specifier (`import(spec[0])`) cannot be resolved when this file is
+      // transformed: under vitest every call became a round trip to the main
+      // process — two per `init()`, measured, mocked packages included —
+      // inside every clocked test window that boots this plugin. Both packages
+      // are declared dependencies, and the absent-package path below is
+      // unchanged. `dev-plugin-literal-imports.pin.test.ts` pins the form.
       for (const spec of [
-        ['@objectstack/setup', 'createSetupAppPlugin'],
-        ['@objectstack/account', 'createAccountAppPlugin'],
+        ['@objectstack/setup', 'createSetupAppPlugin', () => import('@objectstack/setup')],
+        ['@objectstack/account', 'createAccountAppPlugin', () => import('@objectstack/account')],
       ] as const) {
         try {
-          const mod: any = await import(/* @vite-ignore */ spec[0]);
+          const mod: any = await spec[2]();
           this.childPlugins.push(mod[spec[1]]());
           ctx.logger.info(`  ✔ App package enabled (${spec[0]})`);
         } catch (err) {
@@ -862,7 +871,7 @@ export class DevPlugin implements Plugin {
               + (mountCode !== undefined ? `code: ${String(mountCode)} — ` : '')
               + `${mountMessage}. OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will `
               + 'not get past it: it covers an ABSENT multi-org runtime the operator accepts doing '
-              + 'without, not a present one that declined. (#4818)',
+              + 'without, not a present one that declined.',
             );
           }
           ctx.logger.info(`  ✔ Organizations plugin enabled (posture '${tenancyPosture}': organization_id auto-stamp, per-org seed)`);
@@ -922,9 +931,9 @@ export class DevPlugin implements Plugin {
       if (!authMounted) {
         ctx.logger.warn(
           '  ✘ REST API NOT enabled: no auth is mounted in this stack, so no caller could ever '
-          + 'authenticate and anonymous access to object data is always denied (#3963). This is NOT a '
-          + 'missing-package problem — @objectstack/rest was never consulted. Install/enable '
-          + 'plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
+          + 'authenticate and anonymous access to object data is always denied, with no setting that '
+          + 'turns that off. This is NOT a missing-package problem — @objectstack/rest was never '
+          + 'consulted. Install/enable plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
         );
       } else {
         try {
@@ -988,7 +997,7 @@ export class DevPlugin implements Plugin {
             + 'requested multi-organization isolation must not serve traffic without it (ADR-0093 D5). '
             + 'The plugin reported (verbatim — the framework does not interpret it): '
             + `${err?.message ?? String(err)}. OS_ALLOW_DEGRADED_TENANCY does NOT apply: it covers an `
-            + 'ABSENT multi-org runtime, not a present one that declined. (#4818)',
+            + 'ABSENT multi-org runtime, not a present one that declined.',
           );
         }
         ctx.logger.error(`Failed to init child plugin ${plugin.name}: ${err.message}`);
@@ -1051,7 +1060,7 @@ export class DevPlugin implements Plugin {
       );
     }
     // Same reasoning, same surface: "nothing is enforcing security" belongs
-    // next to the banner, not buried in the init log (#10036, #3900).
+    // next to the banner, not buried in the init log (#3900; commit 7552e0337 moved this check here from init()).
     this.warnIfNothingIsEnforcingSecurity(ctx);
     ctx.logger.info('');
     ctx.logger.info('   API:       /api/v1/data/:object');
@@ -1066,7 +1075,7 @@ export class DevPlugin implements Plugin {
    * so the slots stay empty — but silence about unenforced RBAC/RLS/masking
    * would be its own kind of fake).
    *
-   * ## Why this asks for `security`, and why it asks in `start()` (#10036)
+   * ## Why this asks for `security`, and why it asks in `start()` (commit 7552e0337)
    *
    * This used to probe `security.permissions` / `security.rls` /
    * `security.fieldMasker` from `init()`. Both halves of that were wrong, and
@@ -1085,7 +1094,7 @@ export class DevPlugin implements Plugin {
    *   internal handles and enforces nothing, so the warning stayed silent in
    *   the one state where its text is literally true. (The same presence
    *   signal misled `plugin-hono-server`'s `/auth/me/permissions`, fixed in
-   *   #10035 by this same move — two consumers, two packages, one misread:
+   *   commit c1731d023 by this same move — two consumers, two packages, one misread:
    *   that is a property of the signal, not of either reader.)
    *
    * - **Wrong phase.** `security` is registered in `SecurityPlugin.start()`,

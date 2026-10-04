@@ -1208,7 +1208,7 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
  *     keep losing rows for hours to a second fault with one `error` line at the
  *     top of the log describing the first;
  *  2. that one line named the telemetry-datasource remedy unconditionally. The
- *     cause measured on #14927 was `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` and
+ *     cause commit ab489388b records was `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` and
  *     the text said "datasource" — the operator was sent to check something
  *     that was not broken.
  *
@@ -1367,7 +1367,7 @@ describe('audit writers — reported once per CAUSE, not once per process (#1516
     expect(forMissingTable).toMatch(/telemetry/);
     expect(forMissingTable).toMatch(/OS_TELEMETRY_DB=0/);
 
-    // The measured #14927 misdirection: the cause was an organization refusal
+    // The misdirection commit ab489388b records: the cause was an organization refusal
     // and the text said "datasource".
     const refused = makeCauseEngine(() => ORG_REQUIRED());
     await refused.fire('crm_lead', 'l-1');
@@ -1407,7 +1407,239 @@ describe('audit writers — reported once per CAUSE, not once per process (#1516
 });
 
 /**
- * [#8707] Which organization an audit row is stamped with — the RECORD'S own,
+ * [#21262] The line names the table whose insert was REFUSED, and the row that
+ * is lost.
+ *
+ * Measured on MySQL: `sys_activity` was never created because its DDL was
+ * refused at boot, every `sys_audit_log` row LANDED, and the line said "only
+ * the `sys_audit_log` row that records who did it never landed", sent the
+ * operator to the telemetry-datasource split, and printed four times under the
+ * words "reported ONCE" — once per audited object.
+ *
+ * The fixture refuses ONE table's insert, from that table's own `create`, the
+ * way a real driver does — unlike the #15166 block above, whose engine refuses
+ * the ledger insert whatever the error names. Its pins stay as they are.
+ */
+describe('audit writers — the line names the refused table and the lost row (#21262)', () => {
+  interface LogLine { level: string; message: string; meta?: any }
+
+  /**
+   * Engine whose `refusing` table rejects every insert with `nextError(n)`; the
+   * other table accepts. Records which rows LANDED, so a line's claim about
+   * them can be checked against what happened.
+   */
+  function makeRefusingEngine(
+    refusing: 'sys_audit_log' | 'sys_activity' | ((n: number) => 'sys_audit_log' | 'sys_activity'),
+    nextError: (n: number) => unknown,
+    objectDefs: Record<string, any> = {},
+  ) {
+    const hooks = new Map<string, Array<(ctx: any) => any>>();
+    const logs: LogLine[] = [];
+    const landed: string[] = [];
+    let n = 0;
+    const sudoApi = {
+      object(name: string) {
+        return {
+          async create(_row: Record<string, any>) {
+            const refused = typeof refusing === 'function' ? refusing(n) : refusing;
+            if (name === refused) throw nextError(n++);
+            landed.push(name);
+            return { id: 'generated-id' };
+          },
+        };
+      },
+    };
+    const api = { sudo: () => sudoApi };
+    const engine = {
+      getSchema(name: string) {
+        const fields = (SINGLE_TENANT as Record<string, string[]>)[name];
+        const base = fields
+          ? { name, fields: Object.fromEntries(fields.map((f) => [f, { type: 'text' }])) }
+          : { name, fields: { id: { type: 'text' }, name: { type: 'text' } } };
+        return { ...base, ...(objectDefs[name] || {}) };
+      },
+      registerHook(event: string, fn: (ctx: any) => any) {
+        const list = hooks.get(event) ?? [];
+        list.push(fn);
+        hooks.set(event, list);
+      },
+      unregisterHooksByPackage() { /* no-op */ },
+      logger: {
+        error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); },
+        warn(message: string, meta?: any) { logs.push({ level: 'warn', message, meta }); },
+        debug(message: string, meta?: any) { logs.push({ level: 'debug', message, meta }); },
+        info() { /* unused */ },
+      },
+    };
+    installAuditWriters(engine as any, 'test.audit');
+    const fire = async (object: string, id: string, name = 'Acme') => {
+      for (const fn of hooks.get('afterInsert') ?? []) {
+        await fn({
+          event: 'afterInsert',
+          api,
+          object,
+          input: { id },
+          result: { id, name },
+          session: { organizationId: 'org-1', userId: 'user-1' },
+        });
+      }
+    };
+    const at = (level: string) => logs.filter((l) => l.level === level);
+    const landedIn = (table: string) => landed.filter((t) => t === table).length;
+    return { fire, at, logs, landedIn };
+  }
+
+  /** The measured shape: mysql2's `ER_NO_SUCH_TABLE` (errno 1146) naming the table. */
+  const mysqlNoSuchTable = (table: string) => () => {
+    const e = new Error(`Table 'objectstack.${table}' doesn't exist`) as Error & { code?: string; errno?: number };
+    e.code = 'ER_NO_SUCH_TABLE';
+    e.errno = 1146;
+    return e;
+  };
+  const coded = (message: string, code: string) => () => {
+    const e = new Error(message) as Error & { code?: string };
+    e.code = code;
+    return e;
+  };
+
+  it('names `sys_activity` when its insert is refused, and says the ledger row LANDED', async () => {
+    const { fire, at, landedIn } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    await fire('crm_lead', 'l-1');
+
+    // What happened: the ledger row is on disk, only the activity row is lost.
+    expect(landedIn('sys_audit_log')).toBe(1);
+    expect(landedIn('sys_activity')).toBe(0);
+    const [line] = at('error');
+    expect(line.meta).toMatchObject({ object: 'crm_lead', action: 'create', table: 'sys_activity' });
+    expect(line.message).toMatch(/^Audit write FAILED on `sys_activity` \(ER_NO_SUCH_TABLE: /);
+    // The lost row is the activity row; the ledger row is said to have landed.
+    expect(line.message).toMatch(/only the `sys_activity` row/);
+    expect(line.message).toMatch(/so did its `sys_audit_log` row/);
+    // ⛔ The measured falsehood, by the subject it names.
+    expect(line.message).not.toMatch(/`sys_audit_log` row that records who did it never landed/);
+    expect(line.message).not.toMatch(/compliance trail is now INCOMPLETE/);
+  });
+
+  it('names `sys_audit_log` when its insert is refused, and the activity row due after it as lost too', async () => {
+    const { fire, at, landedIn } = makeRefusingEngine('sys_audit_log', mysqlNoSuchTable('sys_audit_log'));
+
+    await fire('crm_lead', 'l-1');
+
+    // The activity row is written only after the ledger row, so it never ran.
+    expect(landedIn('sys_audit_log')).toBe(0);
+    expect(landedIn('sys_activity')).toBe(0);
+    const [line] = at('error');
+    expect(line.meta).toMatchObject({ object: 'crm_lead', action: 'create', table: 'sys_audit_log' });
+    expect(line.message).toMatch(/^Audit write FAILED on `sys_audit_log` \(ER_NO_SUCH_TABLE: /);
+    expect(line.message).toMatch(/compliance trail is now INCOMPLETE/);
+    expect(line.message).toMatch(/`sys_audit_log` row that records who did it never landed/);
+    expect(line.message).toMatch(/neither did its `sys_activity` timeline row/);
+  });
+
+  it('does not claim an activity row was lost for an object that writes none', async () => {
+    // `enable.activities: false` — no activity row was ever due.
+    const { fire, at } = makeRefusingEngine('sys_audit_log', mysqlNoSuchTable('sys_audit_log'), {
+      crm_lead: { enable: { activities: false } },
+    });
+
+    await fire('crm_lead', 'l-1');
+
+    const [line] = at('error');
+    expect(line.message).toMatch(/`sys_audit_log` row that records who did it never landed/);
+    expect(line.message).not.toMatch(/neither did its `sys_activity`/);
+  });
+
+  it('gives a missing table BOTH causes it cannot tell apart, naming that table in each', async () => {
+    // A table is as missing when schema sync's DDL for it was refused at boot
+    // as when it was created on another datasource, and nothing in hand tells
+    // the two apart — so the remedy names both, the boot's own line first.
+    const { fire, at } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/`sys_activity` does not exist on the connection this write reached/);
+    expect(msg).toMatch(/Schema sync FAILED for object 'sys_activity'/);
+    expect(msg).toMatch(/OS_TELEMETRY_DB=0/);
+    expect(msg.indexOf('Schema sync FAILED')).toBeLessThan(msg.indexOf('OS_TELEMETRY_DB=0'));
+  });
+
+  it('gives any other refusal the driver-fault remedy, with neither missing-table cause', async () => {
+    const { fire, at } = makeRefusingEngine(
+      'sys_activity',
+      coded('NOT NULL constraint failed: sys_activity.summary', 'SQLITE_CONSTRAINT_NOTNULL'),
+    );
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/^Audit write FAILED on `sys_activity` \(SQLITE_CONSTRAINT_NOTNULL: /);
+    expect(msg).toMatch(/Fix: resolve the driver fault/);
+    expect(msg).not.toMatch(/Schema sync/);
+    expect(msg).not.toMatch(/telemetry/i);
+  });
+
+  it('reads the missing table from the REFUSED write, not from a list, when the code alone says "missing"', async () => {
+    // SQLSTATE 42P01 with no phrase naming a relation is a missing-table
+    // verdict for ANY table name. Asked in list order, the ledger table would
+    // answer first and be named for a refused `sys_activity` insert.
+    const { fire, at } = makeRefusingEngine('sys_activity', coded('statement refused', '42P01'));
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/`sys_activity` does not exist on the connection this write reached/);
+    expect(msg).not.toMatch(/`sys_audit_log` does not exist/);
+  });
+
+  it('prints once per audited object, refused table and code — and the line says so', async () => {
+    // The measured boot: one missing table, four audited objects, four lines.
+    // That count is the declared key, not a defect — what was wrong was the
+    // sentence calling it "reported ONCE".
+    const objects = ['crm_lead', 'crm_account', 'crm_contact', 'crm_opportunity'];
+    const { fire, at } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    for (const object of objects) for (let i = 0; i < 3; i += 1) await fire(object, `r-${i}`);
+
+    const errors = at('error');
+    expect(errors).toHaveLength(objects.length);
+    expect(errors.map((l) => l.meta.object)).toEqual(objects);
+    expect(at('debug')).toHaveLength(objects.length * 3 - objects.length);
+    expect(errors[0].message).toMatch(/ONCE per audited object, refused table and error code/);
+  });
+
+  it('keys on the refused TABLE too: the other table refusing with the same code is its own line', async () => {
+    // Same object, same code, the two tables refusing in turn. Without the
+    // table in the key the second refusal folds into a line naming the first
+    // table and the first table's lost row.
+    const { fire, at } = makeRefusingEngine(
+      (n) => (n === 0 ? 'sys_activity' : 'sys_audit_log'),
+      coded('constraint failed', 'SQLITE_CONSTRAINT'),
+    );
+
+    await fire('crm_lead', 'l-1');
+    await fire('crm_lead', 'l-2');
+
+    const errors = at('error');
+    expect(errors.map((l) => l.meta.table)).toEqual(['sys_activity', 'sys_audit_log']);
+    expect(at('debug')).toEqual([]);
+  });
+
+  it('carries no stored value — operator text only', async () => {
+    const STORED = 'stored-value-7f3c';
+    const { fire, logs } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    await fire('crm_lead', 'l-1', STORED);
+    await fire('crm_lead', 'l-2', STORED);
+
+    expect(logs.length).toBeGreaterThan(0);
+    expect(JSON.stringify(logs)).not.toContain(STORED);
+  });
+});
+
+/**
+ * [commit 1408fe385] Which organization an audit row is stamped with — the RECORD'S own,
  * honouring the maintainer's ruling on #8287.
  *
  * The precedence these cases pin is `recordOrgId ?? sess.organizationId`. Read the
@@ -1645,12 +1877,12 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
     expect(stampOf(created).audit?.organization_id).not.toBe('org-parent');
   });
 
-  // ── the platform stamp column — `sys_api_key` (#8778, #19054) ──────────
+  // ── the platform stamp column — `sys_api_key` (commit 7901b2dd2, #19054) ──
   //
   // The former ⛔ KNOWN GAP case lived here: it pinned that
   // `sys_api_key.active_organization_id` was UNREACHABLE and stamped the
   // ACTOR's org, and was written to go red the day the divergence became
-  // expressible. That day is #8778 (maintainer-ruled option A); the cases
+  // expressible. That day came with commit 7901b2dd2 (maintainer-ruled option A); the cases
   // below are its rewrite, expecting `org-key`. #19054 moved the divergence
   // off the authorable `tenancy.organizationField` key and into
   // `PLATFORM_STAMP_ORGANIZATION_COLUMNS`, keyed by object name — so these
@@ -1879,7 +2111,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
 
     // This case is GREEN before and after the #9516 fix on purpose: it pins
     // that fixing WHICH KEY the fallback arm reads did not disturb the ORDER
-    // the #8707 ruling set (honouring the maintainer's ruling on #8287).
+    // commit 1408fe385 set (honouring the maintainer's ruling on #8287).
     await fire('afterInsert', {
       object: 'crm_lead',
       input: { id: 'lead-1' },
@@ -1919,7 +2151,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
   // Lower stakes than the audit stamp — it feeds `resolveWriteLocale` and the
   // emitted envelope's `organizationId` rather than a row behind an RLS wall —
   // but the same removed key, dead the same way. Note the ORDER here is
-  // session-first and stays that way: #8707's ruling reasons about an AUDIT
+  // session-first and stays that way: commit 1408fe385 reasons about an AUDIT
   // ROW read through the record's own tenant wall, which is not what a mention
   // notification is. Only the key changes at this site.
   const setupMentions = (schemas: Record<string, string[] | Record<string, any>> = SINGLE_TENANT) => {
@@ -1973,5 +2205,192 @@ describe('audit writers — the writer reads the session key the engine emits (#
     });
 
     expect(emits.find((e) => e.topic === 'collab.mention')?.organizationId).toBe('org-2');
+  });
+});
+
+describe('[#21120] stored metadata body copies are redacted at write time', () => {
+  const CRED = 'writer-cred-5d02';
+  const dsBody = (cred = CRED) =>
+    JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: cred } });
+
+  // sys_metadata is a stored-metadata-body table: a `type` + `metadata` row.
+  const SCHEMAS = {
+    ...SINGLE_TENANT,
+    sys_metadata: ['id', 'name', 'type', 'scope', 'metadata'],
+    sys_metadata_history: ['id', 'name', 'type', 'metadata'],
+  };
+
+  it('a sys_metadata create withholds the stored credential from new_value and the activity copy', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1' },
+      result: { id: 'meta-1', name: 'ds', type: 'datasource', scope: 'platform', metadata: dsBody() },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(audit).toBeDefined();
+    expect(JSON.stringify(audit!.row)).not.toContain(CRED);
+    // The audit copy still records the change: type survives, the projected body is present.
+    const newValue = JSON.parse(audit!.row.new_value);
+    expect(newValue.type).toBe('datasource');
+    expect(JSON.parse(newValue.metadata).config.encryptionKey).toBeUndefined();
+    expect(JSON.parse(newValue.metadata).config.url).toBe('libsql://db.turso.io');
+    expect(JSON.stringify(activity!.row)).not.toContain(CRED);
+  });
+
+  it('a sys_metadata update records the change but withholds the rotated credential', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1', data: { metadata: dsBody() } },
+      previous: { id: 'meta-1', name: 'ds', type: 'datasource', metadata: dsBody('old-cred-0000') },
+      result: { id: 'meta-1', name: 'ds', type: 'datasource', metadata: dsBody() },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    // A credential rotation still produces a row (the values differ)…
+    expect(audit).toBeDefined();
+    // …with neither the old nor the new credential in it.
+    expect(JSON.stringify(audit!.row)).not.toContain(CRED);
+    expect(JSON.stringify(audit!.row)).not.toContain('old-cred-0000');
+  });
+
+  it('a credential-free sys_metadata body is copied intact (nothing to withhold)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    const clean = JSON.stringify({ name: 'v', type: 'view', columns: ['a'] });
+    await fire('afterInsert', {
+      object: 'sys_metadata',
+      input: { id: 'meta-2' },
+      result: { id: 'meta-2', name: 'v', type: 'view', scope: 'platform', metadata: clean },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).metadata).toBe(clean);
+  });
+});
+
+/**
+ * [#21207] Exit two, fork three: a COPY never carries the stored content hash.
+ *
+ * The ledger snapshot and diff, and the activity copy, of a `sys_metadata` /
+ * `sys_metadata_history` write used to copy the row's `checksum` (and the
+ * history row's `previous_checksum`) whole — a hash over the stored body,
+ * withheld credential material included, i.e. an offline verifier, at rest and
+ * served to every ledger reader. The copy now drops both columns; the history
+ * table itself remains the lineage. Every other column, and every other
+ * object's `checksum`, is copied as before.
+ */
+describe('[#21207] stored metadata copies carry no content hash', () => {
+  const HASH = `sha256:${'a'.repeat(64)}`;
+  const PARENT = `sha256:${'b'.repeat(64)}`;
+  const NEXT = `sha256:${'c'.repeat(64)}`;
+  const SCHEMAS = {
+    ...SINGLE_TENANT,
+    sys_metadata: ['id', 'name', 'type', 'scope', 'metadata', 'checksum'],
+    sys_metadata_history: ['id', 'name', 'type', 'metadata', 'checksum', 'previous_checksum'],
+    file_blob: ['id', 'name', 'checksum'],
+  };
+  const view = (label: string) => JSON.stringify({ name: 'v', type: 'grid', label });
+  const hashFree = (text: string) => {
+    expect(text).not.toContain(HASH);
+    expect(text).not.toContain(PARENT);
+    expect(text).not.toContain(NEXT);
+    expect(text).not.toMatch(/\\?"(previous_)?checksum\\?"/);
+  };
+
+  it('a sys_metadata create: neither the ledger snapshot nor the activity copy carries the hash', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1' },
+      result: { id: 'meta-1', name: 'v', type: 'view', scope: 'platform', metadata: view('one'), checksum: HASH },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    const activity = created.find((c) => c.object === 'sys_activity');
+    hashFree(JSON.stringify(audit!.row));
+    hashFree(JSON.stringify(activity!.row));
+    // The copy still records the change: the other columns survive.
+    const newValue = JSON.parse(audit!.row.new_value);
+    expect(newValue.type).toBe('view');
+    expect(newValue.metadata).toBe(view('one'));
+  });
+
+  it('a sys_metadata update: the diff carries the body change and not the hash change', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1', data: { metadata: view('two') } },
+      previous: { id: 'meta-1', name: 'v', type: 'view', metadata: view('one'), checksum: HASH },
+      result: { id: 'meta-1', name: 'v', type: 'view', metadata: view('two'), checksum: NEXT },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit).toBeDefined();
+    hashFree(JSON.stringify(audit!.row));
+    expect(JSON.parse(audit!.row.new_value).metadata).toBe(view('two'));
+    hashFree(JSON.stringify(created.find((c) => c.object === 'sys_activity')!.row));
+  });
+
+  it('a sys_metadata_history append: neither hash column is copied', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata_history',
+      input: { id: 'h-1' },
+      result: { id: 'h-1', name: 'v', type: 'view', metadata: view('one'), checksum: NEXT, previous_checksum: PARENT },
+      session: { userId: 'admin-1' },
+    });
+    for (const c of created) hashFree(JSON.stringify(c.row));
+  });
+
+  it('a history append whose change note quotes a hash: the copy keeps the note and withholds the quote', async () => {
+    const { engine, fire, created } = makeEngine({ ...SCHEMAS, sys_metadata_history: [...SCHEMAS.sys_metadata_history, 'change_note'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata_history',
+      input: { id: 'h-2' },
+      result: { id: 'h-2', name: 'v', type: 'view', metadata: view('one'), checksum: NEXT, change_note: `publish draft (hash ${NEXT})` },
+      session: { userId: 'admin-1' },
+    });
+    for (const c of created) hashFree(JSON.stringify(c.row));
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).change_note).toBe('publish draft (hash (withheld))');
+  });
+
+  it('a decision-audit note that quotes a hash (its rewrite, or a row written before) is copied withheld', async () => {
+    const { engine, fire, created } = makeEngine({ ...SCHEMAS, sys_metadata_audit: ['id', 'code', 'note'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata_audit',
+      input: { id: 'd-1', data: { note: 'expected parent (withheld) but current is (withheld)' } },
+      // adr0112-ok: D6b persisted audit column
+      previous: { id: 'd-1', code: 'metadata_conflict', note: `expected parent ${PARENT} but current is ${HASH}` },
+      // adr0112-ok: D6b persisted audit column
+      result: { id: 'd-1', code: 'metadata_conflict', note: 'expected parent (withheld) but current is (withheld)' },
+      session: {},
+    });
+    expect(created.length).toBeGreaterThan(0);
+    for (const c of created) hashFree(JSON.stringify(c.row));
+  });
+
+  it('control: another object keeps its own checksum column in the copy', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'file_blob',
+      input: { id: 'f-1' },
+      result: { id: 'f-1', name: 'blob', checksum: HASH },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).checksum).toBe(HASH);
   });
 });

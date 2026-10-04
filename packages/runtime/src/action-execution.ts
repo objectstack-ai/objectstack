@@ -49,6 +49,7 @@ import type { FlowRunSummary } from '@objectstack/spec/automation';
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
 import { recordNotFoundError } from '@objectstack/metadata-protocol';
+import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
@@ -900,14 +901,14 @@ export function isFlowActionRefusal(e: unknown): e is FlowActionRefusal {
  * and a downstream reader that had to tell them apart could only infer.
  *
  * [#15168] **The wiring takes the subject LOAD, not a bare record.** The flow
- * face of #14143's signal (`AutomationContext.recordLoadDenied`, declared by
+ * face of commit f19475c0a's signal (`AutomationContext.recordLoadDenied`, declared by
  * #14244) is derived here, once, from {@link loadActionSubjectRecord}'s
  * outcome — so a caller cannot hand this door a record while dropping the
  * verdict that says the caller could not read it. Both call sites already held
  * that outcome and were passing `subject.record` out of it; taking the whole
  * `subject` removes the second de-facto source rather than adding a key beside
  * it, and makes the omission a compile error instead of a silent inertness one
- * door over (the shape #14143 was filed for).
+ * door over (the shape commit f19475c0a fixed).
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
@@ -1496,16 +1497,24 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * via `engine.createContext()`, which the action path never called), so the
  * facade proxied every call context-less. Returns `undefined` when the engine
  * predates `createContext`, leaving the sandbox's own fallback in charge.
+ *
+ * [#21454] Served through the stored-metadata reader seam
+ * (`stored-metadata-reader-seam.ts`): this context is elevated, and it is the
+ * `ctx.api` a host code handler receives, so a read of the stored-metadata-body
+ * family answers the generic data door's form (the body projected, the content
+ * hash keyed) and never the stored row. [#21594] An action BODY's API is built
+ * over this one by the sandbox (`buildSandboxApi`), whose body layers refuse a
+ * family read or write before it reaches this seam.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
     try {
-        return ql.createContext(buildActionExecutionContext(ec));
+        return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
         // the bare elevated context (the same shape hooks default to).
         try {
-            return ql.createContext({ isSystem: true });
+            return serveStoredMetadataReadsThrough(ql.createContext({ isSystem: true }), ql);
         } catch {
             return undefined;
         }
@@ -1677,18 +1686,24 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
             // (`assertActionEngineFindEnvelope` above says why the engine's own
             // check cannot be the whole of it).
             assertActionEngineFindEnvelope(object, query);
-            const rows = await ql.find(object, { ...(query ?? {}), context } as any);
-            return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
+            // [#21454] The answer is served through the stored-metadata reader
+            // seam: this read is elevated, so a read of the stored-metadata-body
+            // family answers the generic data door's form (the body projected,
+            // the content hash keyed), never the stored row.
+            return serveStoredMetadataRead(object, query, ql, async (q) => {
+                const rows = await ql.find(object, { ...((q as Record<string, unknown> | undefined) ?? {}), context } as any);
+                return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
+            });
         },
     };
 }
 
 /**
  * The subject-record load's outcome, as the two action doors hand it to a
- * handler (#14143).
+ * handler (commit f19475c0a).
  */
 export interface ActionSubjectRecordLoad {
-    /** What the handler receives as `ctx.record`. Unchanged by #14143. */
+    /** What the handler receives as `ctx.record`. Unchanged by commit f19475c0a. */
     record: Record<string, unknown>;
     /**
      * `true` exactly when a caller-scope load was ATTEMPTED and did not deliver
@@ -1700,7 +1715,7 @@ export interface ActionSubjectRecordLoad {
 
 /**
  * Load an action's subject record IN THE CALLER'S OWN SCOPE, and report whether
- * that load actually delivered the row (#14143). ONE producer for both action
+ * that load actually delivered the row (commit f19475c0a). ONE producer for both action
  * doors — the MCP `run_action` bridge below and the REST `/actions` route
  * (`domains/actions.ts`) — because the signal it emits is documented to app
  * authors, and a signal only one of two doors sets is an authorization guard
@@ -1793,7 +1808,7 @@ export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordL
  * reading it left open ("whether the automation engine acts on it … is a
  * separate reading") is this function. A swallowed load must never become an
  * implicit grant — the rule is #15079's, and a rule implemented at one of three
- * doors is the failure class #14143 and #15168 each already paid for here.
+ * doors is the failure class commit f19475c0a and #15168 each already paid for here.
  *
  * ## The predicate is the LOAD's verdict — ⛔ never the action's `locations`
  *
@@ -1906,11 +1921,11 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * 'update'` + `patch` (#14092, maintainer ruling 2026-09-01, quoted on the
  * card). ONE implementation, called by BOTH action doors.
  *
- * ## Shared on purpose, for the #14143 reason
+ * ## Shared on purpose, for the reason of commit f19475c0a
  *
  * The REST `/actions` door and the MCP `run_action` bridge are two doors onto
  * one action model, and this repo has now paid twice for a rule implemented at
- * one of them: #14143 (a `recordLoadDenied` signal only one door set) and
+ * one of them: commit f19475c0a (a `recordLoadDenied` signal only one door set) and
  * #15168 (a flow face with no populator at all). An authorization rule is the
  * worst possible thing to fork, and contract point 3 is an authorization rule
  * — so the branch each door owns is three lines, and everything that decides
@@ -1944,7 +1959,7 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * the caller's own scope actually delivered it. A caller who cannot read the
  * row is refused HERE, before any write is attempted, on
  * `subject.recordLoadDenied`. Re-deriving that from `subject.record` is the
- * #14143 defect verbatim: the door stamps `record.id = recordId` on a refused
+ * defect commit f19475c0a fixed, verbatim: the door stamps `record.id = recordId` on a refused
  * load, so `record.id` is truthy either way and `if (!record?.id)` is false on
  * a row the caller cannot see. A swallowed load must never become an implicit
  * grant.
@@ -2202,7 +2217,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // Load the subject record under RLS when row-context (engages the same
     // permission path as get_record — an unseen record reads as not-found).
-    // [#14143] Through the ONE shared producer, so this door and the REST
+    // [commit f19475c0a] Through the ONE shared producer, so this door and the REST
     // `/actions` door emit the same `recordLoadDenied` signal to handlers.
     const subject = await loadActionSubjectRecord(objectName, recordId, () =>
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
@@ -2213,7 +2228,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // first, and an action with no handler has no body to elevate for. The
     // shared executor the REST `/actions` door also calls, so the two doors
     // cannot disagree about the identity the write carries — the failure class
-    // #14143 and #15168 each paid for once, on this exact seam.
+    // commit f19475c0a and #15168 each paid for once, on this exact seam.
     if (isDeclarativeUpdateAction(action)) {
         const result = await executeDeclarativeUpdateAction(deps, action, {
             objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData,
@@ -2281,7 +2296,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     );
     const actionContext: any = {
         record,
-        // [#14143] The caller-scope load's verdict, on the same context the
+        // [commit f19475c0a] The caller-scope load's verdict, on the same context the
         // record rides. `ctx.record.id` is present either way (the stamp is
         // load-bearing for record-less actions), so this is the ONLY thing that
         // tells a handler its subject row did not resolve for THIS caller —
@@ -2472,9 +2487,10 @@ export function doubledPostSuccessNavigationWarning(
     const where = objectName ? `${objectName}/${actionDef?.name ?? '<unnamed>'}` : String(actionDef?.name ?? '<unnamed>');
     return (
         `[action-contract] Action '${where}': the handler returned \`redirectUrl\` while the action `
-        + 'also declares `onSuccess.navigate` — two post-success destinations for one success '
-        + '(#11519). The DECLARED `onSuccess` wins and the handler\'s `redirectUrl` is ignored '
-        + '(interim renderer precedence, objectui#5933). Fix the action, not the renderer: keep '
+        + 'also declares `onSuccess.navigate` — two post-success destinations for one success, '
+        + 'a pair the contract refuses rather than ranks. The DECLARED `onSuccess` wins and the '
+        + 'handler\'s `redirectUrl` is ignored (the interim precedence the console renderer '
+        + 'applies, which no contract promises). Fix the action, not the renderer: keep '
         + '`onSuccess` and stop returning `redirectUrl` from the handler, or drop `onSuccess` and '
         + 'let the handler return drive the navigation. There is no `precedence` field, by ruling.'
     );
@@ -2517,6 +2533,46 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
         }
     }
     return { dispatched: false };
+}
+
+
+/**
+ * [#21321] The read-only twin of {@link executeRegisteredAction}: would the
+ * script door find a handler for this action? Returns a probe over ONE snapshot
+ * of the engine's handler registry (`listRegisteredActions()`, the engine's
+ * public enumeration of the Map `executeAction` reads), answering for an
+ * `(objectName, candidates)` pair by walking exactly the rotation the run door
+ * walks — `actionHandlerObjectKeys(objectName)` × the handler-key candidates —
+ * and dispatching nothing.
+ *
+ * It exists so an ADVERTISING surface reads the same source the run doors do.
+ * MCP `list_actions` used to admit a script action on its declaration alone
+ * (`target || body`), so a declaration nothing had bound — measured: an
+ * `os package install`ed package, before its bodies were bound — was listed
+ * and then refused by `run_action` with "No handler registered".
+ *
+ * An engine that cannot enumerate its handlers (no `listRegisteredActions`)
+ * answers `false` for everything: the listing then cannot vouch for any script
+ * action, and saying nothing is the honest answer — never a fall-back to the
+ * declaration, which is the very source this replaces.
+ */
+export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
+    ql: any,
+): (objectName: string, candidates: string[]) => boolean {
+    const registered = new Set<string>();
+    if (ql && typeof ql.listRegisteredActions === 'function') {
+        for (const row of ql.listRegisteredActions() as Array<{ objectName: string; actionName: string }>) {
+            registered.add(`${row.objectName}:${row.actionName}`);
+        }
+    }
+    return (objectName, candidates) => {
+        for (const obj of actionHandlerObjectKeys(objectName)) {
+            for (const key of candidates) {
+                if (registered.has(`${obj}:${key}`)) return true;
+            }
+        }
+        return false;
+    };
 }
 
 

@@ -25,7 +25,8 @@
  * The comparand-shape face (`assertListComparandShapes`,
  * `./filter-comparand-shape.ts`) is called read-only on a one-slot node, so the
  * save door refuses exactly the cells the query door refuses: an array in the
- * equality or `$ne` slot, a `null` ordering comparand, a non-list `$in` /
+ * equality or `$ne` slot or [#21448] at any other scalar operator, a `null`
+ * ordering comparand, a non-list `$in` /
  * `$nin`, a malformed `$between`, a `null` list member or endpoint, and a blank
  * or `{ $field }` endpoint — and passes what the face passes (the null
  * predicate, a `{ $field }` reference as a whole comparand, `$in: []`, a
@@ -55,8 +56,9 @@
  *
  * ## The words
  *
- * - The equality and `$ne` slots: the face's own sentence, from the builders
- *   both doors import (`./filter-comparand-refusal-text.ts`).
+ * - The equality and `$ne` slots, and [#21448] a list at any other scalar
+ *   operator: the face's own sentence, from the builders both doors import
+ *   (`./filter-comparand-refusal-text.ts`).
  * - A `null` ordering comparand, a `null` list member or endpoint, a blank or
  *   `{ $field }` endpoint: the sentence the enforced operator slot
  *   (`FieldOperatorsSchema`) prints for the same comparand, read off that slot
@@ -87,11 +89,13 @@
 import type { z } from 'zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
+import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 import {
   IN_OPERATOR_SPELLINGS,
   NIN_OPERATOR_SPELLINGS,
   arrayEqualityComparandMessage,
   arrayInequalityComparandMessage,
+  arrayScalarComparandMessage,
   shapePreview,
 } from './filter-comparand-refusal-text';
 
@@ -235,6 +239,10 @@ function comparandShapeRefusalAtSave(
     refusal = { at: [], message: arrayEqualityComparandMessage(comparand, { op, field }) };
   } else if (op === '$ne') {
     refusal = { at: [], message: arrayInequalityComparandMessage(comparand, { field }) };
+  } else if (Array.isArray(comparand) && SCALAR_COMPARAND_OPERATORS.has(op)) {
+    // [#21448] A list at any other scalar operator: the face's own sentence,
+    // from the builder both doors import, less its location.
+    refusal = { at: [], message: arrayScalarComparandMessage(op, comparand, { field }) };
   } else if (comparand === null && ORDERING_OPERATORS.has(op)) {
     refusal = fromSlot([]);
   } else if (op === '$in' || op === '$nin') {
@@ -256,11 +264,19 @@ function comparandShapeRefusalAtSave(
 }
 
 /**
- * The two flags `FieldOperatorsSchema` declares `z.boolean()`. A non-boolean one
+ * The flags `FieldOperatorsSchema` declares `z.boolean()`. A non-boolean one
  * is refused on every query face under the #5347 / #5369 rulings, in every
  * position, because the backends read one in opposite directions.
+ *
+ * [#20311] `$empty` is a flag by the same declaration (ruling A on #20399,
+ * record 5865693155: "`$empty: boolean`"). This door has held it to its
+ * declared type since the day it was declared — before any query face had an
+ * arm for it — and each face's arm inherited the rule, so a `"true"` string was
+ * never saved into a stored filter no arm reads the way its author meant.
+ * [#20446] Every face answers it now, and the view operators `is_empty` /
+ * `is_not_empty` lower to it.
  */
-const BOOLEAN_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists']);
+const BOOLEAN_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists', '$empty']);
 
 /** What arrived where a flag's boolean belongs — the analytics door's `describeFlagComparand`. */
 function describeFlagComparand(value: unknown): string {
@@ -280,8 +296,23 @@ function describeFlagComparand(value: unknown): string {
  * prescription are the analytics door's, less the location and the history of
  * what that door used to do. The field is named because this door can see it;
  * the issue's own `path` carries the location.
+ *
+ * [#20311] `$empty` keeps the first sentence and the prescription's form; its
+ * reason cannot be the opposite-directions history (no backend ever read it
+ * the other way), so it names the rule it shares with the two null flags
+ * instead.
  */
 function nonBooleanFlagComparandMessage(op: string, field: string, value: unknown): string {
+  if (op === '$empty') {
+    return (
+      `Operator "${op}" on field "${field}" requires a boolean comparand (true or false). `
+      + `Received ${describeFlagComparand(value)}. @objectstack/spec FieldOperatorsSchema declares `
+      + `${op} as a boolean, and a non-boolean is refused rather than coerced, the rule $null and `
+      + `$exists follow on every query face. Write the boolean itself: "${op}": true matches rows `
+      + `whose "${field}" is empty, "${op}": false rows whose "${field}" is not empty. The filter `
+      + 'was NOT applied.'
+    );
+  }
   const [whenTrue, whenFalse] = op === '$null' ? ['has no value', 'has a value'] : ['has a value', 'has no value'];
   return (
     `Operator "${op}" on field "${field}" requires a boolean comparand (true or false). `

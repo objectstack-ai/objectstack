@@ -32,15 +32,16 @@ This scaffolds a working project with `objectstack.config.ts`, a sample object, 
 ### Add more metadata
 
 ```bash
-os generate object customer    # Add a Customer object
-os generate flow customer      # Add an automation flow on it
-os generate action customer    # Add an action on it that runs the flow
+os generate object customer                          # Add a Customer object
+os generate flow customer_changed --object customer  # Add an automation flow on it
+os generate action approve --object customer         # Add an action on it that runs the flow
 ```
 
 Each command writes a file and its export line, and the starter's config already
 wires every directory they write into, so all three are part of the stack. The
-flow and the action bind to the object named like them, which is why the object
-comes first: an action bound to an object the stack does not declare is refused.
+flow and the action bind to the object `--object` names, which is why the object
+comes first: a scaffold whose object the stack does not declare is refused, with
+nothing written. The action runs the stack's only flow.
 
 ### Launch the dev server
 
@@ -68,7 +69,7 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 </Callout>
 
 <Callout type="tip">
-`os dev --ui` starts a dev server with the bundled Console UI, auto-loads ObjectQL, an in-memory driver when appropriate, and the Hono HTTP server.
+`os dev --ui` starts a dev server with the bundled Console UI, auto-loads ObjectQL, a SQLite database (a persistent project file by default, a throwaway one with `--fresh`), and the Hono HTTP server.
 </Callout>
 
 ## Commands
@@ -180,9 +181,9 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 
 | Flag | Env equivalent | Purpose |
 |---|---|---|
-| `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
-| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` |
+| `-a, --artifact <path\|url>` | `OS_ARTIFACT_URL` / `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
+| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `:memory:` / `libsql://` / `postgres://` / `mongodb://` |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` |
 | `--database-auth-token <t>` | `OS_DATABASE_AUTH_TOKEN` | libsql/Turso token |
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
@@ -471,8 +472,8 @@ os start
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | File path or `http(s)://` URL to the compiled artifact |
 | — | `OS_ARTIFACT_URL` | Boot a published artifact **by reference**, optionally content-hash pinned via a `#sha256=` fragment. See [Artifact-pinned boot](/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url) |
-| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` when the URL is ambiguous |
+| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `:memory:` / `libsql://` / `postgres://` / `mongodb://` |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
 | `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` |
 | `--home <dir>` | `OS_HOME` | Home directory for persistent state (default `<cwd>/.objectstack` when an `objectstack.config.ts` is present, otherwise `~/.objectstack`) |
@@ -501,10 +502,24 @@ The fall-through applies to the **conventional** locations only. Remote
 (`http(s)://`) sources cannot be checked up front and are validated when fetched.
 </Callout>
 
+<Callout type="warn">
+**The in-memory (mingo) engine is not a boot store.** It refuses every
+tenant-scoped read, so a server booted on it signed you in and then answered
+`503` to every data request. Every boot command — `os dev`, `os start`,
+`os serve` and every `os migrate` subcommand — refuses it: the
+`--database-driver memory` flag value (rejected while the flags parse),
+`OS_DATABASE_DRIVER=memory` / `mingo` / `in-memory`, and a `memory://` or
+`mingo://` database URL, each with a message naming the replacement. Use SQLite
+instead: `os dev --fresh` for a throwaway database that is deleted on exit, or
+`--database :memory:` (`OS_DATABASE_URL=:memory:`) for SQLite's own in-memory
+database. A datasource you declare with `driver: 'memory'` still validates;
+as the project's **default** datasource it is refused at boot the same way.
+</Callout>
+
 **What it boots:**
 - Reads the artifact's `manifest`, `objects`, `views`, `flows`, …
 - Auto-registers the platform services declared in `requires: [...]` (e.g. `ai`, `automation`, `analytics`, `auth`, `ui`). Declaring a **service** capability (`automation`, `analytics`, `ai`, `audit`, …) is a *requirement*: if its provider package isn't installed, boot **fails fast** with a clear error instead of silently starting without a capability you asked for. (`auth` and `ui` are tier-gated with their own opt-in rules — `auth`'s secret-gated skip is described below.)
-- Auto-detects the driver from the database URL scheme (`memory://` → in-memory, `libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite)
+- Auto-detects the driver from the database URL scheme (`libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite; `:memory:` is SQLite's own in-memory database). `memory://` and `mingo://` are refused — see the callout above.
 - Runs standalone boot mode with one active environment.
 
 **Authentication:**
@@ -528,6 +543,13 @@ Reports the `sys_secret` rows no producer references any more, and — only behi
 `--delete` — removes the ones it can prove are the settings subsystem's to remove.
 **Report-only by default: without `--delete` it writes nothing and deletes nothing.**
 It is never run for you; nothing on any boot or upgrade path invokes it.
+
+The report boots your app read-only: no schema change, no seed rows, and a SQLite file
+that does not exist is not created. Pointed at a database that lacks `sys_secret` (one
+that was never booted, or the wrong `--database-url`), it does not read the table, since
+a table that does not exist holds no row: it reports nothing to act on, names the
+tables it did not read, and exits 0. Any other read it cannot make still refuses and
+exits 1 (under `--json`: `"error": "scan_failed"`).
 
 ```bash
 os secret orphans                                    # report (writes nothing)
@@ -571,6 +593,54 @@ named afterwards: the export carries the cipher material, is written owner-only,
 read back and checked before any row is removed. Keep it until you are certain.
 </Callout>
 
+#### `os secret rewrap`
+
+Re-wraps the `sys_secret` ciphertext sealed before secrets were bound to the producer
+that wrote them, so it carries the current binding (ADR-0128). Each row is re-sealed
+under the scope of the producer whose holder references it: a setting, an object's
+`secret` field, or a datasource credential. **A dry run by default: without `--apply`
+it writes nothing.** It is never run for you; nothing on any boot or upgrade path
+invokes it.
+
+```bash
+os secret rewrap --no-declared-datasources            # dry run (writes nothing)
+os secret rewrap --json --no-declared-datasources     # the same, machine-readable
+os secret rewrap --declared-datasources ./datasources.json
+os secret rewrap --apply --no-declared-datasources    # write the re-wrapped rows
+```
+
+**Options:**
+- `--apply` — write the re-wrapped rows (default off)
+- `--declared-datasources <path>` — JSON file (an array, or `{"datasources": [...]}`) of the datasource artefacts this host declares in code
+- `--no-declared-datasources` — state that this host declares none
+- `-y, --yes` — skip the confirmation prompt
+- `--database-url <url>`, `--json`
+
+Run it with the data key the deployment seals with (`OS_SECRET_KEY`, or the persisted
+key file). It never mints a key, and with none it refuses before opening any row.
+
+What a run guarantees:
+
+- **The scope comes from the holder, never from a guess.** A row that nothing
+  references, a row whose holders belong to different producers, and every row while a
+  holder family could not be read are **left as they are** and counted. Like
+  `os secret orphans`, it reads all three holder families, and a host that says nothing
+  about its code-declared datasources leaves that family a gap. `--apply` then refuses
+  and names the family.
+- **Resumable.** A row already sealed under the current binding is skipped as done. A run
+  that stopped part-way finishes the rest when re-run, and a finished run writes nothing.
+- **Safe against a live deployment.** Each row is written in one statement, and only if
+  it still holds the ciphertext the run read. A row a producer changed during the run is
+  not overwritten. It is counted, and a re-run picks it up.
+- **Fails closed.** A row that does not open, or whose re-seal does not open to the same
+  value under the same scope, is not written. The run finishes the rest and exits 1.
+
+The dry run opens, re-seals and verifies every attributed row in memory, so its counts
+are the ones `--apply` would produce. Output is classes and counts only: re-wrap,
+done, left (orphan, conflicting scope, union incomplete), refused (unreadable, unknown
+derivation, verify failed) and, under `--apply`, not written (changed during the run,
+write failed). It never prints a value, a ciphertext or a row id.
+
 ### Build & Validate
 
 | Command | Description |
@@ -604,8 +674,8 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (46)...
-  → Checking capability providers (#3366)...
+  → Running author-time rules (49)...
+  → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
 
@@ -627,17 +697,36 @@ The docs step reports what it collected, not what it attempted — a project who
 successful collection prints.
 
 Under an **ADR-0130 multi-package layout**, docs that moved into a package are
-collected too: a `src/<pkg>/docs/` directory whose `<pkg>` names one of the
+collected too: a `<pkg>/docs/` directory whose `<pkg>` names one of the
 artifact's declared `packages[]` entries is read into **that package's own
 body**, and the step line says so:
 `12 collected (4 from 2 package directories)`.
+The `<pkg>` directory is found from the packages the artifact registers, at
+**any depth** under `src/`: `src/<pkg>/docs/` and `src/packages/<pkg>/docs/`
+are one case, not two. The search descends through every directory whose name
+names none of the declared packages (never into `node_modules`) and **stops**
+at the first directory that names any of them. That directory is a package
+root and everything under it is that package's own source, so only its own
+`docs/` is read — a deeper `src/<pkg>/components/docs/` is neither read nor
+reported. A stack that declares no `packages[]` has nothing to search for: its
+docs are read from `src/docs/` alone, and a `src/<dir>/docs/` one level down
+is reported, not read.
 `<pkg>` is matched against two spellings of the package: its
 `id`, and the last dot-separated segment of that `id`. The display `name` is
 ⛔ not a directory key — it is free to be re-worded, and a docs binding a
-re-wording can break is worse than one that never existed. A directory
-that matches **none** of the declared packages, or **more than one**, is still
-not read — that case keeps the warning that names the files it skipped and the
-spellings it tried, so it is never a silent `0 collected`.
+re-wording can break is worse than one that never existed.
+Docs the search finds but cannot attribute unambiguously are still not read:
+each such `docs/` directory is reported in a warning that names the files it
+skipped, so it is never a silent `0 collected`. Three cases lead there:
+
+- a directory the search passes through, `src/packages/` itself included,
+  whose name matches **none** of the declared packages — the warning lists the
+  declared packages;
+- a directory whose name matches **more than one** declared package — the
+  warning names those packages;
+- one package that answers to **more than one** directory with Markdown in its
+  `docs/`, such as `src/core/docs/` beside `src/packages/core/docs/` — ⛔
+  neither is read and nothing is merged, and each warning names the others.
 
 The resulting `dist/objectstack.json` is a **portable, self-describing deployment unit** —
 you can hand it to `os start` (locally or on a server), publish it to a CDN, or fetch it
@@ -763,7 +852,8 @@ diverges from the live schema, and the physical column wins at write time.
 |---------|-------------|
 | `os migrate plan` | Dry-run: show how the database has drifted from metadata, categorised safe / needs-confirm / destructive (no changes applied) |
 | `os migrate apply` | Reconcile the database to metadata. Applies loosening changes; destructive ones require `--allow-destructive` |
-| `os migrate multi-value-columns` | Migrate a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — one of two drift ops `apply` never reconciles for you. Dry run by default; `--apply` runs the statement the finding prints |
+| `os migrate multi-value-columns` | Migrate a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — one of three drift ops `apply` never reconciles for you. Dry run by default; `--apply` runs the statement the finding prints |
+| `os migrate unmapped-columns` | Read the values of the columns `plan` reports as `unmapped_column` for one object, keyed by record id — the conversion route for a retired field's values before `apply --allow-destructive` drops its columns. Read-only, and operator-only: no runtime door serves these values |
 
 ```bash
 os migrate plan                              # Preview drift (no changes)
@@ -772,6 +862,7 @@ os migrate apply --yes                       # Skip the prompt (CI / scripts)
 os migrate apply --allow-destructive --yes   # Also drop orphaned columns, tighten NOT NULL, narrow types
 os migrate apply --force                     # Migrate even though another process is using the database
 os migrate plan --json                       # Machine-readable output
+os migrate unmapped-columns --object contact --json   # A retired field's stored values, keyed by record id (read-only)
 ```
 
 #### Nothing is written before you confirm
@@ -852,7 +943,7 @@ occupancy on its own.
 | Category | Examples | Applied by |
 |----------|----------|------------|
 | `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
-| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_widen_varchar_to_text`, which nothing applies |
+| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
 
 #### Index drift
@@ -865,6 +956,7 @@ occupancy on its own.
 | `replace_unique_index` | A field's `unique` used to be enforced installation-wide, but metadata now scopes it per organization — the legacy single-column index is swapped for the NULL-safe `(COALESCE(organization_id, '__global__'), field)` composite. A pure relaxation: it creates before it drops, and cannot fail |
 | `recreate_index` | An index exists under the declared name but with different columns/uniqueness. The additive sync skips it by name, so it must be dropped and rebuilt. This is also how a per-organization unique becomes NULL-safe: a **tightening**, so it runs a duplicate pre-flight probe first — rows the old NULL-distinct index wrongly admitted **block** the op with a report instead of failing a boot, and the old index stays in place until they are resolved |
 | `drop_index` | An index carrying ObjectStack's generated naming (`uniq_…` / `idx_…`) that metadata no longer declares |
+| `unbuildable_index` | Metadata declares an index whose key column can never exist: the name is not a field of the object (a misspelling), or it is a virtual `formula` field. Report-only, category `needs_confirm`: severity `error` for a `UNIQUE` index (the declared uniqueness is not enforced), `warning` for a plain one. `os migrate apply` never performs it — it reports the entry `skipped`. Fix the metadata: make every column in the index's `fields` a stored field, or remove the index. A column that is merely not added yet is pending `add_columns` work and is not reported |
 
 Orphan detection is deliberately limited to indexes ObjectStack itself
 generated. A hand-rolled covering index you added in `psql` is never reported as
@@ -887,7 +979,7 @@ it reconciles via a table rebuild (copy → swap) that preserves your data.
 
 #### `os migrate multi-value-columns`
 
-`os migrate apply` will **never** apply this drift op — and it isn't the only one: `manual_widen_varchar_to_text` (an unbounded text-family field left on a pre-existing `varchar` column) is also never applied, but has no `os migrate` subcommand of its own. This section covers the op that does.
+`os migrate apply` will **never** apply this drift op — and it isn't the only one: `manual_widen_varchar_to_text` (an unbounded text-family field left on a pre-existing `varchar` column) and `unbuildable_index` (see [Index drift](#index-drift)) are also never applied, and have no `os migrate` subcommand of their own. This section covers `manual_column_type_change`, the op that does.
 
 A field that gains `multiple: true` over a database that already exists keeps
 its old `varchar` / `text` column: the additive sync adds columns, and never
@@ -958,6 +1050,54 @@ hook or an integration already copied into some *other* single-value column is
 not something it looks for, and it is deliberately not something it will grow
 into: that repair is specific to what your automations did with the value.
 
+#### `os migrate unmapped-columns`
+
+Retiring a field leaves its column in the table: the additive sync never drops
+one, and `os migrate plan` reports it as `unmapped_column` until
+`os migrate apply --allow-destructive` does. In between, the values are still
+stored, and no runtime door serves them: a read or a write through the data API
+returns the object's declared fields only, and naming the column in `fields` is
+refused. When the values have to move into the field that replaced it, this is
+the read:
+
+```bash
+os migrate unmapped-columns --object contact                    # The columns, and every record's values
+os migrate unmapped-columns --object contact --json > out.json  # The same, for a conversion script
+os migrate unmapped-columns --object contact --max-records 1000000 --json
+os migrate unmapped-columns --object contact --database-url postgres://…
+```
+
+The conversion route is three steps: read the values with this command, write
+them into the declared fields with your own script, then run
+`os migrate apply --allow-destructive` to drop the columns.
+
+- **One column set.** It reads exactly the columns `os migrate plan` reports as
+  `unmapped_column` for that object's table: the same differ, the same boot.
+  Columns the differ never reports are never read either, such as the driver's
+  own `id`, `created_at` and `updated_at`.
+- **Operator-only and read-only.** It runs under the database credentials you
+  pass, and covers every organization's rows. There is no REST route or API
+  flag behind it. It boots the way `plan` does, so it writes nothing, and it
+  drops nothing.
+- **Values as stored.** An unmapped column has no declared type, so each value is
+  emitted as the database client returns it, with no field-type decoding: a
+  retired `json` field on SQLite reads as its stored text, a retired `boolean`
+  as `0` or `1`, and a retired `datetime` on PostgreSQL arrives as a date and is
+  emitted as its ISO 8601 text. A value JSON cannot carry as stored (binary
+  bytes, a `bigint`, or a non-finite number) is refused with exit 1, naming the
+  column and the record id, and no record is emitted; read that column with
+  the database's own client.
+- **Empty work, exit 0**, for an object with no unmapped column, or with no table
+  in this database yet. `--json` prints one document:
+  `{ object, table, columns, count, records: [{ id, values }] }`.
+- **Refused, exit 1**: an object name the deployment does not declare
+  (`OBJECT_NOT_FOUND`); an object `plan` does not diff (federated, or bound to
+  another datasource), whose empty answer would be unmeasured; a read that
+  cannot be complete, such as one stopped by `--max-records`; and a value JSON
+  cannot carry as stored, described above. A partial set is
+  never emitted, because a conversion over part of a table, followed by the
+  drop, loses the rest.
+
 #### Data migrations
 
 The commands above reconcile **schema**. A *data* migration rewrites rows, and
@@ -973,11 +1113,44 @@ where the data lives.
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes nothing at all; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
+**The boot itself writes nothing you did not ask for.** Each of these commands boots
+your app to read its metadata. Without `--apply`, that boot is read-only, the same boot
+`os migrate plan` takes: the schema sync is held back, the app's inline seed data is not
+loaded, and a SQLite file that does not exist is not created. With `--apply`, the boot
+creates missing tables and columns so the migration has somewhere to write, but it
+still loads no seed data: the only rows that change are the migration's own.
+One edge follows from the read-only boot: it finds out which tables the database lacks
+(a never-booted database, or the wrong `--database-url`) instead of creating them.
+A read-only data command does not read a table it found missing, since that table
+holds nothing, and answers with empty work and exit 0. `os migrate value-shapes` is
+clean over zero records and names the objects it did not read. `os migrate
+recorded-by` has nothing to convert and `os migrate resume` no interrupted runs.
+`os migrate meta --stored` has no stored metadata to examine, `os migrate
+audit-metadata-bodies` no audit copy to rewrite, and `os migrate account-issuer` no
+account to collide. `os secret orphans`, `os secret rewrap` and `os storage orphans`
+report no secret and no file. A read the command cannot avoid and that fails for any
+other reason still refuses and exits 1. Point `--database-url` at the deployment's
+database, or boot the deployment once first, to see what it holds.
+
+**`--object` narrows a run, and only a run over every object records a flag.**
+`files-to-references`, `value-shapes`, `summary-nulls` and `duplicates` take
+`--object` to restrict the run to the objects you name. `duplicates` takes one name,
+and the others are repeatable. A name your deployment does not declare is refused
+with `OBJECT_NOT_FOUND` and exit 1 before anything is read or written. The error
+names the unknown name and the declared objects, so a misspelling is never answered
+as a clean run over nothing. A narrowed `--apply` applies its fixes to the named
+objects. `files-to-references` and `value-shapes` then record **no** deployment flag,
+because the flag is a claim about every object's stored data and a narrowed run read
+only some. A narrowed `files-to-references` run does not move the media columns
+either. The output says so, a flag that an earlier full run recorded is left as it
+was, and `--json` carries `filter: { objects }`. Any `--object` narrows, even a list
+that names every object, so run the command without `--object` to record the flag.
+
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
 os migrate files-to-references --apply    # Convert, verify, record the flag (prompts)
 os migrate files-to-references --apply --yes --json   # CI / scripts
-os migrate files-to-references --object product       # Restrict to one object (repeatable)
+os migrate files-to-references --object product       # Restrict to one object (repeatable); records no flag
 ```
 
 A `file` / `image` / `avatar` / `video` / `audio` field value is an opaque
@@ -1030,7 +1203,7 @@ The same gate for the **non-media** value classes — references (`lookup`,
 os migrate value-shapes                    # Scan: full report, writes nothing
 os migrate value-shapes --apply            # Scan, then record the flag if clean (prompts)
 os migrate value-shapes --apply --yes --json   # CI / scripts
-os migrate value-shapes --object contact       # Restrict to one object (repeatable)
+os migrate value-shapes --object contact       # Restrict to one object (repeatable); records no flag
 ```
 
 **This one converts nothing.** Its sibling rewrites legacy file values because
@@ -1202,6 +1375,18 @@ can produce, because both supply a live one.
 | Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
 | A flow whose rename the conflict guard refused | The old node-type token is a live name something else owns here. Rewriting would clobber that owner, so the row fails loudly naming the token — never a silent skip |
 | A site the conversion chain leaves as stored because no lossless rewrite exists — above all a page filter carrying `$and` / `$or` / `$not` | Flattening a combinator changes which rows the page selects, so it is never done. Each site is printed as a `TODO` line under its row — path, block, and what blocks the rewrite — whatever the row's outcome; a row with nothing but TODOs is reported `skipped`. It does not fail the run, since no run of this pass can clear it: rewrite each site by hand |
+
+**One thing it lists and never writes: decision nodes that changed meaning at
+protocol 18.** A stored `decision` with no `config.conditions`, no `mode` and two
+or more out-edges carrying a `condition` took every out-edge whose condition held
+before protocol 18, and takes only the first one now. A stored row keeps that new
+meaning — the conversion that writes `mode: 'inclusive'` replays over authored
+sources only, where you assert the source's age, and nothing asserts a row's — so
+the report lists each such node under `decisionModeReview` (flow row, node id,
+label and path) for you to review before and after the upgrade, on a preview and
+an `--apply` run alike. The list changes no row, no count and no exit code. Where
+a node meant every branch, declare `mode: 'inclusive'` on it; declaring `mode`
+either way takes it off the list.
 
 **Flows are covered, and cost one extra plugin.** Flow-node conversions carry an
 open-namespace conflict guard that has to consult the *live* executor registry
@@ -1408,10 +1593,30 @@ either. A name in the legacy `<namespace>__<name>` form (`order__line`) is
 refused, because no prefix makes it one `os validate` accepts. The namespace is
 read from the loaded config, the same place `os validate` reads it from. If a
 config exists but does not load, the command refuses and writes nothing.
-Without a `namespace` (or without a config), nothing is prefixed. A view's own
-`name` is the object it binds to, prefix included, because the server registers
-a view under that object and refuses one whose `name` says otherwise. Nothing
-else a scaffold names (an action's, flow's or app's own `name`) is prefixed.
+Without a `namespace` (or without a config), nothing is prefixed. Nothing else a
+scaffold names (an action's, flow's or app's own `name`) is prefixed.
+
+**What a scaffold binds comes from you or from the stack, never from its
+name.** A `view`, `action`, `flow` or `app` scaffold refers to metadata the
+project already has, and each reference is checked against the stack the
+config loads before anything is written:
+
+- A **view** is named after the object it binds: `os g view customer` writes
+  the views of the object `os g object customer` writes, prefix included. The
+  container carries no `name` or `label` of its own (the server registers it
+  under its object), and its list shows every field the object declares, under
+  a `list.label` that `os lint` requires.
+- A **flow**, **action** or **app** binds the object you name with
+  `--object` — as declared (`my_app_customer`) or without the namespace prefix
+  (`customer`). Without `--object`, it binds the stack's only object.
+- An **action** runs the flow you name with `--flow`, or the stack's only flow.
+
+When the stack declares none, or several and you named none, or the one you
+named is not declared, the command refuses, lists what the stack does declare,
+and writes nothing: which object a scaffold acts on is yours to say. Outside a
+project (no config) a scaffold that binds is refused too, because there is no
+stack to check it against. `--object` and `--flow` on a type that takes neither
+are refused rather than ignored.
 
 **Every scaffold reaches the stack, or the command says it does not.** The
 `objectstack.config.ts` that `os init` writes for the `app` and `plugin`
@@ -1431,30 +1636,30 @@ After writing, `os g` loads the config again and says which of these holds:
   scaffolded in earlier releases do. The file is written, the config is left
   as it was, and the command prints the import and the `defineStack` key that
   wire the directory.
-- **Cannot run**: the stack carries a flow, and its `requires` lacks
-  `automation`. The config loads and the server never runs the flow. The
-  command prints the whole `requires` list to use.
 - **Refused**: the config loaded before the command wrote anything and no
-  longer loads with the new file in place, because the stack refuses it. Two
-  examples are an action or app bound to an object nobody declared, and a flow
-  in a stack without `triggers`. The command removes what it wrote, so the
-  project is as it was, and exits 1 with the stack's own reason. Generate the
-  object first (`os g object customer`), then what binds to it.
+  longer loads with the new file in place, because the stack refuses it — for
+  example a flow in a stack whose `requires` lacks `triggers` or `automation`
+  (`defineStack` refuses a record-change flow without both). The command
+  removes what it wrote, so the project is as it was, and exits 1 with the
+  stack's own reason. Declare `requires: ['automation', 'triggers']` before
+  `os g flow`.
 
 `os g` never edits `objectstack.config.ts`: the config is yours, and the
 command only loads it.
 
 ```bash
-os g object customer        # Generate a Customer object
-os g view customer          # Generate a Customer list view
-os g action customer        # Generate an action on Customer records
-os g flow customer          # Generate a flow that runs when a Customer changes
-os g dashboard sales        # Generate a dashboard
-os g app customer           # Generate an app whose navigation opens Customer
-os g skill lead_qual        # Generate an AI skill
+os g object customer                          # Generate a Customer object
+os g view customer                            # Generate the Customer list view
+os g flow customer_changed --object customer  # Generate a flow that runs when a Customer changes
+os g action approve --object customer         # Generate an action on Customer records that runs the flow
+os g dashboard sales                          # Generate a dashboard
+os g app sales --object customer              # Generate an app whose navigation opens Customer
+os g skill lead_qual                          # Generate an AI skill
+os g picklist industry                        # Generate a shared option list select fields name
 
-os g object task -d lib/    # Override target directory
-os g object task --dry-run  # Preview without writing
+os g action escalate --object customer --flow customer_changed_flow  # Name the flow when there are several
+os g object task -d lib/                      # Override target directory
+os g object task --dry-run                    # Preview without writing
 ```
 
 **Available types:**
@@ -1468,6 +1673,7 @@ os g object task --dry-run  # Preview without writing
 | `dashboard` | `src/dashboards/` | `NAME.dashboard.ts` | `dashboards` | Analytics dashboard |
 | `app` | `src/apps/` | `NAME.app.ts` | `apps` | Application navigation |
 | `skill` | `src/skills/` | `NAME.skill.ts` | `skills` | AI skill — the ADR-0063 extension primitive |
+| `picklist` | `src/picklists/` | `NAME.picklist.ts` | `picklists` | Shared option list that select fields reference by name |
 
 <Callout type="info" title="Why generated files carry a type infix">
 Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
@@ -1521,10 +1727,12 @@ the rules a JSON Schema can express and names the rest under
 **Options:**
 - `-d, --dir <directory>` — Override target directory
 - `--dry-run` — Preview without writing files
+- `--object <object>` — The object a `flow`, `action` or `app` binds; default: the stack's only object
+- `--flow <flow>` — The flow an `action` runs; default: the stack's only flow
 
 **What it does:**
-1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it (see above)
-2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
+1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
+2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`
 
@@ -1581,6 +1789,7 @@ emits a scoped, publishable `@objectstack/plugin-<name>`, and it lands under
 | Command | Description |
 |---------|-------------|
 | `os lint [config]` | Every author-time gate `validate`/`build` run, plus style and convention checks |
+| `os verify` | The author-time rules `validate` runs, then boot the app in-process and verify it through the real HTTP stack |
 | `os test [files]` | Run Quality Protocol test scenarios against a running server |
 | `os doctor` | Check development environment health |
 
@@ -1646,6 +1855,69 @@ the flag was in effect), `failing` (the count the exit code was read from —
 `errors`, or `errors + warnings` under `--strict`) and `passed` (`failing` is
 `0` — the same statement the exit code makes).
 
+#### `os verify`
+
+The done-bar: `os verify` green means the author-time rules pass **and** the
+app behaves at runtime. It runs two stages, in order, and the second starts
+only when the first passes.
+
+```bash
+os verify                                      # Author-time rules, then CRUD round-trip fidelity
+os verify --app ./objectstack.config.ts --rls  # Also prove the cross-owner RLS invariant
+os verify --rls --multi-tenant --json          # Org-scoped boot, structured report
+```
+
+1. **Author-time rules.** The rule registry `os validate` runs, over the stack
+   prepared the way `os validate` prepares it: normalized, inline handlers
+   lowered, parsed against the protocol schema, and judged whole and then once
+   per package of a multi-package artifact. A stack that does not parse, or
+   that any gating rule refuses, fails the run here with those findings — the
+   same ones `os validate` reports — and the app is never booted. Advisories
+   (`warning` and `info` findings) never fail `os verify`; the text face counts
+   them, and `os validate` prints them. This stage is the rule registry, not all
+   of `os validate`: the `defineStack` provenance refusal (a config whose
+   default export `defineStack` did not build, `STACK_PROVENANCE_MISSING`), the
+   package-docs lint, the capability-provider check, the picklist-reference and
+   view-container-name checks and `--strict` stay `os validate`'s, so run it
+   too.
+2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
+   stack: for each object, a record derived from its fields is created, read
+   back and compared (CRUD round-trip fidelity), and a create, read or
+   fidelity failure fails the run. With `--rls`, a second fresh boot proves the
+   cross-owner invariant — a member must not write what it cannot read — for a
+   probe persona and for one persona per declared position, and a hole fails
+   the run. `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
+   apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
+   `group`) asks for the same boot.
+
+The config is the one `--app` names, or the auto-detected one — see
+[Config File Auto-Detection](#config-file-auto-detection).
+
+**Exit status.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | Both stages passed: no gating author-time finding, and no runtime failure |
+| `1` | The author-time stage refused the stack (the runtime stage did not run), the runtime stage found failures, or the command could not run at all (no config found, a config that does not load, a boot failure) |
+
+**`--json`.** stdout carries exactly one JSON document and nothing else, so
+`os verify --json > report.json` leaves a file `JSON.parse` reads whole. Every
+other line the run produces — the booted stack's log records, warnings
+included, and its boot and shutdown lines — goes to stderr; none is dropped.
+Without `--json`, those lines stay on stdout beside the text report. What the
+document carries depends on where the run ended:
+
+- **Refused by the author-time stage:** `{ "error": "<sentence>", "errors": [...] }`,
+  where `errors` carries the findings in the shape `os validate --json` carries
+  them under `errors` — the gating findings (`severity`, `rule`, `where`,
+  `path`, `message`, `hint`, plus `package` for a finding raised inside one
+  package of the artifact), or the schema issues when the stack does not parse.
+- **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
+  `crud`, `rls` (with `--rls`) and `hardFailures`, the count the exit status is
+  read from.
+- **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
+  when the failure carries them.
+
 #### `os test`
 
 Runs Quality Protocol test scenarios (JSON-based BDD) against a running ObjectStack server.
@@ -1704,9 +1976,38 @@ out are **deselected**: not run, counted on the summary
 and never counted as passed. A listed tag that no loaded scenario carries is named
 on the summary, since a typo narrows the run without failing it, and an empty entry
 (`--tags smoke,`) is refused before anything runs. Without the flag every scenario
-runs. A scenario's `requires` block is **not checked**: a scenario that names a
-plugin the target does not load still runs, and the unmet requirement surfaces
-only as whatever failure it causes, if any — the scenario can still pass.
+runs.
+
+**A scenario's `requires` is checked before its first step.** Two keys, each
+judged against something `os test` can observe:
+
+- `requires.params` — environment variables that must be set to a non-empty
+  value **in the process running `os test`** (not on the target server, which a
+  suite cannot see): `"params": ["BILLING_SANDBOX_KEY"]`.
+- `requires.services` — service keys the target must declare in its discovery
+  document as `enabled` with status `available`, read from the same discovery
+  request the runner already makes once per run: `"services": ["ai", "analytics"]`.
+  The keys are the discovery service names (`auth`, `automation`, `storage`, …),
+  and a misspelled one is refused when the suite loads.
+
+A scenario with an unmet entry is **skipped**: none of its steps runs — `setup`
+included — and its line says why, naming every unmet entry and, for a service,
+the services the target does declare available:
+
+```text
+  ⏭️  Scenario: Summarise an account with the AI service [ai-summary] (skipped)
+     Skipped: requires.services 'ai' is not available on the target (enabled: false, status: unavailable). The target declares available: auth, data, metadata.
+```
+
+A skipped scenario is counted on its own —
+`SUCCESS: 3 scenarios passed. 1 skipped (not run, not counted as passed).` — and
+is never counted as passed. Skips alone do not fail a run, but a run in which
+**every** selected scenario was skipped proved nothing: it prints
+`No scenario ran: all 2 selected scenarios were skipped on unmet requirements.`
+instead of `SUCCESS`, exits **0**, and exits **1** under `--fail-on-empty`. The
+retired `requires.plugins` is refused when the suite loads, with the plugin →
+service mapping in its message: no served surface lists loaded plugins, so it
+was never checkable, and `requires.services` asks the question it stood for.
 
 **A pattern that matches no suite is not a failure by default.** The run prints
 `Found 0 test suites.` — the same machine-readable line a full run prints, so a
@@ -2020,13 +2321,13 @@ when both files' `url`s agree.
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
 | `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
-| `--visibility <level>` | — | `org` (default, installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review) |
+| `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectStack Cloud) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
 | `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
 | `--seed-sample-data` | — | Include sample data in that auto-install |
 | `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |
-| `--submit` | — | Submit the new version for marketplace review. Needs `--visibility marketplace` and a complete listing |
+| `--submit` | — | Submit the new version for marketplace review. Needs the package's visibility to be `marketplace` (already stored, or set with `--visibility marketplace`) and a complete listing |
 | `--auto-approve` | — | Platform admin only: skip the review queue and publish straight to the public catalog |
 | `--readme <markdown>` | — | Inline marketplace README. Mutually exclusive with `--readme-file` |
 | `--readme-file <path>` | — | README file, read at publish time. Mutually exclusive with `--readme` |
@@ -2233,7 +2534,7 @@ os g object contact
 os g object opportunity
 
 # 3. Add business logic: a flow that runs when an opportunity changes
-os g flow opportunity
+os g flow opportunity_changed --object opportunity
 
 # 4. Validate everything: each file `os g` wrote is counted and checked
 os validate

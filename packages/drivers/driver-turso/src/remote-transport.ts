@@ -34,6 +34,10 @@ import {
 // on what a pattern means (the fork `turso-local-remote-*` suites exist to catch).
 // [#20041] And the U+0000 gate beside the dangling-escape one.
 import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion — the field's declared row of
+// the ruled 「is empty」 table (ruling A on #20399, record 5865693155), asked of
+// the spec per compile rather than restated here.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark's consumer half — same resolution the
 // SqlDriver family applies, so which transport answered stays unobservable.
 import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
@@ -42,6 +46,19 @@ import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+// [#21178] The JSON-column half of the filter contract, from the one home both
+// faces of this driver stand on: the operator set a JSON-stored column refuses
+// and the words of that refusal (`json-column-operator-refusal.ts`), and the
+// `$contains` membership construct (`json-membership-sql.ts`). `SqlDriver` —
+// this driver's LOCAL face — reads the same three, so the two faces cannot fork
+// on which operators a JSON column refuses, what the refusal says, or what
+// `$contains` means there. ⛔ Never a copy of any of them in this file.
+import {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS,
+  jsonColumnOperatorRefusalText,
+  jsonMembershipPredicate,
+  type JsonColumnFieldClass,
+} from '@objectstack/core';
 // [#8413] What a `unique: true` FIELD becomes, from the one place that decides
 // it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
 // field-level uniqueness becomes an index, so the create-table, alter-table,
@@ -206,6 +223,11 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$ilike',
   '$null',
   '$exists',
+  // [#20444] The staged emptiness flag, declared by `FieldOperatorsSchema` and
+  // compiled here by the field's declared row — listed for the reason `$like`
+  // is: the LOCAL twin compiles it, and a transport refusing what its own local
+  // mode answers is the fork the `turso-local-remote-*` suites exist to prevent.
+  '$empty',
 ] as const;
 
 /**
@@ -365,236 +387,6 @@ function isFilterNode(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
-}
-
-// ── [#5146 / #5298] NULL-safe negation ───────────────────────────────────────
-//
-// The THIRD implementation of one ruling, and deliberately so. `driver-sql`
-// carries it as `nullSafeNegationOperand` (a module-private function over a
-// knex builder's operand) and `service-analytics`'s `read-scope-sql.ts` carries
-// it a second time for the RLS read lowering; that file's header records why a
-// copy was preferable to an import, and the same two reasons hold here:
-//
-//  1. **This module imports no driver.** Its header states it outright — "No
-//     local SQLite or Knex dependency" — and `driver-sql`'s entry point pulls in
-//     knex. The one exportable piece is not the emitter, it is the RULING.
-//  2. **Each polarity table is matched to its OWN emitter, not copied from
-//     another one.** `read-scope-sql` reads `$null`/`$exists` by truthiness
-//     because its emitter writes `val ? … : …`; `driver-sql` reads them by
-//     identity against `false` because its emitter does. This transport reads
-//     them by identity too — see the two arms below — because that is what
-//     `buildWhereSQL` emits. The invariant is the agreement of guard with
-//     emitter, not the sameness of the source text.
-//
-// What holds the three to one answer is not their text but the shared case
-// table: `FILTER_LOGIC_CASES` runs the `$ne` and `$not` rows through all eleven
-// harnesses, and `turso-local-remote-null-parity.test.ts` in this package runs
-// the same filters through BOTH faces of this driver — which is the divergence
-// #5903 actually was.
-
-/**
- * What one field constraint needs so its compiled SQL is TOTAL — TRUE or FALSE
- * for every row, never UNKNOWN.
- *
- * - `'none'`         — already total (`IS NULL` / `IS NOT NULL`), or a shape
- *                      this compiler refuses outright, which must keep refusing.
- * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
- * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
- */
-type NullGuard = 'none' | 'requireValue' | 'allowNull';
-
-/**
- * Does a NULL column satisfy this one operator, under the semantics #5146 and
- * #5298 ruled canonical — the two-valued answer the JS backends (`driver-memory`
- * `match`, `formula` `matchesFilterCondition`) give a value that is not there?
- *
- * The default is the large positive-comparison family (`$gt`, `$in`,
- * `$contains`, `$icontains`, `$startsWith`, `$endsWith`, and any operator this
- * transport refuses outright), every member of which answers `false` for a value
- * that is not there.
- */
-function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
-  switch (op) {
-    // `$eq: null` IS the null predicate (the emitter writes `IS NULL`); any
-    // other comparand is a value test a NULL column fails.
-    //
-    // [#6050] The `|| value === undefined` half is GONE from both arms. It was
-    // correct while this transport COMPILED an undefined comparand to the null
-    // predicate — the table pinned its own emitter, which is the #5298
-    // invariant — and it is wrong now that the comparand is refused before
-    // either runs: the emitter arms below dropped their `undefined` half in the
-    // same edit, so guard and emitter still read the identical value set. This
-    // is deliberately not "harmless extra tolerance": a spelling that keeps
-    // answering for a value nobody ruled on is exactly what #5347 tightened out
-    // of `driver-sql`'s `$null` arm, and it is what let this family diverge.
-    case '$eq': return value === null;
-    // Mirror image: `$ne: null` compiles to `IS NOT NULL`, which a NULL fails.
-    // This is the polarity-by-COMPARAND rule #5298 is explicit about — `$ne`
-    // does not get one answer because of its name.
-    case '$ne': return value !== null;
-    // Read by IDENTITY, matching this transport's emitter, and total over the
-    // declared domain because both comparands are now refused unless boolean
-    // (`$null` since #1116/#5347, `$exists` since #5903 — see
-    // {@link RemoteTransport.nonBooleanExistsComparand}).
-    case '$null': return value === true;
-    // `$null: true` and `$exists: false` are the same question, so these two
-    // arms are each other's MIRROR, not each other's copy.
-    case '$exists': return value === false;
-    // Negative-polarity set / substring tests hold vacuously for an absent
-    // value — the #5298 half of the ruling.
-    case '$nin': return true;
-    // `$notContains` is the one operator the two JS backends disagree on for a
-    // null-valued field (`driver-memory` answers false because `typeof null !==
-    // 'string'`; `formula` answers true). `formula` is followed because
-    // `driver-sql` follows it, so this transport casts no vote on a
-    // disagreement that is filed elsewhere.
-    case '$notContains': return true;
-    default: return false;
-  }
-}
-
-/** Is this operator's compiled SQL already total for a NULL column? */
-function operatorIsNullTotal(op: string, value: unknown): boolean {
-  switch (op) {
-    // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
-    case '$null':
-    case '$exists':
-      return true;
-    // A null comparand makes these null PREDICATES too, not comparisons — see
-    // the `$eq` / `$ne` arms of the emitter. [#6050] `undefined` dropped here
-    // for the reason given on {@link nullValueSatisfiesOperator}'s twin arms:
-    // it is refused upstream, so the two tables and the emitter read one set.
-    case '$eq':
-    case '$ne':
-      return value === null;
-    default:
-      return false;
-  }
-}
-
-/**
- * The guard one field constraint needs. A constraint is the AND of its
- * operators, so it is total when every operator is, and a NULL column satisfies
- * it only when it satisfies all of them.
- */
-function nullGuardForFieldSpec(spec: unknown): NullGuard {
-  // `{ field: null }` compiles to `IS NULL` — already total.
-  //
-  // [#6050] `undefined` no longer shares this arm. The old comment's reasoning
-  // ("this transport's field arm reads it as the null predicate, and a guard
-  // classified from another emitter's reading would contradict what this one
-  // emits") was right about the invariant and has simply run out of subject:
-  // the field arm no longer reads it as anything, because
-  // {@link RemoteTransport.assertDefinedComparands} refuses it before this
-  // classification runs.
-  if (spec === null) return 'none';
-  // A scalar / Date is an implicit `=`; a NULL column fails it. A bare array is
-  // REFUSED by `serializeComparand`; classifying it here keeps that refusal
-  // reachable — the unrewritten `{field: […]}` conjunct still throws its own
-  // message.
-  if (typeof spec !== 'object' || isBindableObjectComparand(spec) || Array.isArray(spec)) return 'requireValue';
-  const entries = Object.entries(spec as Record<string, unknown>);
-  // `{ field: {} }` is refused by {@link RemoteTransport.emptyFieldFilter} and a
-  // non-`$` key by {@link RemoteTransport.unsupportedOperator}. Passing them
-  // through unrewritten is what preserves the exact message; wrapping them in a
-  // guard would only change which error the caller reads.
-  if (entries.length === 0) return 'none';
-  let total = true;
-  let nullSatisfies = true;
-  for (const [op, value] of entries) {
-    if (!operatorIsNullTotal(op, value)) total = false;
-    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
-  }
-  if (total) return 'none';
-  return nullSatisfies ? 'allowNull' : 'requireValue';
-}
-
-/**
- * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
- * predicate — which is what makes `NOT (…)` mean here what it means in
- * `driver-memory`, `formula`, `driver-sql` (since #5296) and this driver's own
- * LOCAL transport.
- *
- * # The defect
- *
- * SQL is three-valued: `NULL = 'won'` is UNKNOWN, `NOT UNKNOWN` is still
- * UNKNOWN, and a `WHERE` keeps only TRUE — so `{ $not: { stage: 'won' } }`
- * dropped every row whose `stage` is NULL. Measured on `origin/main`
- * (2026-08-06) against the shared fixture: LOCAL answered `['2','3','4']` and
- * REMOTE `['2']`, for one filter whose only difference was the `url` it was sent
- * to. On a CEL `!expr` read scope lowered by `cel-to-filter.ts` that is not a
- * count that differs — it is the SAME permission rule admitting a different set
- * of rows per connection mode.
- *
- * # Why the guard rides the LEAF, not the `NOT`
- *
- * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
- * NULL` are the same predicate. They stop being the same as soon as the operand
- * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
- * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
- * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
- * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
- * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
- *
- * # Why polarity is per operator
- *
- * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
- * `{ $not: { a: { $ne: 5 } } }` means "a is 5", and both JS backends exclude a
- * NULL row from it. Adding an unconditional null escape there would hand back
- * exactly the rows the filter excludes. So each leaf is guarded in the direction
- * its OWN operator answers, per {@link nullValueSatisfiesOperator}.
- *
- * # Why it is expressed as a filter TREE, not as SQL
- *
- * The guards are emitted as ordinary `$null` constraints inside `$and` / `$or`
- * nodes and handed back to {@link RemoteTransport.buildWhereSQL}, so every
- * parenthesis is the one that compiler already writes for a combinator. This
- * transport joins a node's keys with a bare ` AND `; a hand-built `col IS NULL
- * OR …` spliced into that list would bind LOOSER than the AND and silently widen
- * the whole filter — the trap #5298's own driver-side twin records. Compiling
- * the guard as structure makes that unrepresentable.
- *
- * A non-node `$and` / `$or` element is passed through untouched so
- * {@link RemoteTransport.buildSubFilterSQL} still refuses it by name (#1073),
- * and a nested `$not` is left alone because its own branch totalises its
- * operand — `NOT <total>` is itself total, so recursing would stack a redundant
- * guard on the same column.
- */
-function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const guarded: unknown[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
-      out[key] = value.map((element) =>
-        isFilterNode(element) ? nullSafeNegationOperand(element) : element,
-      );
-      continue;
-    }
-    if (key.startsWith('$')) {
-      // `$not` (totalised by its own branch) and anything else `$`-prefixed keep
-      // whatever this transport does with them today — the rewrite rules on
-      // NULL, not on the operator vocabulary, and an undeclared combinator must
-      // still reach the #5769 gate that refuses it.
-      out[key] = value;
-      continue;
-    }
-    const guard = nullGuardForFieldSpec(value);
-    if (guard === 'none') {
-      out[key] = value;
-    } else if (guard === 'requireValue') {
-      // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
-      guarded.push({ [key]: { $null: false } }, { [key]: value });
-    } else {
-      // `col IS NULL OR (…)` — ONE conjunct, so the OR binds tighter than the
-      // AND this node's keys form.
-      guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: value }] });
-    }
-  }
-  if (guarded.length > 0) {
-    const existing = Array.isArray(out.$and) ? out.$and : [];
-    out.$and = [...existing, ...guarded];
-  }
-  return out;
 }
 
 /** How long a refused comparand may be echoed back in an error message. */
@@ -929,7 +721,7 @@ function undeclaredAggregateFunctionError(func: string): Error {
     `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
     `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
     `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
-    `not a gap in this one (#5907).`,
+    `not a gap in this one.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -968,7 +760,7 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -995,7 +787,7 @@ function refuseDistinctAggregateWithoutField(func: string): never {
   const err = new Error(
     `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
     `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
-    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -1052,7 +844,7 @@ function refusePerAggregationFilter(alias: string): never {
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (Turso remote transport). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -1089,7 +881,7 @@ function refuseDateBucketedGroupBy(granularity: string): never {
     `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
     `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
     `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
-    `in memory for every granularity absent from it, which is always correct (#6212).`,
+    `in memory for every granularity absent from it, which is always correct.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -1129,6 +921,62 @@ export type FilterColumnSqlResolver = (
  * published type for prose.
  */
 export type NonTextColumnResolver = (object: string, field: string) => boolean;
+
+/**
+ * [#20444] A field's DECLARED value shape — its `type` and `multiple`, the
+ * slice `expandEmptyOperator` reads — or `undefined` when the declaration is
+ * not held. Injected by TursoDriver exactly the way
+ * {@link NonTextColumnResolver} is, and answered from the same registration
+ * (`registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject` fills
+ * `SqlDriver.valueShapeFields`), so this transport and its local twin read one
+ * declaration. Absent (a transport driven standalone), every field reads as
+ * undeclared and `$empty` is refused rather than guessed.
+ */
+export type DeclaredValueShapeResolver = (object: string, field: string) => ValueShapeFieldDef | undefined;
+
+/**
+ * [#21178] Is this field stored as a JSON TEXT column — a `multiple: true`
+ * field, an inherently multi-value option type, or a structured-JSON type?
+ * Injected by TursoDriver exactly the way {@link NonTextColumnResolver} is, and
+ * answered by `SqlDriver.isJsonColumn` from the `jsonFields` registry that
+ * `registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject` fills in
+ * remote mode — the registry the LOCAL face's gate and membership reading ask —
+ * so this transport and its local twin read one population. ⛔ Never re-derived
+ * here from a field's type: that would be a second list of "which columns are
+ * JSON" beside the driver's, drifting on its aliases and on the ADR-0104 media
+ * deployment fact. Absent (a transport driven standalone), every column reads
+ * as not-JSON — the local face's own answer for a table it was never told
+ * about — and the gate and the membership reading stay off.
+ *
+ * [#21236] It answers WHICH class of JSON column the field is, or `undefined`
+ * when it is not one, from `SqlDriver.jsonColumnFieldClass`: the same
+ * registry, with the class beside it. The refusal's reason and repair turn on
+ * the class. Remote mode never moves its media columns, so a single-value
+ * file-class field is a JSON column here on every deployment, and it reads
+ * `'single-value-media'` exactly as it does on the local face inside the
+ * ADR-0104 window. A yes/no answer would leave this face printing the
+ * `$contains` repair for it, which answers no rows there.
+ */
+export type JsonColumnResolver = (object: string, field: string) => JsonColumnFieldClass | undefined;
+
+/**
+ * [#21226] The caller's tenant scope, as ONE compiled predicate: a SQL
+ * fragment and its bind values, which a scoped door ANDs onto its own `WHERE`.
+ *
+ * The driver builds it, and this class never decides it. `TursoDriver` asks the
+ * local face's own chokepoint, `SqlDriver.applyTenantScope`, for the predicate
+ * and hands over what that compiles to: the NULL-organization arm, the `group`
+ * posture's membership set, and the no-tenant-context exit are all that
+ * method's. This class is told WHICH rows, not WHY, as with the upsert `fence`
+ * (#21185). Absent means the call carries no scope (no tenant context, or no
+ * tenant column), and the statement is the one it was before.
+ */
+export interface RemoteTenantScope {
+  /** A self-contained boolean SQL expression with `?` placeholders. */
+  readonly sql: string;
+  /** The values for the fragment's placeholders, in order. */
+  readonly args: readonly unknown[];
+}
 
 /**
  * Remote transport that executes all queries via @libsql/client.
@@ -1172,6 +1020,20 @@ export class RemoteTransport {
   private nonTextColumn: NonTextColumnResolver | null = null;
 
   /**
+   * [#20444] The driver's declared value shape for a field — see
+   * {@link setDeclaredValueShapeResolver}. Absent means "no declaration is
+   * held", and `$empty` is refused rather than answered by a guessed row.
+   */
+  private declaredValueShape: DeclaredValueShapeResolver | null = null;
+
+  /**
+   * [#21178] The driver's JSON-column rule — see {@link setJsonColumnResolver}.
+   * Absent means "no column is known to be JSON", which is what this transport
+   * could say before it was handed the rule.
+   */
+  private jsonColumn: JsonColumnResolver | null = null;
+
+  /**
    * [#7929] Where the withheld half of a redacted refusal is written.
    *
    * This class owns no logger — it never has — and #7929 is not the card that
@@ -1212,6 +1074,13 @@ export class RemoteTransport {
    * class for the same reason: every query keeps answering, correctly, while
    * each one scans the table — nothing is visibly wrong, and the cost arrives
    * as read volume.
+   *
+   * [#20537] A declared index SKIPPED because a key column never materialized
+   * (a misspelt name, a virtual `formula` field) is the same class again, one
+   * step earlier: {@link buildDeclaredIndexDDL} plans no DDL for it at all, so
+   * the constraint (or the access path) is missing for the same reason and with
+   * the same outward look. The local face logs that skip through
+   * `SqlDriver.logDurabilityFailure`, so this face reports it here.
    *
    * Absent, the degradation is not lost: {@link retrofitDeclaredIndexes} still
    * skips the index, and a missing UNIQUE resurfaces as the enveloped refusal
@@ -1321,6 +1190,37 @@ export class RemoteTransport {
   }
 
   /**
+   * [#20444] Hand this transport the driver's declared value shape per field,
+   * so `$empty` compiles the field's declared row of the ruled table
+   * ({@link pushEmptyOperator}). Same shape as
+   * {@link setNonTextColumnResolver} and for the same reason: the declaration
+   * lives on the driver, and this transport asks rather than re-deriving a row
+   * from a value it will only see at run time.
+   */
+  setDeclaredValueShapeResolver(resolver: DeclaredValueShapeResolver): void {
+    this.declaredValueShape = resolver;
+  }
+
+  /**
+   * [#21178] Hand this transport the driver's answer to "is this field stored
+   * as a JSON TEXT column?", so {@link buildWhereSQL} applies the JSON-column
+   * half of the filter contract exactly as `SqlDriver` does locally: the
+   * operators in `JSON_COLUMN_INCOMPATIBLE_OPERATORS` are refused on such a
+   * column ({@link jsonColumnOperator}), and `$contains` / `$notContains` answer
+   * MEMBERSHIP rather than a substring of the serialization
+   * ({@link pushJsonMembership}). Same shape as
+   * {@link setNonTextColumnResolver} and for the same reason: the declaration
+   * lives on the driver, and this transport asks rather than re-deriving it.
+   *
+   * [#21236] The answer is the column's CLASS, or `undefined` for a column that
+   * is not JSON, so the refusal can word the class's repair
+   * ({@link JsonColumnResolver}).
+   */
+  setJsonColumnResolver(resolver: JsonColumnResolver): void {
+    this.jsonColumn = resolver;
+  }
+
+  /**
    * Get the current @libsql/client instance.
    */
   getClient(): Client | null {
@@ -1370,11 +1270,33 @@ export class RemoteTransport {
   // ===================================
   // CRUD Operations
   // ===================================
+  //
+  // [#20107] Every data method below takes the OBJECT and the TABLE apart.
+  //
+  // `object` is the API name the caller asked for. The driver's rules are keyed
+  // by it (`filterColumnSql`, `nonTextColumn`), and every refusal names it,
+  // because it is the caller's own word. `table` is the physical table the
+  // statement is compiled against, which `TursoDriver` resolves the way
+  // `SqlDriver.getBuilder` resolves it for the local face: a federated
+  // object's `external.remoteName` (ADR-0015), otherwise the object's own name.
+  // Omitted, the object is its own table, which is true of every managed
+  // object and of every call a transport driven standalone receives.
+  //
+  // The two used to be one argument, so on this face a federated object was
+  // read from, and written to, a table named after the object. The remote
+  // table it declared was never reached. Every door but `aggregate` failed with
+  // the backend's own `no such table`, and `aggregate` answered an empty list,
+  // while the local face of the same driver answered from the mapped table.
 
-  async find(object: string, query: any): Promise<Record<string, unknown>[]> {
+  async find(
+    object: string,
+    query: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
 
-    const { sql, args } = this.buildSelectSQL(object, query);
+    const { sql, args } = this.buildSelectSQL(object, query, table, scope);
 
     try {
       const result = await this.client!.execute({ sql, args });
@@ -1395,16 +1317,40 @@ export class RemoteTransport {
         // real rows still come back; the unknown field is simply absent from
         // each row (it never existed). Mirrors the SqlDriver backstop — the
         // remote Turso path overrides find(), so it needs its own copy.
+        //
+        // [#20424] The copy now has the local ladder's two rungs and its
+        // terminal. The rungs, in `SqlDriver.findRows`' order: the projection
+        // first, then the ORDER BY (#3821: rows matter more than their order),
+        // each rebuilt with the caller's WHERE, which neither rung may drop.
+        // The terminal was `return []` here, on both the no-rung path and a
+        // failed rung, so an unresolvable column in the WHERE, or an ORDER BY
+        // on a column the table lacks, read as "there are no rows". The local
+        // face answers the first with `INVALID_FILTER` / 400 (#8790) and the
+        // second with its rows, unordered. Now the last error leaves this
+        // method as the backend raised it, and `TursoDriver` classifies it
+        // with the local face's own read-exit seam. The refusal and its code
+        // are the driver's, not this transport's.
+        const rungs: any[] = [];
         if (query?.fields && Array.isArray(query.fields) && query.fields.length > 0) {
+          rungs.push({ ...query, fields: undefined });
+        }
+        if (Array.isArray(query?.orderBy) && query.orderBy.some((item: any) => item?.field)) {
+          rungs.push({ ...query, fields: undefined, orderBy: undefined });
+        }
+        let lastError: unknown = error;
+        for (const rung of rungs) {
           try {
-            const fallback = this.buildSelectSQL(object, { ...query, fields: undefined });
+            // [#21226] Each rung keeps the tenant scope, as it keeps the WHERE.
+            const fallback = this.buildSelectSQL(object, rung, table, scope);
             const result = await this.client!.execute({ sql: fallback.sql, args: fallback.args });
             return this.mapRows(result);
-          } catch {
-            return [];
+          } catch (rungError) {
+            // The next, broader rung. The last one to fail names the column
+            // the WHERE still holds, once the projection and the sort are gone.
+            lastError = rungError;
           }
         }
-        return [];
+        throw lastError;
       }
       throw error;
     }
@@ -1421,9 +1367,14 @@ export class RemoteTransport {
    * missing. Neither the contract nor any caller outside these tests spelled it
    * that way, so the branch is gone here too: one driver, one spelling.
    */
-  async findOne(object: string, query: any): Promise<Record<string, unknown> | null> {
+  async findOne(
+    object: string,
+    query: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown> | null> {
     if (query && typeof query === 'object') {
-      const results = await this.find(object, { ...query, limit: 1 });
+      const results = await this.find(object, { ...query, limit: 1 }, table, scope);
       return results[0] || null;
     }
 
@@ -1440,7 +1391,12 @@ export class RemoteTransport {
    * `SqlDriver.aggregate` and `TursoDriver.aggregate` took, because all three are
    * one door and a caller may not be told three different things about it.
    */
-  async aggregate(object: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
+  async aggregate(
+    object: string,
+    query: DriverQuery,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
     this.assertSafeIdentifier(object);
 
@@ -1592,10 +1548,12 @@ export class RemoteTransport {
 
     if (selectParts.length === 0) selectParts.push('*');
 
-    let sql = `SELECT ${selectParts.join(', ')} FROM "${object}"`;
+    let sql = `SELECT ${selectParts.join(', ')} FROM ${this.tableSql(table)}`;
     const args: any[] = [];
 
-    const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query?.where);
+    // [#21226] The tenant scope narrows the rows BEFORE they are grouped, as
+    // `SqlDriver.aggregate` scopes its builder.
+    const { whereClauses, args: whereArgs } = this.scopedWhereSQL(object, query?.where, scope);
     if (whereClauses) {
       sql += ` WHERE ${whereClauses}`;
       args.push(...whereArgs);
@@ -1609,19 +1567,18 @@ export class RemoteTransport {
       sql += ` GROUP BY ${groupBy.map((g) => `"${g.field}"`).join(', ')}`;
     }
 
-    try {
-      const result = await this.client!.execute({ sql, args });
-      return this.foldEmptyAggregateAnswers(this.mapRows(result), foldedOutput);
-    } catch (error: any) {
-      if (
-        error.message &&
-        (error.message.includes('no such table') ||
-          error.message.includes('no such column'))
-      ) {
-        return [];
-      }
-      throw error;
-    }
+    // [#20424] The backend's error leaves this method as it was raised. A
+    // catch here used to answer `no such table` and `no such column` with `[]`,
+    // so a table that is really absent, or a groupBy, aggregation or WHERE
+    // naming a declared field whose column is absent, read as "no data". The
+    // local face of the same driver refuses all of them. `TursoDriver`
+    // classifies the error with the local face's own aggregate seam
+    // (`SqlDriver.aggregateBackendFault`): `INVALID_FIELD` / 400 for a groupBy
+    // or aggregation column, `INVALID_FILTER` / 400 for a WHERE column, and
+    // `DATABASE_ERROR` / 500 for the rest. The catch arrived with this method's
+    // first version, with no comment, no pin and no case it was written for.
+    const result = await this.client!.execute({ sql, args });
+    return this.foldEmptyAggregateAnswers(this.mapRows(result), foldedOutput);
   }
 
   /**
@@ -1656,7 +1613,7 @@ export class RemoteTransport {
     return rows;
   }
 
-  async create(object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async create(object: string, data: Record<string, unknown>, table: string = object): Promise<Record<string, unknown>> {
     await this.ensureConnected();
 
     const { _id, ...rest } = data as any;
@@ -1672,12 +1629,12 @@ export class RemoteTransport {
     const placeholders = columns.map(() => '?').join(', ');
     const values = columns.map((col) => this.serializeValue(toInsert[col]));
 
-    const sql = `INSERT INTO "${object}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
+    const sql = `INSERT INTO ${this.tableSql(table)} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
     await this.client!.execute({ sql, args: values });
 
     // Fetch the inserted row to return complete record
     const result = await this.client!.execute({
-      sql: `SELECT * FROM "${object}" WHERE "id" = ?`,
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
       args: [toInsert.id],
     });
     const rows = this.mapRows(result);
@@ -1685,7 +1642,7 @@ export class RemoteTransport {
   }
 
   /**
-   * [#14428] A miss answers `null` — the arm `IDataDriver.update()` declares
+   * [commit ca3fd4b1a] A miss answers `null` — the arm `IDataDriver.update()` declares
    * (#13878), and the answer this driver's LOCAL face (`SqlDriver.update`,
    * through `TursoDriver.update`'s `super` branch) has always given.
    *
@@ -1715,26 +1672,78 @@ export class RemoteTransport {
    * ⚠️ `upsert()` is deliberately untouched: an upsert never answers
    * "not found".
    */
-  async update(object: string, id: string | number, data: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  async update(
+    object: string,
+    id: string | number,
+    data: Record<string, unknown>,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown> | null> {
     await this.ensureConnected();
 
     const columns = Object.keys(data);
     const setClauses = columns.map((col) => `"${col}" = ?`).join(', ');
     const values = columns.map((col) => this.serializeValue(data[col]));
 
-    const sql = `UPDATE "${object}" SET ${setClauses} WHERE "id" = ?`;
-    await this.client!.execute({ sql, args: [...values, id] });
+    // [#21226] The key AND, on a scoped call, the tenant scope — on the write
+    // and on the read-back, as `SqlDriver.update` scopes both. A row outside
+    // the scope is neither written nor read, and the answer is the miss arm
+    // (`null`), the local face's answer for it.
+    const byId = this.byIdWhereSQL(id, scope);
+    const sql = `UPDATE ${this.tableSql(table)} SET ${setClauses} WHERE ${byId.sql}`;
+    await this.client!.execute({ sql, args: [...values, ...byId.args] });
 
     // Fetch updated row
     const result = await this.client!.execute({
-      sql: `SELECT * FROM "${object}" WHERE "id" = ?`,
-      args: [id],
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${byId.sql}`,
+      args: [...byId.args],
     });
     const rows = this.mapRows(result);
     return rows[0] ?? null;
   }
 
-  async upsert(object: string, data: Record<string, unknown>, conflictKeys?: string[]): Promise<Record<string, unknown>> {
+  /**
+   * [#21226] `"id" = ?`, AND the tenant scope on a scoped call. Unscoped, the
+   * clause is the one the by-id doors always sent.
+   */
+  private byIdWhereSQL(id: string | number, scope: RemoteTenantScope | undefined): { sql: string; args: any[] } {
+    if (!scope) return { sql: `"id" = ?`, args: [id] };
+    return { sql: `"id" = ? AND (${scope.sql})`, args: [id, ...scope.args] };
+  }
+
+  /**
+   * `insertOnlyColumns` — columns written on the INSERT leg and left alone on
+   * the MERGE leg, so a value the caller (or the driver, on its behalf) put on
+   * the row for a NEW row never overwrites the one an existing row already
+   * holds. The transport is told WHICH columns, not WHY: the driver decides
+   * from the schema it holds and this class does not (the same division
+   * `setFilterColumnSql` and `setTenantFieldResolver` draw). A column named
+   * here that is also a merge key is simply a merge key.
+   *
+   * `fence` — [#21185] the organization the merge leg may land in: a tenant
+   * column and the value the row is written under. When given, the merge
+   * statement carries the predicate `… DO UPDATE SET … WHERE` the stored
+   * column `IS` the written one (`excluded`), so a conflict on a row of
+   * another organization — or of none — leaves that row untouched, in the one
+   * statement; and the read-back of the landed row is scoped to the written
+   * value exactly. A row the predicate left alone is then not found, and the
+   * answer is `null` — on a fenced call only, never otherwise: the driver,
+   * which knows why the row is not there, turns that into its refusal. Told
+   * WHICH column and value, not WHY, as with `insertOnlyColumns`.
+   *
+   * The read-back decides, not the statement's `rowsAffected`: with no column
+   * left to merge the statement is `DO NOTHING`, which affects zero rows for a
+   * conflict inside the written organization too, so a `rowsAffected` verdict
+   * would refuse an ordinary same-organization upsert.
+   */
+  async upsert(
+    object: string,
+    data: Record<string, unknown>,
+    conflictKeys?: string[],
+    table: string = object,
+    insertOnlyColumns: readonly string[] = [],
+    fence?: { column: string; value: unknown },
+  ): Promise<Record<string, unknown> | null> {
     await this.ensureConnected();
 
     const { _id, ...rest } = data as any;
@@ -1752,13 +1761,18 @@ export class RemoteTransport {
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
     // Build ON CONFLICT ... DO UPDATE SET
-    const updateCols = columns.filter((c) => !mergeKeys.includes(c));
+    const updateCols = columns.filter((c) => !mergeKeys.includes(c) && !insertOnlyColumns.includes(c));
     const updateClauses = updateCols.map((col) => `"${col}" = excluded."${col}"`).join(', ');
 
-    let sql = `INSERT INTO "${object}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
+    let sql = `INSERT INTO ${this.tableSql(table)} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
     sql += ` ON CONFLICT(${mergeKeys.map((k) => `"${k}"`).join(', ')})`;
     if (updateClauses) {
       sql += ` DO UPDATE SET ${updateClauses}`;
+      // [#21185] The organization fence, inside the statement: the merge leg
+      // runs only on a row whose stored tenant column `IS` (NULL-safe) the one
+      // this row is written under. The written value is never NULL on a fenced
+      // call, so a platform row with no organization is fenced off as well.
+      if (fence) sql += ` WHERE ${this.tableSql(table)}."${fence.column}" IS excluded."${fence.column}"`;
     } else {
       sql += ` DO NOTHING`;
     }
@@ -1775,29 +1789,61 @@ export class RemoteTransport {
       throw e;
     }
 
-    // Fetch the result row
+    // Fetch the row the statement landed on, by the identity it MATCHED on:
+    // the conflict-key values. [#21166] Reading it back by the payload's `id`
+    // answers the wrong row once `id` is insert-only: a merge on a business
+    // key keeps the stored row's `id`, so the payload's `id` (or the nanoid
+    // minted above) names no row, the read finds nothing, and the fallback
+    // below answered the PAYLOAD as if it had been stored. The conflict-key
+    // values name the landed row on both legs: the inserted row carries them,
+    // and the merged row is the one that matched them. A conflict key the
+    // payload leaves empty cannot have matched (NULL never conflicts), so the
+    // statement inserted and the row carries this call's `id`. On the default
+    // `['id']` target the two readings are the same statement.
+    const keyColumns = mergeKeys.every((k) => toUpsert[k] !== undefined && toUpsert[k] !== null) ? mergeKeys : ['id'];
+    // [#21185] A fenced call reads back under the written organization exactly
+    // (the local face's own read-back, not the chokepoint scope the other
+    // doors carry since #21226: that scope admits a row with no organization),
+    // and a read-back that found another organization's row would hand its
+    // columns to the caller. Not found means the predicate above left the row
+    // alone.
+    const fenceSql = fence ? ` AND "${fence.column}" = ?` : '';
+    const fenceArgs = fence ? [this.serializeValue(fence.value)] : [];
     const result = await this.client!.execute({
-      sql: `SELECT * FROM "${object}" WHERE "id" = ?`,
-      args: [toUpsert.id],
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${keyColumns.map((k) => `"${k}" = ?`).join(' AND ')}${fenceSql}`,
+      args: [...keyColumns.map((k) => this.serializeValue(toUpsert[k])), ...fenceArgs],
     });
     const rows = this.mapRows(result);
+    if (fence) return rows[0] ?? null;
     return rows[0] || toUpsert;
   }
 
-  async delete(object: string, id: string | number): Promise<boolean> {
+  async delete(
+    object: string,
+    id: string | number,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<boolean> {
     await this.ensureConnected();
+    // [#21226] The key AND the tenant scope, as `SqlDriver.delete` scopes it.
+    const byId = this.byIdWhereSQL(id, scope);
     const result = await this.client!.execute({
-      sql: `DELETE FROM "${object}" WHERE "id" = ?`,
-      args: [id],
+      sql: `DELETE FROM ${this.tableSql(table)} WHERE ${byId.sql}`,
+      args: byId.args,
     });
     return result.rowsAffected > 0;
   }
 
-  async count(object: string, query?: any): Promise<number> {
+  async count(
+    object: string,
+    query?: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<number> {
     await this.ensureConnected();
 
-    const { whereClauses, args } = this.buildWhereSQL(object, query?.where);
-    let sql = `SELECT COUNT(*) as count FROM "${object}"`;
+    const { whereClauses, args } = this.scopedWhereSQL(object, query?.where, scope);
+    let sql = `SELECT COUNT(*) as count FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
     const result = await this.client!.execute({ sql, args });
@@ -1828,11 +1874,16 @@ export class RemoteTransport {
    * The column is a REFERENCE, so it keeps the identifier gate, as
    * `aggregate()`'s group-by field does.
    */
-  compileDistinct(object: string, field: string, where: unknown): { sql: string; args: unknown[] } {
+  compileDistinct(
+    object: string,
+    field: string,
+    where: unknown,
+    table: string = object,
+  ): { sql: string; args: unknown[] } {
     this.assertSafeIdentifier(object);
     this.assertSafeIdentifier(field);
     const { whereClauses, args } = this.buildWhereSQL(object, where);
-    let sql = `SELECT DISTINCT "${field}" FROM "${object}"`;
+    let sql = `SELECT DISTINCT "${field}" FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
     return { sql, args };
   }
@@ -1841,55 +1892,82 @@ export class RemoteTransport {
   // Bulk Operations
   // ===================================
 
-  async bulkCreate(object: string, dataArray: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+  async bulkCreate(
+    object: string,
+    dataArray: Record<string, unknown>[],
+    table: string = object,
+  ): Promise<Record<string, unknown>[]> {
     const results: Record<string, unknown>[] = [];
     for (const data of dataArray) {
-      const created = await this.create(object, data);
+      const created = await this.create(object, data, table);
       results.push(created);
     }
     return results;
   }
 
-  async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, unknown> }>): Promise<Record<string, unknown>[]> {
+  async bulkUpdate(
+    object: string,
+    updates: Array<{ id: string | number; data: Record<string, unknown> }>,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown>[]> {
     const results: Record<string, unknown>[] = [];
     for (const { id, data } of updates) {
-      const updated = await this.update(object, id, data);
+      const updated = await this.update(object, id, data, table, scope);
       if (updated) results.push(updated);
     }
     return results;
   }
 
-  async bulkDelete(object: string, ids: Array<string | number>): Promise<void> {
+  async bulkDelete(
+    object: string,
+    ids: Array<string | number>,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<void> {
     await this.ensureConnected();
     if (ids.length === 0) return;
 
     const placeholders = ids.map(() => '?').join(', ');
+    // [#21226] The id set AND the tenant scope, as `SqlDriver.bulkDelete`.
+    const scopeSql = scope ? ` AND (${scope.sql})` : '';
     await this.client!.execute({
-      sql: `DELETE FROM "${object}" WHERE "id" IN (${placeholders})`,
-      args: ids as any[],
+      sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" IN (${placeholders})${scopeSql}`,
+      args: [...ids, ...(scope ? scope.args : [])] as any[],
     });
   }
 
-  async updateMany(object: string, query: any, data: Record<string, unknown>): Promise<number> {
+  async updateMany(
+    object: string,
+    query: any,
+    data: Record<string, unknown>,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<number> {
     await this.ensureConnected();
 
     const columns = Object.keys(data);
     const setClauses = columns.map((col) => `"${col}" = ?`).join(', ');
     const setValues = columns.map((col) => this.serializeValue(data[col]));
 
-    const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query?.where);
-    let sql = `UPDATE "${object}" SET ${setClauses}`;
+    const { whereClauses, args: whereArgs } = this.scopedWhereSQL(object, query?.where, scope);
+    let sql = `UPDATE ${this.tableSql(table)} SET ${setClauses}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
     const result = await this.client!.execute({ sql, args: [...setValues, ...whereArgs] });
     return result.rowsAffected;
   }
 
-  async deleteMany(object: string, query: any): Promise<number> {
+  async deleteMany(
+    object: string,
+    query: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<number> {
     await this.ensureConnected();
 
-    const { whereClauses, args } = this.buildWhereSQL(object, query?.where);
-    let sql = `DELETE FROM "${object}"`;
+    const { whereClauses, args } = this.scopedWhereSQL(object, query?.where, scope);
+    let sql = `DELETE FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
     const result = await this.client!.execute({ sql, args });
@@ -2229,6 +2307,28 @@ export class RemoteTransport {
   }
 
   /**
+   * [#20107] Spell the table a data statement targets — see the note above
+   * {@link find} for where `table` comes from.
+   *
+   * A remote table name is ONE name, so it takes the treatment
+   * {@link aliasIdentifierSql} gives an output name: quoted, with any embedded
+   * quote doubled. Its qualifier is a separate key (`external.remoteSchema`),
+   * which SQLite has no namespace for. It is NOT held to
+   * {@link assertSafeIdentifier}: `external.remoteName` is authored as any
+   * string, since it names a table this platform does not own, and the local
+   * face reads such a table through knex's own identifier quoting. Refusing it
+   * here would make a name the local face reads (`order-lines`) unreadable on
+   * this one. Doubling the quote keeps it a name: nothing inside it can close
+   * the quoting and continue as grammar.
+   *
+   * For a managed object the table is the object's own snake_case name, and
+   * the statement is byte-for-byte the one this transport emitted before.
+   */
+  private tableSql(table: string): string {
+    return this.aliasIdentifierSql(table);
+  }
+
+  /**
    * Build a CREATE TABLE SQL string for the given object definition.
    * Shared by syncSchema() and syncSchemasBatch() to avoid duplication.
    */
@@ -2294,11 +2394,13 @@ export class RemoteTransport {
    * (`COALESCE(<tenant>, '__global__')`) from the shared helper for the reason
    * ADR-0120 D3 records. Neither rule is re-decided here.
    *
-   * Columns that were never materialized (a virtual `formula` field) are
-   * skipped rather than emitted — the same choice `SqlDriver.syncDeclaredIndexes`
-   * makes, and for the same reason: DDL naming a column that does not exist
-   * fails the whole sync over an index nothing could have used. A name declared
-   * twice is emitted once, as the local face creates it once.
+   * Columns that were never materialized (a misspelt key name, a virtual
+   * `formula` field) are skipped rather than emitted — the same choice
+   * `SqlDriver.syncDeclaredIndexes` makes, and for the same reason: DDL naming a
+   * column that does not exist fails the whole sync over an index nothing could
+   * have used. [#20537] The skip is reported where the local face reports it,
+   * at `error`: on {@link durabilitySink}, not the diagnostic sink. A name
+   * declared twice is emitted once, as the local face creates it once.
    */
   private buildDeclaredIndexDDL(
     tableName: string,
@@ -2322,9 +2424,26 @@ export class RemoteTransport {
     for (const index of expected) {
       const missing = index.columns.filter((c) => !materializedColumns.has(c));
       if (missing.length > 0) {
-        this.diagnosticSink?.(
-          `[RemoteTransport] skipping declared index "${index.name}" on "${tableName}" — ` +
-            `column(s) not materialized: ${missing.join(', ')}`,
+        // [#20537] Durability, not function — the durability sink, never the
+        // diagnostic one. The sync goes on and the object serves normally while
+        // DDL the metadata declares never runs; for a UNIQUE index that means
+        // duplicate rows are accepted. `SqlDriver.syncDeclaredIndexes` answers
+        // the same skip on the local face through `logDurabilityFailure`, for
+        // the same reason, and a PLAIN index takes the same channel on both
+        // faces (see {@link durabilitySink}). One line per skipped index per
+        // sync, and the line says which of the two kinds it is.
+        const columns = missing.map((c) => `'${c}'`).join(', ');
+        this.durabilitySink?.(
+          `[RemoteTransport] declared ${index.unique ? 'UNIQUE ' : ''}index "${index.name}" on "${tableName}" ` +
+            `was NOT created: no column for ${columns} (a key column must be a stored field of the object — a ` +
+            `name that is not a field, or a virtual formula field computed on read, has no column). ` +
+            (index.unique
+              ? `The uniqueness it declares is NOT enforced: duplicate rows are accepted, and nothing looks ` +
+                `broken from the outside. `
+              : `Every query this index exists to serve is answered by scanning the whole table instead: ` +
+                `nothing looks broken from the outside and results stay correct. `) +
+            `Fix the metadata so every column in the index's fields is a stored field of the object, or ` +
+            `remove the index ("os validate" refuses a name that is not a field).`,
         );
         continue;
       }
@@ -2479,7 +2598,7 @@ export class RemoteTransport {
    *
    * Both transports round-trip every `VALUE_ROUNDTRIP_CASES` value faithfully
    * (`turso-value-roundtrip-conformance.test.ts`, both halves). They arrive
-   * there by different routes: #12380 made the local `Field.json` codec
+   * there by different routes: commit 4045b954d made the local `Field.json` codec
    * injective, so the NUMERIC-affinity column is only ever handed an encoded
    * form it has nothing to convert; this transport's own `serializeValue` /
    * `mapRows` reach the same answer over a column where no conversion was
@@ -2490,7 +2609,7 @@ export class RemoteTransport {
    * and a TEXT cell here, and `find()` answers `123` on both. That is the
    * #11535 class in its quiet phase — two paths agreeing on every visible
    * answer while standing on different ground. PR #12585's ablation is the
-   * loud phase: restoring the pre-#12380 SQLite `json` branch broke the two
+   * loud phase: restoring the SQLite `json` branch from before commit 4045b954d broke the two
    * transports by DIFFERENT counts, diverging on `s_0123`, because only the
    * local column had NUMERIC affinity to destroy a bare `'0123'` with.
    *
@@ -2588,16 +2707,21 @@ export class RemoteTransport {
    * `orderBy` is likewise an ANSWER — #4363's carve-out for an unpaged
    * unordered read — and emitting no ORDER BY for it is correct.
    */
-  private buildSelectSQL(object: string, query: any): { sql: string; args: any[] } {
+  private buildSelectSQL(
+    object: string,
+    query: any,
+    table: string,
+    scope?: RemoteTenantScope,
+  ): { sql: string; args: any[] } {
     const fields = query.fields && Array.isArray(query.fields) && query.fields.length > 0
       ? query.fields.map((f: string) => `"${this.mapSortField(f)}"`).join(', ')
       : '*';
 
-    let sql = `SELECT ${fields} FROM "${object}"`;
+    let sql = `SELECT ${fields} FROM ${this.tableSql(table)}`;
     const allArgs: any[] = [];
 
-    // WHERE
-    const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query.where);
+    // WHERE — the caller's filter and, on a scoped call, the tenant scope.
+    const { whereClauses, args: whereArgs } = this.scopedWhereSQL(object, query.where, scope);
     if (whereClauses) {
       sql += ` WHERE ${whereClauses}`;
       allArgs.push(...whereArgs);
@@ -2692,15 +2816,39 @@ export class RemoteTransport {
    * every refusal that predates it keeps its own wording and its own way of
    * naming a location, so threading this parameter changes no existing message.
    */
+  /**
+   * [#21226] The caller's `WHERE`, compiled by {@link buildWhereSQL}, AND the
+   * tenant scope the driver handed over. With no scope the answer is
+   * {@link buildWhereSQL}'s own, so an unscoped statement is byte-identical to
+   * the one this transport sent before. With one, both sides are
+   * parenthesized: a top-level `OR` in the caller's filter must not escape the
+   * scope. An empty caller filter is vacuously TRUE (#1073), so the scope
+   * stands alone.
+   */
+  private scopedWhereSQL(
+    object: string,
+    filters: unknown,
+    scope: RemoteTenantScope | undefined,
+  ): { whereClauses: string; args: any[] } {
+    const compiled = this.buildWhereSQL(object, filters);
+    if (!scope) return compiled;
+    if (!compiled.whereClauses) return { whereClauses: `(${scope.sql})`, args: [...scope.args] };
+    return {
+      whereClauses: `(${compiled.whereClauses}) AND (${scope.sql})`,
+      args: [...compiled.args, ...scope.args],
+    };
+  }
+
   private buildWhereSQL(
     object: string,
     filters: any,
     path = 'where',
   ): { whereClauses: string; args: any[] } {
     // [#8220] Resolve a redacted refusal's provenance at the OUTERMOST frame
-    // only — `path === 'where'` is true exactly for the six external call
-    // sites, and the root they hand over is the tree the read-scope merge
-    // boundaries marked. Recursive frames rethrow untouched so one refusal is
+    // only — `path === 'where'` is true exactly for the external call sites
+    // (`compileDistinct`, and `scopedWhereSQL` for every other door, #21226),
+    // and the root they hand over is the caller's own filter, the tree the
+    // read-scope merge boundaries marked; the tenant scope is ANDed on after. Recursive frames rethrow untouched so one refusal is
     // resolved once, against the whole tree. Fail-closed like the SqlDriver
     // seam: 'author' swaps in the full text; 'policy', unmarked, unreachable
     // and ambiguous all keep the redaction.
@@ -2788,15 +2936,21 @@ export class RemoteTransport {
     }
 
     // [#6050] Refuse every `undefined` comparand in the WHOLE subtree, before a
-    // single clause is emitted and before the `$not` branch below rewrites its
-    // operand through the polarity tables.
+    // single clause is emitted, in `driver-sql`'s words.
     //
-    // The pre-walk is what makes the gate hold for `{ $not: { d: undefined } }`.
-    // Compiling key-by-key would reach `nullSafeNegationOperand` — a GUARD —
-    // with the undefined still in it, and #6050's whole point is that guard and
-    // emitter must never get to disagree about this value. Walking first makes
-    // the disagreement unreachable rather than merely repaired, and it is the
-    // same discipline `driver-sql` applies with `reduceFilterNode`.
+    // The pre-walk is what makes the gate hold at every depth — `{ $not: { d:
+    // undefined } }` included — with ONE sentence: `undefinedComparand` below
+    // is `driver-sql`'s refusal behind this file's prefix, so a caller reads
+    // the same refusal from both faces of `TursoDriver` (#6050's ruling,
+    // pinned by `turso-local-remote-null-parity.test.ts`). It is the same
+    // discipline `driver-sql` applies with `reduceFilterNode`.
+    //
+    // [ADR-0053 D-D1 item 5, as amended — #20822] Kept, with `driver-sql`'s
+    // copy. A caller that passes no seam is refused here; without it this
+    // transport would still refuse (`serializeComparand` binds no `undefined`)
+    // but in another sentence, splitting the two faces' wording, and
+    // `driver-sql`'s copy cannot go because its emitter would ANSWER some of
+    // these positions (the LIKE family binds `String(undefined)`).
     //
     // Idempotent by construction: `$and`/`$or`/`$not` re-enter this method
     // through `buildSubFilterSQL`, so a nested node is walked more than once and
@@ -2821,11 +2975,12 @@ export class RemoteTransport {
       //
       // The first two are the silent empty set: SQLite's backwards-compatible
       // rule degrades a double-quoted name that resolves to no column into a
-      // STRING LITERAL, so the statement compiles, runs and matches nothing —
-      // and where a build disables that rule (`SQLITE_DQS=0`) `find()`'s own
-      // `no such column` backstop swallows the error into `[]` anyway. Two
-      // roads, one answer, and neither is distinguishable from "no rows
-      // matched".
+      // STRING LITERAL, so the statement compiles, runs and matches nothing,
+      // which is not distinguishable from "no rows matched". Where a build
+      // disables that rule (`SQLITE_DQS=0`), the statement fails with
+      // `no such column` instead, and `find()`'s backstop now refuses it, as
+      // the local face does (`INVALID_FILTER` / 400, see #20424). It used to
+      // swallow that error into `[]` too: a second road to the same answer.
       //
       // The third is the expensive direction, and it needs no dialect quirk at
       // all: a `{}` disjunct absorbs its `$or` to TRUE, the compiled clauses are
@@ -2949,13 +3104,20 @@ export class RemoteTransport {
         // answer canonical — "the column has no value" does NOT satisfy the
         // negated condition, so the row IS returned.
         //
-        // The rewrite totalises every leaf of the operand BEFORE it is compiled,
-        // so `NOT (…)` negates a predicate that is TRUE or FALSE for every row
-        // and never UNKNOWN. Only a filter NODE is rewritten: a non-node operand
-        // must reach `buildSubFilterSQL` exactly as the caller wrote it, so the
+        // [ADR-0053 D-D1 items 5 and 9, as amended — #20822] That ruling is
+        // applied ONCE, by the shared lowering (`lowerFilterCondition`,
+        // `@objectstack/spec/data`, its rule 3) at the seams: it totalises every
+        // leaf of a `$not` operand before any face compiles it, so every seamed
+        // read hands this branch an operand that is TRUE or FALSE for every row
+        // and `NOT (…)` is its exact complement. The rewrite this transport
+        // carried (`nullSafeNegationOperand` and its polarity tables, the third
+        // hand copy of the ruling) is deleted, and `driver-sql`'s with it, so
+        // the two faces still answer alike: a caller that passes no seam gets
+        // the three-valued `NOT` it wrote, on both. A non-node operand still
+        // reaches `buildSubFilterSQL` exactly as the caller wrote it, so the
         // refusal keeps naming the shape that was sent (the branch above has no
         // `isFilterNode` guard for precisely that reason).
-        const operand = isFilterNode(value) ? nullSafeNegationOperand(value) : value;
+        const operand = value;
         const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, operand, path, filters);
         if (sc) {
           clauses.push(`NOT (${sc})`);
@@ -2979,6 +3141,26 @@ export class RemoteTransport {
         // widening the statement to every row in the table.
         const clausesBefore = clauses.length;
         for (const [op, opValue] of Object.entries(value as Record<string, any>)) {
+          // [#21178] The column-type gate, on the operator AS WRITTEN and ahead
+          // of every arm — `SqlDriver.assertOperatorAppliesToColumn`'s position
+          // on the local face. A JSON column holds the serialization
+          // `["u1","u2"]`, so every operator in the shared set compares or
+          // matches THAT text: measured on this transport before the gate,
+          // `$nin` and `$ne` returned the rows holding the excluded member
+          // (fail-open), `$eq` / `$in` returned none, `$lt` / `$lte` answered
+          // lexicographically over the serialization, and `$startsWith: '['`
+          // matched every row — while the local face refused each with
+          // `INVALID_FILTER` / 400. The arms below never see such an operator
+          // on such a column.
+          const jsonClass = JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)
+            ? this.jsonColumnFieldClass(object, key)
+            : undefined;
+          if (jsonClass !== undefined) {
+            // [#8220] `value` — this field's operator map — is the node the
+            // entry seam resolves the refusal's provenance against, as the
+            // local face hands its gate the same map.
+            throw this.jsonColumnOperator(key, op, false, jsonClass, value);
+          }
           switch (op) {
             case '$eq':
               // [#6050] `=== null` only. `undefined` used to share this arm and
@@ -3069,6 +3251,9 @@ export class RemoteTransport {
             case '$contains': {
               const bind = this.serializeComparand(object, key, op, opValue);
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              // [#21178] The MEMBERSHIP reading on a JSON column, ahead of the
+              // substring emitter every scalar string column keeps.
+              if (this.pushJsonMembership(clauses, args, object, key, column, opValue, false)) break;
               this.pushLike(clauses, args, column, bind, 'contains');
               break;
             }
@@ -3093,6 +3278,9 @@ export class RemoteTransport {
               // single emission point.
               const bind = this.serializeComparand(object, key, op, opValue);
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              // [#21178] The exact complement of `$contains`' membership arm,
+              // on the same population and the same construct, NULL-safe.
+              if (this.pushJsonMembership(clauses, args, object, key, column, opValue, true)) break;
               this.pushLike(clauses, args, column, bind, 'contains', true, true);
               break;
             }
@@ -3187,10 +3375,21 @@ export class RemoteTransport {
               // DEFAULT side, so a third value read as "the caller asked for
               // null"; here `false` is the value being tested FOR, and with the
               // guard holding there is no third value left for a default to
-              // catch. Its polarity twin in {@link nullValueSatisfiesOperator}
-              // is spelled `value === false` for exactly the same reason —
+              // catch. Its polarity twin (this transport's
+              // `nullValueSatisfiesOperator` then; since #20822 the shared
+              // lowering's) is spelled `value === false` for exactly the same reason —
               // `$null: true` and `$exists: false` are one question asked twice.
               clauses.push(`${column} IS ${opValue === false ? 'NULL' : 'NOT NULL'}`);
+              break;
+            // [#20444] `$empty` — the emptiness flag, answered by the
+            // field's DECLARED row of the ruled table on the plain column (a
+            // presence question like the two above, so no storage form applies).
+            // Refused, as its two siblings are, unless the comparand is boolean.
+            case '$empty':
+              if (typeof opValue !== 'boolean') {
+                throw this.nonBooleanEmptyComparand(object, key, opValue, value);
+              }
+              this.pushEmptyOperator(clauses, args, object, key, column, opValue, value);
               break;
             default:
               // Declared = enforced. This arm used to compile ANY unknown
@@ -3221,6 +3420,19 @@ export class RemoteTransport {
         // stored with `organization_id IS NULL`; emitting `= ?` here is what
         // made every env-wide draft read come back empty even though the row
         // was written. (Knex special-cases this; this hand-rolled builder did not.)
+        //
+        // [#21178] Still the bare equality spelling, so a JSON column refuses
+        // it here exactly as it refuses `{ field: 'u1' }` below and
+        // `{ field: { $eq: null } }` above: the local face's bare-value
+        // positions ask the column-type gate whatever the comparand, `null`
+        // included. Measured on this harness: local refused `{ owners: null }`
+        // with `INVALID_FILTER` / 400 while this branch answered the NULL row —
+        // a different answer from one driver by connection string. `$null: true`
+        // is the presence spelling, and both faces answer it.
+        const jsonClass = this.jsonColumnFieldClass(object, key);
+        if (jsonClass !== undefined) {
+          throw this.jsonColumnOperator(key, '=', true, jsonClass, filters);
+        }
         const column = `"${this.mapSortField(key)}"`;
         clauses.push(`${column} IS NULL`);
       } else {
@@ -3237,6 +3449,15 @@ export class RemoteTransport {
         // map above and a bad one already threw (#1004).
         const column = `"${this.mapSortField(key)}"`;
         const bind = this.serializeComparand(object, key, '$eq', value);
+        // [#21178] The bare `{ field: value }` spelling is an implicit `=`, so
+        // the column-type gate applies here too — after the comparand gate, the
+        // order the local face's bare-value positions run their two gates in.
+        // [#8220] A bare comparand is usually a primitive, so `filters` — the
+        // node carrying `key` — is what carries the mark.
+        const jsonClass = this.jsonColumnFieldClass(object, key);
+        if (jsonClass !== undefined) {
+          throw this.jsonColumnOperator(key, '=', true, jsonClass, refusalNode(value, filters));
+        }
         clauses.push(`${this.comparisonColumn(object, key, column)} = ?`);
         args.push(bind);
       }
@@ -3265,7 +3486,8 @@ export class RemoteTransport {
    * `turso-local-remote-text-parity` suite holds the two to one row set; its
    * docblock carries why the constants compose with the NULL rules (#5298)
    * and the `$not` rewrite instead of fighting them — the same argument holds
-   * here, since {@link nullSafeNegationOperand} is the same rewrite.
+   * here, since both faces receive the same seam-lowered operand (the shared
+   * lowering's rule 3; #20822 deleted each face's own copy of the rewrite).
    *
    * No binding is appended, so `args` stays aligned with the `?`s that ARE
    * emitted; the `clausesBefore` invariant (#1066) is satisfied because a
@@ -3274,6 +3496,120 @@ export class RemoteTransport {
   private pushTextOverNonTextColumn(clauses: string[], object: string, field: string, op: string): boolean {
     if (!this.nonTextColumn || !this.nonTextColumn(object, field)) return false;
     clauses.push(op === '$notContains' ? '1 = 1' : SQL_FALSE);
+    return true;
+  }
+
+  /**
+   * [#21178] Is `field` on `object` stored as a JSON TEXT column, per the
+   * driver's injected {@link JsonColumnResolver}? `false` when no rule was
+   * injected — never a guess from the value.
+   */
+  private isJsonColumn(object: string, field: string): boolean {
+    return this.jsonColumnFieldClass(object, field) !== undefined;
+  }
+
+  /**
+   * [#21236] WHICH class of JSON column `field` on `object` is, per the driver's
+   * injected {@link JsonColumnResolver}, or `undefined` when it is not one or
+   * no rule was injected. The local face's `SqlDriver.jsonColumnFieldClass`,
+   * read through the resolver, so {@link jsonColumnOperator} words the same
+   * refusal on both faces.
+   */
+  private jsonColumnFieldClass(object: string, field: string): JsonColumnFieldClass | undefined {
+    return this.jsonColumn === null ? undefined : this.jsonColumn(object, field);
+  }
+
+  /**
+   * [#21178] The refusal an operator in `JSON_COLUMN_INCOMPATIBLE_OPERATORS`
+   * gets on a JSON column — the local face's `jsonColumnOperatorError`, one
+   * package over. ADR-0112 class 1, `INVALID_FILTER` / 400.
+   *
+   * Both texts are `@objectstack/core`'s {@link jsonColumnOperatorRefusalText},
+   * byte for byte what the local face prints, with no `[RemoteTransport]`
+   * prefix: one mistake reads one sentence whichever face answered it. The
+   * caller-visible `message` withholds the field and the operator (on a read
+   * scope the predicate is an administrator's, #7929 / #8197); the `diagnostic`
+   * naming both goes to the diagnostic sink, and the entry seam swaps it back
+   * onto the wire only for a positively `'author'`-marked `subtree` (#8220) —
+   * the local face's `withheldFilterError` contract, with the same carrier keys.
+   *
+   * `bare` is the implicit-equality spelling `{ field: value }`, whose operator
+   * the diagnostic names as `=`.
+   *
+   * [#21236] `fieldClass` is the column's class ({@link jsonColumnFieldClass}),
+   * so a single-value file-class field reads the media-column move here, as it
+   * does locally, rather than a `$contains` repair that answers no rows on it.
+   */
+  private jsonColumnOperator(
+    field: string,
+    op: string,
+    bare: boolean,
+    fieldClass: JsonColumnFieldClass,
+    subtree: unknown,
+  ): Error {
+    const { message, diagnostic } = jsonColumnOperatorRefusalText(this.mapSortField(field), op, bare, fieldClass);
+    return this.withheldRefusal(message, subtree, diagnostic);
+  }
+
+  /**
+   * [#21178] Emit the MEMBERSHIP reading of `$contains` / `$notContains` when
+   * the column they were aimed at is a JSON column, and say whether it did —
+   * the local face's `SqlDriver.applyJsonMembership`, one package over.
+   * `false` leaves the caller on its substring emitter, which is what every
+   * scalar string column keeps: on such a column `$contains` IS the substring
+   * test (the spec's `FILTER_OPERATORS.$contains` docblock states both halves).
+   *
+   * The construct is `@objectstack/core`'s {@link jsonMembershipPredicate},
+   * `'sqlite'` dialect — libSQL is SQLite — so it asks whether the comparand's
+   * JSON value is an ELEMENT of the stored array: `u1` no longer answers the
+   * row holding `["u10"]`, and a stored object or scalar answers no member at
+   * all, exactly as locally. Measured before this arm on the libsql stub: the
+   * substring reading matched `["u10"]` for `u1`, `$notContains: 'u1'` dropped
+   * that row, and a `json`-typed field's `$contains` matched text inside the
+   * serialized object — three row sets the local face did not return.
+   *
+   * The column is the PLAIN quoted identifier (no storage-form rewrite applies
+   * to a JSON column), emitted by reference; each candidate value is bound
+   * through `?` in placeholder order, so `args` stays aligned with the SQL. The
+   * comparand is handed over AS WRITTEN — the caller has already run it through
+   * {@link serializeComparand}'s gate — because the construct reads its text
+   * rendering itself, exactly as the local face hands it the raw comparand.
+   *
+   * The negated spelling composes with the NULL rule rather than replacing it:
+   * a row with no value satisfies `$notContains` (#5298), and the `json_each`
+   * scan answers NULL — not FALSE — for a NULL column, so {@link nullSafeNegative}
+   * is doing real work here.
+   */
+  private pushJsonMembership(
+    clauses: string[],
+    args: any[],
+    object: string,
+    field: string,
+    column: string,
+    value: unknown,
+    negate: boolean,
+  ): boolean {
+    if (!this.isJsonColumn(object, field)) return false;
+    const bound: unknown[] = [];
+    const sql = jsonMembershipPredicate(
+      'sqlite',
+      {
+        column: () => column,
+        value: (v) => {
+          bound.push(v);
+          return '?';
+        },
+      },
+      value,
+    );
+    if (sql === null) {
+      // Unreachable: `'sqlite'` always has a construct, and only `'unknown'`
+      // answers `null`. Said out loud rather than falling back to the substring
+      // emitter, which would be the very answer this arm exists to replace.
+      throw new Error('[RemoteTransport] jsonMembershipPredicate returned no construct for the sqlite dialect');
+    }
+    clauses.push(negate ? this.nullSafeNegative(column, `NOT ${sql}`) : sql);
+    args.push(...bound);
     return true;
   }
 
@@ -3685,8 +4021,8 @@ export class RemoteTransport {
         `(with driver-sql, driver-sqlite-wasm and Turso local) compiled IS NULL (anything but false), ` +
         `driver-memory's query path and driver-mongodb compiled IS NOT NULL (anything but true), and ` +
         `driver-memory's matcher dropped the constraint entirely. Note "false" the STRING is truthy, ` +
-        `so it landed on the side opposite the false it was written to mean ` +
-        `(objectstack#5347, objectstack#5368, #1116).`,
+        `so it landed on the side opposite the false it was written to mean. Every driver now ` +
+        `refuses it, so one filter no longer gets a different answer per backend.`,
     );
   }
 
@@ -3778,12 +4114,124 @@ export class RemoteTransport {
       `[RemoteTransport] Operator "$exists" on field "${field}" requires a boolean comparand (true or ` +
         `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$exists. ` +
         `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
-        `than coerced for the same reason $null is (objectstack#5347): a non-boolean lands on ` +
+        `than coerced for the same reason $null is: a non-boolean lands on ` +
         `whichever side the backend's two-branch conditional happens to default to, and those ` +
         `defaults point in OPPOSITE directions — this transport's \`=== false\` test compiled ` +
         `IS NOT NULL for anything but false, a \`=== true\` test compiles IS NULL for anything but ` +
         `true. Note "false" the STRING is truthy, so it landed on the side opposite the false it was ` +
-        `written to mean (objectstack#5369, objectstack#5903).`,
+        `written to mean.`,
+    );
+  }
+
+  /**
+   * [#20444] The error for an `$empty` whose comparand is not a boolean —
+   * `driver-sql`'s `nonBooleanEmptyComparandError`, one package over, in this
+   * transport's location convention. `FieldOperatorsSchema` declares
+   * `$empty: z.boolean()`, and the spec's save door refuses anything else.
+   */
+  private nonBooleanEmptyComparand(object: string, field: string, value: unknown, subtree?: unknown): Error {
+    const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
+    return this.withheldRefusal(
+      '[RemoteTransport] Operator "$empty" in this filter requires a boolean comparand (true or ' +
+        'false). @objectstack/spec FieldOperatorsSchema declares $empty as a boolean, and a ' +
+        'non-boolean is refused rather than coerced: true asks for the empty rows, false for their ' +
+        'exact complement, and any other value would land on whichever side a compiler defaults to. ' +
+        'The field it was aimed at and the value it received are withheld from the message; the ' +
+        'full diagnostic is in the server log.',
+      subtree,
+      `[RemoteTransport] Operator "$empty" on field "${field}" requires a boolean comparand (true or ` +
+        `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$empty. ` +
+        `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+        `empty rows, false for their exact complement.`,
+    );
+  }
+
+  /**
+   * [#20444] Compile `{ field: { $empty: true | false } }` by the field's
+   * DECLARED row of the ruled 「is empty」 table — ruling B on #20311 (record
+   * 5861435168), spelled as this operator by ruling A on #20399 (record
+   * 5865693155) — through the spec's one expansion, `expandEmptyOperator`:
+   *
+   * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+   * |---|---|---|
+   * | `null_only` | `col IS NULL` | `col IS NOT NULL` |
+   * | `text` | `(col IS NULL OR col = ?)`, `''` bound | `(col IS NOT NULL AND col <> ?)` |
+   * | `multi_value` | `(col IS NULL OR L)` | `(col IS NOT NULL AND NOT L)` |
+   *
+   * The SQL is the local twin's (`SqlDriver.applyEmptyOperator`) on its SQLite
+   * dialect — libSQL IS SQLite, where a multi-value field is a TEXT column
+   * holding JSON — so `L` is `driver-sql`'s SQLite construct, `json_valid`
+   * asked first inside a lazily evaluated `CASE` so a malformed cell answers
+   * FALSE rather than failing the statement, `json_type` beside
+   * `json_array_length` so a non-array JSON value is not an empty list. The
+   * `turso-local-remote-*` parity suites hold the two faces to one row set.
+   *
+   * Every clause is parenthesised as ONE conjunct — this transport joins a
+   * node's clauses with a bare ` AND `, so a loose `OR` would bind looser than
+   * it and widen the filter — and TOTAL (never UNKNOWN), so the `$not` rewrite
+   * needs no guard for it (the shared lowering's polarity table reads it as total).
+   *
+   * Refused, before anything is pushed: a field whose declaration the driver
+   * does not hold (or a transport nobody handed the resolver), because a row
+   * of the table cannot be read off a value this transport sees only at run
+   * time.
+   */
+  private pushEmptyOperator(
+    clauses: string[],
+    args: any[],
+    object: string,
+    field: string,
+    column: string,
+    empty: boolean,
+    subtree: unknown,
+  ): void {
+    const shape = this.declaredValueShape?.(object, field);
+    if (!shape) throw this.undeclaredEmptyOperatorField(object, field, subtree);
+    const expansion = expandEmptyOperator(shape);
+    switch (expansion.arm) {
+      case 'null_only':
+        clauses.push(`${column} IS ${empty ? 'NULL' : 'NOT NULL'}`);
+        return;
+      case 'text':
+        clauses.push(empty ? `(${column} IS NULL OR ${column} = ?)` : `(${column} IS NOT NULL AND ${column} <> ?)`);
+        args.push('');
+        return;
+      case 'multi_value': {
+        const list =
+          `(CASE WHEN json_valid(${column}) THEN json_type(${column}) = 'array' ` +
+          `AND json_array_length(${column}) = 0 ELSE 0 END)`;
+        clauses.push(empty ? `(${column} IS NULL OR ${list})` : `(${column} IS NOT NULL AND NOT ${list})`);
+        return;
+      }
+      default: {
+        // A closed union of three rows; a fourth is a spec change this
+        // transport was not taught, and it must fail loudly.
+        const unknownArm: never = expansion.arm;
+        throw new Error(`[RemoteTransport] no $empty arm for the declared row ${JSON.stringify(unknownArm)}`);
+      }
+    }
+  }
+
+  /**
+   * [#20444] `$empty` aimed at a field whose declaration this transport was not
+   * handed — `driver-sql`'s `undeclaredEmptyOperatorFieldError`, whose withheld
+   * sentence this one is behind the `[RemoteTransport]` prefix (the declaration
+   * the caller is missing is the DRIVER's registry, which this transport reads),
+   * in this transport's location convention.
+   */
+  private undeclaredEmptyOperatorField(object: string, field: string, subtree?: unknown): Error {
+    const why =
+      "What counts as empty is the field's DECLARED row of the ruled table — null or '' for a " +
+      'text-like type, null or [] for a multi-value field, null only for every other type — so ' +
+      'the operator is refused rather than guessed. Filter on a declared field, or use "$null" for ' +
+      '"has no value".';
+    return this.withheldRefusal(
+      '[RemoteTransport] Operator "$empty" in this filter targets a field whose declaration this ' +
+        `driver does not hold (no declared type). ${why} The field is withheld from the message; ` +
+        'the full diagnostic is in the server log.',
+      subtree,
+      `[RemoteTransport] Operator "$empty" on field '${object}.${field}' targets a field whose ` +
+        `declaration this driver does not hold (no declared type). ${why}`,
     );
   }
 
@@ -3791,11 +4239,13 @@ export class RemoteTransport {
    * The error for an operator this transport does not compile.
    *
    * `$between` gets its own sentence because it is not missing by oversight:
-   * `TursoDriver.toRemoteFieldSpec` lowers it to `$gte`/`$lte` (#1003) so the
-   * calendar-day upper-bound rule is applied in exactly one place. Growing a
-   * `$between` arm here would be that second implementation, silently without
-   * the rule — so a well-formed range reaching this point means the lowering
-   * step was bypassed, and saying which step it was is the whole value of the
+   * `TursoDriver.toRemoteFieldSpec` splits it into `$gte`/`$lte` (#1003), so
+   * this transport compiles one spelling of a range. (The calendar-day
+   * upper-bound rule is not applied there any more: the shared lowering applies
+   * it at the seams, before the driver sees the filter — ADR-0053 D-D1,
+   * amended; #20822.) Growing a `$between` arm here would be a second range
+   * spelling — so a well-formed range reaching this point means the split was
+   * bypassed, and saying which step it was is the whole value of the
    * message. [#20094] A range that is NOT two bounds is the other way to arrive:
    * the lowering hands it over as written, and it gets the sentence `driver-sql`
    * gives the same mistake instead — a malformed range, not a skipped step.
@@ -3863,20 +4313,20 @@ export class RemoteTransport {
         );
       }
       // [#20039, the #8220 contract] A WELL-FORMED range is unreachable through
-      // `TursoDriver`, which lowers every two-bound `$between` before this
+      // `TursoDriver`, which splits every two-bound `$between` before this
       // transport sees it — and withheld all the same, so that EVERY refusal
       // `buildWhereSQL` can raise goes through the seam and the enumeration pin
       // has no exception to carry.
       return this.withheldRefusal(
         '[RemoteTransport] A $between in this filter must be lowered to $gte/$lte before it reaches ' +
-          'the transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound ' +
-          'rule is applied exactly once. Refusing rather than compiling a second, rule-free range. ' +
-          'The field it was aimed at is withheld from the message; the full diagnostic is in the ' +
-          'server log.',
+          'the transport — TursoDriver.toRemoteFieldSpec splits every two-bound range, and this ' +
+          'transport compiles no range of its own. Refusing rather than compiling a second range ' +
+          'spelling. The field it was aimed at is withheld from the message; the full diagnostic is ' +
+          'in the server log.',
         subtree,
         `[RemoteTransport] $between on ${target} must be lowered to $gte/$lte before it reaches the ` +
-          `transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound rule is ` +
-          `applied exactly once (#1003). Refusing rather than compiling a second, rule-free range.`,
+          `transport — TursoDriver.toRemoteFieldSpec splits every two-bound range, and this transport ` +
+          `compiles no range of its own. Refusing rather than compiling a second range spelling.`,
       );
     }
     // [#20020, the #8220 contract] The two arms below name the target and the
@@ -3902,7 +4352,7 @@ export class RemoteTransport {
       subtree,
       `[RemoteTransport] Unsupported filter operator "${op}" on ${target} in remote mode. Supported: ` +
         `${SUPPORTED_FILTER_OPERATORS.join(', ')}. Refusing rather than compiling it to an equality — a ` +
-        `silent degradation is indistinguishable from "no rows matched" (#1004).`,
+        `silent degradation is indistinguishable from "no rows matched".`,
     );
   }
 
@@ -3959,7 +4409,7 @@ export class RemoteTransport {
         subtree,
         `${shared}. "${key}" IS a field operator, one level down: write ` +
           `{ <field>: { "${key}": <value> } } — e.g. { stage: { "${key}": … } } — rather than putting ` +
-          `it at the condition level (objectstack#5769, objectstack#5348).`,
+          `it at the condition level.`,
       );
     }
     return this.withheldRefusal(
@@ -3967,8 +4417,7 @@ export class RemoteTransport {
       subtree,
       `${shared}. The Filter Protocol declares no "${key}" at any level; on a read it cost an empty ` +
         `page, and on deleteMany/updateMany the predicate is constantly false or constantly true ` +
-        `depending on which side of the comparison the literal lands (objectstack#5769, ` +
-        `objectstack#5348).`,
+        `depending on which side of the comparison the literal lands.`,
     );
   }
 
@@ -4011,7 +4460,7 @@ export class RemoteTransport {
         `filter conditions, but received ${shown} (${preview(value)}). @objectstack/spec ` +
         `FilterConditionSchema declares "${key}" as FilterCondition[]. Refusing rather than falling ` +
         `through to the field path, which read '${key}' as a COLUMN NAME and compiled a predicate ` +
-        `against a column that cannot exist (objectstack#5769).`,
+        `against a column that cannot exist.`,
     );
   }
 
@@ -4159,7 +4608,7 @@ export class RemoteTransport {
         `because the backends disagreed: driver-sql handed it to knex and got a bare "Undefined ` +
         `binding(s)" Error carrying no code, while Turso's remote transport compiled it to IS NULL ` +
         `— so \`{ owner_id: ctx.user?.id }\` with a missing id silently matched every env-wide row ` +
-        `instead of failing (#6050).`,
+        `instead of failing.`,
     );
   }
 
@@ -4210,12 +4659,12 @@ export class RemoteTransport {
           `FilterConditionSchema declares \`$not: FilterConditionSchema\`). Refusing rather than ` +
           `reading '${branch}' as a COLUMN NAME — that is the bug this branch exists to close: it ` +
           `compiled a predicate against a column that cannot exist, and named it as a field of ` +
-          `'${object}' when it complained (#1051, #1076). A negation of "no condition" is written ` +
+          `'${object}' when it complained. A negation of "no condition" is written ` +
           `\`{ $not: {} }\`, which matches zero rows.`
         : `Every element of ${branch} must be a plain object of conditions (spec ` +
           `FilterConditionSchema). Refusing rather than skipping it — a dropped element leaves ` +
-          `valid SQL that answers a DIFFERENT question: narrower in $or, wider in $and (#1004, ` +
-          `#1058, #1066, #1073). An intentionally unconstrained branch is written \`{}\`.`;
+          `valid SQL that answers a DIFFERENT question: narrower in $or, wider in $and. An ` +
+          `intentionally unconstrained branch is written \`{}\`.`;
     // [#20039, the #8220 contract] The position, the kind and the preview are
     // the predicate's (a policy's literal, measured) — and so is which of the
     // three combinators it sat under, since the requirement sentence names it.
@@ -4282,8 +4731,8 @@ export class RemoteTransport {
       `[RemoteTransport] where on '${object}' is ${describeValue(filters)}, not a filter condition: ` +
         `${preview(filters)}. ${requirement} Refusing rather than compiling it to NO WHERE clause — ` +
         `a filter that vanishes WIDENS the statement to the whole table, so a read returns exactly ` +
-        `the rows the filter was written to exclude and deleteMany/updateMany touch every row ` +
-        `(#1004, #1058, #1066, #1073, #1075). "No filter" is written \`{}\`, or by omitting \`where\`.`,
+        `the rows the filter was written to exclude and deleteMany/updateMany touch every row. ` +
+        `"No filter" is written \`{}\`, or by omitting \`where\`.`,
     );
   }
 
@@ -4321,7 +4770,7 @@ export class RemoteTransport {
         `(${SUPPORTED_FILTER_OPERATORS.join(', ')}); to compare against a value, write the value ` +
         `itself. Refusing rather than dropping the condition — a predicate that vanishes WIDENS the ` +
         `statement to the whole table, so the caller gets back exactly the rows the filter was ` +
-        `written to exclude (#1004, #1058, #1066).`,
+        `written to exclude.`,
     );
   }
 
@@ -4407,9 +4856,9 @@ export class RemoteTransport {
           `compares a column against another column instead of against a value. The query DSL ` +
           `declares this form (spec FieldReferenceSchema) but no executor compiles it, so it is ` +
           `refused here rather than bound as the marker's JSON text — which is valid SQL that ` +
-          `matches nothing (#1058). Compare against a literal, or select both columns and compare ` +
+          `matches nothing. Compare against a literal, or select both columns and compare ` +
           `after retrieval. The columns and the operator this filter used are withheld from the ` +
-          `message (#7929); the full diagnostic is in the server log.`,
+          `message; the full diagnostic is in the server log.`,
         diagnostic,
         value,
         `${diagnostic} No executor compiles this form in remote mode — compare against a ` +
@@ -4432,14 +4881,14 @@ export class RemoteTransport {
       `transport cannot bind. A comparison value must be ` +
       `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding its JSON text ` +
       `— that compiles to valid SQL matching zero rows, which is indistinguishable from ` +
-      `"no rows matched" (#1004, #1058).`;
+      `"no rows matched".`;
     this.diagnosticSink?.(diagnostic);
     return withheldInvalidFilterError(
       `[RemoteTransport] A filter comparand in this query is a value this transport cannot bind. ` +
         `A comparison value must be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather ` +
         `than binding its JSON text — that compiles to valid SQL matching zero rows, which is ` +
-        `indistinguishable from "no rows matched" (#1004, #1058). The field, the operator and the ` +
-        `value this filter used are withheld from the message (#8197); the full diagnostic is in ` +
+        `indistinguishable from "no rows matched". The field, the operator and the ` +
+        `value this filter used are withheld from the message; the full diagnostic is in ` +
         `the server log.`,
       diagnostic,
       value,

@@ -47,6 +47,13 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so every analytics boot below also registers an `auth` slot in the shape
+// `resolveExecutionContext` reads, answering a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 function makeFakeServer() {
     const handlers: Record<string, (req: any, res: any) => any> = {};
     const rec = (verb: string) => (path: string, handler: any) => {
@@ -104,6 +111,7 @@ function faultRecords(logger: { error: { mock: { calls: any[][] } } }) {
 describe('#14310 — a 5xx is never silent', () => {
     it('a handler throwing a plain Error yields a 500 AND one error-level record carrying the message', async () => {
         const { handlers, logger } = await boot({
+            auth: SIGNED_IN_AUTH,
             analytics: {
                 query: async () => { throw new Error('boom-plain-error'); },
                 getMeta: async () => ({ cubes: [] }),
@@ -145,6 +153,7 @@ describe('#14310 — a 5xx is never silent', () => {
     it('still hands the same error to the observability side-channel — the log does not replace APM', async () => {
         const original = new Error('UNIQUE constraint failed: sys_user.email');
         const { handlers, logger } = await boot({
+            auth: SIGNED_IN_AUTH,
             analytics: {
                 query: async () => { throw original; },
                 getMeta: async () => ({ cubes: [] }),
@@ -180,6 +189,7 @@ describe('#14310 — a 5xx is never silent', () => {
         // fixture moves to a returned envelope that is a genuine FAULT: the
         // analytics door catching its own failure and answering 500.
         const { handlers, logger } = await boot({
+            auth: SIGNED_IN_AUTH,
             analytics: {
                 query: async () => { throw new Error('returned-not-thrown'); },
                 getMeta: async () => ({ cubes: [] }),

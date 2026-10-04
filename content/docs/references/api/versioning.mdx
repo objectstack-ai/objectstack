@@ -1,5 +1,6 @@
 ---
-title: Versioning
+title: Versioning schema — API Protocol reference
+navTitle: Versioning
 description: "Defines how API versions are negotiated between client and server. Supports multiple versioning strategies and deprecation lifecycle management."
 ---
 
@@ -106,7 +107,7 @@ const result = VersionDefinitionSchema.parse(data);
 | **headerName** | `string` | optional (default: `"ObjectStack-Version"`) | HTTP header name for version negotiation (header/dateBased strategies) |
 | **queryParamName** | `string` | optional (default: `"version"`) | Query parameter name for version specification (queryParam strategy) |
 | **urlPrefix** | `string` | optional (default: `"/api"`) | URL prefix before version segment (urlPath strategy) |
-| **deprecation** | `{ warnHeader: boolean; sunsetHeader: boolean; linkHeader: boolean; rejectRetired: boolean; … }` | optional | Deprecation lifecycle behavior |
+| **deprecation** | `{ warnHeader?: boolean; sunsetHeader?: boolean; linkHeader?: boolean; rejectRetired?: boolean; … }` | optional | Deprecation lifecycle behavior |
 | **includeInDiscovery** | `boolean` | optional (default: `true`) | Include version information in the API discovery endpoint |
 
 ### Nested Shape: `VersioningConfig.versions[number]`

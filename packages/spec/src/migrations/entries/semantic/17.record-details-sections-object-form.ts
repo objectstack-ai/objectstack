@@ -27,11 +27,13 @@ export const entry: SemanticMigration = {
     + '`sys_user` platform page — authors the object form. So the break lands only on stored '
     + 'metadata written against a declaration nothing ever honoured, and it lands at publish '
     + 'time rather than rewriting data at rest. The same change DECLARED `hideFields`, which '
-    + 'the `sys_user` platform page had been authoring undeclared. Registered by the #6350 '
-    + 'stock reconciliation: #5611 predates the #6148 completeness gate, so nothing asked it '
+    + 'the `sys_user` platform page had been authoring undeclared. Registered late, by the '
+    + 'stock reconciliation that compared the breaking changesets already on the v17 release '
+    + 'train against this ledger: the change that declared the object form predates the gate '
+    + 'that makes a breaking changeset state its ledger disposition, so nothing asked it '
     + 'what it had done about the ledger, and the sibling key on the same def — '
-    + '`ui/RecordDetailsProps:layout`, retired by #6350\'s neighbour — carries a tombstone '
-    + 'while this face carried none. ADR-0087, #5611 (backfilled #6350).',
+    + '`ui/RecordDetailsProps:layout`, retired in a neighbouring change — carries a tombstone '
+    + 'while this face carried none. ADR-0087.',
   acceptanceCriteria:
     'Every `record:details` component in authored metadata spells `sections` as an object '
     + 'array: each entry names the fields it renders (`fields: [...]`), optionally with '

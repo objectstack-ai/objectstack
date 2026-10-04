@@ -554,5 +554,45 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'To keep 25 rows per page, write it: `pagination: { pageSize: 25 }`. To take the platform '
         + 'default, change nothing.',
     },
+    {
+      key: 'data/Cube:public',
+      from: 'false',
+      to: 'true',
+      reason:
+        'The declared default moves to the Cube.dev default (visible) in the SAME change that makes '
+        + 'the key real (#20282, triage verdict ENFORCE under the maintainer\'s enforce-or-retire '
+        + 'criterion). Until now nothing read `public`: `GET /analytics/meta` listed every cube and '
+        + 'every query door answered it, so the old `false` hid nothing. `@objectstack/service-analytics` '
+        + 'now reads it (`cube-visibility.ts#isCubePublic`): an explicit `public: false` hides the cube '
+        + 'from discovery and refuses `POST /analytics/query` and `/analytics/sql` with CUBE_NOT_FOUND. '
+        + 'Enforcing the OLD default as declared would have hidden every cube that omits the key, so '
+        + 'the flip is what makes enforcement possible. What moves for a consumer who relied on `false`: '
+        + 'nothing deployed changes behaviour on the omitted path — an omitted `public` was visible '
+        + 'before (nothing read the key) and is visible after (it now parses to `true`). A client that '
+        + 'parses cube metadata through the published JSON Schema materialises `true` where it '
+        + 'materialised `false`. A document that SERIALISED an earlier parse (an `os compile` artifact) '
+        + 'carries a written `false` and is now hidden: recompile it, or delete the key. To hide a cube '
+        + 'from the analytics API, write `public: false`.',
+    },
+    {
+      key: 'marketplace/Package:visibility',
+      from: '"private"',
+      to: '"org"',
+      reason:
+        'A RULED declaration change: ADR-0006 v4 open question 2 (the visibility a package gets '
+        + 'when its creator names none) is ruled `org` (maintainer ruling 2026-09-30, letter A) — a '
+        + 'package published from one environment is installable in the owner organization\'s other '
+        + 'environments. The declared `private` was never the default a create path applied: the cloud control '
+        + 'plane gives a new package `org` when the create request omits `visibility`, '
+        + '`os package publish` used to send `org` itself, and `os plugin publish` sent its own '
+        + '`private` explicitly on every publish (it now omits the key unless `--visibility` is '
+        + 'passed, so a NEW plugin package gets the control plane\'s `org`). '
+        + '`CreatePackageRequestSchema.visibility` stays optional with NO default, so a create '
+        + 'request that omits the key still reaches the control plane without it. What moves for '
+        + 'a consumer who relied on `private`: a package ROW parsed through `PackageSchema` (or its '
+        + 'published JSON Schema) with no `visibility` now reads `org` where it read `private`. A '
+        + 'row or request that writes a value keeps it. To keep `private`, write '
+        + '`visibility: \'private\'` (on the CLI, `--visibility private`).',
+    },
   ],
 };

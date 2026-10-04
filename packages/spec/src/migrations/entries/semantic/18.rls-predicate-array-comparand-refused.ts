@@ -23,8 +23,9 @@ export const entry: SemanticMigration = {
     + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands, and '
     + '{ $field } references between single-valued columns evaluate exactly as before',
   reason:
-    'Ruling A on #19886 refuses an array comparand under $ne, and the equality slot is ruling '
-    + '乙 on #19757; stage 2a of #19886 lands both on the formula face, the evaluator '
+    'Ruling A of 2026-09-24 refuses an array comparand under $ne, and ruling 乙 of 2026-09-23 '
+    + 'refuses one in the implicit-equality slot, each for every driver at once; this change '
+    + 'lands both on the formula face, the evaluator '
     + 'plugin-security runs against the post-image of an insert or update to enforce a '
     + 'row-level check. It compared strictly, and no stored value ever equals an array, so a '
     + 'check written record.status != ["closed", "archived"], or != against a current_user '

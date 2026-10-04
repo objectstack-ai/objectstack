@@ -15,17 +15,36 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
+import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
 import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
 import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
+import { SysFlowCredential } from './sys-flow-credential.object.js';
+import {
+    FlowCredentialChannel,
+    storedFlowStates,
+    type FlowCredentialEngine,
+    type FlowCredentialState,
+} from './flow-credential-channel.js';
+import {
+    migrateFlowCredentialsIntoChannel,
+    type FlowCredentialMigrationEngine,
+    type FlowCredentialMigrationProtocol,
+} from './flow-credential-migration.js';
 import {
     ObjectStoreSuspendedRunStore,
     DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW,
     type SuspendedRunStoreEngine,
 } from './suspended-run-store.js';
 import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+import {
+    pullConnectorSource,
+    type ConnectorPullOptions,
+    type ConnectorPullProtocol,
+    type ConnectorPullResult,
+} from './connector-pull.js';
 // [ADR-0126 §4 · #12359 ruling, 2026-08-26] ⛔ `SysMetadataActivation` is
 // deliberately NOT imported here any more. This plugin registered the
 // activation ledger's object while flows were its only consumer; registration
@@ -445,6 +464,35 @@ export function findInertDeclaredConnectors(
 }
 
 /**
+ * [#20761, ADR-0126 §7.2 / §7.3] The engine's reader over THE LOADER'S SET:
+ * which package ships a flow name, asked of the metadata protocol's
+ * `packagedArtifactOwner` — the answer its locked-base verdict reads, drawn
+ * from the entries the artifact loader registered. ⛔ No second set is kept
+ * here, and nothing is read off a definition.
+ *
+ * Resolved at QUESTION time, never at boot: the protocol service may register
+ * after this plugin's `init()`, and a registry read turned into a recorded
+ * "not there" would be the startup-registry verdict AGENTS.md forbids. A
+ * composition with no protocol — or one whose protocol brings no such reader —
+ * holds no flow a managed package loaded as far as this engine can know, so
+ * the answer is "none": the §7.3 guards then protect nothing and the
+ * activation door refuses every flow, which fails closed rather than trusting
+ * a definition's own stamps.
+ */
+export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (name: string) => string | undefined {
+    return (name) => {
+        let protocol: { packagedArtifactOwner?: (request: { type: string; name: string }) => string | undefined } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            return undefined;
+        }
+        if (typeof protocol?.packagedArtifactOwner !== 'function') return undefined;
+        return protocol.packagedArtifactOwner({ type: 'flow', name });
+    };
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -521,9 +569,11 @@ export class AutomationServicePlugin implements Plugin {
      * an unchanged instance (skip — don't re-open its MCP connection) from a
      * changed one (re-materialize). `close` is the optional teardown (e.g. an MCP
      * connection), invoked on removal, replacement, and `destroy()` so no socket /
-     * child process leaks.
+     * child process leaks. `provider` is the entry's provider key (#20919):
+     * the registered def carries none, and the connector sync executor reads
+     * only a `rest` / `openapi` instance, so the answer is recorded here.
      */
-    private materializedConnectors = new Map<string, { signature: string; close?: () => void | Promise<void> }>();
+    private materializedConnectors = new Map<string, { signature: string; provider: string; close?: () => void | Promise<void> }>();
     /**
      * Degraded declarative instances (#3017): provider-bound entries whose
      * upstream was unreachable at materialization. Keyed by connector name;
@@ -563,15 +613,62 @@ export class AutomationServicePlugin implements Plugin {
      * what their disagreement looks like in production.
      */
     private runObjectRegistered = false;
+    /** The context `init()` received — what {@link pullConnectorSource} resolves its services through. */
+    private ctx?: PluginContext;
+    /**
+     * [#20790] The write-only flow credential channel: the engine's credential
+     * source, and the `flow` credential channel of the metadata save door.
+     */
+    private credentialChannel?: FlowCredentialChannel;
+    /** [#20790] Serializes the one-time credential move — see {@link scheduleCredentialMigration}. */
+    private credentialMigration: Promise<void> = Promise.resolve();
+    /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
+    private unsubscribeCryptoProvider?: () => void;
 
     constructor(options: AutomationServicePluginOptions = {}) {
         this.options = options;
     }
 
     /**
+     * [#20919] Pull one `mapping`'s `connectorSource` and write the records
+     * through the import runner — the connector sync executor
+     * (`./connector-pull.ts`). Reads the mapping and writes the target through
+     * the `protocol` service, and resolves the connector against the instances
+     * this plugin materialized from `connectors[]`.
+     *
+     * The engine serves this as the `automation` service's contract method
+     * (`IAutomationService.pullConnectorSource`): `init()` attaches it with
+     * `setConnectorPullSource`, because the registered service is the ENGINE
+     * and the materialized-connector map it needs is this plugin's. A `job`
+     * whose `pull` names the mapping reaches it that way, through the service
+     * registry, and supplies the execution context (`opts.context`) built from
+     * the job's `organization`.
+     */
+    async pullConnectorSource(opts: ConnectorPullOptions): Promise<ConnectorPullResult> {
+        const ctx = this.ctx;
+        const engine = this.engine;
+        if (!ctx || !engine) {
+            throw new Error('[Automation] pullConnectorSource() called before init() — the automation plugin is not initialized');
+        }
+        const protocol = ctx.getService<ConnectorPullProtocol>('protocol');
+        return pullConnectorSource(
+            {
+                protocol,
+                registry: engine,
+                providerOf: (connector) => this.materializedConnectors.get(connector)?.provider,
+                logger: ctx.logger,
+            },
+            opts,
+        );
+    }
+
+    /**
      * Register {@link SysAutomationRun} and {@link SysFlowDispatch} with the
      * `manifest` service so the suspended-run and dispatch-ledger tables
-     * migrate like every other `sys_*` object (ADR-0019, #10220).
+     * migrate like every other `sys_*` object (ADR-0019, #10220) — and
+     * [#20790] {@link SysFlowCredential}, the write-only flow credential
+     * channel, in the same registration, so one manifest answer (and at most
+     * one warning) covers all three.
      *
      * Returns whether it landed. Callers must honour a `false` — a durable
      * store attached over an unregistered object writes to a table that does
@@ -587,7 +684,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun, SysFlowDispatch],
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential],
             });
             return true;
         } catch (err) {
@@ -606,21 +703,194 @@ export class AutomationServicePlugin implements Plugin {
         }
     }
 
+    /**
+     * [#20790] The data engine the credential channel, its index and the
+     * one-time move read and write through — ObjectQL, resolved at call time
+     * (it may register after this plugin inits).
+     */
+    private resolveDataEngine(ctx: PluginContext): (FlowCredentialEngine & FlowCredentialMigrationEngine) | undefined {
+        for (const name of ['objectql', 'data']) {
+            try {
+                const engine = ctx.getService<FlowCredentialEngine & FlowCredentialMigrationEngine>(name);
+                if (engine && typeof engine.find === 'function' && typeof engine.insert === 'function') return engine;
+            } catch {
+                /* not registered under this name */
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * [#20790] Register {@link SysFlowCredential} ALONE with the `manifest`
+     * service — the `suspendedRunStore: 'memory'` composition, which registers
+     * no run object: a flow credential has nowhere else to go, so the channel
+     * needs its table on every composition. Every other composition registers
+     * it with the run objects ({@link registerRunObject}).
+     */
+    private registerCredentialObject(ctx: PluginContext): boolean {
+        try {
+            ctx.getService<{ register(m: unknown): void }>('manifest').register({
+                id: 'com.objectstack.service-automation.flow-credentials',
+                name: 'Automation Flow Credentials',
+                version: '1.0.0',
+                type: 'plugin',
+                scope: 'system',
+                defaultDatasource: 'cloud',
+                namespace: 'sys',
+                objects: [SysFlowCredential],
+            });
+            return true;
+        } catch (err) {
+            ctx.logger.warn(
+                '[Automation] manifest service unavailable; sys_flow_credential not registered yet.',
+                describeThrownForLog(err),
+            );
+            return false;
+        }
+    }
+
+    /**
+     * [#20790] Make the channel the `flow` credential channel of the metadata
+     * save door, its publish promotion and its delete — on the protocol, which
+     * every metadata write reaches. Resolved at `start()`, once every plugin
+     * has inited, so a protocol that registers after this plugin is seen.
+     */
+    private registerCredentialChannelOnProtocol(ctx: PluginContext): void {
+        const channel = this.credentialChannel;
+        if (!channel) return;
+        let protocol: {
+            registerCredentialChannel?(type: string, channel: unknown): void;
+            registerPublishMaterializer?(type: string, materializer: (args: { body: unknown }) => Promise<unknown>): void;
+            registerMutationProjector?(type: string, projector: (evt: { name?: unknown; state?: unknown }) => Promise<void>): void;
+        } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            protocol = undefined;
+        }
+        if (!protocol) {
+            // No metadata store: flows come from code only, and nothing stores one.
+            ctx.logger.debug('[Automation] no metadata protocol — no flow credential channel to register');
+            return;
+        }
+        if (typeof protocol.registerCredentialChannel !== 'function') {
+            ctx.logger.warn(
+                '[Automation] the metadata protocol offers no credential channel registration — a flow saved through it ' +
+                    'is stored WITH its credentials in the definition. Run a metadata protocol that registers credential channels.',
+            );
+            return;
+        }
+        protocol.registerCredentialChannel('flow', {
+            store: (args: { name: string; state: FlowCredentialState; body: unknown }) => channel.store(args),
+            heldPaths: (args: { name: string; state: FlowCredentialState; item: unknown }) => channel.heldPaths(args),
+            strip: (body: unknown) => channel.strip(body),
+        });
+        // Publishing a draft promotes the draft's credentials into the live ones.
+        protocol.registerPublishMaterializer?.('flow', async ({ body }) => {
+            const name = (body as { name?: unknown } | null)?.name;
+            if (typeof name !== 'string' || name === '') {
+                return { success: false, inserted: 0, updated: 0, error: 'the published flow body names no flow' };
+            }
+            const { promoted } = await channel.promote({ name, body });
+            return { success: true, inserted: 0, updated: promoted };
+        });
+        // Deleting a stored row drops the credentials of every state whose row is gone.
+        protocol.registerMutationProjector?.('flow', async (evt) => {
+            if (evt?.state !== 'deleted' || typeof evt.name !== 'string') return;
+            const engine = this.resolveDataEngine(ctx);
+            if (!engine) return;
+            await channel.prune({ name: evt.name, liveStates: await storedFlowStates(engine, evt.name) });
+        });
+    }
+
+    /**
+     * [#20790] (Re)load which live credentials the channel holds, before flows
+     * are registered — a flow stored through the save door registers on the
+     * strength of it. A failed read is loud: every such flow is refused until
+     * the next load.
+     */
+    private async loadCredentialIndex(ctx: PluginContext, moment: string): Promise<void> {
+        if (!this.credentialChannel) return;
+        try {
+            await this.credentialChannel.loadIndex();
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] the flow credential store could not be read at ${moment} — an inbound flow whose secret it ` +
+                    'holds is refused at registration until it can be.',
+                describeThrownForLog(err),
+            );
+        }
+    }
+
+    /**
+     * [#20790] Run the one-time move of stored flow credentials into the
+     * channel — at `kernel:ready`, and again whenever a crypto provider
+     * registers (the host injects one only after `kernel:ready`, so the first
+     * attempt usually defers). Serialized, idempotent and never fatal.
+     */
+    private scheduleCredentialMigration(ctx: PluginContext): void {
+        this.credentialMigration = this.credentialMigration.then(async () => {
+            if (this.destroyed) return;
+            const engine = this.resolveDataEngine(ctx);
+            let protocol: FlowCredentialMigrationProtocol | undefined;
+            try {
+                protocol = ctx.getService<FlowCredentialMigrationProtocol>('protocol');
+            } catch {
+                protocol = undefined;
+            }
+            if (!engine || typeof protocol?.saveMetaItem !== 'function') return;
+            try {
+                await migrateFlowCredentialsIntoChannel({ engine, protocol, logger: ctx.logger });
+            } catch (err) {
+                ctx.logger.warn('[Automation] the stored flow credential move failed', describeThrownForLog(err));
+            }
+        });
+    }
+
     async init(ctx: PluginContext): Promise<void> {
+        this.ctx = ctx;
         this.engine = new AutomationEngine(ctx.logger, undefined, {
             maxLogSize: this.options.maxLogSize,
             runSummaryLog: this.options.runSummaryLog,
             scheduledWorkPolicy: this.options.scheduledWorkPolicy,
         });
 
+        // [#20790] The write-only flow credential channel — the engine reads a
+        // flow's credentials from it at verification and execution, and the
+        // metadata save door stores them in it (registered at `start()`).
+        this.credentialChannel = new FlowCredentialChannel(() => this.resolveDataEngine(ctx));
+        this.engine.setFlowCredentialSource(this.credentialChannel);
+
+        // [#20281 stage ③] The connector sync executor, served on the
+        // `automation` service's contract (`pullConnectorSource`) — the door a
+        // job's `pull` run form binds through. Attached before the service is
+        // registered, so no caller can resolve the service without it.
+        this.engine.setConnectorPullSource((request) => this.pullConnectorSource(request));
+
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
+
+        // [#20761, ADR-0126 §7.2 / §7.3] Which flows are PACKAGED is the
+        // loader's set, read through the metadata protocol — the same answer
+        // its locked-base verdict reads — never the stamps on a definition.
+        // See `packagedFlowReader`.
+        this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+
+        // [#20552] Every metadata read exit withholds the inbound hook's secret
+        // from a served flow from here on — the `flow` entry of the per-type
+        // redactor registry, registered in `init()` as that registry asks.
+        // What the engine binds is untouched: it reads the protocol's
+        // EXECUTION view (see `readMetaItemsFromProtocol`) and its own flow map.
+        registerFlowCredentialRedactor();
 
         // Register the sys_automation_run object so suspended-run state migrates
         // like other sys_* tables (ADR-0019). Best-effort: a host without the
         // manifest service still runs in-memory. Skipped when persistence is off.
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
+            // [#20790] The channel's table rides the same registration.
             this.runObjectRegistered = this.registerRunObject(ctx);
+        } else {
+            this.registerCredentialObject(ctx);
         }
 
         // Seed the platform's built-in node executors. A bare
@@ -650,6 +920,12 @@ export class AutomationServicePlugin implements Plugin {
         ctx.logger.info(
             `[Automation] Engine started with ${nodeTypes.length} node types: ${nodeTypes.join(', ') || '(none)'}`,
         );
+
+        // [#20790] The flow credential channel joins the metadata save door
+        // BEFORE the inert-mode return below: a one-shot tool that rewrites
+        // stored rows (`os migrate meta --stored`) must not store a flow
+        // credential back into a definition either. Registering it arms nothing.
+        this.registerCredentialChannelOnProtocol(ctx);
 
         // ── Inert mode (#4454) — an engine, and nothing armed ─────────────────
         // A one-shot tool (`os migrate meta --stored`) needs this engine for one
@@ -875,7 +1151,10 @@ export class AutomationServicePlugin implements Plugin {
             if (ql?.registry && typeof ql.registry.getObject === 'function') {
                 this.engine.setObjectSchemaResolver((objectName) =>
                     parseObjectFieldSchema((ql.registry!.getObject!(objectName) as { fields?: unknown } | undefined)?.fields));
-                ctx.logger.debug('[Automation] object-schema resolver bridged to objectql.registry (#1928 condition checks)');
+                ctx.logger.debug(
+                    '[Automation] object-schema resolver bridged to objectql.registry ' +
+                    '(flow conditions are checked against object fields at registration)',
+                );
             }
         } catch {
             ctx.logger.debug('[Automation] objectql registry not present — flow-condition checks limited to syntax');
@@ -913,7 +1192,10 @@ export class AutomationServicePlugin implements Plugin {
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
-                ctx.logger.debug('[Automation] runAs:user grant resolver bridged to @objectstack/core resolveUserAuthzGrants (#3356)');
+                ctx.logger.debug(
+                    '[Automation] runAs:user grant resolver bridged to @objectstack/core resolveUserAuthzGrants ' +
+                    '(a user-mode run carries the triggering user\'s positions and permission sets)',
+                );
 
                 // #3475 — bridge the lookup expander for record-change flow
                 // templates. Re-reads the relations a flow declares in its start
@@ -940,7 +1222,10 @@ export class AutomationServicePlugin implements Plugin {
                         const full = await expandQl.findOne!(objectName, query);
                         return full && typeof full === 'object' ? (full as Record<string, unknown>) : undefined;
                     });
-                    ctx.logger.debug('[Automation] record-change lookup expander bridged (#3475)');
+                    ctx.logger.debug(
+                        '[Automation] record-change lookup expander bridged ' +
+                        '(a lookup the start node declares in expand is read with the run\'s own identity)',
+                    );
                 }
             } else {
                 ctx.logger.debug('[Automation] objectql not present — runAs:user runs keep the trigger-supplied identity');
@@ -948,6 +1233,10 @@ export class AutomationServicePlugin implements Plugin {
         } catch (err) {
             ctx.logger.debug(`[Automation] runAs:user grant resolver not wired: ${(err as Error).message}`);
         }
+
+        // [#20790] Which live credentials the channel holds, before any flow is
+        // registered from a stored row that no longer carries its own.
+        await this.loadCredentialIndex(ctx, 'start');
 
         // Pull flow definitions from the ObjectQL schema registry. AppPlugin.init()
         // calls manifest.register(payload), which routes to ql.registerApp() and
@@ -967,14 +1256,21 @@ export class AutomationServicePlugin implements Plugin {
             const flows = ql?.registry?.listItems?.('flow') ?? [];
             ctx.logger.debug(`[Automation] flow pull: registry returned ${flows.length} flow(s)`);
             // [#11997] Collapse same-named contenders BEFORE anything is armed.
-            // `listItems` returns a packaged flow and a same-named runtime
-            // overlay as two entries (ADR-0048 §3.4 coexistence, deliberate);
-            // the engine's flow map is keyed by bare name, so registering both
+            // `listItems` returns a packaged flow and a same-named stored row
+            // as two entries (ADR-0048 §3.4 coexistence, deliberate); the
+            // engine's flow map is keyed by bare name, so registering both
             // used to let Map iteration order decide which one dispatches.
-            // resolveFlowPrecedence applies the ADR-0005 direction — runtime
-            // overlay wins over the packaged artifact — and warns per colliding
-            // name, which is the artifact-vs-DB warning ADR-0048 §3.4 routes to.
-            const resolved = resolveFlowPrecedence(flows, ctx.logger);
+            // [#20913] resolveFlowPrecedence applies ADR-0126 §2 — a managed
+            // package's flow is sealed, so the loader's body is armed and a
+            // stored row of its name is shadowed — and warns per colliding name.
+            // [#20864, ADR-0126 §7.3] Which contender IS the packaged artifact
+            // is the loader's set, asked through the engine's own
+            // `packagedFlowOwner` (the `packagedFlowReader` attached in
+            // `init()`), so precedence and every other classification the
+            // engine makes read one source — never the stamps on the bodies.
+            // [#20913] Through {@link resolveFlowContenders}, the one decision
+            // the two protocol syncs below resolve through as well.
+            const resolved = this.resolveFlowContenders(ctx, flows);
             const shadowedNames = resolved.filter((entry) => entry.shadowing).length;
             let registered = 0;
             for (const entry of resolved) {
@@ -1073,6 +1369,8 @@ export class AutomationServicePlugin implements Plugin {
         // idempotently — ScheduleTrigger.start cancels + reschedules) and unregister
         // flows that vanished so their jobs stop.
         ctx.hook('metadata:reloaded', async (payload?: unknown) => {
+            // [#20790] A publish may have promoted credentials on another replica.
+            await this.loadCredentialIndex(ctx, 'metadata:reloaded');
             await this.resyncFlowsFromProtocol(ctx);
             // #7742 — take the connector collection off the payload FIRST. The
             // reconcile below used to read `listItems('connector')` alone, and
@@ -1104,17 +1402,35 @@ export class AutomationServicePlugin implements Plugin {
         // record-triggered flows silently never bound on a cold start, so their
         // automations never fired.
         //
-        // The canonical flattened flow view — the one `GET /meta/flow` serves —
-        // is `protocol.getMetaItems({ type: 'flow' })`; it surfaces inline app
-        // flows on-demand from the registry. Bind from THAT at kernel:ready,
+        // The canonical flattened flow view — the list `GET /meta/flow` serves,
+        // read through the protocol's EXECUTION face
+        // (`getMetaItemsForExecution({ type: 'flow' })`, #20552: the served face
+        // withholds the inbound-hook secret) — surfaces inline app flows
+        // on-demand from the registry. Bind from THAT at kernel:ready,
         // once every plugin has finished init()/start() (so the app — hence its
         // flows — is registered). registerFlow is idempotent with the boot pull.
+        // [#20913] …and it arms what the boot pull armed: both resolve through
+        // the one precedence decision ({@link resolveFlowContenders}).
         ctx.hook('kernel:ready', async () => {
+            // [#20790] Reloaded first: the protocol's view binds stored rows,
+            // whose credentials the channel holds.
+            await this.loadCredentialIndex(ctx, 'kernel:ready');
             await this.syncFlowsFromProtocol(ctx);
             // Every plugin's init()/start() has completed here, so connector
             // plugins have registered their runtime connectors — the earliest
             // point the declared-vs-registered comparison is meaningful.
             await this.auditDeclaredConnectors(ctx);
+            // [#20790] Move stored flow credentials into the channel, once — and
+            // again on every crypto-provider registration, since the host
+            // injects the provider only after this hook (the first attempt then
+            // defers without writing anything).
+            this.scheduleCredentialMigration(ctx);
+            const dataEngine = this.resolveDataEngine(ctx) as
+                | { onCryptoProviderChange?(listener: () => void): () => void }
+                | undefined;
+            if (!this.unsubscribeCryptoProvider && typeof dataEngine?.onCryptoProviderChange === 'function') {
+                this.unsubscribeCryptoProvider = dataEngine.onCryptoProviderChange(() => this.scheduleCredentialMigration(ctx));
+            }
         });
 
         // ── Silent-miss audit: unbound triggered flows (2026-07-17 eval) ──────
@@ -1179,8 +1495,8 @@ export class AutomationServicePlugin implements Plugin {
                     `[Automation] flow '${record.name}' is claimed by ${record.shadowed.length + 1} definitions — ` +
                         `${renderFlowContender(record.armed)} is ARMED and ` +
                         `${record.shadowed.map(renderFlowContender).join(', ')} ` +
-                        `${record.shadowed.length === 1 ? 'is' : 'are'} shadowed (ADR-0005 overlay precedence). ` +
-                        `Only the armed definition dispatches.`,
+                        `${record.shadowed.length === 1 ? 'is' : 'are'} shadowed (see the flow name collision ` +
+                        `warning for the rule that armed it). Only the armed definition dispatches.`,
                 );
             }
 
@@ -1299,8 +1615,9 @@ export class AutomationServicePlugin implements Plugin {
      *  - the ObjectQL registry `registerApp` writes connector metadata into. It
      *    is authoritative at boot and for everything a plugin package
      *    contributes, and it is never refreshed for connectors afterwards.
-     *  - `protocol.getMetaItems({ type: 'connector' })` — the same flattened
-     *    `/meta` view the flow re-sync reads. It IS that registry read plus the
+     *  - `protocol.getMetaItemsForExecution({ type: 'connector' })` — the same
+     *    flattened `/meta` view the flow re-sync reads, without the serving
+     *    decorations (#20552). It IS that registry read plus the
      *    `sys_metadata` overlay rows layered over it, which is what a **Studio
      *    package publish** promotes to active: the named production trigger.
      *    Only consulted `post` = true (after boot). At boot the registry has
@@ -1373,12 +1690,14 @@ export class AutomationServicePlugin implements Plugin {
         ctx.logger.warn(
             `[Automation] ${inert.length} declarative connector(s) declare actions but are not registered ` +
                 `in the connector registry — the connector_action node cannot dispatch them: ${inert.join(', ')}. ` +
-                `Declarative \`connectors:\` entries are catalog descriptors (descriptor-only contract, #2612); ` +
-                `runtime connectors are contributed by plugins via engine.registerConnector() — e.g. ` +
+                `Declarative \`connectors:\` entries without a \`provider\` are catalog descriptors ` +
+                `(descriptor-only contract); runtime connectors are contributed by plugins via ` +
+                `engine.registerConnector() — e.g. ` +
                 `@objectstack/connector-rest, @objectstack/connector-slack, @objectstack/connector-openapi, ` +
                 `@objectstack/connector-mcp. Install/instantiate the matching connector plugin, or mark a ` +
                 `deliberate catalog-only entry with \`enabled: false\` to silence this warning. ` +
-                `Declarative provider-bound connector instances are tracked in #2977 (ADR-0097).`,
+                `An entry that names a \`provider\` is a connector instance instead: that provider's ` +
+                `installed executor materializes it into a live connector (ADR-0097).`,
         );
     }
 
@@ -1520,7 +1839,7 @@ export class AutomationServicePlugin implements Plugin {
                 // the live connector is already the desired one: cancel it.
                 if (this.degradedInstances.delete(name)) {
                     ctx.logger.info(
-                        `[Automation] connector instance '${name}' reverted to its live configuration; pending retry cancelled (#3017)`,
+                        `[Automation] connector instance '${name}' reverted to its live configuration; pending retry cancelled`,
                     );
                 }
                 continue;
@@ -1662,7 +1981,7 @@ export class AutomationServicePlugin implements Plugin {
             // conflict rule all agree with the metadata the author wrote.
             const def = { ...materialization.def, name };
             engine.registerConnector(def, materialization.handlers, 'declarative');
-            this.materializedConnectors.set(name, { signature, close: materialization.close });
+            this.materializedConnectors.set(name, { signature, provider, close: materialization.close });
             // Success clears any pending degraded retry — including replacing a
             // registered husk (registerConnector above overwrote it).
             const recovered = this.degradedInstances.delete(name);
@@ -1763,7 +2082,7 @@ export class AutomationServicePlugin implements Plugin {
                 // cause goes there.
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
-                        `connector registry until a retry succeeds (#3017).`,
+                        `connector registry until a retry succeeds.`,
                     describeThrownForLog(err),
                 );
             }
@@ -1775,13 +2094,13 @@ export class AutomationServicePlugin implements Plugin {
                 (info.hasLive
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
-                `; retrying with backoff, attempt ${attempts} (#3017).`,
+                `; retrying with backoff, attempt ${attempts}.`,
             undefined,
             describeThrownForLog(info.cause),
         );
     }
 
-    /** The action-less `status: 'error'` def a degraded instance registers (#3017). */
+    /** The action-less def a degraded instance registers (#3017). */
     private buildDegradedHuskDef(name: string, entry: DeclaredConnectorItem): Connector {
         return {
             name,
@@ -1789,9 +2108,12 @@ export class AutomationServicePlugin implements Plugin {
             description: entry.description,
             icon: entry.icon,
             type: (typeof entry.type === 'string' ? entry.type : 'api') as Connector['type'],
-            // 'error' is the ConnectorStatusSchema value for "has errors" — the
-            // husk is honest metadata, not a dispatchable connector.
-            status: 'error',
+            // What marks the husk as not dispatchable is the registry's computed
+            // `state: 'degraded'` (`registerDegradedConnector`), which
+            // `GET /connectors` publishes. It used to carry `status: 'error'` as
+            // well — the retired `ConnectorStatusSchema` value — which nothing
+            // ever read; the spec key is a tombstone now (ADR-0049), so the
+            // husk no longer writes it.
             enabled: true,
             authentication: { type: 'none' },
             // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049): it
@@ -1829,7 +2151,7 @@ export class AutomationServicePlugin implements Plugin {
         (timer as unknown as { unref?: () => void }).unref?.();
         this.declarativeRetryTimer = timer;
         ctx.logger.info(
-            `[Automation] ${this.degradedInstances.size} degraded connector instance(s); next retry in ${delay}ms (#3017)`,
+            `[Automation] ${this.degradedInstances.size} degraded connector instance(s); next retry in ${delay}ms`,
         );
     }
 
@@ -1890,8 +2212,11 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * Read the protocol's flattened flow view — `getMetaItems({ type: 'flow' })`,
-     * the same source `GET /meta/flow` serves and #2560's cold-boot bind uses.
+     * Read the protocol's flattened flow view — `getMetaItemsForExecution({ type:
+     * 'flow' })`, the same list `GET /meta/flow` serves (#2560's cold-boot bind
+     * uses it), minus the serving decorations: the served face withholds each
+     * flow's inbound-hook secret, which this engine must arm the hook with
+     * (#20552).
      * Returns the list of flow docs, or `null` when the protocol is unavailable
      * or the read failed. Callers MUST treat `null` as "couldn't read", NOT as
      * "zero flows" — tearing flows down on a failed read would unbind live
@@ -1939,28 +2264,43 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         type: string,
     ): Promise<unknown[] | null> {
-        let protocol: { getMetaItems?(q: { type: string }): Promise<unknown> } | undefined;
+        let protocol: { getMetaItemsForExecution?(q: { type: string }): Promise<unknown> } | undefined;
         try {
             protocol = ctx.getService('protocol');
         } catch {
             return null; // no protocol service (bare engine / tests) — nothing to sync
         }
-        if (!protocol || typeof protocol.getMetaItems !== 'function') return null;
+        // [#20552] The EXECUTION read, never the served `getMetaItems`: the
+        // served view withholds each type's credentials (a flow's inbound-hook
+        // secret among them), and this engine executes what it reads — a flow
+        // bound from the served view would be registered without the secret
+        // its hook verifies against, and refused. Same items, same merge; only
+        // the serving decorations are absent (`getMetaItemsForExecution`).
+        if (!protocol || typeof protocol.getMetaItemsForExecution !== 'function') {
+            if (protocol) {
+                ctx.logger.warn(
+                    `[Automation] the protocol service offers no getMetaItemsForExecution — ${type} definitions ` +
+                        `are not read from it. Only the protocol's execution read carries what the engine runs; ` +
+                        `its served read withholds credentials.`,
+                );
+            }
+            return null;
+        }
 
         let raw: unknown;
         try {
-            raw = await protocol.getMetaItems({ type });
+            raw = await protocol.getMetaItemsForExecution({ type });
         } catch (err) {
             // #5048 — structured `meta`, not string interpolation (same reason as
             // the register seams below; see ./thrown-cause-diagnostics.ts).
             ctx.logger.warn(
-                `[Automation] ${type} read from protocol failed: getMetaItems('${type}')`,
+                `[Automation] ${type} read from protocol failed: getMetaItemsForExecution('${type}')`,
                 describeThrownForLog(err),
             );
             return null;
         }
 
-        // getMetaItems hands back a bare array or an `{ items: [...] }` envelope,
+        // The read hands back a bare array or an `{ items: [...] }` envelope,
         // and each entry is either the doc itself or an `{ item: <doc> }` wrapper.
         const list = Array.isArray(raw) ? raw : (((raw as { items?: unknown[] })?.items) ?? []);
         return list.map((entry) => {
@@ -1969,6 +2309,36 @@ export class AutomationServicePlugin implements Plugin {
                 : entry;
             return stripReadDecorations(doc);
         });
+    }
+
+    /**
+     * [#20913, #20761 ruling rule 1, ADR-0126 §2] THE ONE precedence decision
+     * every step that arms flows at boot or on reload goes through: the boot
+     * pull over the registry's flow list, the `kernel:ready` sync and the
+     * `metadata:reloaded` re-sync over the protocol's flow view.
+     *
+     * `resolveFlowPrecedence`, with the engine's own `packagedFlowOwner` — the
+     * loader's set, the one server-held fact of which flows are packaged — so
+     * for a name the loader's set holds, the loader's body is what is armed,
+     * at every step. Before this, the two syncs registered the view's bodies
+     * one by one with no precedence at all, and the `kernel:ready` sync re-armed
+     * over what the boot pull had just resolved. ⛔ No step keeps a second
+     * precedence path: a step that needs one calls this.
+     *
+     * Only the boot pull records the shadowing receipt: it is the step that
+     * sees a stored row of a shipped name at all (the protocol's view does not
+     * merge one in — see `getMetaItemsForExecution`), and the syncs resolve to
+     * the same winners by this same decision, so its receipt describes what is
+     * armed after them too. The collision warning is logged by every step that
+     * meets a contested name.
+     */
+    private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
+        const engine = this.engine;
+        return resolveFlowPrecedence(
+            items,
+            ctx.logger,
+            engine ? (name) => engine.packagedFlowOwner(name) : undefined,
+        );
     }
 
     /**
@@ -1984,8 +2354,9 @@ export class AutomationServicePlugin implements Plugin {
      *      trigger (record-change automations never fired) until the next
      *      restart, even though #2560 fixed the cold-boot bind.
      *
-     * Reads `protocol.getMetaItems({ type: 'flow' })` — the SAME source #2560's
-     * cold-boot bind and `GET /meta/flow` use. It does NOT read the ObjectQL
+     * Reads `protocol.getMetaItemsForExecution({ type: 'flow' })` — the SAME
+     * list #2560's cold-boot bind uses and `GET /meta/flow` serves, without the
+     * serving decorations (#20552). It does NOT read the ObjectQL
      * schema registry (a boot-time cache the reload never refreshes) and — the
      * bug this fixes — no longer reads `metadata.list('flow')`, which returns 0
      * in a real running server (it does not surface inline app flows), so the old
@@ -2004,16 +2375,17 @@ export class AutomationServicePlugin implements Plugin {
 
         const freshNames = new Set<string>();
         let resynced = 0;
-        for (const def of defs) {
-            if (!def?.name) continue;
-            freshNames.add(def.name);
+        // [#20913] Same-named contenders in the view resolve through the ONE
+        // precedence the boot pull used — never "last one registered wins".
+        for (const entry of this.resolveFlowContenders(ctx, defs)) {
+            freshNames.add(entry.name);
             try {
-                this.engine.registerFlow(def.name, def as never);
+                this.engine.registerFlow(entry.name, entry.definition as never);
                 resynced++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] flow re-sync: failed to register flow', {
-                    flow: def.name,
+                    flow: entry.name,
                     ...describeThrownForLog(err),
                 });
             }
@@ -2021,10 +2393,13 @@ export class AutomationServicePlugin implements Plugin {
 
         // Tear down flows that were synced from a prior artifact but are gone
         // now, so their triggers/jobs (e.g. a scheduled job) stop firing.
+        // [#20725] Through `withdrawFlow`, not the `unregisterFlow` door: the
+        // artifact dropped them, which ADR-0126 §7.3's removal guard does not
+        // judge — see `AutomationEngine.withdrawFlow` for why.
         for (const prev of this.syncedFlowNames) {
             if (!freshNames.has(prev)) {
                 try {
-                    this.engine.unregisterFlow(prev);
+                    this.engine.withdrawFlow(prev);
                 } catch {
                     /* best-effort */
                 }
@@ -2050,16 +2425,18 @@ export class AutomationServicePlugin implements Plugin {
         const defs = await this.readFlowDefsFromProtocol(ctx);
         if (!defs) return;
         let bound = 0;
-        for (const def of defs) {
-            if (!def?.name) continue; // registerFlow is idempotent, so re-binding is safe
+        // [#20913] Through the boot pull's own precedence decision — see
+        // {@link resolveFlowContenders}. registerFlow is idempotent, so
+        // re-binding the body the boot pull armed is safe.
+        for (const entry of this.resolveFlowContenders(ctx, defs)) {
             try {
-                this.engine.registerFlow(def.name, def as never);
-                this.syncedFlowNames.add(def.name);
+                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.syncedFlowNames.add(entry.name);
                 bound++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] cold-boot flow bind: failed to register flow', {
-                    flow: def.name,
+                    flow: entry.name,
                     ...describeThrownForLog(err),
                 });
             }
@@ -2073,6 +2450,10 @@ export class AutomationServicePlugin implements Plugin {
         // Stop the degraded-instance retry loop first (#3017): mark destroyed so
         // an already-queued reconcile no-ops, and cancel any armed timer.
         this.destroyed = true;
+        // [#20790] No credential move after shutdown, and none left in flight.
+        this.unsubscribeCryptoProvider?.();
+        this.unsubscribeCryptoProvider = undefined;
+        await this.credentialMigration.catch(() => undefined);
         this.clearDeclarativeRetryTimer();
         this.degradedInstances.clear();
         // Tear down materialized provider-bound connectors (ADR-0097) — e.g. an

@@ -13,28 +13,21 @@ import {
     type ArtifactGrantBinding,
 } from './security/artifact-granted-permissions.js';
 import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
-import {
-    resolveTenancyPosture,
-    resolveScheduledWorkEnabled,
-    SCHEDULED_WORK_DISABLED_REASON,
-} from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { declareSeedSource } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
-import type { IJobService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import type { IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
-import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
-import { toBoundaryJobSchedule } from './job-schedule.js';
-import type { JobHandlerContext } from './job-handler-context.js';
-import { countServerTiming, SEMCONV } from '@objectstack/observability';
-import { resolveMetrics } from './observability/observability-service-plugin.js';
+import { bindAppArtifactHandlers, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { countServerTiming } from '@objectstack/observability';
 
 /**
  * The write options every seed insert must use — the shared
@@ -102,7 +95,8 @@ export type AppPluginSecurityMetadataRegistrar = 'app-plugin' | 'artifact-door';
  * 
  * Responsibilities:
  * 1. Register App Manifest as a service (for ObjectQL discovery)
- * 2. Execute Runtime `onEnable` hook (for code logic)
+ * 2. Execute Runtime `onEnable` hook (for code logic) — withheld on a
+ *    declaration boot that passes `skipOnEnable`
  * 3. Auto-load i18n translation bundles into the kernel's i18n service
  */
 export class AppPlugin implements Plugin {
@@ -172,6 +166,26 @@ export class AppPlugin implements Plugin {
      */
     private readonly skipSeedData: boolean;
     /**
+     * Do not execute the bundle's `onEnable` (#21054) — the same one-shot
+     * schema commands as {@link skipSeedData}, for the same reason one step
+     * further. `os migrate plan` / `apply` compose this app for what it
+     * DECLARES; `onEnable` is the app's imperative code, and what it does —
+     * register handlers, drivers and lifecycle hooks, read and write data —
+     * belongs to a served boot. Measured on `examples/app-crm`: its `onEnable`
+     * hooks `kernel:bootstrapped` and reads `sys_position` /
+     * `sys_permission_set`, tables the plan's composition never declares, so
+     * every plan printed six `DATABASE_ERROR` lines.
+     *
+     * Read HERE, by the executor, rather than arranged by stripping the member
+     * off a copy of the bundle: this method alone resolves which object owns
+     * the hook (`bundle.default` before the bundle itself), a stripped copy
+     * would re-state that rule at the call site, and the boot would then log
+     * "No runtime.onEnable function found" about an app that has one.
+     */
+    private readonly skipOnEnable: boolean;
+    /** Set by `start()` when {@link skipOnEnable} withheld an `onEnable` the bundle carries. */
+    private onEnableWithheldFlag = false;
+    /**
      * See {@link AppPluginSecurityMetadataRegistrar}. Public and readonly so a
      * composition test can pin which registrar a boot shape declared.
      */
@@ -229,14 +243,29 @@ export class AppPlugin implements Plugin {
         return this.grantBindingResult;
     }
 
+    /**
+     * `true` once `start()` found an `onEnable` on this bundle and did NOT run
+     * it, because the composition passed `skipOnEnable` (#21054). `false` on
+     * every boot that runs it and on a bundle that carries none — so a caller
+     * reporting what its boot withheld names only what was really there.
+     */
+    get onEnableWithheld(): boolean {
+        return this.onEnableWithheldFlag;
+    }
+
     constructor(
         bundle: any,
         projectContext?: AppPluginProjectContext,
-        opts: { skipSeedData?: boolean; securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar } = {},
+        opts: {
+            skipSeedData?: boolean;
+            skipOnEnable?: boolean;
+            securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar;
+        } = {},
     ) {
         this.bundle = bundle;
         this.projectContext = projectContext;
         this.skipSeedData = opts.skipSeedData ?? false;
+        this.skipOnEnable = opts.skipOnEnable ?? false;
         // Refused loudly rather than defaulted: a misspelt registrar would
         // otherwise fall through to whichever branch the typo happened to
         // miss, and both branches are silent about what they did not do.
@@ -1015,8 +1044,16 @@ export class AppPlugin implements Plugin {
             ? stackBundle
             : this.bundle;
 
-        if (runtime && typeof runtime.onEnable === 'function') {
-             ctx.logger.info('Executing runtime.onEnable', { 
+        if (runtime && typeof runtime.onEnable === 'function' && this.skipOnEnable) {
+             // [#21054] A declaration boot: the hook exists and is withheld,
+             // and the boot says so rather than reading as an app without one.
+             this.onEnableWithheldFlag = true;
+             ctx.logger.info(
+                 'runtime.onEnable NOT executed — this boot composes the app for its declarations only (skipOnEnable)',
+                 { appName: this.name, appId },
+             );
+        } else if (runtime && typeof runtime.onEnable === 'function') {
+             ctx.logger.info('Executing runtime.onEnable', {
                  appName: this.name,
                  appId 
              });
@@ -1043,110 +1080,24 @@ export class AppPlugin implements Plugin {
              ctx.logger.debug('No runtime.onEnable function found', { appId });
         }
 
-        // ── Auto-bind declarative Hook metadata ─────────────────────────
-        // Hooks declared via `defineStack({ hooks })` (or attached to the
-        // bundle by other tooling) are wired into the ObjectQL execution
-        // pipeline here, with no boilerplate from user code. Inline
-        // function handlers are resolved directly; string-named handlers
-        // are looked up in `bundle.functions` (also auto-registered) or in
-        // any function previously registered on the engine.
+        // ── Auto-bind declarative Hook + Action handlers ────────────────
+        // Hooks declared via `defineStack({ hooks })` (inline function handlers,
+        // string-named `bundle.functions`, or a sandboxed `body`) and actions
+        // carrying an extracted `body` are wired into the ObjectQL engine here,
+        // with no boilerplate from user code, so `POST /api/v1/actions/<obj>/<name>`,
+        // MCP `run_action` and the record pipeline run them.
         //
-        // Runs AFTER `runtime.onEnable` so user code may still
-        // imperatively register additional hooks/functions for advanced
-        // cases — both will coexist on the engine.
-        try {
-            const hooks = collectBundleHooks(this.bundle);
-            // Entries, not bare handlers: each function's declared `effect`
-            // (#4396) rides along to the registry, where a `script` node reads
-            // it to report what its run actually did.
-            const functions = collectBundleFunctionEntries(this.bundle);
-            for (const [name, fn] of Object.entries(functions)) {
-                if (fn.unrecognizedEffect === undefined) continue;
-                ctx.logger.warn('[AppPlugin] unrecognized function effect — counted as an uncountable write', {
-                    appId,
-                    name,
-                    effect: fn.unrecognizedEffect,
-                    expected: "'pure' | 'writes'",
-                });
-            }
-            if (hooks.length > 0 || Object.keys(functions).length > 0) {
-                if (typeof ql.bindHooks === 'function') {
-                    ql.bindHooks(hooks, {
-                        packageId: `app:${appId}`,
-                        functions,
-                        bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), {
-                            ql,
-                            logger: ctx.logger,
-                            appId,
-                        }),
-                    });
-                    ctx.logger.info('[AppPlugin] Bound declarative hooks', {
-                        appId,
-                        hookCount: hooks.length,
-                        functionCount: Object.keys(functions).length,
-                    });
-                } else {
-                    ctx.logger.warn('[AppPlugin] ql.bindHooks unavailable; declarative hooks ignored', {
-                        appId,
-                        hookCount: hooks.length,
-                    });
-                }
-            }
-        } catch (err: any) {
-            ctx.logger.error('[AppPlugin] Failed to bind declarative hooks', err as Error, {
-                appId,
-            });
-        }
-
-        // ── Auto-register declarative Action handlers ───────────────────
-        // Actions with an inline `handler` (or extracted `body`) are wired
-        // to the engine here so HTTP `POST /api/v1/actions/<obj>/<name>`
-        // can invoke them. Actions without a body are left for legacy
-        // imperative `engine.registerAction(...)` registration in user code.
-        try {
-            const actions = collectBundleActions(this.bundle);
-            const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), {
-                ql,
-                logger: ctx.logger,
-                appId,
-            });
-            let registered = 0;
-            if (actions.length > 0 && typeof ql.registerAction === 'function') {
-                for (const action of actions) {
-                    const handler = actionBodyRunner(action);
-                    if (!handler) continue;
-                    // Object-less actions register under the canonical
-                    // `'global'` key (#3913) — the literal every reader probes
-                    // (`actionHandlerObjectKeys`), since `executeAction` is an
-                    // exact-string Map lookup with no wildcard semantics.
-                    const objectKey =
-                        typeof action.object === 'string' && action.object.length > 0
-                            ? action.object
-                            : GLOBAL_ACTION_OBJECT_KEY;
-                    try {
-                        ql.registerAction(objectKey, action.name, handler, `app:${appId}`);
-                        registered++;
-                    } catch (err: any) {
-                        ctx.logger.warn('[AppPlugin] Failed to register action body', {
-                            appId,
-                            action: action.name,
-                            object: objectKey,
-                            error: err?.message ?? String(err),
-                        });
-                    }
-                }
-            }
-            if (registered > 0) {
-                ctx.logger.info('[AppPlugin] Bound declarative actions', {
-                    appId,
-                    actionCount: registered,
-                });
-            }
-        } catch (err: any) {
-            ctx.logger.error('[AppPlugin] Failed to bind declarative actions', err as Error, {
-                appId,
-            });
-        }
+        // [#21321] Through `bindAppArtifactHandlers` — the ONE binder, which the
+        // install-local plugin also calls for an installed package on install
+        // and on rehydrate. This block used to BE that loop, which made
+        // `AppPlugin.start` the only path that ever bound an artifact's
+        // handlers. See `./app-artifact-handlers.ts` for the contract.
+        //
+        // Runs AFTER `runtime.onEnable` so user code may still imperatively
+        // register additional hooks/functions/actions for advanced cases — both
+        // coexist on the engine (the binder only replaces what it owns,
+        // `app:<appId>`).
+        bindAppArtifactHandlers(ql, this.bundle, { appId, logger: ctx.logger, source: 'AppPlugin' });
 
         // [ADR-0110 D5] The action-governance inventory used to hang off a
         // `kernel:ready` hook HERE. Moved to ObjectQLPlugin: AppPlugin is
@@ -1159,157 +1110,18 @@ export class AppPlugin implements Plugin {
         // ── Auto-register declarative Background Jobs ────────────────────
         // Jobs declared via `defineStack({ jobs })` are scheduled against the
         // running `IJobService` on `kernel:ready` (so the service plugin and
-        // ObjectQL engine have had a chance to register). Handler strings are
-        // resolved through `collectBundleFunctions(bundle)` — the same
-        // registry used by hooks/actions, keeping the surface uniform.
+        // ObjectQL engine have had a chance to register).
+        //
+        // [#21489] Through `scheduleAppArtifactJobs` — the binder's job half,
+        // which the install-local plugin also calls for an installed package on
+        // install and on rehydrate. This block used to BE that loop, resolving
+        // `fnMap[job.handler]` only: a job's sandboxed `body` was skipped at
+        // warn, and ignored when a `handler` stood beside it. The binder runs
+        // the body, and the body wins. See `./app-artifact-handlers.ts`.
         try {
-            const jobs: any[] = Array.isArray(this.collections.jobs)
-                ? this.collections.jobs
-                : Array.isArray((this.bundle.manifest || {}).jobs)
-                    ? (this.bundle.manifest as any).jobs
-                    : [];
-            if (jobs.length > 0) {
+            if (collectBundleJobs(this.bundle).length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    // [#17396] The DEPLOYMENT gate, ahead of the job service
-                    // probe. Every `defineJob` reaching this loop is
-                    // PACKAGE-AUTHORED — it arrived through `defineStack({ jobs })`
-                    // or a package bundle — which is exactly the boundary the
-                    // switch draws. ⛔ Platform-internal scheduled work is NOT
-                    // gated and does not pass through here: approvals
-                    // escalation, the lifecycle Reaper, the messaging dispatch
-                    // loop and membership backfill each schedule themselves
-                    // from their own service plugin, because they are part of
-                    // the runtime a deployment asked for rather than arbitrary
-                    // load a package put on its clock.
-                    //
-                    // `info`, not `warn`: this is the default state of every
-                    // deployment and the deployment declared it, so nothing is
-                    // wrong and nothing looks normal-but-broken. Said once per
-                    // app with the job count, rather than once per job — the
-                    // remedy is one variable, and repeating it N times is how a
-                    // line stops being read.
-                    if (!resolveScheduledWorkEnabled()) {
-                        ctx.logger.info(
-                            `[AppPlugin] declarative jobs NOT scheduled — ${SCHEDULED_WORK_DISABLED_REASON}`,
-                            { appId, jobCount: jobs.length },
-                        );
-                        return;
-                    }
-                    let svc: IJobService | undefined;
-                    try { svc = ctx.getService<IJobService>('job'); } catch { /* not installed */ }
-                    if (!svc || typeof svc.schedule !== 'function') {
-                        ctx.logger.warn('[AppPlugin] job service not registered — skipping declarative jobs', {
-                            appId, jobCount: jobs.length,
-                        });
-                        return;
-                    }
-                    const fnMap = collectBundleFunctions(this.bundle);
-                    const metrics = resolveMetrics(ctx);
-                    let ok = 0;
-                    let failed = 0;
-                    for (const job of jobs) {
-                        const jobName: string = job?.name;
-                        if (!jobName) {
-                            ctx.logger.warn('[AppPlugin] skipping job without name', { appId, job });
-                            continue;
-                        }
-                        if (job.enabled === false) {
-                            ctx.logger.debug('[AppPlugin] job disabled — skipping', { appId, job: jobName });
-                            continue;
-                        }
-                        const handler = fnMap[job.handler];
-                        if (typeof handler !== 'function') {
-                            ctx.logger.warn('[AppPlugin] job handler not found in bundle.functions — skipping', {
-                                appId, job: jobName, handler: job.handler,
-                            });
-                            continue;
-                        }
-                        try {
-                            await svc.schedule(
-                                jobName,
-                                // #4567: authoring tier → boundary tier. `job.schedule`
-                                // is the PARSED `Schedule`, whose cron `expression` is
-                                // the ADR expression envelope `{dialect,source}`;
-                                // `IJobService.schedule` (and croner behind it) take a
-                                // bare cron string. Same seam, same place, as the
-                                // retryPolicy/timeout threading just below.
-                                toBoundaryJobSchedule(job.schedule, jobName),
-                                // #14094: the handler is given DATA REACH. A job has no
-                                // graph — no node before it, none after — so unlike a
-                                // flow `script` node it cannot be a pure value-returner
-                                // whose I/O the surrounding graph performs. `ql` is the
-                                // same engine handle `defineStack({ onEnable })` gets, and
-                                // it is the only route that survives the ARTIFACT path:
-                                // an artifact carries no `onEnable` and `mergeRuntimeModule`
-                                // merges only `functions`, so the module-scope-global
-                                // escape is never bound on an artifact-served boot.
-                                // Additive — see `JobHandlerContext` for the full argument.
-                                async (jobCtx: any) => {
-                                    const jobContext: JobHandlerContext = {
-                                        ...jobCtx,
-                                        jobId: jobName,
-                                        // The RESOLVED view, not `this.bundle`:
-                                        // a handler reading `ctx.bundle.objects`
-                                        // on a multi-package option-B artifact
-                                        // would otherwise read `undefined` with
-                                        // nothing thrown (ADR-0130 D4, #15005).
-                                        // Identical reference on every bundle
-                                        // that carries no `packages[]`.
-                                        bundle: this.collections,
-                                        ql,
-                                        logger: ctx.logger,
-                                    };
-                                    // #14256: RETURN the handler's resolved
-                                    // value. `JobHandler` is
-                                    // `(context) => Promise<void | JobRunOutcome>`
-                                    // and all three shipped adapters map a
-                                    // resolved `{ outcome: 'degraded', reason }`
-                                    // onto a `sys_job_run.status` distinct from
-                                    // `success` (#6617/#5548). A block-bodied
-                                    // arrow that only awaited made this wrapper
-                                    // a `Promise<void>`, so the third outcome
-                                    // was unreachable from `defineJob`: a job
-                                    // that ran to completion while its work did
-                                    // not happen was recorded as `success` with
-                                    // `reason` dropped, and the three-outcome
-                                    // table in `content/docs/automation/jobs.mdx`
-                                    // was false on the declarative door.
-                                    // A handler that resolves `undefined` — every
-                                    // handler written before #6617 — still returns
-                                    // `undefined` here, which is the `success`
-                                    // branch exactly as before.
-                                    return await handler(jobContext);
-                                },
-                                // #3494: thread the authored retryPolicy/timeoutMs to the adapter
-                                (job.retryPolicy || job.timeoutMs)
-                                    ? { retryPolicy: job.retryPolicy, timeoutMs: job.timeoutMs }
-                                    : undefined,
-                            );
-                            ok++;
-                        } catch (err: any) {
-                            failed++;
-                            // #4567: a job that fails to schedule is a SILENT OUTAGE —
-                            // the app builds and boots green while the work never runs.
-                            // It gets error level plus its own counter, and deliberately
-                            // NOT the `warn` that "handler not found" / "job disabled"
-                            // use: those describe a job that was never going to run,
-                            // this one describes a job the author is owed.
-                            ctx.logger.error(
-                                '[AppPlugin] Background job FAILED TO SCHEDULE — it will never run',
-                                err as Error,
-                                { appId, job: jobName, schedule: job.schedule },
-                            );
-                            metrics.counter(SEMCONV.jobScheduleFailuresTotal, { app: appId, job: jobName });
-                        }
-                    }
-                    ctx.logger.info('[AppPlugin] Scheduled background jobs', { appId, count: ok, failed });
-                    if (failed > 0) {
-                        ctx.logger.error(
-                            '[AppPlugin] Some background jobs are declared but NOT scheduled',
-                            undefined,
-                            { appId, scheduled: ok, failed },
-                        );
-                    }
+                    await scheduleAppArtifactJobs(ctx, this.bundle, { appId, ql, source: 'AppPlugin' });
                 });
             }
         } catch (err: any) {
@@ -1733,7 +1545,11 @@ export class AppPlugin implements Plugin {
                 // organization was just created and that must stand whatever
                 // happens here. `warn` and not `error` — nothing was lost, and the
                 // `kernel:ready` migration retries the same repair on next boot.
-                ctx.logger.warn('[AppPlugin] seed tenancy handoff failed (#8686)', {
+                ctx.logger.warn(
+                    '[AppPlugin] seed tenancy handoff failed: the seed rows were not stamped with the new '
+                    + 'organization, so seed and API writes stay on separate autonumber counters until the '
+                    + 'next boot\'s migration repairs it',
+                    {
                     error: e?.message ?? String(e),
                 });
             }
@@ -2192,6 +2008,20 @@ export function collectBundleHooks(bundle: any): any[] {
     push(stack?.hooks);
     push(stack?.manifest?.hooks);
     return out;
+}
+
+/**
+ * Collect declarative `Job` definitions from a bundle (#21489) — the resolved
+ * top-level `jobs` (ADR-0130 D4: every package body's too), else the legacy
+ * `manifest.jobs`. One list or the other, never a merge: the read `AppPlugin`
+ * always made, moved here so the binder's job half and the install-local job
+ * gate read the jobs the boot reads.
+ */
+export function collectBundleJobs(bundle: any): any[] {
+    const stack = resolveArtifactCollections(bundle) as any;
+    if (Array.isArray(stack?.jobs)) return stack.jobs;
+    const manifest = bundle?.manifest;
+    return Array.isArray(manifest?.jobs) ? manifest.jobs : [];
 }
 
 /**

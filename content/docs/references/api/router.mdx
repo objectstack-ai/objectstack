@@ -1,5 +1,6 @@
 ---
-title: Router
+title: Router schema — API Protocol reference
+navTitle: Router
 description: "Router schemas of the ObjectStack API Protocol: ConflictResolutionStrategy and 4 more — each property with its type, default and a TypeScript example."
 ---
 
@@ -92,8 +93,8 @@ HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **basePath** | `string` | optional (default: `"/api"`) | Global API prefix |
-| **mounts** | `{ data: string; metadata: string; auth: string; automation: string; … }` | optional (has default) |  |
-| **cors** | `{ enabled: boolean; origins: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean; … }` | optional |  |
+| **mounts** | `{ data?: string; metadata?: string; auth?: string; automation?: string; … }` | optional (has default) |  |
+| **cors** | `{ enabled?: boolean; origins?: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials?: boolean; … }` | optional |  |
 | **staticMounts** | `{ path: string; directory: string; cacheControl?: string }[]` | optional |  |
 
 ### Nested Shape: `RouterConfig.mounts`

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8734] The FIRST of the two links that bind `plugin-auth`'s break-glass
+ * [commit f8eb73601] The FIRST of the two links that bind `plugin-auth`'s break-glass
  * standing-key lists to what this resolver actually reads.
  *
  * This half answers one question mechanically: **which columns does
@@ -97,7 +97,7 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
           return raw(row, key) === cond;
         }),
       );
-      // [#10978] Enforce the caller's bound — presence, not truthiness, so
+      // [commit 4c9780c7a] Enforce the caller's bound — presence, not truthiness, so
       // `limit: 0` returns nothing rather than everything. Bounding BEFORE the
       // Proxy wrap keeps the column-observation ledger honest: a row the real
       // read would never have returned must not record column reads either.

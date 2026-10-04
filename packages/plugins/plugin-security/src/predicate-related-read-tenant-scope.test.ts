@@ -179,7 +179,7 @@ async function boot(kind: 'secret' | 'public', posture?: 'single' | 'group' | 'i
   });
 
   const stored = async (object: string, name: string) => (await table(object).where({ name }).select('id')).length;
-  return { engine, readsOfLine, userColumnsRead, stored, table };
+  return { engine, readsOfLine, userColumnsRead, stored, table, plugin };
 }
 
 /** Everything the caller sees of one write and one preview naming `line`. */
@@ -365,14 +365,25 @@ describe('#18682 — a caller with no userId that is not system is bound like a 
     }
   });
 
-  it('a user only org Y holds, under no wall: every door refuses as not readable, whatever its value', async () => {
+  it('a user only org Y holds, under no wall: every door refuses, whatever its value — the write as not readable, the preview at its write gate', async () => {
     const banned = await observe('secret', 'u_y', PUBLIC_FORM('qa_review'), 'single', 'qa_review');
     const clear = await observe('public', 'u_y', PUBLIC_FORM('qa_review'), 'single', 'qa_review');
 
     expect(clear.seen).toEqual(banned.seen);
     expect(banned.seen.refusal).toMatchObject({ code: 'VALIDATION_FAILED', message: expect.stringContaining("could not read 'sys_user'") });
     expect(banned.seen.committed).toBe(0);
-    expect(banned.seen.preview).toEqual({ valid: false, errors: [expect.stringContaining("could not read 'sys_user'")] });
+    // [#21079] The preview asks the engine's write gate before it reads anything
+    // related. This grant context names a set the deployment does not register,
+    // so it resolves no permission set, and the ADR-0056 D2 deny baseline
+    // refuses it there (the grant is not one of `canWriteObject`'s arms — its
+    // docblock says why). The preview therefore refuses with the related user
+    // never read, instead of reading it and failing the read.
+    const h = await boot('public', 'single');
+    expect(
+      await h.plugin.canWriteObject('qa_review', 'insert', PUBLIC_FORM('qa_review'), { name: 'probe', reviewer: 'u_y' }),
+    ).toBe(false);
+    expect(banned.seen.preview.valid).toBe(false);
+    expect(banned.seen.preview.errors).toHaveLength(1);
     expect(banned.userColumnsRead).not.toContain('banned');
   });
 

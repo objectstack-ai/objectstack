@@ -537,7 +537,7 @@ describe('[#15350] §5b — a `tenancy` service that was REGISTERED and FAILED i
     // handler"), not the `503 SERVICE_UNAVAILABLE` the brand carries. That is a
     // PRE-EXISTING relay gap, not one this card opened — `requireDatasourceAdmin`
     // has re-raised `AuthzStoreUnavailableError` for the identical `ql`
-    // permission-store outage since #13279, out of route handlers that have no
+    // permission-store outage since commit 6a180e42d, out of route handlers that have no
     // `catch`, and the Hono adapter renders any escaped throw as a bare 500. It
     // is filed separately. Asserting the class rather than the digits keeps this
     // pin measuring the SECURITY property — the outage is never answered as an

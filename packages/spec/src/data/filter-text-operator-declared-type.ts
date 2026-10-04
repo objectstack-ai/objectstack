@@ -389,7 +389,7 @@ export const TEXT_OPERATOR_DOOR_TYPE_CLASSES: readonly TextOperatorDoorTypeClass
     name: 'formula',
     types: new Set(['formula']),
     verdict: 'by-return-type',
-    note: 'Judged as the FieldType its declared `returnType` names (`text` passes; `number` / `boolean` / `date` are refused through the same sets); `returnType` absent ⇒ deferred. ⚠️ Unreachable at the engine seam: the earlier #8296 door refuses EVERY formula filter with INVALID_FIELD 400 whatever the `returnType`, so this row states the contract\'s answer, not an observable one — see the module header.',
+    note: 'Judged as the FieldType its declared `returnType` names (`text` passes; `number` / `boolean` / `date` are refused through the same sets); `returnType` absent ⇒ deferred. ⚠️ Unreachable at the engine seam: the earlier unmaterializable-field door refuses EVERY formula filter with INVALID_FIELD 400 whatever the `returnType` (no driver stores a formula column), so this row states the contract\'s answer, not an observable one — see the module header.',
   },
 ];
 
@@ -409,6 +409,8 @@ export interface TextOperatorDoorFixtureField {
   readonly returnType?: 'number' | 'text' | 'boolean' | 'date';
   /** `summary` — a roll-up declaration, present so the field is a legal declaration. */
   readonly summaryOperations?: { readonly object: string; readonly field: string; readonly function: 'count' };
+  /** Single-choice types (`select` / `radio`) — one option, present so the field is a legal declaration. */
+  readonly options?: readonly { readonly label: string; readonly value: string }[];
 }
 
 /** The fixture object's name. */
@@ -420,6 +422,7 @@ const fixtureFieldFor = (type: string): TextOperatorDoorFixtureField => {
   if (type === 'summary') {
     return { name, type, summaryOperations: { object: TEXT_OPERATOR_DOOR_FIXTURE_OBJECT, field: 'id', function: 'count' } };
   }
+  if (SINGLE_OPTION_TYPES.has(type)) return { name, type, options: [{ label: 'Open', value: 'open' }] };
   return { name, type };
 };
 
@@ -547,8 +550,8 @@ function caseFor(
         ...base,
         verdict,
         note: dotted
-          ? 'A dotted path into a structured-JSON field is filter-dotted-head\'s subject (deliberately unjudged there, #8371); this door must not re-close that carve-out by reading the head\'s declared type.'
-          : 'The declared return type is not readable here — the ruling judges formula only when it is. ⚠️ Unreachable at the engine seam: #8296 refuses every formula filter one door earlier (INVALID_FIELD 400) — see the module header.',
+          ? 'A dotted path into a structured-JSON field is filter-dotted-head\'s subject (deliberately left unjudged there, by ruling); this door must not re-close that carve-out by reading the head\'s declared type.'
+          : 'The declared return type is not readable here — the ruling judges formula only when it is. ⚠️ Unreachable at the engine seam: the unmaterializable-field door refuses every formula filter one door earlier (INVALID_FIELD 400) — see the module header.',
       };
   }
 }

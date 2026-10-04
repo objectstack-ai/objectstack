@@ -854,7 +854,7 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
         + 'comparison: the packaged baseline, the tenant customization row, and the merged '
         + 'result side by side. A DIFFERENT representation from `GET /:type/:name`, which '
         + 'answers only the merged value under `item` — hence its own path and its own '
-        + 'response schema (#5882). Reached until now only as `GET /:type/:name?layers=true`, '
+        + 'response schema, since one route answers one shape. Reached until now only as `GET /:type/:name?layers=true`, '
         + 'which still works during its deprecation window but is answered with '
         + '`Deprecation` / `Link` headers pointing here.',
       tags: ['Metadata'],
@@ -896,8 +896,9 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
         + '`op=\'publish\'` history event. The sibling write door of `PUT /:type/:name` — the '
         + 'ADR-0033 two-step spelling, where `?mode=draft` stages a body and this makes it live. '
         + '404 `NO_DRAFT` when there is nothing to publish; 409 `metadata_conflict` when the '
-        + 'published row advanced while the draft was held. Served since before #7294 with no '
-        + 'declaration behind it — this entry is what makes its response contract nameable.',
+        + 'published row advanced while the draft was held. The route was served for a long time with no '
+        + 'declaration behind it — this entry is what makes its response contract nameable, the same '
+        + 'declared-equals-returned rule the save door follows.',
       tags: ['Metadata'],
       // No `requestSchema` (#3899): the body is optional and its only read key
       // is `message`, taken only when it is already a string and ignored

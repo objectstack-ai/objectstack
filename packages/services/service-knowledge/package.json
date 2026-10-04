@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-knowledge",
-  "version": "17.4.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "Knowledge Service for ObjectStack — orchestrator implementing IKnowledgeService over pluggable IKnowledgeAdapter backends (RAGFlow, LlamaIndex, Dify, in-memory).",
   "type": "module",
@@ -30,8 +30,8 @@
   },
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
-    "@types/node": "^26.2.0",
-    "tsx": "^4.23.12",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

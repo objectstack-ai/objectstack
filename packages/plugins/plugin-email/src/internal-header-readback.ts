@@ -34,7 +34,7 @@
  * majority of real rows have no custom headers at all. Under a key-absence
  * inference every ordinary header-less email would look like a redacted row
  * and force a privileged read, and an engine without the accessor would fail
- * every ordinary send. (PR #8675 hit exactly this on `sys_account`'s optional
+ * every ordinary send. (Commit c9f595083 records exactly this on `sys_account`'s optional
  * token columns: inheriting "key missing ⇒ the strip ran" from a
  * `required: true` column broke ordinary sign-in, 16 red tests.) The schema
  * flag is cardinality-independent: it is true when the engine redacts and
@@ -124,8 +124,9 @@ export async function readInternalHeadersJson(
     throw new Error(
       `EmailService: ${SYS_EMAIL_OBJECT}.${HEADERS_COLUMN} is declared \`internal: true\`, but this `
       + 'data engine does not implement resolveInternalField() — the custom headers this message was '
-      + 'authored with are stored but cannot be recovered, and a message must not be sent missing them '
-      + '(#8149). The row stays `queued`: the queue retry or the next boot outbox sweep delivers it '
+      + 'authored with are stored but cannot be recovered, and a message must not be sent missing them: '
+      + 'a missing header does not announce itself, so the send would succeed while silently deviating '
+      + 'from what was authored. The row stays `queued`: the queue retry or the next boot outbox sweep delivers it '
       + 'intact once an engine that implements the privileged accessor is mounted.',
     );
   }

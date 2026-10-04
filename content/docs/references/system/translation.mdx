@@ -1,5 +1,6 @@
 ---
-title: Translation
+title: Translation schema — System Protocol reference
+navTitle: Translation
 description: "Translation schemas of the ObjectStack System Protocol — each property with its type, default and a TypeScript example."
 ---
 
@@ -124,6 +125,7 @@ Translation data for a single field
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
 
@@ -153,7 +155,7 @@ Translation data for a single field
 
 Map of locale codes to platform translation data
 
-**Type:** `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>`
+**Type:** `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>`
 
 
 ---
@@ -167,6 +169,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
@@ -194,6 +197,13 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
+### Nested Shape: `PlatformTranslationData.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
+
 ### Nested Shape: `PlatformTranslationData.apps[string]`
 
 | Property | Type | Required | Description |
@@ -210,6 +220,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
 
@@ -220,7 +231,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated dashboard title |
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
-| **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+| **widgets** | `Record<string, { title?: string; description?: string }>` | optional | Widget translations keyed by widget id |
 | **globalFilters** | `Record<string, { label?: string; options?: Record<string, string> }>` | optional | Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`) |
 
 ### Nested Shape: `PlatformTranslationData.datasets[string]`
@@ -281,7 +292,7 @@ Translation data for a single object
 
 Map of locale codes to per-app translation data
 
-**Type:** `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>`
+**Type:** `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>`
 
 
 ---
@@ -357,6 +368,7 @@ Per-app translation data for objects, apps, and UI messages
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
@@ -383,6 +395,13 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
+### Nested Shape: `TranslationData.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
+
 ### Nested Shape: `TranslationData.apps[string]`
 
 | Property | Type | Required | Description |
@@ -399,6 +418,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
 
@@ -409,7 +429,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated dashboard title |
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
-| **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+| **widgets** | `Record<string, { title?: string; description?: string }>` | optional | Widget translations keyed by widget id |
 | **globalFilters** | `Record<string, { label?: string; options?: Record<string, string> }>` | optional | Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`) |
 
 ### Nested Shape: `TranslationData.datasets[string]`
@@ -497,6 +517,7 @@ One locale of translations — the `translation` metadata type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
@@ -533,6 +554,13 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
+### Nested Shape: `TranslationItem.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
+
 ### Nested Shape: `TranslationItem.apps[string]`
 
 | Property | Type | Required | Description |
@@ -549,6 +577,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
 
@@ -559,7 +588,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated dashboard title |
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
-| **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+| **widgets** | `Record<string, { title?: string; description?: string }>` | optional | Widget translations keyed by widget id |
 | **globalFilters** | `Record<string, { label?: string; options?: Record<string, string> }>` | optional | Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`) |
 
 ### Nested Shape: `TranslationItem.datasets[string]`

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { ensurePackageTable, PACKAGE_TABLE_STATEMENTS, resolvePackageTableDialect } from './package-table.js';
 
 export interface PackageMetadata {
   objects?: any[];
@@ -205,7 +206,7 @@ function declaresHttpAnswer(error: unknown): boolean {
  * the SAME row, so the next divergence is a red test rather than prose someone
  * has to re-read.
  *
- * ⚠️ [#10965] It returns `[]` for EVERYTHING else too, and that is the whole
+ * ⚠️ [commit ab47f6974] It returns `[]` for EVERYTHING else too, and that is the whole
  * defect this file's seam guard exists for — see {@link isResultSet}. Flatten
  * with this only AFTER the result has been established as an answer.
  */
@@ -220,7 +221,7 @@ function normalizeRows(result: any): any[] {
 }
 
 /**
- * ── The seam that ACCEPTS a query but never ANSWERS one (#10965) ───────────
+ * ── The seam that ACCEPTS a query but never ANSWERS one (commit ab47f6974) ──
  *
  * {@link normalizeRows} flattens the result-set shapes a raw SELECT comes back
  * as. A seam can hand back one more thing, and it means something else
@@ -231,8 +232,8 @@ function normalizeRows(result: any): any[] {
  * — which is also what a real driver returns for a SELECT that matched nothing.
  *
  * Both read paths in this service then reported that emptiness as a fact about
- * the data, and unlike its two siblings (#10677 / PR #10788 for
- * `os migrate duplicates`, #10789 / PR #10964 for `backfillSeedTenancy`) what
+ * the data, and unlike its two siblings (#10677 / commit 3a7ec2d3b for
+ * `os migrate duplicates`, commit 38bc74ed1 for `backfillSeedTenancy`) what
  * they hand back is a PRODUCT ANSWER a caller acts on:
  *
  *   - `get()` returned `null` ⇒ "this package is not installed".
@@ -283,7 +284,7 @@ function isResultSet(result: unknown): boolean {
 }
 
 /**
- * [#10965] The caller-facing sentence a read over a non-answering seam gets.
+ * [commit ab47f6974] The caller-facing sentence a read over a non-answering seam gets.
  *
  * Like {@link PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE}, a CONSTANT that
  * interpolates nothing: no driver text, no statement, no table name. It says
@@ -301,7 +302,7 @@ export const PACKAGE_SEAM_UNREADABLE_MESSAGE =
 const SEAM_UNREADABLE = Symbol.for('objectstack.service-package.seam-unreadable');
 
 /**
- * [#10965] The refusal a read raises when the seam did not answer.
+ * [commit ab47f6974] The refusal a read raises when the seam did not answer.
  *
  * ADR-0112 envelope: a `status` AND a `code`, both declared, so it leaves by
  * the door's shared `errorFromThrown` mapping as the producer's own answer
@@ -324,7 +325,7 @@ function packageSeamUnreadableError(): Error {
 }
 
 /**
- * [#10965] Is this the seam refusal above?
+ * [commit ab47f6974] Is this the seam refusal above?
  *
  * ⛔ Deliberately NOT {@link declaresHttpAnswer}. That predicate asks the much
  * broader "did this throw declare an envelope?", and widening the two READ
@@ -363,11 +364,24 @@ export class PackageServicePlugin implements Plugin {
       throw new Error('ObjectQL service with execute() support is required for PackageService');
     }
 
-    // Create sys_packages table if it doesn't exist
+    // Create sys_packages table if it doesn't exist.
+    //
+    // [#21243] This catch was unreachable until now: `ensureTable` swallowed
+    // every DDL failure at `debug` ("may already exist"), so the table was
+    // never created on MySQL and nothing above `debug` said so. "Already
+    // exists" is no longer an error at all (see `ensurePackageTable`), so
+    // anything arriving here is a real refusal, and the start fails with it.
     try {
       await this.ensureTable(objectql, logger);
     } catch (error) {
-      logger.error('Failed to create sys_packages table', error as Error);
+      logger.error(
+        'Failed to create the sys_packages table — the database refused the DDL. This plugin\'s start() fails and '
+          + 'no `package` service is registered: under the kernel\'s default rollback the boot fails, and a kernel '
+          + 'that continues past a failed plugin installs packages in memory only. The refusal is attached here and '
+          + 'in the driver\'s log line; make the database accept it (its permissions, or a dialect the driver '
+          + 'names), then restart.',
+        error as Error,
+      );
       throw error;
     }
 
@@ -379,16 +393,11 @@ export class PackageServicePlugin implements Plugin {
             .update(JSON.stringify({ manifest: data.manifest, metadata: data.metadata }))
             .digest('hex');
 
+          // [#21243] The upsert is spelled for the driver's dialect: MySQL has
+          // no `ON CONFLICT`, and refused the standard spelling with
+          // `ER_PARSE_ERROR` on every publish (`PACKAGE_TABLE_STATEMENTS`).
           await objectql.execute!({
-            sql: `
-              INSERT INTO sys_packages (id, version, manifest, metadata, hash, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-              ON CONFLICT(id, version) DO UPDATE SET
-                manifest = excluded.manifest,
-                metadata = excluded.metadata,
-                hash = excluded.hash,
-                updated_at = CURRENT_TIMESTAMP
-            `,
+            sql: PACKAGE_TABLE_STATEMENTS[resolvePackageTableDialect(objectql)].upsert,
             args: [
               data.manifest.id,
               data.manifest.version,
@@ -448,7 +457,7 @@ export class PackageServicePlugin implements Plugin {
           const args = version === 'latest' ? [packageId] : [packageId, version];
           const result = await objectql.execute!({ sql, args });
 
-          // [#10965] Before reading emptiness as a fact, establish that there
+          // [commit ab47f6974] Before reading emptiness as a fact, establish that there
           // was an answer to read. A seam that did not run the SELECT hands
           // back no result set, and `normalizeRows` maps that to `[]` — the
           // same value a real driver returns when the package genuinely is not
@@ -473,7 +482,7 @@ export class PackageServicePlugin implements Plugin {
             updated_at: row.updated_at,
           };
         } catch (error) {
-          // [#10965] The seam refusal is the ONE throw this catch must not
+          // [commit ab47f6974] The seam refusal is the ONE throw this catch must not
           // swallow: swallowing it would restore the exact `null` the refusal
           // exists to replace, and the caller would be back to reading "not
           // installed" off a query that never ran. Everything else keeps the
@@ -499,7 +508,7 @@ export class PackageServicePlugin implements Plugin {
             `,
           });
 
-          // [#10965] Same separation as `get()`: a seam that never ran this
+          // [commit ab47f6974] Same separation as `get()`: a seam that never ran this
           // SELECT must not be reported as "no packages are installed". An
           // answering seam with zero rows still returns `[]` below.
           if (!isResultSet(result)) throw packageSeamUnreadableError();
@@ -514,7 +523,7 @@ export class PackageServicePlugin implements Plugin {
             updated_at: row.updated_at,
           }));
         } catch (error) {
-          // [#10965] As in `get()`: only the seam refusal escapes, because
+          // [commit ab47f6974] As in `get()`: only the seam refusal escapes, because
           // swallowing it would answer "nothing installed" over a driver this
           // method never queried.
           if (isSeamUnreadable(error)) {
@@ -623,7 +632,7 @@ export class PackageServicePlugin implements Plugin {
         }
       }
     } catch (error) {
-      // [#10965] The measured consequence of the conflation, and the half that
+      // [commit ab47f6974] The measured consequence of the conflation, and the half that
       // made it invisible. `list()` used to answer `[]` over a seam that never
       // ran the SELECT, so this loop iterated zero times and said nothing —
       // its only log sits behind `hydrated > 0`. A durable package was then
@@ -645,37 +654,19 @@ export class PackageServicePlugin implements Plugin {
     }
   }
 
+  /**
+   * [#21243] Create `sys_packages` and its index in the driver's dialect.
+   *
+   * ⛔ No `catch` here, deliberately. The old body caught EVERY failure and
+   * logged it at `debug` as "may already exist", which is how a MySQL
+   * `ER_INVALID_DEFAULT` read as a table that was there. An existing table or
+   * index is not an error at all any more — `ensurePackageTable` asks the
+   * dialect instead of interpreting a refusal — so whatever throws is a refusal
+   * and goes to `start()` whole.
+   */
   private async ensureTable(objectql: IDataEngine, logger: any): Promise<void> {
-    try {
-      // Create the sys_packages table
-      await objectql.execute!({
-        sql: `
-          CREATE TABLE IF NOT EXISTS sys_packages (
-            id TEXT NOT NULL,
-            version TEXT NOT NULL,
-            manifest TEXT NOT NULL,
-            metadata TEXT NOT NULL,
-            hash TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id, version)
-          )
-        `,
-      });
-
-      // Create index for faster latest version queries
-      await objectql.execute!({
-        sql: `
-          CREATE INDEX IF NOT EXISTS idx_packages_latest
-          ON sys_packages(id, created_at DESC)
-        `,
-      });
-
-      logger.debug('sys_packages table ensured');
-    } catch (error) {
-      // Table might already exist, log and continue
-      logger.debug('sys_packages table creation skipped (may already exist)');
-    }
+    const dialect = await ensurePackageTable(objectql);
+    logger.debug(`sys_packages table ensured (${dialect} statements)`);
   }
 }
 

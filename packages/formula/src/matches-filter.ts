@@ -47,6 +47,20 @@
  *    that test a silent `false` for `$like` would have been the same defect
  *    under a new name.
  *
+ *    [#20444] The claim was FALSE for a while, and is true again because of an
+ *    arm, not a rewording. `$empty` was declared by `FieldOperatorsSchema` /
+ *    `SpecialOperatorSchema` (#20311) and staged out of `FILTER_OPERATORS` like
+ *    `$like`, but its arms were placed in per-lane cards rather than in the
+ *    declaring PR — so from that declaration until this face's arm landed, an
+ *    RLS `check` written with `$empty` was answered by the silent `false`
+ *    below, for every record and both flags: the defect this paragraph names.
+ *    It now has its arm in {@link evalOp}, judged by the stored value (this
+ *    face's reading, ruling A on #20399). Today the declared-but-staged names
+ *    are `$like` and `$ilike` (`$empty` left the staging in #20446), and each
+ *    is answered here; a name the
+ *    protocol declares NEXT is owed an arm here by the PR that lets an author
+ *    write it, or by the lane card its staging names.
+ *
  * What stays open, deliberately and on the record: a RETIRED spelling
  * (`$regex` / `$options`) still gets the silent `false` here while the other five
  * faces print `RETIRED_FILTER_OPERATORS`' prescription naming `$icontains`. That
@@ -76,19 +90,43 @@
  * refusal and driver-memory's array-comparand refusal — already refuse the
  * shape with `INVALID_FILTER` / 400; this face now gives the same envelope. See
  * {@link arrayComparandError}.
+ *
+ * [#20355] A third shape is refused when the caller hands over the object's
+ * declared columns ({@link MatchesFilterOptions.fields}): a `{ $field }`
+ * comparison between two columns that share no COMPARISON CLASS — text against
+ * a number, text against a file field, anything against a formula field. The
+ * rule is the spec's `crossFieldComparisonVerdict`, the same one driver-sql's
+ * read applies, so one access policy gets one answer on both sides of the
+ * write. See {@link findCrossFieldClassRefusal}.
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#20355] The cross-field comparison class, defined once in the spec (#20347)
+// and read by every judge of a column-to-column comparison: driver-sql's read,
+// the authoring door in `@objectstack/lint`, and this evaluator's write check.
+import {
+  crossFieldComparisonVerdict,
+  type CrossFieldColumnVerdict,
+  type CrossFieldComparisonFieldMeta,
+  type CrossFieldComparisonVerdict,
+} from '@objectstack/spec/data';
 // [#6520] `asciiCaseInsensitiveContains` is `$icontains`' fold, defined once in
 // the spec and shared by every JS evaluation face — so a `check` evaluated here
 // and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
 // domain.
-import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+import { utcInstantMs, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, likewise defined once in the
 // spec: this face evaluates the pattern in JS, `driver-sql` compiles the same
 // one to `LIKE`/`GLOB`, and a translation written twice would agree on the day
 // it was typed and never again.
 import { matchesLikePattern } from '@objectstack/spec/data';
+// [#20444] `$empty`'s value-level half — the spec's one definition of what a
+// stored value counts as empty for a face that reads no field declaration.
+import { isEmptyFilterValue } from '@objectstack/spec/data';
+// The JSON-stored population — the declared columns on which `$contains` asks
+// MEMBERSHIP — from the spec's value-shape classes, the same two every typed
+// face's population is built from. See {@link containsAsksMembership}.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -124,7 +162,7 @@ function emptyFieldConstraintError(field: string, path: string): Error {
       `comparand (e.g. { "${field}": "value" }). It is refused rather than evaluated because the ` +
       `backends disagreed on what it means — driver-sql dropped it inside $and/$or/$not (matching ` +
       `EVERY row) while refusing it at the top level, and driver-memory / this evaluator ` +
-      `answered "matches nothing". #5240.`,
+      `answered "matches nothing".`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
@@ -265,8 +303,36 @@ function isOperatorMap(spec: unknown): spec is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+/**
+ * [#20355] What a caller that knows the record's object may tell the evaluator.
+ */
+export interface MatchesFilterOptions {
+  /**
+   * The declared columns of the object `record` belongs to, keyed by field
+   * name — each column's declared `type` and `multiple`, the slice the spec's
+   * cross-field classification reads.
+   *
+   * Supplied, every `{ $field }` comparison between two columns named here is
+   * judged by that classification before any record is read, and one the
+   * platform defines no answer for is refused ({@link findCrossFieldClassRefusal}).
+   * Omitted, the evaluator judges values only, as it always has: it has no
+   * schema of its own, and a caller without one (an aggregated row, a probe
+   * record) is not asked for one.
+   *
+   * A column named here also selects the question `$contains` / `$notContains`
+   * ask of it: MEMBERSHIP on a JSON-stored column, SUBSTRING on any other. A
+   * column it does not name is judged by its stored value instead
+   * ({@link containsAsksMembership}).
+   */
+  readonly fields?: Readonly<Record<string, CrossFieldComparisonFieldMeta>>;
+}
+
 /** True iff `record` satisfies `filter`. A null/empty filter matches everything. */
-export function matchesFilterCondition(record: Record<string, unknown>, filter: FilterCondition | null | undefined): boolean {
+export function matchesFilterCondition(
+  record: Record<string, unknown>,
+  filter: FilterCondition | null | undefined,
+  options?: MatchesFilterOptions,
+): boolean {
   if (filter == null) return true;
   if (typeof filter !== 'object' || Array.isArray(filter)) return false;
   // [#5240] Shape first, then evaluate. The refusal is raised by a walk of the
@@ -276,7 +342,214 @@ export function matchesFilterCondition(record: Record<string, unknown>, filter: 
   // depending on the RECORD being tested. A malformed permission rule must be
   // refused for every record or none. Evaluation below is untouched.
   assertFilterShape(filter as Record<string, unknown>, 'filter');
-  return evalNode(record, filter as Record<string, unknown>);
+  // [#20355] The comparison-class rule is judged the same way, and for the same
+  // reason: it reads the declared columns, never the record, so a policy is
+  // refused for every record or for none.
+  if (options?.fields) {
+    const refusal = findCrossFieldClassRefusal(filter, options.fields);
+    if (refusal) throw crossFieldClassError(refusal);
+  }
+  return evalNode(record, filter as Record<string, unknown>, options?.fields);
+}
+
+/**
+ * [#20355] One `{ $field }` comparison between two declared columns that share
+ * no comparison class, as {@link findCrossFieldClassRefusal} found it.
+ */
+export interface CrossFieldClassRefusal {
+  /** The constrained column — the key the comparison sits under. */
+  readonly field: string;
+  /** The comparison operator (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`). */
+  readonly operator: string;
+  /** The referenced column — the `{ $field }` value. */
+  readonly reference: string;
+  /** The classification's answer: two classes, or a column with none. */
+  readonly verdict: Extract<CrossFieldComparisonVerdict, { verdict: 'cross-class' | 'no-class' }>;
+  /**
+   * The comparison and both declarations in words. SERVER-SIDE ONLY: it names
+   * the columns of a predicate the caller may not have written, so it goes to
+   * a log, never into an error message (see {@link crossFieldClassError}).
+   */
+  readonly diagnostic: string;
+}
+
+/**
+ * [#20355] The first `{ $field }` comparison in `filter` whose two columns are
+ * both declared in `fields` and share no comparison class — `null` when there
+ * is none. Pure: it reads the filter and the declarations, never a record.
+ *
+ * ## The rule, and why it is the spec's
+ *
+ * A column-to-column comparison has one meaning only between two columns of
+ * ONE comparison class, and a file field, a formula field or a column holding
+ * a list or an object has no class at all (`@objectstack/spec/data`
+ * `crossFieldComparisonVerdict`, lifted from driver-sql's #5222 boundary by
+ * #20347). Across classes the backends answer differently: SQLite orders
+ * every TEXT above every INTEGER, while this evaluator's JS comparison coerces
+ * (`'open' > 5` is false), so a comparison that is well defined nowhere gets a
+ * different answer on each path.
+ *
+ * Measured through the real plugin-security and ObjectQL on driver-sql, on
+ * SQLite and on PostgreSQL, before this rule: an RLS policy
+ * `record.status != record.amount` (text vs number), `record.status !=
+ * record.photo` (text vs image), `record.status != record.is_open` (text vs a
+ * formula field) or `record.status != record.meta` (text vs json) answered the
+ * read it scopes with `INVALID_FILTER` / 400, because driver-sql refuses to
+ * compile the comparison; and the insert its `check` judges — or its `using`,
+ * standing in as the check — was ADMITTED and stored, because this evaluator
+ * compared the two raw values (`'open' !== 5`). One policy, two answers, the
+ * permissive one on the write side. The write check now refuses the
+ * comparison exactly where the read does, by the same classification.
+ *
+ * ## What it judges, and what it leaves
+ *
+ * The six operators a `{ $field }` comparand is declared for
+ * ({@link ARRAY_REFUSED_OPERATORS}: the ones that compare ONE value), at any
+ * depth under `$and` / `$or` / `$not`, whether or not the reference carries an
+ * `addDays` offset — driver-sql asks the class question before it reads the
+ * offset. Only a comparison whose BOTH columns are keys of `fields` is judged:
+ * a dotted path, or a column the object does not declare, is a different
+ * question with its own answer elsewhere (the RLS compiler's field guard
+ * refuses an undeclared column before a filter ever reaches this evaluator).
+ * A declared type outside `FieldType` is not judged either
+ * (`unjudged`) — it is not a declaration the classification covers, and the
+ * metadata schema refuses it at authoring.
+ */
+export function findCrossFieldClassRefusal(
+  filter: FilterCondition | Record<string, unknown> | null | undefined,
+  fields: Readonly<Record<string, CrossFieldComparisonFieldMeta>>,
+): CrossFieldClassRefusal | null {
+  const declared = (name: string): CrossFieldComparisonFieldMeta | undefined =>
+    Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+  const walk = (node: unknown): CrossFieldClassRefusal | null => {
+    if (node == null || typeof node !== 'object' || Array.isArray(node)) return null;
+    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+      if (key === '$and' || key === '$or') {
+        if (!Array.isArray(val)) continue;
+        for (const child of val) {
+          const found = walk(child);
+          if (found) return found;
+        }
+        continue;
+      }
+      if (key === '$not') {
+        const found = walk(val);
+        if (found) return found;
+        continue;
+      }
+      if (key.startsWith('$') || !isOperatorMap(val)) continue;
+      const target = declared(key);
+      if (!target) continue;
+      for (const op of ARRAY_REFUSED_OPERATORS) {
+        const raw = val[op];
+        if (!isFieldReference(raw) || typeof raw.$field !== 'string') continue;
+        const ref = declared(raw.$field);
+        if (!ref) continue;
+        const verdict = crossFieldComparisonVerdict(target, ref);
+        if (verdict.verdict !== 'cross-class' && verdict.verdict !== 'no-class') continue;
+        return {
+          field: key,
+          operator: op,
+          reference: raw.$field,
+          verdict,
+          diagnostic: describeCrossFieldClassRefusal(key, target, op, raw.$field, ref, verdict),
+        };
+      }
+    }
+    return null;
+  };
+  return walk(filter);
+}
+
+/** How one declared column stands in a refused comparison, in words. */
+function describeColumn(name: string, meta: CrossFieldComparisonFieldMeta, verdict: CrossFieldColumnVerdict): string {
+  const declared = `"${name}" (type '${meta.type}'${meta.multiple === true ? ', multiple' : ''})`;
+  if (verdict.kind === 'class') return `${declared} is compared as ${verdict.class}`;
+  if (verdict.reason === 'file') return `${declared} is a file field, which has no comparison class`;
+  if (verdict.reason === 'formula') return `${declared} is a formula field, which has no stored column to compare`;
+  return `${declared} holds a list or an object, which has no comparison class`;
+}
+
+function describeCrossFieldClassRefusal(
+  field: string,
+  target: CrossFieldComparisonFieldMeta,
+  op: string,
+  reference: string,
+  ref: CrossFieldComparisonFieldMeta,
+  verdict: CrossFieldClassRefusal['verdict'],
+): string {
+  const parts =
+    verdict.verdict === 'cross-class'
+      ? [
+          describeColumn(field, target, { kind: 'class', class: verdict.left }),
+          describeColumn(reference, ref, { kind: 'class', class: verdict.right }),
+        ]
+      : [
+          ...(verdict.left.kind === 'no-class' ? [describeColumn(field, target, verdict.left)] : []),
+          ...(verdict.right.kind === 'no-class' && reference !== field
+            ? [describeColumn(reference, ref, verdict.right)]
+            : []),
+        ];
+  return (
+    `the comparison { "${field}": { "${op}": { "$field": "${reference}" } } } compares two columns that ` +
+    `share no comparison class: ${parts.join(', and ')}`
+  );
+}
+
+/**
+ * [#20355] The refusal carried on the error, under a SYMBOL key — the same
+ * non-travel reason driver-sql's withheld diagnostic uses one: `JSON.stringify`,
+ * a spread, `Object.keys` and the structured-clone boundary all skip it, so no
+ * error mapper can put the column names back on the wire. `Symbol.for` so a
+ * duplicated copy of this package resolves the same key.
+ */
+const CROSS_FIELD_CLASS_REFUSAL = Symbol.for('objectstack.formula.crossFieldClassRefusal');
+
+/**
+ * [#20355] A `{ $field }` comparison between two columns of no shared
+ * comparison class is REFUSED, with the envelope the read gives the same
+ * comparison: `INVALID_FILTER` / 400.
+ *
+ * The message names nothing from the filter, for the reason
+ * {@link arrayComparandError} names nothing: on the write gate the filter is an
+ * access policy, and the caller who receives the 400 is usually not its author
+ * — driver-sql withholds the same comparison's columns on the read for the
+ * same reason (#7929). The columns, the operator and both declarations travel
+ * on the error for the server log ({@link crossFieldClassRefusalCarriedBy}).
+ *
+ * The remedy leads, and the whole message stays under the REST door's client
+ * message bound (`CLIENT_MESSAGE_MAX` in `@objectstack/rest`: a 4xx message of
+ * 500 characters or more is cut to 499 plus an ellipsis). The bound cuts the
+ * TAIL, so a remedy written last never reached the wire. The order is: the
+ * remedy; what is refused (two columns with no shared class, and the classes);
+ * why it is refused; why the columns are withheld. The text is fixed, so its
+ * length is too — a sentence added here must be paid for by a shorter one.
+ */
+function crossFieldClassError(refusal: CrossFieldClassRefusal): Error {
+  const err = new Error(
+    'In a row-level policy, compare a field only with a field of the same class, or fix the declaration ' +
+      'of the one that is declared with the wrong type. This filter compares two columns that share no ' +
+      'class (number, text, boolean, date, datetime, time; file, formula, list and object fields have ' +
+      'none). SQL and this evaluator answer it differently, so it is refused, as on the read path. The ' +
+      'columns and operator are withheld, as the caller may not have written the policy; the server log ' +
+      'names them.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  Object.defineProperty(err, CROSS_FIELD_CLASS_REFUSAL, { value: refusal, enumerable: false });
+  return err;
+}
+
+/**
+ * [#20355] The comparison-class refusal an error carries, or `null` for any
+ * other error — the read half of {@link crossFieldClassError}, for a caller that
+ * logs the refused comparison server-side (the RLS write gate names the policy
+ * beside it).
+ */
+export function crossFieldClassRefusalCarriedBy(err: unknown): CrossFieldClassRefusal | null {
+  if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
+  const refusal = (err as Record<symbol, unknown>)[CROSS_FIELD_CLASS_REFUSAL];
+  return refusal && typeof refusal === 'object' ? (refusal as CrossFieldClassRefusal) : null;
 }
 
 /**
@@ -332,26 +605,29 @@ function isEmptyFieldConstraint(spec: unknown): boolean {
   return Object.keys(spec as Record<string, unknown>).length === 0;
 }
 
-function evalNode(record: Record<string, unknown>, node: Record<string, unknown>): boolean {
+/** The caller's declared columns ({@link MatchesFilterOptions.fields}), when it supplied them. */
+type DeclaredColumns = Readonly<Record<string, CrossFieldComparisonFieldMeta>> | undefined;
+
+function evalNode(record: Record<string, unknown>, node: Record<string, unknown>, fields?: DeclaredColumns): boolean {
   // A node is the AND of all its entries.
   for (const [key, val] of Object.entries(node)) {
     if (key === '$and') {
-      if (!Array.isArray(val) || !val.every((c) => evalNode(record, c as Record<string, unknown>))) return false;
+      if (!Array.isArray(val) || !val.every((c) => evalNode(record, c as Record<string, unknown>, fields))) return false;
     } else if (key === '$or') {
-      if (!Array.isArray(val) || val.length === 0 || !val.some((c) => evalNode(record, c as Record<string, unknown>))) return false;
+      if (!Array.isArray(val) || val.length === 0 || !val.some((c) => evalNode(record, c as Record<string, unknown>, fields))) return false;
     } else if (key === '$not') {
       if (val == null || typeof val !== 'object') return false;
-      if (evalNode(record, val as Record<string, unknown>)) return false;
+      if (evalNode(record, val as Record<string, unknown>, fields)) return false;
     } else if (key.startsWith('$')) {
       return false; // unknown top-level operator → fail closed
     } else {
-      if (!evalField(record, key, val)) return false;
+      if (!evalField(record, key, val, fields)) return false;
     }
   }
   return true;
 }
 
-function evalField(record: Record<string, unknown>, field: string, spec: unknown): boolean {
+function evalField(record: Record<string, unknown>, field: string, spec: unknown, fields?: DeclaredColumns): boolean {
   const actual = getPath(record, field);
   // `{ field: null }` → IS NULL.
   if (spec === null) return actual == null;
@@ -374,13 +650,21 @@ function evalField(record: Record<string, unknown>, field: string, spec: unknown
   // `evalNode` on a subtree, and a total function must stay total — but it is a
   // floor, no longer this backend's ANSWER to the shape.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) return false;
+  const declared = fields && Object.prototype.hasOwnProperty.call(fields, field) ? fields[field] : undefined;
   for (const op of keys) {
-    if (!evalOp(actual, op, ops[op], record)) return false;
+    if (!evalOp(actual, op, ops[op], record, declared)) return false;
   }
   return true;
 }
 
-function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string, unknown>): boolean {
+function evalOp(
+  actual: unknown,
+  op: string,
+  raw: unknown,
+  record: Record<string, unknown>,
+  // The column's declaration, when the caller supplied one for it.
+  declared?: CrossFieldComparisonFieldMeta,
+): boolean {
   // [#19886 stage 2d] A `{ $field }` comparison whose column holds a list or an
   // object ON THIS RECORD — either side. See {@link assertComparableReference}.
   if (isFieldReference(raw)) assertComparableReference(actual, op, raw, record);
@@ -401,17 +685,50 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$gt': return actual != null && v != null && order(actual, v, (a, b) => a > b);
     case '$gte': return actual != null && v != null && order(actual, v, (a, b) => a >= b);
     case '$lt': return actual != null && v != null && order(actual, v, (a, b) => a < b);
-    case '$lte': return actual != null && v != null && lteBound(actual, v);
+    /**
+     * [#21242 · ADR-0053 D-D1 items 5 and 9] Compared as written. This face
+     * kept its own copy of the whole-day upper bound (a bare `YYYY-MM-DD` read
+     * as "through that day", and `9999-12-31` as no bound at all) until every
+     * seam that feeds it applied the shared `lowerFilterCondition` first: the
+     * RLS compile seam on the object's declared `datetime` columns, the
+     * engine's aggregate seam for `having` and `aggregations[i].filter`, and
+     * the RLS write check, which judges a declared `date` column in its stored
+     * calendar-day form (ruling A on #21109). So a bound reaches this arm
+     * already lowered, and one that reaches it unlowered — a column that is
+     * not `datetime`, a `{ $field }` referent holding a bare day, a caller that
+     * passes no seam — gets the comparison it wrote, as `driver-sql` gives it
+     * on the read. A caller with a `datetime` column and no seam lowers the
+     * filter first: `lowerFilterCondition(filter, { isDatetimeColumn })`
+     * (`@objectstack/spec/data`).
+     */
+    case '$lte': return actual != null && v != null && order(actual, v, (a, b) => a <= b);
     case '$in': return Array.isArray(v) && v.some((x) => looseEq(actual, x));
     case '$nin': return Array.isArray(v) && !v.some((x) => looseEq(actual, x));
+    // [#21242] Inclusive at both ends, as written: a seam splits a `$between`
+    // on a `datetime` column and gives its maximum the whole day (see `$lte`).
     case '$between':
       return Array.isArray(v) && v.length === 2 && actual != null && v[0] != null && v[1] != null
-        && order(actual, v[0], (a, b) => a >= b) && lteBound(actual, v[1]);
-    case '$contains': return typeof actual === 'string' && typeof v === 'string' && actual.includes(v);
+        && order(actual, v[0], (a, b) => a >= b) && order(actual, v[1], (a, b) => a <= b);
+    /**
+     * MEMBERSHIP on a JSON-stored column, SUBSTRING on a scalar one — the two
+     * questions `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`)
+     * gives this one operator. Which one is asked is decided by
+     * {@link containsAsksMembership}: the column's declaration when the caller
+     * supplied it, the stored value's shape otherwise.
+     *
+     * Before, this arm answered the substring test alone, and a stored array is
+     * not a string, so a `check` written as `{ tags: { $contains: 'x' } }` over
+     * a multi-valued field denied every write, while the read the same policy
+     * scopes (the typed drivers, the read-scope SQL) showed the rows holding
+     * `'x'` by membership.
+     */
+    case '$contains': return containsHolds(actual, v, declared);
     /**
      * [#6520] `$contains`' case-INSENSITIVE twin, folding ASCII case and nothing
      * else — `asciiCaseInsensitiveContains` is the spec's shared definition, the
-     * same one `driver-memory`'s matcher and objectql's `having` call.
+     * same one objectql's `having` calls. `driver-memory`'s reference matcher
+     * called it too until commit `8fec76a2b` retired it; `driver-memory`'s
+     * query path folds through its pattern twin, `asciiCaseInsensitiveRegexSource`.
      *
      * NOT `actual.toLowerCase().includes(v.toLowerCase())`, which is the obvious
      * line and the wrong one: it folds the whole Unicode range, so an RLS
@@ -453,7 +770,9 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
       } catch {
         return false;
       }
-    case '$notContains': return !(typeof actual === 'string' && typeof v === 'string' && actual.includes(v));
+    // The exact complement of `$contains`, whichever question that asks: a
+    // value with no member, and a value that is not text, satisfy it (#5298).
+    case '$notContains': return !containsHolds(actual, v, declared);
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
     case '$endsWith': return typeof actual === 'string' && typeof v === 'string' && actual.endsWith(v);
     case '$null': return v === true ? actual == null : actual != null;
@@ -482,16 +801,45 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
      */
     case '$exists': return v === true ? actual != null : actual == null;
     /**
+     * [#20444] `$empty` — the emptiness flag (declared by
+     * `FieldOperatorsSchema`; staged out of `FILTER_OPERATORS` like `$like`
+     * until #20446 added it there and lowered `is_empty` / `is_not_empty` to
+     * it, so a policy's stored 「is empty」 reaches this arm too).
+     * Ruling A on #20399 (record 5865693155) gives this face the BY-VALUE
+     * reading, because it judges a record, not a declaration: null, a missing
+     * key, `''` and `[]` are empty, through the spec's `isEmptyFilterValue`
+     * rather than a copy of it, and `false` is the exact complement.
+     *
+     * That differs from the declared-type faces (the SQL family, the document
+     * drivers, and the read-scope compiler that lowers the same policy for the
+     * read) only on a stored state the declaration does not predict: `''` in a
+     * non-text column — the write-door class #20308 closed — or `[]` in a
+     * scalar one. On every value a field's own type can hold, the write
+     * `check` and the read agree.
+     *
+     * Read off `raw`, not the resolved `v`: the flag is a boolean by
+     * declaration, never a value of another column, so a `{ $field }` in its
+     * slot is not resolved into one. Anything but `true` / `false` answers
+     * `false` — the write is denied — which is this face's standing answer to
+     * an unevaluable condition (the header's "unknown-operator posture"); the
+     * spec's save door and every query face refuse such a flag loudly.
+     */
+    case '$empty':
+      if (raw === true) return isEmptyFilterValue(actual);
+      if (raw === false) return !isEmptyFilterValue(actual);
+      return false;
+    /**
      * An operator this evaluator does not know answers `false` — the write is
      * DENIED — rather than throwing. [#6520] examined this arm and KEPT it; the
      * reasoning is on this module's header under "the unknown-operator posture",
      * because it is a decision rather than an omission.
      *
      * What #6520 did change is the arm's REACH: every operator `FILTER_OPERATORS`
-     * declares now has a case above it, so this line is only reachable for a
-     * spelling the protocol does not have (a typo) or one it retired
-     * (`$regex` / `$options`). No DECLARED operator is answered silently here
-     * any more, which was the defect the #6993 census measured.
+     * declares now has a case above it (`$empty` among them since #20446) — and
+     * so does every declared-but-staged one (`$like`, `$ilike`) — so this line is only
+     * reachable for a spelling the protocol does not have (a typo) or one it
+     * retired (`$regex` / `$options`). No DECLARED operator is answered silently
+     * here any more, which was the defect the #6993 census measured.
      */
     default: return false; // unknown operator → fail closed
   }
@@ -542,31 +890,6 @@ function assertComparableReference(
   if (!(ARRAY_REFUSED_OPERATORS as readonly string[]).includes(op)) return;
   const referent = getPath(record, String(raw.$field));
   if (isNonScalarValue(referent) || isNonScalarValue(actual)) throw arrayComparandError();
-}
-
-/**
- * The inclusive-upper-bound comparison, with the calendar-day rule the rest of
- * the platform applies (ADR-0053 D-D, #3777): a bare `YYYY-MM-DD` bound means
- * "through that whole day", so it is evaluated half-open against the next day
- * rather than against that day's midnight.
- *
- * Without this, a `check` policy of the shape `{ signed_on: { $lte: '{today}' } }`
- * evaluated on a `datetime` post-image **denied every write made after 00:00** —
- * the write-side twin of the read-side data loss #3777 fixed, and the reason
- * this evaluator had to stop being the one backend that disagreed. The four
- * other backends (SQL compiler, memory, mongo, the analytics preview) already
- * share this rule via the same primitive.
- *
- * String ordering makes `< nextDay` equivalent to `<= day` for a plain
- * `YYYY-MM-DD` value, so no field-type lookup is needed — which matters here,
- * because this evaluator sees a bare record and has no schema to consult.
- * A full-ISO or non-string bound keeps exact-instant semantics.
- */
-function lteBound(actual: unknown, bound: unknown): boolean {
-  if (bound == null) return false;
-  const nextDay = nextUtcCalendarDay(bound);
-  if (nextDay != null) return order(actual, nextDay, (a, b) => a < b);
-  return order(actual, bound, (a, b) => a <= b);
 }
 
 /**
@@ -667,8 +990,8 @@ const CALENDAR_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
  * value of the same column:
  *
  *   - a bare calendar day (`YYYY-MM-DD`, the `Field.date` storage form) stays a
- *     calendar day — which is what keeps {@link lteBound}'s half-open rule
- *     ("through that whole day") in force for a `$lte` against a shifted day;
+ *     calendar day, so it compares day for day with a stored `Field.date`
+ *     value, which is a calendar day too;
  *   - an ISO instant string (the `Field.datetime` canonical form) stays an ISO
  *     string with its time of day intact;
  *   - a `Date` stays a `Date`; an epoch number stays a number.
@@ -715,4 +1038,80 @@ function looseEq(a: unknown, b: unknown): boolean {
   if (a instanceof Date && (typeof b === 'string' || typeof b === 'number')) return a.getTime() === new Date(b).getTime();
   if (b instanceof Date && (typeof a === 'string' || typeof a === 'number')) return new Date(a).getTime() === b.getTime();
   return a === b;
+}
+
+/**
+ * Does `$contains` ask MEMBERSHIP of this column, rather than SUBSTRING?
+ *
+ * `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`) selects the
+ * question by the COLUMN: on a `multiple: true` field or a JSON-stored type it
+ * is membership, on a scalar string column it is substring. This evaluator
+ * judges a record, and is handed the record's declaration only by some callers
+ * (`plugin-security`'s write check and explain engine, when the object's schema
+ * loads), so it reads the question in two ways:
+ *
+ * - **A declared column** (the caller supplied {@link MatchesFilterOptions.fields}
+ *   and it names this column) — by the DECLARATION, contract first: the spec's
+ *   JSON-stored classes, `STRUCTURED_JSON_TYPES` or a multi-valued field
+ *   (`isMultiValueField`), the two halves every typed face's population is
+ *   built from. A declared JSON-stored column holding a scalar then has no
+ *   member, and a declared scalar column holding an array matches nothing, as
+ *   on `driver-sql`.
+ * - **Anything else** — no map, or a column the map does not name — by the
+ *   stored VALUE: an array asks membership, anything else substring. This is
+ *   the face's existing split for a value-level rule: `$empty` here is judged
+ *   by the stored value because this face judges a record, not a declaration
+ *   (ruling A on #20399), and `$contains` takes the same reading for the same
+ *   reason.
+ */
+function containsAsksMembership(actual: unknown, declared: CrossFieldComparisonFieldMeta | undefined): boolean {
+  if (declared) {
+    return STRUCTURED_JSON_TYPES.has(declared.type)
+      || isMultiValueField({ type: declared.type, multiple: declared.multiple === true });
+  }
+  return Array.isArray(actual);
+}
+
+/** `$contains` on one value: membership or substring, per {@link containsAsksMembership}. The comparand is a string by contract. */
+function containsHolds(actual: unknown, comparand: unknown, declared: CrossFieldComparisonFieldMeta | undefined): boolean {
+  if (typeof comparand !== 'string') return false;
+  if (containsAsksMembership(actual, declared)) return storedArrayHasMember(actual, comparand);
+  return typeof actual === 'string' && actual.includes(comparand);
+}
+
+/**
+ * The JSON NUMBER grammar, spelled out — the pattern `@objectstack/core`'s
+ * `jsonMembershipCandidates` tests a comparand against, for its reason:
+ * `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none of
+ * which is a JSON number, and admitting them would make the member set depend
+ * on JS coercion rules no SQL dialect shares.
+ */
+const JSON_NUMBER_TEXT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * Is `comparand` a MEMBER of the stored array?
+ *
+ * The comparand is a STRING by contract, so a member stored as a JSON number or
+ * boolean is named by its TEXT: `'1'` names the string `'1'` or the number `1`,
+ * `'true'` the string or `true`, `'null'` the string or `null`, and `'1.50'`
+ * the number `1.5`. That is the candidate set `@objectstack/core`'s
+ * `jsonMembershipCandidates` binds for every SQL dialect, read here as a
+ * predicate over JS values. Array-only, as the SQL constructs are: a value that
+ * is not an array has no member, and neither does an element that is itself
+ * an object or an array.
+ *
+ * ⚠️ A copy of that rule, not an import of it: this package depends on
+ * `@objectstack/spec` alone, and the rule lives in `@objectstack/core`. objectql's
+ * `having` walker and `driver-memory` carry the same copy for their own reasons;
+ * the one shared home they could all read is `@objectstack/spec/data`.
+ */
+function storedArrayHasMember(value: unknown, comparand: string): boolean {
+  if (!Array.isArray(value)) return false;
+  const number = JSON_NUMBER_TEXT.test(comparand) ? Number(comparand) : Number.NaN;
+  return value.some((element) => {
+    if (typeof element === 'string') return element === comparand;
+    if (typeof element === 'number') return Number.isFinite(number) && element === number;
+    if (typeof element === 'boolean' || element === null) return String(element) === comparand;
+    return false;
+  });
 }

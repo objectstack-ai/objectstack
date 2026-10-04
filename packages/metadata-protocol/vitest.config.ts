@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// This config exists for exactly one setting; everything else stays on
+// This config exists for exactly two settings; everything else stays on
 // vitest's defaults, deliberately — a key added here re-specifies behaviour
 // for every test file in the package (packages/cli/vitest.config.ts's header
 // records the incident that taught that).
+import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -15,5 +16,17 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+  },
+  resolve: {
+    alias: [
+      // [#20312] The save door compiles html page source with the ADR-0080
+      // compiler; its tests judge the compiler in this checkout, not a stale
+      // `dist/` (scripts/check-test-source-alias.mjs). Anchored, so no subpath
+      // is swallowed by the file replacement.
+      {
+        find: /^@objectstack\/sdui-parser$/,
+        replacement: path.resolve(__dirname, '../sdui-parser/src/index.ts'),
+      },
+    ],
   },
 });

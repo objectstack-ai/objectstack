@@ -84,7 +84,7 @@
  *
  * ## Scope: BOTH halves — and the correction that put the generated half here
  *
- * This note used to end with a claim that is FALSE, and #11671 is its
+ * This note used to end with a claim that is FALSE, and the defect commit 09b4f4e4e fixed is its
  * counterexample. It read:
  *
  * > `objects` and `metadataForms` are GENERATED (`*.generated.ts`) and are
@@ -211,7 +211,7 @@ export const HAND_AUTHORED_SECTIONS = ['apps', 'dashboards', 'pages'] as const;
  * judged by {@link findStaleFills}. Their recorded digests live in the
  * generated `<locale>.source-hashes.generated.ts`.
  *
- * These were excluded from this module until #11671 measured that the hole it
+ * These were excluded from this module until commit 09b4f4e4e acted on the measurement that the hole it
  * closes occurs here too — see the module note for the claim that was wrong and
  * why it was wrong.
  *
@@ -277,9 +277,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * (`apps.setup.navigation.group_overview.label`).
  *
  * A generic deep walk rather than an enumeration of the known shapes: the
- * sections grow keys (`subCaption`, `pages.<n>.components.<id>.<copyKey>`) and
- * an enumeration would silently stop covering the new ones — the same
- * declared-but-unwalked failure this module exists to close.
+ * sections grow keys (`dashboards.<n>.globalFilters.<key>.options.<value>`,
+ * `pages.<n>.components.<id>.<copyKey>`) and an enumeration would silently stop
+ * covering the new ones — the same declared-but-unwalked failure this module
+ * exists to close. (They shrink too: the widget `subCaption` key this sentence
+ * once cited was retired, and a deep walk needs no edit for that either.)
  */
 export function collectSourceLeaves(data: TranslationData | undefined): Map<string, string> {
   return collectLeavesOf(data, HAND_AUTHORED_SECTIONS);
@@ -565,7 +567,7 @@ function setDeep(target: Record<string, unknown>, path: string, value: string): 
  * optional `filledFrom` judges the generated ones ({@link findStaleFills}), over
  * whatever sections `filledFrom` itself records.
  * Omitting `filledFrom` leaves the generated sections entirely legacy-trusted,
- * which is what every caller did before #11671 and is still the honest default
+ * which is what every caller did before commit 09b4f4e4e and is still the honest default
  * for a bundle with no committed `<locale>.source-hashes.generated.ts`.
  *
  * The input is never mutated. Returns the same reference when nothing is stale,

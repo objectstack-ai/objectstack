@@ -3,7 +3,7 @@
 // ADR-0056 D10 — the authorization conformance matrix is a CHECKED artifact,
 // within the scope the mechanism can see: routes are ratcheted, primitives are
 // hand-maintained (see the matrix's own header for the narrowed claim and the
-// measured numbers — #8711). Refactored onto the reusable ADR-0060
+// measured numbers — commit 2ce1eb41b). Refactored onto the reusable ADR-0060
 // `checkLedger` helper: one call asserts every shared invariant (valid state,
 // enforced-has-site, experimental/removed-has-note, proof-file-exists,
 // high-risk-has-proof). A row that regresses one of THOSE invariants, or a
@@ -239,6 +239,16 @@ const PROBES: readonly Probe[] = [
     file: 'packages/runtime/src/domains/packages.ts',
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'packages:domains/packages.ts:anonymous-gate',
+  },
+  // #21061 — the /analytics domain gate. Same GATE-pin shape: the key exists
+  // only while `handleAnalyticsRequest` still consults `shouldDenyAnonymous`.
+  // Delete the domain floor and the key vanishes → the covering
+  // `anonymous-deny-analytics` row goes STALE → red CI.
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/analytics.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'analytics:domains/analytics.ts:anonymous-gate',
   },
 
   // ── a probe whose POPULATION WAS DELETED, re-declared for what it is ────
@@ -961,6 +971,7 @@ describe('the ledger-sourced population and its baseline bite', () => {
     expect(classified.length).toBeGreaterThan(0);
     expect(classified.sort()).toEqual([
       'dispatcher-domain:route-ledger.ts:/actions',
+      'dispatcher-domain:route-ledger.ts:/analytics',
       'dispatcher-domain:route-ledger.ts:/automation',
       'dispatcher-domain:route-ledger.ts:/mcp',
       'dispatcher-domain:route-ledger.ts:/meta',

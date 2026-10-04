@@ -104,6 +104,14 @@ export type {
   NavGroupContribution,
 } from './nav-contribution-diagnostics.js';
 
+// [#20331] The divergent view-container `name` refusal the boot registrar
+// throws. Exported because `os validate` is the SECOND door that has to answer
+// "will boot refuse this `views:` container?" — at author time, before the
+// server refuses it — and it must answer with the same judgment in the same
+// words. A consumer calls this; it does not re-derive the check.
+export { viewContainerNameRefusal } from './view-container-name-refusal.js';
+export type { ViewContainerNameRefusal } from './view-container-name-refusal.js';
+
 // Search-normalization companion column (#2486 — pinyin recall). Shared by
 // the registry's compile-time provisioning seam, the engine's `$search`
 // expansion, and plugin-pinyin-search's populate hooks.
@@ -133,6 +141,11 @@ export type { AdmittedValueShapeViolationTally } from './engine.js';
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
 // `sys_secret` references can name the shape it reads instead of re-declaring it.
 export type { DatasourceDef } from './engine.js';
+// [#20802] The cap on the related ids one nested-relation condition may feed
+// (`{ owner: { region: 'NA' } }`, served at `where`): past it the engine
+// refuses the filter rather than truncate it, and its words name this number.
+// Exported so a caller running the two-step route itself can page by it.
+export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
 // [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
 // docblock tells a caller to identify it by `code` rather than `instanceof`
 // (the two-realm split #14936 measured: this package declares BOTH realms in
@@ -556,12 +569,19 @@ export {
   collectMaskedReadFields,
   collectMaskedPasswordFields,
   collectCredentialFields,
+  // [#21197] The flag-keyed collector (`internal: true`), for consumers that
+  // copy record values to a second exit — the audit ledger's CRUD mirror.
+  collectInternalReadFields,
+  // [#21197] The one dereference of an `internal` column for rows a consumer
+  // holds — stripped-versus-unset by declaration, fail-closed.
+  readInternalColumn,
   // [#8559] The empty-string refusal at the credential write door — exported
   // so consumers branch on `code`/`status` rather than message text.
   EmptyCredentialWriteError,
   EMPTY_CREDENTIAL_REFUSAL_CODE,
   EMPTY_CREDENTIAL_REFUSAL_STATUS,
 } from './secret-fields.js';
+export type { InternalColumnSource } from './secret-fields.js';
 
 // Export Utilities
 export {

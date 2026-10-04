@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-pinyin-search",
-  "version": "17.4.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "Pinyin search recall for ObjectStack — populates the hidden `__search` companion column (full pinyin + initials of the display/name field) so `$search` hits CJK names typed as pinyin. Locale-gated via OS_SEARCH_PINYIN_ENABLED (#2486).",
   "main": "dist/index.js",
@@ -22,11 +22,11 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "pinyin-pro": "^3.29.1"
+    "pinyin-pro": "^3.29.4"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "tsx": "^4.23.12",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

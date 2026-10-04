@@ -15,7 +15,7 @@ import type {
   IQueueService,
   QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
-import { renderTemplate, requireVars, htmlToText } from './template-engine.js';
+import { renderTemplate, renderPlainTextTemplate, requireVars, htmlToText } from './template-engine.js';
 import {
   SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
   encodeAttachmentsForRow,
@@ -739,7 +739,7 @@ export class EmailService implements IEmailService {
       ...(input.relatedObject ? { related_object: input.relatedObject } : {}),
       ...(input.relatedId ? { related_id: input.relatedId } : {}),
       ...(input.sentBy ? { sent_by: input.sentBy } : {}),
-      // #11741 — pass-through ONLY. This writer runs under a constant system
+      // Commit b706af987 — pass-through ONLY. This writer runs under a constant system
       // context, so the input's organization is the one fact it may stamp:
       // no resolution, no default, no fabrication (a wrong organization_id is
       // worse than a null). Absent ⇒ the column stays unwritten.
@@ -922,7 +922,8 @@ export class EmailService implements IEmailService {
         `EmailService: queue delivery skipped for one message — its attachments total `
         + `${encodedAttachments.totalBytes} bytes, over the ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}-byte limit a `
         + 'sys_email row carries, so the message was delivered inline (in-process retries only) rather than '
-        + 'queued without them. Content that large is queueable through the storage capability (#5172), '
+        + 'queued without them. Content that large is queueable through the storage capability, which holds '
+        + 'it outside the row while the row keeps a reference and the attachment\'s audit metadata, '
         + `but ${encodedAttachments.storageDetail ?? 'that path was not attempted for this message'}. `
         + 'Fix: mount the storage capability (@objectstack/service-storage) so large attachments are '
         + 'stored out of the row and the message can be delivered durably.',
@@ -1375,10 +1376,18 @@ export class EmailService implements IEmailService {
       ...(locale ? { locale } : {}),
       ...(input.timezone ? { timeZone: input.timezone } : {}),
     };
-    const subject = renderTemplate(row.subject, data, renderOpts);
+    // Each face is rendered in ITS OWN encoding. Only `body_html` is markup,
+    // so only it HTML-escapes its `{{x}}` holes. The subject (a mail header,
+    // an inbox title) and `body_text` (the plain-text part, an inbox body) are
+    // plain text: escaping there put `&amp;` into every link carrying a
+    // query string — a plain-text reader, or anyone copying the link, got a
+    // parameter named `amp;callbackURL` and lost the post-verification
+    // redirect. The derived fallback was already right: `htmlToText` decodes
+    // the entities the HTML render introduced.
+    const subject = renderPlainTextTemplate(row.subject, data, renderOpts);
     const html = renderTemplate(row.body_html, data, renderOpts);
     const text = row.body_text
-      ? renderTemplate(row.body_text, data, renderOpts)
+      ? renderPlainTextTemplate(row.body_text, data, renderOpts)
       : htmlToText(html);
 
     return { row, rendered: { subject, html, text } };
@@ -1428,7 +1437,7 @@ export class EmailService implements IEmailService {
       ...(input.relatedObject ? { relatedObject: input.relatedObject } : {}),
       ...(input.relatedId ? { relatedId: input.relatedId } : {}),
       ...(input.sentBy ? { sentBy: input.sentBy } : {}),
-      // #11741 — sendTemplate is itself a producer of send(): forward the
+      // Commit b706af987 — sendTemplate is itself a producer of send(): forward the
       // caller's organization so the sys_email row it persists is stamped.
       ...(input.organizationId ? { organizationId: input.organizationId } : {}),
     };

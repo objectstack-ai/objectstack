@@ -21,13 +21,24 @@
         },
         {
           "name": "label",
-          "type": "string",
-          "description": "Grid label, used as the table caption and as the export file title. The canonical spelling — the deprecated `title` is only read when this is absent."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Grid label, used as the table caption, as the export file title and in the record-detail overlay heading. The canonical spelling — the deprecated `title` is only read when this is absent. Accepts either a plain string or an inline per-locale map (`{ en: \"Accounts\", \"zh-CN\": \"客户\" }`) — the `I18nLabel` union the contract admits on this key — and the grid resolves the map against the display locale (the workspace's regional default when one is configured, otherwise the active UI language), falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
+        },
+        {
+          "name": "description",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "One line of help text drawn above the grid's rows, in muted type. Accepts either a plain string or an inline per-locale map (`{ en: \"Everyone you work with\", \"zh-CN\": \"你的所有联系人\" }`) — the `I18nLabel` union the contract admits on this key — resolved against the display locale the way `label` is. A map with no usable entry draws no line."
         },
         {
           "name": "sort",
           "type": "array",
-          "description": "Initial sort order, `[{ field, order }]`. The canonical spelling — the deprecated single-sort `defaultSort` is only read when this is absent."
+          "description": "Initial sort order, `[{ field, order }]`. The only sort spelling this block reads — the retired single-sort `defaultSort` is refused by the protocol and ignored by the renderer."
         },
         {
           "name": "pagination",
@@ -85,7 +96,12 @@
         {
           "name": "conditionalFormatting",
           "type": "array",
-          "description": "Row/cell styling rules. Accepts both the ObjectUI `{ field, operator, value }` form and the spec expression form `{ condition, style }`."
+          "description": "Row style rules, each `{ condition, style }` — a CEL `condition` over the row’s own `record.*` and a CSS `style` map, the rule a list view declares. The first matching rule styles that row. The native `{ field, operator, value }` rule, its `expression`, and a colour written beside `condition` instead of inside `style` are retired (objectui#11533)."
+        },
+        {
+          "name": "emptyState",
+          "type": "object",
+          "description": "What the grid draws in place of an empty table, `{ title, message, icon }`: a Lucide `icon` name, a `title` (default: the table's own \"No results found\") and a `message` (default: none). `title` and `message` each accept a plain string or an inline per-locale map, resolved against the display locale. Not drawn when a term typed into the grid's own server-side search box is what emptied it — the table and its search box stay, so the term can be cleared. Leave it out and an empty grid draws the table's own empty row."
         },
         {
           "name": "grouping",
@@ -131,6 +147,11 @@
           "name": "singleClickEdit",
           "type": "boolean",
           "description": "With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid."
+        },
+        {
+          "name": "keyboardNavigation",
+          "type": "boolean",
+          "description": "Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Defaults to on when the grid renders editable; a read-only grid keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid."
         },
         {
           "name": "navigation",
@@ -242,7 +263,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Bare field names to show, in order (each looked up in the object schema; `{ name }` is tolerated). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations)."
+          "description": "Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations)."
         },
         {
           "name": "mode",
@@ -271,21 +292,28 @@
         },
         {
           "name": "title",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the drawer and modal presentations (`formType: \"drawer\"` / `\"modal\"`). Accepts either a plain string or an inline per-locale map (`{ en: \"New order\", \"zh-CN\": \"新建订单\" }`) — the `I18nLabel` union the contract admits on this key — and the form resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "description",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Subtitle under the drawer and modal heading. Accepts either a plain string or an inline per-locale map (`{ en: \"Enter the order details\", \"zh-CN\": \"填写订单信息\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "layout",
           "type": "enum",
           "enum": [
             "vertical",
-            "horizontal",
-            "inline",
-            "grid"
-          ]
+            "horizontal"
+          ],
+          "description": "Label placement: `vertical` puts each label above its field (the default), `horizontal` beside it."
         },
         {
           "name": "columns",
@@ -357,7 +385,7 @@
         {
           "name": "modalCloseButton",
           "type": "boolean",
-          "description": "Show the modal presentation’s close button. Read at ObjectForm.tsx:361 and honoured by ModalForm."
+          "description": "Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by `ObjectForm`’s modal route and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown."
         },
         {
           "name": "contentLayout",
@@ -366,7 +394,7 @@
             "simple",
             "tabbed"
           ],
-          "description": "How the modal presentation lays out sections. `tabbed` needs more than one section to differ from `simple` (ModalForm.tsx:638)."
+          "description": "How the modal presentation lays out sections. `tabbed` differs from `simple` only when more than one section has a field to show (`ModalForm` tests `schema.contentLayout === \"tabbed\" && groups.length > 1`)."
         },
         {
           "name": "confirmOnDiscard",
@@ -400,21 +428,35 @@
         },
         {
           "name": "submitText",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the Save button. A map no locale limb resolves shows the default label. Accepts either a plain string or an inline per-locale map (`{ en: \"Save order\", \"zh-CN\": \"保存订单\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "cancelText",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the Cancel button. Accepts either a plain string or an inline per-locale map (`{ en: \"Back\", \"zh-CN\": \"返回\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "nextText",
-          "type": "string",
-          "description": "Label of the next-step button (wizard)."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the next-step button (wizard). Accepts either a plain string or an inline per-locale map (`{ en: \"Continue\", \"zh-CN\": \"继续\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "prevText",
-          "type": "string",
-          "description": "Label of the previous-step button (wizard)."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the previous-step button (wizard). Accepts either a plain string or an inline per-locale map (`{ en: \"Previous\", \"zh-CN\": \"上一步\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "showSubmit",
@@ -435,8 +477,11 @@
         },
         {
           "name": "successMessage",
-          "type": "string",
-          "description": "Toast shown after a successful submit. Ignored when `submitBehavior` or `navigateOnSuccess` is set."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Toast shown after a successful submit. Ignored when `submitBehavior` or `navigateOnSuccess` is set. Accepts either a plain string or an inline per-locale map (`{ en: \"Order saved\", \"zh-CN\": \"订单已保存\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "navigateOnSuccess",
@@ -486,7 +531,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Bare field names to show, in order (each looked up in the object schema; `{ name }` is tolerated). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (`EmbeddableForm` passes this array straight through to `<ObjectForm>` with no `sections`, so it renders through the same `SimpleObjectForm` as `object-form` above — see its `fields` description)."
+          "description": "Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (`EmbeddableForm` passes this array straight through to `<ObjectForm>` with no `sections`, so it renders through the same `SimpleObjectForm` as `object-form` above — see its `fields` description)."
         },
         {
           "name": "allowMultiple",
@@ -543,20 +588,31 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key is also the parent pool for values, create defaults and the submitted set. Author one or the other, or list every section member here too. Members are bare field names (`{ name }` tolerated); NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
+          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names; NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
         },
         {
           "name": "title",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Names the record in the built-in \"… saved\" toast after an edit save, which shows only when the host supplies no `onSuccess`. Accepts either a plain string or an inline per-locale map (`{ en: \"Purchase order\", \"zh-CN\": \"采购单\" }`) — the `I18nLabel` union the contract admits on this key — and the renderer resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "submitText",
-          "type": "string",
-          "description": "Label of the button that saves the parent and every detail row in one batch."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the button that saves the parent and every detail row in one batch. Defaults to \"Save\" when editing a record (`mode: \"edit\"` with a `recordId`) and to \"Create\" otherwise, in the active UI language; an empty string, or a map no locale limb resolves, shows the default too. Accepts either a plain string or an inline per-locale map (`{ en: \"Save order\", \"zh-CN\": \"保存订单\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "cancelText",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the Cancel button, which renders only when the host supplies an `onCancel` callback (a runtime slot, not authorable in a JSON document). Defaults to \"Cancel\", in the active UI language; an empty string, or a map no locale limb resolves, shows the default too. Accepts either a plain string or an inline per-locale map (`{ en: \"Back\", \"zh-CN\": \"返回\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "showSubmit",
@@ -651,7 +707,12 @@
         {
           "name": "conditionalFormatting",
           "type": "array",
-          "description": "Per-card style rules, each evaluated against that card’s own record. Two member dialects are accepted: the native `{ field, operator, value, backgroundColor?, borderColor? }` and the spec CEL `{ condition, backgroundColor?, borderColor? }`. A matching rule colours that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record."
+          "description": "Per-card style rules, each `{ condition, style }` — a CEL `condition` over the card’s own `record.*` and a CSS `style` map, the rule a list view declares. The first matching rule styles that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record. The native `{ field, operator, value }` rule and a colour written beside `condition` instead of inside `style` are retired and refused by name (objectui#11522)."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a card click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `page` opens the record page through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, there is no record page to open and the click opens nothing. `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
         },
         {
           "name": "dataSource",
@@ -668,7 +729,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key."
         },
         {
           "name": "calendar",
@@ -716,6 +777,11 @@
           "description": "External loading state, honoured ONLY alongside an array `data`: it then replaces the calendar with its loading placeholder. On a calendar fed by `staticData` or by `objectName` it is dropped, because that calendar owns its own loading state."
         },
         {
+          "name": "navigation",
+          "type": "object",
+          "description": "What an event click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `page` opens the record page through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, there is no record page to open and the click opens nothing. `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, `preventNavigation: true` opens nothing, and `size` sets the overlay width. An overlay mode wins over a parent view’s click handler; any other mode hands the click to it."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -730,12 +796,91 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-gantt` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key."
         },
         {
           "name": "gantt",
           "type": "object",
-          "description": "startDateField, endDateField, titleField, progressField, percentageField, colorField, dependenciesField"
+          "description": "Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored. The spec requires `startDateField`, `endDateField` and `titleField`, which name the record fields a task's bar starts at, ends at and is titled by; the other members (`progressField`, `colorField`, `dependenciesField`, `parentField`, `viewMode`, `exportFileName`, …) are optional."
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a gantt carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` charts those rows, `{ provider: 'object', object }` queries that object and `{ provider: 'api', read }` reads through that request. A bare array is not this key’s shape and is not a record source: the gantt falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a gantt carrying both charts these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the tasks the gantt charts — from every record source it reads: the object, an `api` request, or inline rows. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Task order in `[{ field, order }]` form, ordering the rows the gantt charts. Lowered to `$orderby` on the same query."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a task click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the task's record in a drawer, this renderer's own default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec's `page` default. `drawer`, `modal` and `popover` open the task's record in that overlay, and `split` opens it beside the chart, which stays drawn; `none` opens nothing. `page` opens the task's record page in the same tab and `new_window` opens it in a new tab. The gantt builds that address itself from the page it is on and does not use a record navigator the host publishes, so a host that publishes one changes nothing: on the object's own list or view route (`…/OBJECT/view/VIEW`) the address is the record page `…/OBJECT/record/ID`, while on any other page, such as a custom page, `/OBJECT/record/ID` is appended to the current address. The object is `data.object` when `data` is the object provider, else `objectName`; on inline rows that name neither there is no record to open, and every mode, the default drawer included, opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width."
+        },
+        {
+          "name": "label",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label. A string is used as written, and an inline locale map (`{ en, \"zh-CN\", … }`) gives the entry for the display locale. The chart draws it nowhere else."
+        },
+        {
+          "name": "skipWeekends",
+          "type": "boolean",
+          "description": "Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays. The day view also folds the Saturday and Sunday columns out of its axis."
+        },
+        {
+          "name": "holidays",
+          "type": "array",
+          "of": "string",
+          "description": "Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math. A non-empty list turns the working calendar on by itself, without `skipWeekends`, and the day view folds each listed date's column out of its axis."
+        },
+        {
+          "name": "persistLayout",
+          "type": "boolean",
+          "description": "Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName`. The object half is `objectName`, else `data.object`, and `gantt` on inline rows that name neither. With `false` the toolbar has no save-layout button and nothing is stored."
+        },
+        {
+          "name": "viewName",
+          "type": "string",
+          "description": "Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`). Two gantts on the same object with different names keep separate saved layouts, and a gantt restores only the layout saved under its own name."
+        },
+        {
+          "name": "markers",
+          "type": "array",
+          "description": "Extra vertical reference lines drawn like the Today marker ({ date, label?, color? }). `date` places the line, and a date outside the chart's range draws none; `label` is the text drawn against it; `color` is its CSS colour, the theme's primary colour when omitted."
+        },
+        {
+          "name": "criticalPath",
+          "type": "boolean",
+          "description": "Seed the critical-path highlight ON; the toolbar toggle stays available either way"
+        },
+        {
+          "name": "showBaselines",
+          "type": "boolean",
+          "description": "Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it. A task draws one only when `gantt.baselineStartField` and `gantt.baselineEndField` give it both baseline dates."
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "description": "Disable every write path on this gantt and lock the record drawer. A task click still opens the record, read-only."
+        },
+        {
+          "name": "mobileReadOnly",
+          "type": "boolean",
+          "description": "Auto read-only on narrow viewports — ON unless an explicit `false` disables it. Narrow is under 640px: the chart's own width once it is measured, the viewport's until then. A narrow chart's own write paths are gated as under `readOnly`, read-only badge included, but the record drawer is locked by `readOnly` alone, so a task's record still opens writable. `false` keeps a narrow chart editable, and `readOnly: true` locks the chart and the drawer at any width."
         },
         {
           "name": "dataSource",
@@ -752,7 +897,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node. A timeline drawn from `items`, `data` or a `bind` path issues no query and needs none to draw, but `navigation` still reads it: without it `page` opens nothing and `new_window` / `openNewTab` open no record page."
         },
         {
           "name": "variant",
@@ -762,6 +907,76 @@
             "horizontal",
             "gantt"
           ]
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the records the timeline fetches. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. Authored `items` or `data` suppress that query, so the key then narrows nothing. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Order of the records the timeline fetches, in `[{ field, order }]` form, lowered to `$orderby` on the same query. The rail draws entries composed from records by their start date, earliest first, whatever this order. Authored `items` or `data` suppress the query, so the key then orders nothing."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What an entry click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `drawer`, `modal` and `popover` open the entry’s record in that overlay, but `split` opens nothing, because the timeline hands the split shell no main panel; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of the timeline’s `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a timeline that names no `objectName`, there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. On a timeline that names no `objectName`, `new_window` and `openNewTab` open no record page either: the new tab’s address is a slash and the entry’s `id` alone (its `_id` when it has no `id`, `undefined` when it has neither). A click handler from a parent view outranks the whole key."
+        },
+        {
+          "name": "timeline",
+          "type": "object",
+          "description": "Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. On entries composed from records, `startDateField` is the entry’s date, `endDateField` the end printed after it, `titleField` the title, `groupByField` the field whose value heads each group (without it, entries group into date buckets), and `colorField` the field whose option colour, or the value itself when it is a colour literal, paints the marker. Each outranks the flat key of the same binding, and `titleField` / `startDateField` outrank `mapping`’s `title` / `date`. `scale` sets the axis unit of the gantt branch, which on this block draws authored `items` only."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size. A value that is not a positive integer is ignored with a console warning, and the default cap applies."
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written."
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "description": "Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each element is objectui's declared timeline element, `@object-ui/types`'s `TimelineFeedItem` (`variant` absent / `vertical` / `horizontal`) or `TimelineGanttItem` (`variant: 'gantt'`), the arm this node's `variant` selects. They are drawn as written: the `timeline` block’s field bindings, `mapping` and `descriptionField` do not apply to them."
+        },
+        {
+          "name": "dateFormat",
+          "type": "enum",
+          "enum": [
+            "short",
+            "long",
+            "iso"
+          ],
+          "description": "How each entry's date is rendered (renderer default `short`): `short` / `long` are locale-formatted, `iso` is the locale-free machine form."
+        },
+        {
+          "name": "rowLabel",
+          "type": "string",
+          "description": "Header label for the gantt row column — read by the gantt branch only, which on this block needs authored `items`. Without it the header shows the default label."
+        },
+        {
+          "name": "minDate",
+          "type": "string",
+          "description": "Pin the gantt axis start (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured. A value that is not a date, or a `minDate` after `maxDate`, refuses the chart with a diagnostic naming it."
+        },
+        {
+          "name": "maxDate",
+          "type": "string",
+          "description": "Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured. A value that is not a date, or a `maxDate` before `minDate`, refuses the chart with a diagnostic naming it."
+        },
+        {
+          "name": "descriptionField",
+          "type": "string",
+          "description": "Field rendered as each entry's description (renderer default `description`). It is declared flat because the `timeline` block has no member for it, and `mapping.description` outranks it when both are written."
+        },
+        {
+          "name": "mapping",
+          "type": "object",
+          "description": "Record-to-entry field mapping ({ title, date, description, variant }) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has. On the vertical rail a colour that `timeline.colorField` resolves for an entry outranks that marker colour."
         },
         {
           "name": "dataSource",
@@ -778,12 +993,47 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`, or the node’s `dataSource` binding; the `object-map` schema refuses a block that declares none of them."
         },
         {
           "name": "map",
           "type": "object",
-          "description": "latitudeField, longitudeField, titleField"
+          "description": "The field configuration: `latitudeField` / `longitudeField` (or one `locationField` holding a `\"lat,lng\"` string, a `{ lat, lng }` object or a `[lat, lng]` pair) place each record’s marker, and a record with no readable coordinates is not plotted; `titleField` and `descriptionField` name what the marker popup shows; `zoom` and `center` (`[latitude, longitude]`) set the initial camera, which otherwise fits the markers; `style` is a MapLibre style URL, read after the node’s `mapStyle`."
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a map carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` plots those rows and `{ provider: 'object', object }` queries that object, both narrowed by `filter` and ordered by `sort`. The `api` provider is not implemented on the map and plots no markers. A bare array is not this key’s shape and is not a record source: the map falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a map carrying both plots these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the markers the map plots — fetched rows and inline (`staticData`, `{ provider: 'value' }`) rows alike. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Marker order in `[{ field, order }]` form, ordering the rows the map plots. Lowered to `$orderby` on the same query."
+        },
+        {
+          "name": "mapStyle",
+          "type": "string",
+          "description": "MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record"
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a marker click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `drawer`, `modal` and `popover` open the marker’s record in that overlay, but `split` opens nothing, because the map hands the split shell no main panel; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of the map’s `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a map that names no `objectName`, there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
+        },
+        {
+          "name": "enableClustering",
+          "type": "boolean",
+          "description": "Group nearby markers into one numbered cluster. Absent, the map clusters only above 100 markers; `false` turns clustering off at any count."
         },
         {
           "name": "dataSource",
@@ -800,12 +1050,32 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`, read in that order: a tree on `data` or `staticData` never queries this object. On a tree whose rows are inline it still names the record page a new-tab click opens."
         },
         {
           "name": "tree",
           "type": "object",
-          "description": "parentField, labelField, fields, defaultExpandedDepth"
+          "description": "The field configuration: `parentField` names the field holding each record’s parent id (auto-detected from the object’s self-referencing field when omitted), `labelField` the field drawn indented in the first column (default `name`), `fields` the further fields drawn as flat columns after it, and `defaultExpandedDepth` how many levels open on first draw (`0` shows roots only; omitted, every level is open)."
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a tree carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` draws those records and `{ provider: 'object', object }` queries that object, both narrowed by `filter`. The `api` and `schema` providers draw no rows on the tree. A bare array is not this key’s shape and is not a record source: the tree falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a tree carrying both draws these rows and never queries that object. Each record is placed under the record its `parentField` value names, and one naming no record is drawn as a root. `filter` narrows these rows exactly as it does fetched ones."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the records the tree draws — fetched rows and inline (`staticData`, `{ provider: 'value' }`) rows alike. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. A record whose parent the filter removed is drawn as a root. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a row click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `drawer`, `modal` and `popover` open the row’s record in that overlay, and `split` opens it beside the tree; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of `data.object` when `data` is the object provider, else of the tree’s `objectName`, through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a tree that names neither (inline rows with no `objectName`), there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
         }
       ]
     },
@@ -820,7 +1090,11 @@
         },
         {
           "name": "label",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the tile, and of the drill-down panel when `title` is not set. Accepts either a plain string or an inline per-locale map (`{ en: \"Pipeline\", \"zh-CN\": \"销售管道\" }`) — the `I18nLabel` union the contract admits on this key — and the tile resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "aggregate",
@@ -833,13 +1107,19 @@
         },
         {
           "name": "description",
-          "type": "string",
-          "description": "Helper text rendered under the value."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Helper text rendered under the value. Accepts either a plain string or an inline per-locale map (`{ en: \"This quarter\", \"zh-CN\": \"本季度\" }`), resolved against the active UI language with the same fallback chain as `label`."
         },
         {
           "name": "title",
-          "type": "string",
-          "description": "Heading of the drill-down panel. Defaults to `label` — set it only when the records list wants a different name from the tile."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the drill-down panel. Defaults to `label` — set it only when the records list wants a different name from the tile. Accepts either a plain string or an inline per-locale map (`{ en: \"Open deals\", \"zh-CN\": \"进行中的商机\" }`), resolved against the active UI language with the same fallback chain as `label`."
         },
         {
           "name": "filter",
@@ -913,7 +1193,7 @@
         {
           "name": "drillDown",
           "type": "object",
-          "description": "Click-through config that opens the records behind the number."
+          "description": "Click-through config that opens the records behind the number. `drillDown.filter` and `drillDown.mode` do not apply to a metric, which has no clicked point to filter by and no row to open, so the list is always scoped by this block’s own `filter`; a drill `filter` belongs on `object-chart` or `object-pivot`, and `mode` on `object-data-table`."
         },
         {
           "name": "dataSource",
@@ -1089,6 +1369,11 @@
           "type": "string"
         },
         {
+          "name": "drillDown",
+          "type": "object",
+          "description": "Click-through config that opens the records behind a clicked cell, header or total — in a drawer, a dialog, the object’s list page (`target: \"navigate\"`), or an analytical report (`report`). The drilled list is this block’s `filter` narrowed by the clicked value. `drillDown.mode` does not apply: every click point on a pivot is an aggregated bucket, so it always drills through; `mode` belongs on `object-data-table`."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -1138,6 +1423,23 @@
           "name": "showHeader",
           "type": "boolean",
           "description": "Render the detail body's own title / follow-star / copy-id chip above the fields. Off by default because this block is normally composed under a `page:header` that already draws that chrome, and turning it on there shows the record title twice. Set it true only when this block is the whole page."
+        },
+        {
+          "name": "enforceFieldSecurity",
+          "type": "boolean",
+          "description": "Fold this block's field list through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value."
+        },
+        {
+          "name": "redactFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         }
       ]
     },
@@ -1159,6 +1461,23 @@
             "vertical"
           ],
           "description": "Layout orientation for highlight fields"
+        },
+        {
+          "name": "enforceFieldSecurity",
+          "type": "boolean",
+          "description": "Fold this block's highlight chips through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty chip behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the record is fetched either way and the server still decides every value."
+        },
+        {
+          "name": "redactFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         }
       ]
     },
@@ -1207,7 +1526,11 @@
         },
         {
           "name": "title",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the list. Defaults to the related object's label (its translation when one is loaded, otherwise the humanized object name). Accepts either a plain string or an inline per-locale map (`{ en: \"Open tasks\", \"zh-CN\": \"未完成任务\" }`) — the `I18nLabel` union the contract admits on this key — and the list resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "showViewAll",
@@ -1223,6 +1546,23 @@
           "name": "add",
           "type": "object",
           "description": "Adds an \"Add\" button that assigns EXISTING records instead of creating one — the m2m/junction case. Shape: `{ picker: { object, valueField?, labelField?, filter? }, linkField?, label? }`. `picker.object` (required) is the object whose records the dialog offers. `picker.valueField` is the field of the picked record used as the link value (default \"id\"); `picker.labelField` is the column shown in the picker rows (default \"name\", and the other columns are derived from that object's schema). With `linkField` set, selecting records CREATES rows in this list's own object as `{ [relationshipField]: parentValue, [linkField]: pickedId }` — the junction case; omit `linkField` and the picked child is RE-PARENTED instead, by setting its own `relationshipField` to this parent. `label` is the button text (default \"Add\", localizable inline). Setting `add` also enables generic link removal on rows when no host delete handler is wired. `picker.filter` restricts which records the dialog offers — a list of `{ field, operator, value }` rules in the same vocabulary as this list's own `filter`, applied as a hard constraint the user cannot widen (it never appears as an editable filter row)."
+        },
+        {
+          "name": "enforceFieldSecurity",
+          "type": "boolean",
+          "description": "Fold this list's `columns` through the caller's FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value."
+        },
+        {
+          "name": "redactFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         },
         {
           "name": "dataSource",
@@ -1276,6 +1616,58 @@
         {
           "name": "amountField",
           "type": "string"
+        },
+        {
+          "name": "parentObject",
+          "type": "string",
+          "description": "The PARENT object the line total is written to on Save, together with `totalField`. Defaults to the object of the record the page shows, and outranks it when set. With neither, Save writes the lines alone and no parent field."
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "The parent record whose lines the panel lists and saves: it loads `childObject` rows whose `relationshipField` equals this id, and a line added in the grid is saved with this id in `relationshipField`. Outranks `recordId` and the record the page shows; leave it unset on a record page, where the record shown is the parent. With no parent id at all the panel asks the user to save the record first and loads nothing."
+        },
+        {
+          "name": "recordId",
+          "type": "string",
+          "description": "The parent record id, read only when `parentId` is unset. It outranks the record the page shows."
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "Heading of the panel. Defaults to \"Line Items\" in the active UI language. A plain string, drawn as authored."
+        },
+        {
+          "name": "readonly",
+          "type": "boolean",
+          "description": "Shows the lines without editing: no Save button, no Add line / Duplicate row / Remove row actions, and the grid draws a read-only table."
+        },
+        {
+          "name": "minRows",
+          "type": "number",
+          "description": "Fewest lines the user can leave: every line's Remove row action is disabled while the grid holds this many lines or fewer. It adds no blank lines to reach the number."
+        },
+        {
+          "name": "maxRows",
+          "type": "number",
+          "description": "Most lines the user can hold: at this many lines Add line and Duplicate row are disabled and the trailing blank entry row is not drawn."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "of": "object",
+          "description": "Additional criteria for the lines, as spec `ViewFilterRule` entries (`[{ field, operator, value }]`). AND-combined with the parent relationship condition, never a replacement for it: it can only narrow this record's lines. Also the key a per-element `dataSource` binding's composed filter lands on."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "of": "object",
+          "description": "Load order for the lines, as `[{ field, order }]` entries applied in list order; `order` is `asc` or `desc`. Without it the lines arrive in storage order."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Most lines loaded (default 500). The grid has no pagination: every loaded line is editable and saved as one batch, and lines past the cap are not loaded. Must be a positive integer: any other value is ignored, with a console warning."
         },
         {
           "name": "dataSource",
@@ -1422,7 +1814,7 @@
           "name": "requiredPermissions",
           "type": "array",
           "of": "string",
-          "description": "Hide the whole bar unless the user holds these permissions"
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         },
         {
           "name": "location",
@@ -1677,11 +2069,19 @@
           "name": "variant",
           "type": "enum",
           "enum": [
-            "heading",
-            "subheading",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
             "body",
-            "caption"
-          ]
+            "caption",
+            "overline",
+            "heading",
+            "subheading"
+          ],
+          "description": "One of the nine text styles ui:text uses: h1-h6 (rendered as that heading level), body, caption or overline. heading and subheading are earlier spellings the contract still accepts and renders as h2 and h3; write h2 or h3 instead."
         },
         {
           "name": "align",
@@ -1701,8 +2101,7 @@
         {
           "name": "object",
           "type": "string",
-          "required": true,
-          "description": "Object the aggregate runs over"
+          "description": "Object the aggregate runs over. Required unless a node-level `dataSource` binding names one; when both are set, `dataSource.object` wins."
         },
         {
           "name": "aggregate",
@@ -1723,7 +2122,8 @@
         },
         {
           "name": "filter",
-          "type": "array"
+          "type": "array",
+          "description": "Criteria the aggregate is scoped by. When a node-level `dataSource` binding also supplies a filter (its own, or the saved view its `view` names), the two are AND-combined: neither is dropped."
         },
         {
           "name": "format",
@@ -1741,6 +2141,12 @@
         {
           "name": "suffix",
           "type": "string"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -1808,16 +2214,23 @@
         {
           "name": "items",
           "type": "array",
-          "required": true,
-          "description": "Term/description pairs [{ term, description }]"
+          "of": "object",
+          "description": "Term/description pairs [{ term, description }], in order: `term` is the row label, `description` is shown as-is (an object as JSON, an omitted one as an em dash). Omitted or empty renders the \"No details\" state"
         },
         {
           "name": "columns",
           "type": "enum",
           "enum": [
-            "1",
-            "2"
-          ]
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            }
+          ],
+          "description": "Grid columns from the small breakpoint up: the NUMBER 1 or 2 (default 1)"
         },
         {
           "name": "inline",
@@ -1843,15 +2256,19 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Columns per row — bare names or { field, label? }"
+          "description": "Fields shown after the title on each line, in order: a bare field name, or `{ field }`"
         },
         {
           "name": "filter",
-          "type": "array"
+          "type": "array",
+          "of": "object",
+          "description": "Filter rules `[{ field, operator, value }]`. A string `value` may be a context token such as `{current_user_id}`, resolved before the query"
         },
         {
           "name": "sort",
-          "type": "array"
+          "type": "array",
+          "of": "object",
+          "description": "Sort order `[{ field, order }]`, applied in list order"
         },
         {
           "name": "limit",
@@ -1915,14 +2332,139 @@
           "name": "size",
           "type": "enum",
           "enum": [
+            "default",
             "sm",
             "md",
-            "lg"
-          ]
+            "lg",
+            "icon"
+          ],
+          "description": "Button size: the Button primitive's `default`, `sm`, `lg` or `icon`, plus `md`, which renders as `default` (default: `default`)"
         },
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the button is not rendered when it is false, nor when the predicate fails to evaluate. Omit for always-visible"
+        },
+        {
+          "name": "disabled",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Disabled predicate, in the same three shapes as `visible`: the button is shown but cannot be pressed while it holds. Omit for never-disabled"
+        },
+        {
+          "name": "params",
+          "type": "array",
+          "description": "The parameters to collect from the user before the action runs (`ActionParam` objects: `name`, `type`, `label`, …); each collected value reaches the executor under its parameter `name`. Static execution values ride `properties.params` instead"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "Action description — the parameter dialog shows it under its title"
+        },
+        {
+          "name": "openIn",
+          "type": "enum",
+          "enum": [
+            "self",
+            "new-tab"
+          ],
+          "description": "For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "description": "HTTP method of an `api` action (`POST` when omitted)"
+        },
+        {
+          "name": "bodyExtra",
+          "type": "object",
+          "description": "Static request-body fields of an `api` action, merged last, so a constant here overrides a collected value of the same name"
+        },
+        {
+          "name": "bodyShape",
+          "type": [
+            "enum",
+            "object"
+          ],
+          "enum": [
+            "flat"
+          ],
+          "description": "How an `api` action shapes its request body: `flat` (the default) or `{ wrap: KEY }` to nest the collected values under that key, with `bodyExtra` beside it"
+        },
+        {
+          "name": "operation",
+          "type": "enum",
+          "enum": [
+            "update"
+          ],
+          "description": "`update` declares a single-record field write: the runner dispatches it to the platform action route with `patch` merged under the collected values"
+        },
+        {
+          "name": "patch",
+          "type": "object",
+          "description": "For `operation: update`: the field values written, merged UNDER the values the user supplies, so a collected value of the same name wins"
+        },
+        {
+          "name": "confirmText",
+          "type": "string",
+          "description": "Confirmation question asked before the action runs; the action runs only if it is confirmed"
+        },
+        {
+          "name": "successMessage",
+          "type": "string",
+          "description": "Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`)"
+        },
+        {
+          "name": "errorMessage",
+          "type": "string",
+          "description": "Toast text when the action fails, in place of the raw error"
+        },
+        {
+          "name": "refreshAfter",
+          "type": "boolean",
+          "description": "Refresh the surrounding data after the action succeeds"
+        },
+        {
+          "name": "locations",
+          "type": "array",
+          "of": "string",
+          "description": "The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one"
+        },
+        {
+          "name": "toast",
+          "type": "object",
+          "description": "Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast"
+        },
+        {
+          "name": "resultDialog",
+          "type": "object",
+          "description": "One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast"
+        },
+        {
+          "name": "onSuccess",
+          "type": "object",
+          "description": "Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab`"
+        },
+        {
+          "name": "objectName",
+          "type": "string",
+          "description": "Object the action acts on — dispatch goes to this object instead of the page's. Omit to act on the page's object"
+        },
+        {
+          "name": "recordIdField",
+          "type": "string",
+          "description": "For a `script` action run against a single selected row: the row field whose value is sent as the record id (default `id`)"
         }
       ]
     },
@@ -1930,10 +2472,6 @@
       "type": "action:group",
       "namespace": "action",
       "inputs": [
-        {
-          "name": "name",
-          "type": "string"
-        },
         {
           "name": "label",
           "type": "string"
@@ -1944,7 +2482,9 @@
         },
         {
           "name": "actions",
-          "type": "object"
+          "type": "array",
+          "of": "object",
+          "description": "The actions in this group, in order. Each member is an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `locations`, `visible`, `disabled`, …); a member's executor is its own `type`"
         },
         {
           "name": "display",
@@ -1953,6 +2493,19 @@
             "inline",
             "dropdown"
           ]
+        },
+        {
+          "name": "location",
+          "type": "enum",
+          "enum": [
+            "list_toolbar",
+            "list_item",
+            "record_header",
+            "record_more",
+            "record_related",
+            "record_section"
+          ],
+          "description": "Render only the members whose `locations` include this location. Omit to render every member"
         },
         {
           "name": "variant",
@@ -1968,10 +2521,21 @@
           "name": "size",
           "type": "enum",
           "enum": [
+            "default",
             "sm",
-            "md",
-            "lg"
-          ]
+            "lg",
+            "icon"
+          ],
+          "description": "Button size for the dropdown trigger and for every inline member that sets none"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate for the whole group: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds. Omit for always-visible"
         },
         {
           "name": "className",
@@ -1993,7 +2557,9 @@
         },
         {
           "name": "actions",
-          "type": "object"
+          "type": "array",
+          "of": "object",
+          "description": "The menu's actions, in order. Each member is an action object the menu draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `tags`, …); a member's executor is its own `type`"
         },
         {
           "name": "variant",
@@ -2004,6 +2570,26 @@
             "outline",
             "ghost"
           ]
+        },
+        {
+          "name": "size",
+          "type": "enum",
+          "enum": [
+            "default",
+            "sm",
+            "lg",
+            "icon"
+          ],
+          "description": "Trigger button size (renderer default: `icon`)"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate for the whole menu: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; a predicate that fails to evaluate hides it. Omit for always-visible"
         },
         {
           "name": "className",
@@ -2056,6 +2642,123 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is false. Omit for always-visible"
+        },
+        {
+          "name": "disabled",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Disabled predicate, in the same three shapes as `visible`: the icon is shown but cannot be pressed while it holds. Omit for never-disabled"
+        },
+        {
+          "name": "params",
+          "type": "array",
+          "description": "The parameters to collect from the user before the action runs (`ActionParam` objects: `name`, `type`, `label`, …); each collected value reaches the executor under its parameter `name`. Static execution values ride `properties.params` instead"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "Action description — the tooltip text when there is no `label`, and what the parameter dialog shows under its title"
+        },
+        {
+          "name": "openIn",
+          "type": "enum",
+          "enum": [
+            "self",
+            "new-tab"
+          ],
+          "description": "For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "description": "HTTP method of an `api` action (`POST` when omitted)"
+        },
+        {
+          "name": "bodyExtra",
+          "type": "object",
+          "description": "Static request-body fields of an `api` action, merged last, so a constant here overrides a collected value of the same name"
+        },
+        {
+          "name": "bodyShape",
+          "type": [
+            "enum",
+            "object"
+          ],
+          "enum": [
+            "flat"
+          ],
+          "description": "How an `api` action shapes its request body: `flat` (the default) or `{ wrap: KEY }` to nest the collected values under that key, with `bodyExtra` beside it"
+        },
+        {
+          "name": "operation",
+          "type": "enum",
+          "enum": [
+            "update"
+          ],
+          "description": "`update` declares a single-record field write: the runner dispatches it to the platform action route with `patch` merged under the collected values"
+        },
+        {
+          "name": "patch",
+          "type": "object",
+          "description": "For `operation: update`: the field values written, merged UNDER the values the user supplies, so a collected value of the same name wins"
+        },
+        {
+          "name": "confirmText",
+          "type": "string",
+          "description": "Confirmation question asked before the action runs; the action runs only if it is confirmed"
+        },
+        {
+          "name": "successMessage",
+          "type": "string",
+          "description": "Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`)"
+        },
+        {
+          "name": "errorMessage",
+          "type": "string",
+          "description": "Toast text when the action fails, in place of the raw error"
+        },
+        {
+          "name": "refreshAfter",
+          "type": "boolean",
+          "description": "Refresh the surrounding data after the action succeeds"
+        },
+        {
+          "name": "locations",
+          "type": "array",
+          "of": "string",
+          "description": "The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one"
+        },
+        {
+          "name": "toast",
+          "type": "object",
+          "description": "Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast"
+        },
+        {
+          "name": "resultDialog",
+          "type": "object",
+          "description": "One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast"
+        },
+        {
+          "name": "onSuccess",
+          "type": "object",
+          "description": "Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab`"
+        },
+        {
+          "name": "objectName",
+          "type": "string",
+          "description": "Object the action acts on — dispatch goes to this object instead of the page's. Omit to act on the page's object"
         }
       ]
     },
@@ -2099,8 +2802,46 @@
         },
         {
           "name": "gap",
-          "type": "number",
-          "description": "Gap between items (0-8)"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "7",
+              "value": 7
+            },
+            {
+              "label": "8",
+              "value": 8
+            }
+          ],
+          "description": "Gap step between items; 0 is none. Default 2."
         },
         {
           "name": "wrap",
@@ -2124,33 +2865,109 @@
       "inputs": [
         {
           "name": "columns",
-          "type": "number",
-          "description": "Number of columns on mobile devices"
-        },
-        {
-          "name": "smColumns",
-          "type": "number",
-          "description": "Columns at sm breakpoint (>640px)"
-        },
-        {
-          "name": "mdColumns",
-          "type": "number",
-          "description": "Columns at md breakpoint (>768px)"
-        },
-        {
-          "name": "lgColumns",
-          "type": "number",
-          "description": "Columns at lg breakpoint (>1024px)"
-        },
-        {
-          "name": "xlColumns",
-          "type": "number",
-          "description": "Columns at xl breakpoint (>1280px)"
+          "type": [
+            "enum",
+            "object"
+          ],
+          "of": "enum",
+          "enum": [
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "7",
+              "value": 7
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "9",
+              "value": 9
+            },
+            {
+              "label": "10",
+              "value": 10
+            },
+            {
+              "label": "11",
+              "value": 11
+            },
+            {
+              "label": "12",
+              "value": 12
+            }
+          ],
+          "description": "Column count, 1 to 12, or an object of such counts keyed by breakpoint (xs, sm, md, lg, xl, 2xl). Default 2."
         },
         {
           "name": "gap",
-          "type": "number",
-          "description": "Gap between items (0-12)"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "10",
+              "value": 10
+            },
+            {
+              "label": "12",
+              "value": 12
+            }
+          ],
+          "description": "Gap step between items; 0 is none. Default 4."
         },
         {
           "name": "className",
@@ -2179,7 +2996,46 @@
         },
         {
           "name": "gap",
-          "type": "number"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "10",
+              "value": 10
+            }
+          ],
+          "description": "Gap step between items; 0 is none. Default 2."
         },
         {
           "name": "align",
@@ -2348,8 +3204,58 @@
         },
         {
           "name": "padding",
-          "type": "number",
-          "description": "Padding value (0, 1-8, 10, 12, 16)"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "7",
+              "value": 7
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "10",
+              "value": 10
+            },
+            {
+              "label": "12",
+              "value": 12
+            },
+            {
+              "label": "16",
+              "value": 16
+            }
+          ],
+          "description": "Padding step on the container spacing scale; 0 is none. Default 4."
         },
         {
           "name": "centered",
@@ -2405,10 +3311,6 @@
           "type": "array",
           "of": "string",
           "description": "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere."
-        },
-        {
-          "name": "breadcrumb",
-          "type": "boolean"
         },
         {
           "name": "recordChrome",
@@ -2641,6 +3543,789 @@
           "name": "html",
           "type": "string",
           "description": "Raw HTML content"
+        }
+      ]
+    },
+    "h1": {
+      "type": "h1",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h2": {
+      "type": "h2",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h3": {
+      "type": "h3",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h4": {
+      "type": "h4",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h5": {
+      "type": "h5",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h6": {
+      "type": "h6",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "p": {
+      "type": "p",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "a": {
+      "type": "a",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "href",
+          "type": "string"
+        },
+        {
+          "name": "target",
+          "type": "string"
+        },
+        {
+          "name": "rel",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "blockquote": {
+      "type": "blockquote",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "cite",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "pre": {
+      "type": "pre",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "code": {
+      "type": "code",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "strong": {
+      "type": "strong",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "em": {
+      "type": "em",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "b": {
+      "type": "b",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "i": {
+      "type": "i",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "u": {
+      "type": "u",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "small": {
+      "type": "small",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "mark": {
+      "type": "mark",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "sub": {
+      "type": "sub",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "sup": {
+      "type": "sup",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "del": {
+      "type": "del",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "ins": {
+      "type": "ins",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "abbr": {
+      "type": "abbr",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "ul": {
+      "type": "ul",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "ol": {
+      "type": "ol",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "li": {
+      "type": "li",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "dl": {
+      "type": "dl",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "dt": {
+      "type": "dt",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "dd": {
+      "type": "dd",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "figure": {
+      "type": "figure",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "figcaption": {
+      "type": "figcaption",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "img": {
+      "type": "img",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "src",
+          "type": "string"
+        },
+        {
+          "name": "alt",
+          "type": "string"
+        },
+        {
+          "name": "width",
+          "type": "number"
+        },
+        {
+          "name": "height",
+          "type": "number"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        }
+      ]
+    },
+    "hr": {
+      "type": "hr",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "br": {
+      "type": "br",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "time": {
+      "type": "time",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "dateTime",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "address": {
+      "type": "address",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "cite": {
+      "type": "cite",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "q": {
+      "type": "q",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "cite",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "span": {
+      "type": "span",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Inline content, rendered ahead of `value`"
+        }
+      ]
+    },
+    "table": {
+      "type": "table",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "caption",
+          "type": "string"
+        },
+        {
+          "name": "footer",
+          "type": "string"
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "description": "Array of { header, accessorKey, className, cellClassName, width }"
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Array of objects"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "label": {
+      "type": "label",
+      "namespace": "ui",
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "aside": {
+      "type": "aside",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "main": {
+      "type": "main",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "header": {
+      "type": "header",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "nav": {
+      "type": "nav",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "footer": {
+      "type": "footer",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "section": {
+      "type": "section",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "article": {
+      "type": "article",
+      "namespace": "ui",
+      "isContainer": true,
+      "tier": "html",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     }

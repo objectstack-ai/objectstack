@@ -1,0 +1,194 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * runImport() batches CREATE-resolved rows through `p.createManyData` instead
+ * of one `createData` call per row (framework#2678). These tests exercise
+ * that integration directly against a mock `ImportProtocolLike`, independent
+ * of the generic `bulkWrite` unit tests in `@objectstack/core`.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { runImport, type ImportProtocolLike } from './import-runner';
+
+/**
+ * [#16952] The doubles below are annotated FROM the exported declaration
+ * (`ImportProtocolLike`), never from a hand-written restatement of the shape
+ * the runner happens to send. A local parameter annotation was one of the
+ * three non-authoritative places this card converged: it froze a dialect no
+ * compiler held anyone to, so it kept compiling — and kept passing — after the
+ * runner moved to another one. ⛔ Never widen these back to an inline object
+ * type; that re-opens the seam.
+ */
+type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
+import type { ExportFieldMeta } from './import-field-meta.js';
+
+/**
+ * The CANONICAL object `where` out of the slot's declared input union.
+ *
+ * `FindDataRequest['query'].where` admits the input-only `FilterArray` sugar as
+ * well, because the transport door serves it on every spelling of that slot.
+ * `runImport` builds only the object form, so this narrows by REFUSING the
+ * other arm rather than by casting past it: a runner that started emitting the
+ * array sugar fails here loudly instead of type-checking into silence.
+ */
+function canonicalWhere(args: FindArgs): Record<string, any> {
+  const where = args.query?.where;
+  if (where == null || Array.isArray(where)) {
+    throw new Error(`runImport must send a canonical object \`where\`; got ${JSON.stringify(where)}`);
+  }
+  return where;
+}
+
+const metaMap = new Map<string, ExportFieldMeta>([
+  ['name', { name: 'name', type: 'text' }],
+]);
+
+const baseOpts = {
+  objectName: 'task',
+  metaMap,
+  writeMode: 'insert' as const,
+  matchFields: [] as string[],
+  dryRun: false,
+  runAutomations: false,
+  trimWhitespace: true,
+  createMissingOptions: false,
+  skipBlankMatchKey: false,
+};
+
+function rowsOf(n: number): Array<Record<string, any>> {
+  return Array.from({ length: n }, (_, i) => ({ name: `r${i}` }));
+}
+
+describe('runImport — bulk create batching (framework#2678)', () => {
+  it('routes N insert-mode rows through ceil(N/batch) createManyData calls, not N createData calls', async () => {
+    const createManyData = vi.fn(async (args: { records: any[] }) => ({
+      records: args.records.map((r) => ({ id: `id_${r.name}`, ...r })),
+    }));
+    const createData = vi.fn();
+    const p: ImportProtocolLike = {
+      findData: vi.fn(async () => []),
+      createData,
+      updateData: vi.fn(),
+      createManyData,
+    };
+
+    const summary = await runImport({
+      ...baseOpts, p, rows: rowsOf(250), progressEvery: 100,
+    });
+
+    expect(createData).not.toHaveBeenCalled();
+    expect(createManyData).toHaveBeenCalledTimes(3); // ceil(250/100)
+    expect(summary.created).toBe(250);
+    expect(summary.results).toHaveLength(250);
+    expect(summary.results.map((r) => r.row)).toEqual(Array.from({ length: 250 }, (_, i) => i + 1));
+    // Rows carry a pre-assigned id (framework#3173), echoed back by the mock.
+    expect(summary.results[0]).toMatchObject({ ok: true, action: 'created' });
+    expect(summary.results[0].id).toBeTruthy();
+    expect(summary.results[249]).toMatchObject({ ok: true, action: 'created' });
+    expect(summary.results[249].id).toBeTruthy();
+  });
+
+  it('retries a transient createManyData failure instead of dropping the batch', async () => {
+    let attempts = 0;
+    const createManyData = vi.fn(async (args: { records: any[] }) => {
+      attempts++;
+      if (attempts === 1) throw new Error('fetch failed');
+      return { records: args.records.map((r) => ({ id: `id_${r.name}`, ...r })) };
+    });
+    const p: ImportProtocolLike = {
+      findData: vi.fn(async () => []),
+      createData: vi.fn(),
+      updateData: vi.fn(),
+      createManyData,
+    };
+
+    const summary = await runImport({ ...baseOpts, p, rows: rowsOf(3) });
+
+    expect(createManyData).toHaveBeenCalledTimes(2);
+    expect(summary.errors).toBe(0);
+    expect(summary.created).toBe(3);
+  });
+
+  it('degrades to per-row createData on a logical batch failure, without failing the whole batch', async () => {
+    const createManyData = vi.fn(async () => {
+      throw new Error('CHECK constraint failed');
+    });
+    const createData = vi.fn(async (args: CreateArgs) => {
+      if (args.data.name === 'r1') throw new Error('CHECK constraint failed: name');
+      return { id: `id_${String(args.data.name)}`, record: { id: `id_${String(args.data.name)}` } };
+    });
+    const p: ImportProtocolLike = {
+      findData: vi.fn(async () => []),
+      createData,
+      updateData: vi.fn(),
+      createManyData,
+    };
+
+    const summary = await runImport({ ...baseOpts, p, rows: rowsOf(3) });
+
+    expect(createData).toHaveBeenCalledTimes(3);
+    expect(summary.errors).toBe(1);
+    expect(summary.created).toBe(2);
+    expect(summary.results[0]).toMatchObject({ ok: true, action: 'created' });
+    expect(summary.results[1]).toMatchObject({ ok: false, action: 'failed' });
+    expect(summary.results[2]).toMatchObject({ ok: true, action: 'created' });
+  });
+
+  it('falls back to one createData call per row when the protocol has no createManyData', async () => {
+    const createData = vi.fn(async (args: CreateArgs) => ({ id: `id_${String(args.data.name)}` }));
+    const p: ImportProtocolLike = {
+      findData: vi.fn(async () => []),
+      createData,
+      updateData: vi.fn(),
+      // no createManyData
+    };
+
+    const summary = await runImport({ ...baseOpts, p, rows: rowsOf(5) });
+
+    expect(createData).toHaveBeenCalledTimes(5);
+    expect(summary.created).toBe(5);
+  });
+
+  it('retries a transient createData failure on the no-createManyData fallback path (#3150)', async () => {
+    let attempts = 0;
+    const createData = vi.fn(async (args: CreateArgs) => {
+      attempts++;
+      if (attempts === 1) throw new Error('fetch failed'); // one transient blip, then succeeds
+      return { id: `id_${String(args.data.name)}` };
+    });
+    const p: ImportProtocolLike = {
+      findData: vi.fn(async () => []),
+      createData,
+      updateData: vi.fn(),
+      // no createManyData → inline per-row fallback path (previously un-retried)
+    };
+
+    const summary = await runImport({ ...baseOpts, p, rows: rowsOf(1) });
+
+    expect(createData).toHaveBeenCalledTimes(2); // first throws, retried, succeeds
+    expect(summary.created).toBe(1);
+    expect(summary.errors).toBe(0);
+  });
+
+  it('preserves row order in results even with update/skip rows interleaved between buffered creates', async () => {
+    const createManyData = vi.fn(async (args: { records: any[] }) => ({
+      records: args.records.map((r) => ({ id: `id_${r.name}`, ...r })),
+    }));
+    const updateData = vi.fn(async (args: { id: string }) => ({ id: args.id }));
+    // Row 1 ('existing') matches an existing record → update; the rest are creates.
+    // [#16638] Reads the CANONICAL `where` the runner sends, not `$filter`.
+    const findData = vi.fn(async (args: FindArgs) =>
+      (canonicalWhere(args).name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
+    const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData, createManyData };
+
+    const summary = await runImport({
+      ...baseOpts, p, writeMode: 'upsert', matchFields: ['name'],
+      rows: [{ name: 'a' }, { name: 'existing' }, { name: 'b' }],
+    });
+
+    expect(summary.results.map((r) => r.action)).toEqual(['created', 'updated', 'created']);
+    expect(summary.created).toBe(2);
+    expect(summary.updated).toBe(1);
+  });
+});

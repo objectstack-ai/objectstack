@@ -56,7 +56,7 @@ export const emailTemplateFixtureStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Email Template Materialization Fixture',
-    description: 'Single-object app that authors one email template to prove stack `emailTemplates:` entries materialize into the sys_email_template rows sendTemplate reads (ADR-0054, #4509).',
+    description: 'Single-object app that authors one email template to prove stack `emailTemplates:` entries materialize into the sys_email_template rows sendTemplate reads (ADR-0054).',
   },
   objects: [EtNote],
   emailTemplates: [etPasswordReset],

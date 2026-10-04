@@ -40,7 +40,7 @@
  * red THERE. Breaking a writer is red here and green there. Neither file alone
  * covers this object.
  *
- * ## 2026-08-24 — what the ruling on #11507 changed about this file
+ * ## 2026-08-24 — what the open-vocabulary ruling (commit 88b9d749a) changed about this file
  *
  * Nothing about the measurements; everything about what they MEAN. #8203 wrote
  * §3 as "a defect, characterized", with the instruction to delete those cases
@@ -266,15 +266,13 @@ describe('[#8203] sys_activity.type — the writers emit declared values', () =>
   });
 
   /**
-   * The real default when a milestone omits `type`. Pinned because the spec's
-   * own field description says otherwise — `object.zod.ts` documents
-   * `activityMilestones[].type` as 'Activity type for the emitted row (default
-   * "completed")', while the code default is `activityTypeFor(action)` and a
-   * milestone can only fire on the UPDATE branch, making it `updated`.
-   * Filed separately; pinned here so the divergence is measured rather than
-   * argued from either side's prose.
+   * The real default when a milestone omits `type`: `activityTypeFor(action)`,
+   * and a milestone can only fire on the UPDATE branch, so the emitted row is
+   * `updated`. `object.zod.ts`'s `activityMilestones[].type` describe states
+   * this default (#20494); pinned here so the runtime behaviour stays
+   * measured, not just described.
    */
-  it('a milestone without `type` emits `updated` — not the "completed" the spec text claims', async () => {
+  it('a milestone without `type` keeps the update row\'s kind, `updated`', async () => {
     const { engine, storeFor } = await boot();
     await engine.insert('biz_ticket', { id: 't3', title: 'Three', stage: 'open' });
     await moveStage(engine, 't3', 'plain');
@@ -321,7 +319,7 @@ describe('[#8203/#11507] an author-contributed type is accepted — the open-voc
    * instruction is RETIRED, and deleting them now would delete the only
    * end-to-end measurement of a ruled contract.
    *
-   * Maintainer ruling, 2026-08-24, #11507 (direction 4): `sys_activity.type` is
+   * Maintainer ruling, 2026-08-24, commit 88b9d749a (direction 4): `sys_activity.type` is
    * an OPEN, author-extensible vocabulary. The declared options are the
    * platform's built-in set; ADR-0052 §5b.2 `activityMilestones[].type` stays a
    * sanctioned write path; an author-contributed value landing verbatim is what
@@ -331,7 +329,7 @@ describe('[#8203/#11507] an author-contributed type is accepted — the open-voc
    * So a red here no longer reads "the fix landed". It reads: something has
    * started REJECTING an author-contributed value — which is direction 3, a
    * shipped authoring surface turned into a rejection path. Do not adapt these
-   * cases to it and do not weaken them; re-open #11507, because that is a
+   * cases to it and do not weaken them; re-open the ruling (commit 88b9d749a), because that is a
    * maintainer call and not a test-fixing exercise.
    *
    * The mechanism is unchanged and still worth knowing: every field on this
@@ -364,7 +362,7 @@ describe('[#8203/#11507] an author-contributed type is accepted — the open-voc
    * in the spec, so any metadata author can name any string and it lands. This
    * is the authoring-time face of the open vocabulary, and the one an AI-written
    * metadata app meets first — which is exactly why the declaration now says so
-   * in its own `description` (#11507), instead of showing that author a list
+   * in its own `description` (commit 88b9d749a), instead of showing that author a list
    * that reads closed.
    */
   it('a milestone declaring an undeclared type writes it — the authoring-surface hole', async () => {

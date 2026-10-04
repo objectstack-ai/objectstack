@@ -17,6 +17,8 @@ import {
   DashboardWidgetOptionsSchema,
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
+  checkDashboardWidgetChartMeasureArity,
+  DASHBOARD_WIDGET_MULTI_MEASURE_TYPES,
 } from './dashboard.zod';
 import * as ui from './index';
 import { readFileSync } from 'node:fs';
@@ -1157,19 +1159,34 @@ describe('[#17779] DashboardWidgetSchema — the metric family takes exactly one
     expect(issue.message).toContain('declares no `type` at all');
   });
 
-  it.each(['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie', 'donut', 'funnel',
-    'scatter', 'treemap', 'sankey', 'combo', 'radar', 'table', 'pivot'] as const)(
-    'leaves `%s` — every NON-metric type — accepting three measures, unmoved',
+  const OTHERS = ['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie', 'donut', 'funnel',
+    'scatter', 'treemap', 'sankey', 'combo', 'radar', 'table', 'pivot'] as const;
+  // [#21293] `WIDGET_BASE` carries a dimension, and with one the single-series
+  // types are refused at two or more measures — by the SIBLING chart check, not
+  // by this one. So this block's own claim, "the metric check leaves every
+  // non-metric type alone", is read off the metric export directly, and the
+  // parse leg keeps only the types no check refuses here.
+  const SINGLE_SERIES: readonly string[] = ['pie', 'donut', 'funnel', 'treemap', 'sankey'];
+
+  it.each(OTHERS)('the metric check leaves `%s` — every NON-metric type — silent at three measures', (type) => {
+    const out: unknown[] = [];
+    checkDashboardWidgetMetricMeasureArity(
+      widget({ type, values: ['a', 'b', 'c'] }) as never,
+      { addIssue: (i: unknown) => out.push(i) } as unknown as z.RefinementCtx,
+    );
+    expect(out).toHaveLength(0);
+  });
+
+  it.each(OTHERS.filter((t) => !SINGLE_SERIES.includes(t)))(
+    'leaves `%s` — a non-metric, non-single-series type — accepting three measures with a dimension, unmoved',
     (type) => {
       expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['a', 'b', 'c'] })).success).toBe(true);
     },
   );
 
   it('covers the whole taxonomy — the metric family plus the others IS `ChartTypeSchema`', () => {
-    // Guards the two `it.each` lists above against a new chart type landing in
-    // the enum and being covered by neither.
-    const OTHERS = ['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie', 'donut', 'funnel',
-      'scatter', 'treemap', 'sankey', 'combo', 'radar', 'table', 'pivot'];
+    // Guards the `it.each` lists above against a new chart type landing in the
+    // enum and being covered by neither.
     expect([...FAMILY, ...OTHERS].sort()).toEqual([...ChartTypeSchema.options].sort());
   });
 
@@ -1227,5 +1244,320 @@ describe('[#17779] DashboardWidgetSchema — the metric family takes exactly one
       .shape.values.description ?? '';
     expect(described).toContain('exactly one');
     for (const type of FAMILY) expect(described).toContain(type);
+  });
+});
+
+/**
+ * [#20958] objectui#8894 ruling D's principle, applied to the chart families — a
+ * widget with NO dimension declares two or more measures only on a type that
+ * renders them.
+ *
+ * Before this, `pie` / `donut` / `funnel` / `scatter` / `radar` / `treemap` /
+ * `sankey` accepted `values: ['a', 'b']` with no `dimensions` at every door and
+ * drew `values[0]`: the rest were queried and dropped. The multi-measure set is
+ * ONE exported constant, `DASHBOARD_WIDGET_MULTI_MEASURE_TYPES`; the metric
+ * family keeps its own refusal, unchanged, from
+ * `checkDashboardWidgetMetricMeasureArity`.
+ */
+describe('[#20958] DashboardWidgetSchema — a dimensionless widget takes several measures only on a multi-measure type', () => {
+  // No `dimensions` on purpose: WIDGET_BASE carries one, and that is the
+  // variable this block turns.
+  const DIMLESS = { id: 'pipeline_mix', dataset: 'contracts', layout: { x: 0, y: 0, w: 6, h: 4 } } as const;
+  const widget = (over: Record<string, unknown>) => ({ ...DIMLESS, ...over });
+  const issuesOf = (value: Record<string, unknown>) => {
+    const r = DashboardWidgetSchema.safeParse(value);
+    return r.success ? [] : r.error.issues;
+  };
+  const refusal = (value: Record<string, unknown>) => {
+    const issues = issuesOf(value);
+    expect(issues).toHaveLength(1);
+    return issues[0]!;
+  };
+
+  // The seven, read off the refusal rather than off a second constant: the
+  // message interpolates the authored type, so a member silently admitted
+  // fails HERE rather than in a list that agrees with itself.
+  const SEVEN = ['pie', 'donut', 'funnel', 'scatter', 'radar', 'treemap', 'sankey'] as const;
+  const FAMILY = ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet'] as const;
+
+  it('the multi-measure set is exactly the card\'s eight, in ONE exported constant', () => {
+    expect([...DASHBOARD_WIDGET_MULTI_MEASURE_TYPES].sort()).toEqual(
+      ['table', 'pivot', 'bar', 'column', 'horizontal-bar', 'line', 'area', 'combo'].sort(),
+    );
+    expect((ui as Record<string, unknown>).DASHBOARD_WIDGET_MULTI_MEASURE_TYPES)
+      .toBe(DASHBOARD_WIDGET_MULTI_MEASURE_TYPES);
+  });
+
+  it('covers the whole taxonomy — the seven, the metric family and the multi-measure set ARE `ChartTypeSchema`', () => {
+    // A new chart type landing in the enum is covered by none of the three
+    // lists here and turns this red, instead of slipping past both checks.
+    expect([...SEVEN, ...FAMILY, ...DASHBOARD_WIDGET_MULTI_MEASURE_TYPES].sort())
+      .toEqual([...ChartTypeSchema.options].sort());
+  });
+
+  it.each(SEVEN)('refuses two measures on a dimensionless `%s`, at `values`', (type) => {
+    const issue = refusal(widget({ type, values: ['amount_sum', 'count'] }));
+    expect(issue.code).toBe('custom');
+    expect(issue.path.join('.')).toBe('values');
+    expect(issue.message).toContain(`\`type: '${type}'\``);
+  });
+
+  it.each(SEVEN)('refuses an EXPLICITLY empty `dimensions: []` on `%s` the same way', (type) => {
+    const issue = refusal(widget({ type, dimensions: [], values: ['amount_sum', 'count'] }));
+    expect(issue.code).toBe('custom');
+    expect(issue.path.join('.')).toBe('values');
+  });
+
+  // [#21293] With a dimension, five of the seven are the single-series arm's to
+  // refuse (its own block below); this arm's dimensioned control is the two the
+  // ruling left out.
+  it.each(['scatter', 'radar'] as const)('accepts `%s` with ONE dimension and two measures — the dimensionless arm is about the dimensionless shape', (type) => {
+    expect(DashboardWidgetSchema.safeParse(widget({ type, dimensions: ['stage'], values: ['amount_sum', 'count'] })).success)
+      .toBe(true);
+  });
+
+  it.each(SEVEN)('accepts `%s` with no dimension and ONE measure', (type) => {
+    expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['amount_sum'] })).success).toBe(true);
+  });
+
+  it.each([...DASHBOARD_WIDGET_MULTI_MEASURE_TYPES])(
+    'control: `%s` — in the multi-measure set — accepts three measures with no dimension',
+    (type) => {
+      expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['a', 'b', 'c'] })).success).toBe(true);
+    },
+  );
+
+  it('names the widget, the count and the type, and steers to `table`, a bar-family type, or one widget per measure', () => {
+    const issue = refusal(widget({ type: 'radar', values: ['a', 'b', 'c'] }));
+    expect(issue.message).toContain('`pipeline_mix`');
+    expect(issue.message).toContain('declares 3 measures');
+    expect(issue.message).toContain("`type: 'radar'`");
+    expect(issue.message).toContain("`type: 'table'`");
+    expect(issue.message).toContain('bar-family');
+    expect(issue.message).toContain('its own widget');
+    // The set in the message IS the constant — read, not restated.
+    for (const t of DASHBOARD_WIDGET_MULTI_MEASURE_TYPES) expect(issue.message).toContain('`' + t + '`');
+  });
+
+  it.each(FAMILY)('the metric family\'s existing refusal is unchanged on a dimensionless `%s` — one issue, the metric check\'s', (type) => {
+    const value = widget({ type, values: ['a', 'b'] });
+    const issue = refusal(value);
+    // The very message the metric export produces on the same body — not a
+    // second issue from the dimensionless check, and not a new wording.
+    const direct: string[] = [];
+    checkDashboardWidgetMetricMeasureArity(
+      value as never,
+      { addIssue: (i: { message?: string }) => direct.push(String(i.message)) } as unknown as z.RefinementCtx,
+    );
+    expect(direct).toHaveLength(1);
+    expect(issue.code).toBe('custom');
+    expect(issue.path.join('.')).toBe('values');
+    expect(issue.message).toBe(direct[0]);
+  });
+
+  it('a widget that declares NO type is the metric check\'s alone — `type` defaults to `metric`', () => {
+    const issue = refusal(widget({ values: ['a', 'b'] }));
+    expect(issue.message).toContain("`type: 'metric'`");
+    expect(issue.message).toContain('declares no `type` at all');
+  });
+
+  it('a `type` outside the enum reports the TYPE refusal alone', () => {
+    const issue = refusal(widget({ type: 'ziggurat', values: ['a', 'b'] }));
+    expect(issue.code).toBe('invalid_value');
+    expect(issue.path.join('.')).toBe('type');
+  });
+
+  it('the export judges only the types the spec declares — a mirror\'s wider enum is not refused by it', () => {
+    // objectui's `.shape` mirror re-points `type` at a wider enum (`list`,
+    // `custom`, component widget types) with no default. Through the spec's
+    // door those never reach the check; called directly, the export stays
+    // silent on them, and on a typeless widget (the metric default's case).
+    const collect = (value: Record<string, unknown>) => {
+      const out: unknown[] = [];
+      checkDashboardWidgetChartMeasureArity(
+        value as never,
+        { addIssue: (i: unknown) => out.push(i) } as unknown as z.RefinementCtx,
+      );
+      return out;
+    };
+    expect(collect({ id: 'w', type: 'custom', values: ['a', 'b'] })).toHaveLength(0);
+    expect(collect({ id: 'w', values: ['a', 'b'] })).toHaveLength(0);
+    // Lit control: the same call refuses a declared member of the seven.
+    expect(collect({ id: 'w', type: 'pie', values: ['a', 'b'] })).toHaveLength(1);
+  });
+
+  it('the rule the door runs is the EXPORT, attached by identifier — no inline copy', () => {
+    const src = readFileSync(new URL('./dashboard.zod.ts', import.meta.url), 'utf8');
+    expect(src).toContain('export function checkDashboardWidgetChartMeasureArity(');
+    expect(src.match(/^\s*(export )?function checkDashboardWidgetChartMeasureArity\b/gm)).toHaveLength(1);
+    expect(src.match(/^[ \t]*\.superRefine\(checkDashboardWidgetChartMeasureArity\)/gm)).toHaveLength(1);
+    // ONE list: the constant is declared once and no second literal of the set
+    // sits beside it.
+    expect(src.match(/^export const DASHBOARD_WIDGET_MULTI_MEASURE_TYPES\b/gm)).toHaveLength(1);
+  });
+
+  it('`@objectstack/spec/ui` ships the same function object', () => {
+    expect((ui as Record<string, unknown>).checkDashboardWidgetChartMeasureArity)
+      .toBe(checkDashboardWidgetChartMeasureArity);
+    expect(checkDashboardWidgetChartMeasureArity.length).toBe(2);
+  });
+
+  it('[#21293] no longer exports `checkDashboardWidgetDimensionlessMeasureArity` — renamed with its second arm', () => {
+    // The surviving export above is the lit control that the namespace is
+    // really populated.
+    expect('checkDashboardWidgetDimensionlessMeasureArity' in (ui as Record<string, unknown>)).toBe(false);
+  });
+
+  it('the gate travels with the widget through `DashboardSchema.widgets[]`', () => {
+    const r = DashboardSchema.safeParse({
+      name: 'sales_dashboard',
+      label: 'Sales',
+      widgets: [widget({ type: 'donut', values: ['a', 'b'] })],
+    });
+    expect(r.success).toBe(false);
+    const paths = (r.success ? [] : r.error.issues).map((i) => i.path.join('.'));
+    expect(paths).toContain('widgets.0.values');
+  });
+
+  it('the shipped `values` doc string states the dimensionless rule, reading the constant', () => {
+    const described = (DashboardWidgetSchema as unknown as { shape: Record<string, { description?: string }> })
+      .shape.values.description ?? '';
+    expect(described).toContain('with no dimensions');
+    expect(described).toContain(DASHBOARD_WIDGET_MULTI_MEASURE_TYPES.join('/'));
+  });
+});
+
+/**
+ * [#21293] The single-series arm — `pie` / `donut` / `funnel` / `treemap` /
+ * `sankey` take ONE measure WITH a dimension too (triage's ruling on
+ * objectui#11417, extending #20958's rule to the dimensioned arm).
+ *
+ * Before this, `{ type: 'pie', dimensions: ['stage'], values: ['revenue', 'cost'] }`
+ * parsed at every door, and objectui's chart renderer drew `revenue` alone: it
+ * binds `series[0]` on those five arms. Same check as the dimensionless arm
+ * (`checkDashboardWidgetChartMeasureArity`), same `custom` issue at `values`;
+ * `scatter` and `radar` with a dimension are outside the ruling.
+ */
+describe('[#21293] DashboardWidgetSchema — a single-series type takes one measure WITH a dimension too', () => {
+  // `WIDGET_BASE` carries `dimensions: ['status']` — the variable this block
+  // holds fixed.
+  const widget = (over: Record<string, unknown>) => ({ ...WIDGET_BASE, ...over });
+  const issuesOf = (value: Record<string, unknown>) => {
+    const r = DashboardWidgetSchema.safeParse(value);
+    return r.success ? [] : r.error.issues;
+  };
+  const refusal = (value: Record<string, unknown>) => {
+    const issues = issuesOf(value);
+    expect(issues).toHaveLength(1);
+    return issues[0]!;
+  };
+  const collect = (value: Record<string, unknown>) => {
+    const out: Array<{ message?: string; path?: unknown }> = [];
+    checkDashboardWidgetChartMeasureArity(
+      value as never,
+      { addIssue: (i: { message?: string; path?: unknown }) => out.push(i) } as unknown as z.RefinementCtx,
+    );
+    return out;
+  };
+
+  // The five, read off the refusal rather than off the module-private constant:
+  // the message interpolates the authored type, so a member silently admitted
+  // fails HERE rather than in a list that agrees with itself.
+  const FIVE = ['pie', 'donut', 'funnel', 'treemap', 'sankey'] as const;
+  const FAMILY = ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet'] as const;
+
+  it.each(FIVE)('refuses two measures on `%s` WITH a dimension, at `values`', (type) => {
+    const issue = refusal(widget({ type, values: ['amount_sum', 'count'] }));
+    expect(issue.code).toBe('custom');
+    expect(issue.path.join('.')).toBe('values');
+    expect(issue.message).toContain(`\`type: '${type}'\``);
+    expect(issue.message).toContain('single-series');
+  });
+
+  it.each(FIVE)('control: accepts ONE measure on `%s` with a dimension', (type) => {
+    expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['amount_sum'] })).success).toBe(true);
+  });
+
+  it.each(FIVE)('refuses `%s` with TWO dimensions as well — whatever the dimension', (type) => {
+    const issue = refusal(widget({ type, dimensions: ['status', 'owner'], values: ['amount_sum', 'count', 'avg_days'] }));
+    expect(issue.path.join('.')).toBe('values');
+    expect(issue.message).toContain('declares 3 measures');
+  });
+
+  it.each(['scatter', 'radar'] as const)('outside the ruling: `%s` with a dimension keeps accepting two measures', (type) => {
+    expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['amount_sum', 'count'] })).success).toBe(true);
+  });
+
+  it.each([...DASHBOARD_WIDGET_MULTI_MEASURE_TYPES])(
+    'control: `%s` — a multi-measure type — keeps accepting three measures with a dimension',
+    (type) => {
+      expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['a', 'b', 'c'] })).success).toBe(true);
+    },
+  );
+
+  it('with a dimension, the types refused at two measures are EXACTLY the metric family and the five', () => {
+    // The whole taxonomy, read off the door: a new chart type, or a member
+    // silently moved in or out of the single-series set, turns this red.
+    const refused = ChartTypeSchema.options.filter(
+      (type) => !DashboardWidgetSchema.safeParse(widget({ type, values: ['a', 'b'] })).success,
+    );
+    expect([...refused].sort()).toEqual([...FAMILY, ...FIVE].sort());
+  });
+
+  it('names the widget, the count, the type and the five, and steers to `table`, a bar-family type, or one widget per measure', () => {
+    const issue = refusal(widget({ id: 'revenue_by_stage', type: 'funnel', values: ['revenue', 'cost', 'margin'] }));
+    expect(issue.message).toContain('`revenue_by_stage`');
+    expect(issue.message).toContain('declares 3 measures');
+    expect(issue.message).toContain("`type: 'funnel'`");
+    expect(issue.message).toContain('whatever its `dimensions`');
+    expect(issue.message).toContain("`type: 'table'`");
+    expect(issue.message).toContain('bar-family');
+    expect(issue.message).toContain('its own widget');
+    for (const t of FIVE) expect(issue.message).toContain('`' + t + '`');
+  });
+
+  it.each(FIVE)('a DIMENSIONLESS `%s` keeps the dimensionless refusal word for word — one issue, not two', (type) => {
+    const value = { id: 'pipeline_mix', dataset: 'contracts', type, values: ['amount_sum', 'count'] };
+    const issue = refusal(value);
+    expect(issue.message).toContain('with no `dimensions`');
+    expect(issue.message).not.toContain('single-series');
+    // The very message the export produces on the same body — the parse leg and
+    // the direct call agree on the arm.
+    const direct = collect(value);
+    expect(direct).toHaveLength(1);
+    expect(issue.message).toBe(direct[0]!.message);
+  });
+
+  it.each(FAMILY)('the metric family keeps its OWN refusal with a dimension — one issue, the metric check\'s', (type) => {
+    const value = widget({ type, values: ['a', 'b'] });
+    const issue = refusal(value);
+    expect(issue.message).not.toContain('single-series');
+    expect(collect(value)).toHaveLength(0);
+  });
+
+  it('the export, called directly, refuses a dimensioned `pie` and judges only the types the spec declares', () => {
+    expect(collect({ id: 'w', type: 'pie', dimensions: ['stage'], values: ['a', 'b'] })).toHaveLength(1);
+    // A mirror's wider enum (objectui's `list` / `custom` / component types) is
+    // not this export's to judge, with a dimension as without one.
+    expect(collect({ id: 'w', type: 'custom', dimensions: ['stage'], values: ['a', 'b'] })).toHaveLength(0);
+    expect(collect({ id: 'w', type: 'scatter', dimensions: ['stage'], values: ['a', 'b'] })).toHaveLength(0);
+  });
+
+  it('the gate travels with the widget through `DashboardSchema.widgets[]`', () => {
+    const r = DashboardSchema.safeParse({
+      name: 'sales_dashboard',
+      label: 'Sales',
+      widgets: [widget({ type: 'sankey', values: ['a', 'b'] })],
+    });
+    expect(r.success).toBe(false);
+    const paths = (r.success ? [] : r.error.issues).map((i) => i.path.join('.'));
+    expect(paths).toContain('widgets.0.values');
+  });
+
+  it('the shipped `values` doc string states the single-series rule', () => {
+    const described = (DashboardWidgetSchema as unknown as { shape: Record<string, { description?: string }> })
+      .shape.values.description ?? '';
+    expect(described).toContain('single-series');
+    expect(described).toContain(FIVE.join('/'));
   });
 });

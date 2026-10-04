@@ -1,4 +1,4 @@
-// The TEST-layer type-check program (#15145), adopting the #5286 mechanism that
+// The TEST-layer type-check program (commit 45a72b0cc), adopting the #5286 mechanism that
 // #5449 generalised and that 30 sibling configs now use. `tsconfig.json` beside
 // this file is unchanged: it is the BUILD config, its `exclude` of
 // `**/*.test.ts` stays, and this sibling puts the excluded layer in front of

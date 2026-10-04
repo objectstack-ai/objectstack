@@ -374,7 +374,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     });
     await auditDanglingReferences(dirty);
     expect(dirty.warnings).toHaveLength(1);
-    expect(dirty.warnings[0][0]).toContain('#4551');
+    expect(dirty.warnings[0][0]).toContain('reported, never rewritten');
     expect((dirty.warnings[0][1] as any).references).toEqual([
       'sys_position_permission_set#ppr_1.permission_set_id → sys_permission_set#ps_gone',
     ]);
@@ -495,7 +495,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
     expect(out.unreadableObjects).toEqual([]);
     // The real finding is still reported, and the summary line carries the
     // incompleteness so the log cannot read as a finished run either.
-    const summary = port.warnings.find((w) => w[0].includes('#4551'));
+    const summary = port.warnings.find((w) => w[0].includes('reported, never rewritten'));
     expect(summary).toBeDefined();
     expect((summary![1] as any).aborted).toBe(true);
   });
@@ -712,7 +712,7 @@ describe('[#4743] provenance references are audited, in their OWN bucket', () =>
 
     const out = await auditDanglingReferences(port);
 
-    const summary = port.warnings.find((w) => w[0].includes('#4551'));
+    const summary = port.warnings.find((w) => w[0].includes('reported, never rewritten'));
     expect(summary).toBeDefined();
     const meta = summary![1] as Record<string, unknown>;
     expect(meta.dangling).toBe(1);
@@ -956,7 +956,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
     });
     await auditDanglingReferences(loud, { maxRows: 1 });
 
-    const summary = loud.warnings.find((w) => w[0].includes('#4551'));
+    const summary = loud.warnings.find((w) => w[0].includes('reported, never rewritten'));
     expect(summary).toBeDefined();
     const meta = summary![1] as Record<string, unknown>;
     // Itemised, not merely counted: object-scale, and a reader who has to act

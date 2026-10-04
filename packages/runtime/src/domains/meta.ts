@@ -11,7 +11,7 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
-// [#10503] `canonicalMetaUrlType` is the FOLD this transport was missing.
+// [commit 67ceb9aef] `canonicalMetaUrlType` is the FOLD this transport was missing.
 // See the two call sites below for what each one was deciding raw.
 import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
 import { CoreServiceName } from '@objectstack/spec/system';
@@ -20,8 +20,8 @@ import { CoreServiceName } from '@objectstack/spec/system';
 // because D5's "every schema-serving outlet" is only true if a future exit
 // inherits the decision instead of re-deciding it.
 import {
+    OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     ObjectSchemaMaskEvaluationError,
-    applyObjectSchemaMask,
     isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     resolveObjectSchemaMaskPosture,
@@ -42,14 +42,49 @@ import {
 // which is the whole reason `MetaDomainProtocol` below is `Pick`ed rather than
 // written out. Same move `domains/packages.ts` and `domains/mcp.ts` make.
 import type { MetadataProtocol } from '@objectstack/spec/api';
+// [#21002] The implementation class, for the ONE member it declares that this
+// domain asks (`isShippedFlowName`) — `Pick`ed below, never restated.
+import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
 // `RestServer` asks, published by `@objectstack/rest` so this transport asks it
 // too instead of a second audience resolver (ruling `5793362670` item 1).
 // [#20237] …and its LIST twin, for `/meta/:type`, on the same ports.
+// [#20320] …and the rest of what `RestServer`'s `/meta` reads answer: the list
+// route's whole post-read chain, the locale parse it reads, the anonymous
+// gates' `public`-audience predicate and the stored-version doors' policy.
+// [#20408] …and the item route's post-read chain, the book-tree route, the
+// list's unknown-type refusal, the object mask's cache posture and the
+// organization a caller's `/meta` request is scoped to.
+// [#20478] …and the layered view, on both of its spellings: its post-read
+// chain, the deprecated `?layers=` flag's parse and the headers that flag is
+// served under.
+// Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
+    createMetaBookTreeAnswer,
+    createMetaItemAnswer,
     createMetaItemReadGate,
-    createMetaListReadGate,
+    createMetaLayeredAnswer,
+    createMetaListAnswer,
+    isPublicAudienceRead,
+    metaCallerOrganizationId,
+    metaItemLayersDeprecationHeaders,
+    metaReadOrganizationId,
+    metaRequestLocale,
+    metaTypeReadRefusal,
+    metaTypeWriteRefusal,
+    projectMetaObjectSchema,
+    refuseUnknownMetaListType,
+    STORED_VERSION_DOOR_POLICY,
+    translateMetaEnvelope,
+    translateMetaList,
+    wantsMetaItemLayers,
+    type MetaItemAnswer,
+    type MetaItemAnswerSources,
     type MetaItemReadGateSources,
+    type MetaLayeredAnswer,
+    type MetaListAnswerSources,
+    type MetaListTranslationSources,
+    type MetaPublicReadRoute,
     type MetaReadGateCaller,
     type MetaReadGatePolicy,
 } from '@objectstack/rest';
@@ -70,7 +105,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * ("real services with no written contract, so they keep today's `any` rather
  * than being given a shape here that nothing verifies"). The `any` is honest
  * about the SLOT. What it also did, silently, was hand every request literal
- * downstream of it an unchecked call target: the #11006 series' end state —
+ * downstream of it an unchecked call target: the end state of commit cccbe51bf's ruled pattern —
  * "an undeclared key in a request literal is a compile error" — stopped one
  * seam short here, so a misspelt or undeclared key in these literals compiled,
  * and so did a misspelt VERB.
@@ -83,7 +118,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * probes below exist to deny — and it would have to answer for the three verbs
  * in the second group, which no contract declares at all. So the narrowing
  * happens at the consumer, once, exactly as `domains/packages.ts` (#13598) and
- * `domains/mcp.ts` (#8726) narrow the same slot for their own seams.
+ * `domains/mcp.ts` (commit e783e163d) narrow the same slot for their own seams.
  *
  * ## ⛔ Every member is OPTIONAL, and the runtime probes STAY
  *
@@ -115,10 +150,18 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * `unknown` rather than `string`, for the same reason the verbs above keep
  * `any` requests — nothing declares its type, and the only thing that branch
  * asks of it is whether it is `undefined`.
+ *
+ * [#21002] A third group: `isShippedFlowName`, the predicate the layered read
+ * decides its effective layer with, which `/published` asks so it follows that
+ * decision. Its signature is DECLARED — on `ObjectStackProtocolImplementation`
+ * itself — so it is `Pick`ed from that class, never restated: a rename at the
+ * producer is a compile error here, the same move `domains/automation.ts`
+ * makes for `packagedBaseRefusal`.
  */
 export type MetaDomainProtocol =
     Partial<Pick<MetadataProtocol,
         'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
+    & Partial<Pick<ObjectStackProtocolImplementation, 'isShippedFlowName'>>
     & {
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         listDrafts?(request: any): Promise<any>;
@@ -150,8 +193,9 @@ async function resolveProtocol(
 
 /**
  * [#20338] May this caller read PENDING metadata (a `sys_metadata` row in
- * `state: 'draft'`)? The one question this domain's three draft doors ask —
- * `_drafts`, and the item and list reads' `?preview=draft` — delegated, never
+ * `state: 'draft'`)? The one question this domain's draft doors ask —
+ * `_drafts`, the item and list reads' `?preview=draft` and [#20320] the item
+ * read's `?state=draft` — delegated, never
  * restated, to the predicate `_drafts` has always asked
  * (`isObjectSchemaMaskExempt`: a system caller, `studio.access`, `setup.access`
  * or `manage_metadata`). `RestServer` asks the same predicate through its own
@@ -166,7 +210,7 @@ function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
- * [#8848] The methods `/metadata/:type/:name` actually serves — the single
+ * [commit 4fc4a3c0b] The methods `/metadata/:type/:name` actually serves — the single
  * source for both the `Allow` header and the refusal message, so the two
  * cannot drift apart.
  *
@@ -188,22 +232,83 @@ export function createMetaDomain(deps: DomainHandlerDeps): DomainRoute {
 }
 
 /**
- * ADR-0046: `doc` list responses omit `content` by default — manuals
- * are the one metadata payload that grows unbounded, and the list
- * surface only needs `name` + `label`. `?include=content` opts back in
- * (single-item GET /metadata/doc/:name always returns the full body).
+ * [#20320] The READ route shape this domain would serve `parts` with, as the
+ * shared `isPublicAudienceRead` names it — or `undefined` for every shape that
+ * is not one of this domain's list, item or book-tree reads.
+ *
+ * [#20408] `book/:name/tree` is one of them now: this domain serves the route
+ * `RestServer` serves ({@link isBookTreePath}), with its type segment LITERAL
+ * as there — `/meta/books/:name/tree` is no route on either transport. Every
+ * other path of three or more segments is `/published`, [#20478] `/layers`, the
+ * FSM `/state/:field` read or the located `ROUTE_NOT_FOUND`, and none is exempt
+ * — as on `RestServer`, where `/layers` keeps the anonymous deny and only the
+ * item read's `?layers=` flag reaches a `public` book's §6.7 gate.
  */
-function slimDocList(type: string, data: any, query?: Record<string, string>): any {
-    if (type !== 'doc' || query?.include === 'content') return data;
-    const strip = (items: any[]) =>
-        items.map((i) => {
-            if (!i || typeof i !== 'object') return i;
-            const { content: _content, ...rest } = i as Record<string, unknown>;
-            return rest;
-        });
-    if (Array.isArray(data)) return strip(data);
-    if (data && Array.isArray(data.items)) return { ...data, items: strip(data.items) };
-    return data;
+function metaReadRouteOf(parts: readonly string[]): MetaPublicReadRoute | undefined {
+    if (parts.length === 1) return 'list';
+    if (parts.length === 2) return 'item';
+    if (isBookTreePath(parts)) return 'book-tree';
+    return undefined;
+}
+
+/** [#20408] `GET /meta/book/:name/tree` — the ADR-0046 §6 book-tree route, matched exactly as `RestServer` registers it. */
+function isBookTreePath(parts: readonly string[]): boolean {
+    return parts.length === 3 && parts[0] === 'book' && parts[2] === 'tree';
+}
+
+/**
+ * [#20320 · #20408] A `deps.success` answer that carries the headers a `/meta`
+ * read owes — `Vary: Accept-Language` on a body translated per request, and
+ * `Cache-Control: private, no-store` on an object schema served under an
+ * undetermined field visibility (ADR-0106 D6 tier 2). `deps.success` takes no
+ * headers, so this is the ONE place this domain builds such an answer; its
+ * body is `deps.success`'s declared envelope, spread. A header whose value is
+ * `undefined` is not owed; with none owed the answer is `deps.success`'s own.
+ */
+function successWithHeaders(
+    deps: DomainHandlerDeps,
+    data: unknown,
+    headers: Readonly<Record<string, string | undefined>>,
+): HttpDispatcherResult {
+    return withHeaders(deps.success(data), headers);
+}
+
+/**
+ * [#20478] ANY `deps.*` answer, carrying the headers a `/meta` read owes it —
+ * the ONE place this domain builds an answer with headers ({@link
+ * successWithHeaders} is its success case). The deprecated `?layers=` flag owes
+ * `Deprecation` and `Link` on EVERY answer it gets, refusals included, as on
+ * `RestServer`, which sets them before it reads; `deps.error` takes no headers
+ * either. The body is the `deps.*` helper's declared envelope, spread. A header
+ * whose value is `undefined` is not owed; with none owed the answer is the
+ * helper's own.
+ */
+function withHeaders(
+    response: { status: number; body: any },
+    headers: Readonly<Record<string, string | undefined>>,
+): HttpDispatcherResult {
+    const set: Record<string, string> = {};
+    for (const [name, value] of Object.entries(headers)) if (value !== undefined) set[name] = value;
+    if (Object.keys(set).length === 0) return { handled: true, response };
+    return { handled: true, response: { ...response, headers: set } };
+}
+
+/**
+ * [#5224 · #20320] Said once per process: this host's `api` list face has no
+ * endpoint matcher to ask, so it lists what is STORED — which may advertise a
+ * route that answers 404. `error`, as `RestServer`'s twin notice: the
+ * consequence is a contract face that may lie, and the remedy is wiring.
+ */
+let warnedMissingEndpointMatcher = false;
+function notifyMissingEndpointMatcher(surface: string): void {
+    if (warnedMissingEndpointMatcher) return;
+    warnedMissingEndpointMatcher = true;
+    (globalThis as any).console?.error?.(
+        `[HttpDispatcher] no endpoint matcher is reachable (no \`metadata\` service with \`matchEndpoint\`), so ${surface} `
+        + 'cannot narrow declared `api` items to the ones this runtime serves. It is listing what is STORED instead, '
+        + 'which may advertise routes that answer 404. Register a metadata service that implements `matchEndpoint` '
+        + 'in the kernel this dispatcher serves to restore the guarantee.',
+    );
 }
 
 /**
@@ -212,13 +317,15 @@ function slimDocList(type: string, data: any, query?: Record<string, string>): a
  * an empty-fields 200. Mirrors the REST layer's `sendFieldVisibilityFault`.
  */
 function fieldVisibilityFault(deps: DomainHandlerDeps, objectName: string): HttpDispatcherResult {
-    return {
-        handled: true,
-        response: deps.error(
-            `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
-            503,
-        ),
-    };
+    return { handled: true, response: fieldVisibilityFaultResponse(deps, objectName) };
+}
+
+/** [#20478] {@link fieldVisibilityFault}'s response alone, for an answer that owes it headers ({@link withHeaders}). */
+function fieldVisibilityFaultResponse(deps: DomainHandlerDeps, objectName: string): { status: number; body: any } {
+    return deps.error(
+        `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
+        503,
+    );
 }
 
 /**
@@ -227,11 +334,18 @@ function fieldVisibilityFault(deps: DomainHandlerDeps, objectName: string): Http
  *
  * Resolved once per request and asked per object name, so the `/metadata` list
  * read pays one context + service resolution for the whole page.
+ *
+ * [#20408] `metaType` is the FOLDED type the masker serves, as on `RestServer`:
+ * every type but `object` is answered the not-applicable passthrough without
+ * resolving anything, so an exit that serves every type (the item read) can
+ * resolve its posture unconditionally, before its fetch.
  */
 async function resolveObjectMasker(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
+    metaType: string,
 ): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>> {
+    if (metaType !== 'object') return async () => OBJECT_SCHEMA_MASK_NOT_APPLICABLE;
     const enabled = isObjectSchemaMaskingEnabled();
     if (!enabled) {
         const disabled: ObjectSchemaMaskPosture = { kind: 'passthrough', reason: 'disabled' };
@@ -258,12 +372,18 @@ async function resolveObjectMasker(
  * `'fault'` covers both the throw tier and the empty-projection case — see
  * `applyObjectSchemaMask`'s `emptied` for why an empty-fields 200 is not an
  * option the ADR leaves open.
+ *
+ * [#20408] The projection is the shared `projectMetaObjectSchema`, so the
+ * answer carries the `Cache-Control` an undetermined posture owes (ADR-0106 D6
+ * tier 2: the schema goes out UNMASKED, `private, no-store`). This exit masked
+ * without it — the schema was served with no cache header at all, where
+ * `RestServer` answers `private, no-store`.
  */
 async function maskObjectSchema(
     masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
     objectName: string,
     document: any,
-): Promise<{ ok: true; document: any } | { ok: false }> {
+): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false }> {
     let posture: ObjectSchemaMaskPosture;
     try {
         posture = await masker(objectName);
@@ -271,40 +391,7 @@ async function maskObjectSchema(
         if (error instanceof ObjectSchemaMaskEvaluationError) return { ok: false };
         throw error;
     }
-    const masked = applyObjectSchemaMask(document, posture);
-    if (masked.emptied) return { ok: false };
-    return { ok: true, document: masked.document };
-}
-
-/**
- * [ADR-0106 D5(2)] Project every object schema in a list answer.
- *
- * A no-op for any type but `object`/`objects`, and shape-preserving for both
- * list shapes the dispatcher hands around (a bare array and an
- * `{ type, items }` envelope). One unevaluable object fails the whole list —
- * serving the rest would leave a hole in the projection that no client can see.
- */
-async function maskObjectSchemaList(
-    deps: DomainHandlerDeps,
-    context: HttpProtocolContext,
-    typeOrName: string,
-    data: any,
-): Promise<{ ok: true; data: any } | { ok: false; object: string }> {
-    if (pluralToSingular(typeOrName) !== 'object') return { ok: true, data };
-    const list: any[] | null = Array.isArray(data)
-        ? data
-        : (data && Array.isArray(data.items) ? data.items : null);
-    if (!list || list.length === 0) return { ok: true, data };
-
-    const masker = await resolveObjectMasker(deps, context);
-    const projected: any[] = [];
-    for (const item of list) {
-        const objectName = String(item?.name ?? '');
-        const masked = await maskObjectSchema(masker, objectName, item);
-        if (!masked.ok) return { ok: false, object: objectName };
-        projected.push(masked.document);
-    }
-    return { ok: true, data: Array.isArray(data) ? projected : { ...data, items: projected } };
+    return projectMetaObjectSchema(posture, document);
 }
 
 /**
@@ -339,14 +426,23 @@ const NAV_PRUNE_LOGGED = new Set<string>();
  *    (fail closed, ADR-0049), never as an empty one;
  *  - the ADR-0057 D10 service probe is `resolveService`, the capability probe
  *    whose collapsed `undefined` is exactly "not registered here".
+ *
+ * [#20320] `mayWriteItem` — handed in only by a door whose policy honours the
+ * author exemption (the `?state=draft` read): this transport's own save-door
+ * answer (`saveVerdict` in {@link handleMetadataRequest}), carried on a COPY of
+ * the context — the same object serves every other consumer of this request.
  */
 function metaItemReadGateSources(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     protocol: MetaDomainProtocol | undefined,
+    mayWriteItem?: boolean,
 ): MetaItemReadGateSources {
     return {
-        resolveCaller: async () => context.executionContext as MetaReadGateCaller | undefined,
+        resolveCaller: async () => {
+            const caller = context.executionContext as MetaReadGateCaller | undefined;
+            return mayWriteItem === undefined || !caller ? caller : { ...caller, mayWriteItem };
+        },
         resolveSecurityService: () => deps.resolveService(context, 'security'),
         listMetaItems: (type) => (typeof protocol?.getMetaItems === 'function' ? protocol.getMetaItems({ type }) : undefined),
         serviceProbe: () => async (name: string) => {
@@ -361,8 +457,12 @@ function metaItemReadGateSources(
 }
 
 /**
- * [#20193] Ask the shared per-caller read gate about ONE document this
- * transport is about to serve, and write its refusal on this transport's wire.
+ * [#20193] Ask the shared per-caller read gate about ONE document `/published`
+ * is about to serve, and write its refusal on this transport's wire.
+ *
+ * [#20408] The plain item read and its `?state=draft` branch no longer come
+ * here: they hand their envelope to the whole item chain
+ * ({@link answerMetaItem}), whose first step is this same gate.
  *
  * The item read and `/published` used to serve whatever the store answered:
  * no ADR-0046 §6.7 docs audience, no app nav filter, no ADR-0057 D10 gate. On a
@@ -410,44 +510,326 @@ async function gateMetaItemDocument(
 }
 
 /**
- * [#20237] The per-caller steps of ONE list answer this transport is about to
- * serve, in `RestServer`'s order: the shared per-caller LIST gate
- * (`createMetaListReadGate`, the one `RestServer`'s `GET /meta/:type` calls —
- * ⛔ no decision lives here), then the ADR-0106 object mask.
+ * [#20237 · #20320] Answer ONE list this transport is about to serve: hand the
+ * store's answer to THE list chain (`createMetaListAnswer`, the one
+ * `RestServer`'s `GET /meta/:type` calls — ⛔ no step lives here) and write
+ * its answer on this transport's wire.
+ *
+ * The chain runs, in `RestServer`'s order, the `api` served-set face, the
+ * per-caller list gate, `?id=`, `?object=`, the doc locale collapse and slim,
+ * the object mask over this transport's masker ({@link resolveObjectMasker}) and
+ * the translation.
+ * This branch used to run the gate, the mask and a doc slim that compared the
+ * RAW segment — so `?id=`, `?object=`, `/meta/docs`, the locale, the
+ * translation and the served-set face all answered differently here.
  *
  * `data` is either list shape this branch hands around (a bare array or a
  * `{ type, items }` envelope), and the answer keeps that shape; `listType` is
- * the folded singular type the gate is asked about, `typeOrName` the raw
- * segment the mask folds for itself. A gate input that could not be read (a
- * doc list's books read threw) is answered as that fault — its own status,
- * `500` for a shapeless one — ⛔ never as the unfiltered list; so is a mask
- * fault that is not the D6 tier-3 one, which keeps its `503`.
+ * the folded singular type; `previewDrafts` is the ADMITTED switch the branch
+ * declared. The answer carries `Vary: Accept-Language` because its body now
+ * varies by it, as `RestServer`'s does, and [#20408] `Cache-Control: private,
+ * no-store` when the chain says an undetermined posture served a schema
+ * unmasked (ADR-0106 D6 tier 2). A gate or matcher input that could not
+ * be read (a doc list's books read threw) is answered as that fault — its own
+ * status, `500` for a shapeless one — ⛔ never as the unfiltered list; so is a
+ * mask fault that is not the D6 tier-3 one, which keeps its `503`.
  */
-async function gateMetaListAnswer(
+async function answerMetaList(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     protocol: MetaDomainProtocol | undefined,
-    typeOrName: string,
     listType: string,
+    query: any,
+    previewDrafts: boolean,
     data: any,
-): Promise<{ ok: true; data: any } | { ok: false; result: HttpDispatcherResult }> {
-    const list: any[] | null = Array.isArray(data) ? data : (data && Array.isArray(data.items) ? data.items : null);
+): Promise<HttpDispatcherResult> {
+    // The locale parse `RestServer.extractLocale` runs, over this request.
+    const requestLocale = (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers, query }, i18n);
+    const sources: MetaListAnswerSources = {
+        ...metaItemReadGateSources(deps, context, protocol),
+        resolveEndpointMatcher: async () => {
+            try {
+                return await deps.resolveService(context, 'metadata');
+            } catch {
+                return undefined;
+            }
+        },
+        notifyMissingEndpointMatcher,
+        // [#20408] The masker only: the chain projects each schema and says
+        // which cache posture the page owes.
+        resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
+        requestLocale,
+        translateList: (metaType, items) => translateMetaList(
+            metaTranslationSources(deps, context, protocol, requestLocale), metaType, items,
+        ),
+    };
     try {
-        let gated = data;
-        if (list) {
-            const judged = await createMetaListReadGate(metaItemReadGateSources(deps, context, protocol), listType)(list);
-            if (judged !== list) gated = Array.isArray(data) ? judged : { ...data, items: judged };
-        }
-        const projected = await maskObjectSchemaList(deps, context, typeOrName, gated);
-        if (!projected.ok) return { ok: false, result: fieldVisibilityFault(deps, projected.object) };
-        return { ok: true, data: projected.data };
+        const answer = await createMetaListAnswer(sources, { metaType: listType, query, previewDrafts })(data);
+        if (!answer.ok) return fieldVisibilityFault(deps, answer.object);
+        return successWithHeaders(deps, answer.data, {
+            'Cache-Control': answer.cacheControl,
+            Vary: 'Accept-Language',
+        });
     } catch (e: any) {
-        return { ok: false, result: { handled: true, response: deps.errorFromThrown(e, 500) } };
+        return { handled: true, response: deps.errorFromThrown(e, 500) };
     }
 }
 
 /**
- * Percent-decode the `:name` path segment. [#12195]
+ * [#20320 · #20408] This transport's I/O for a metadata translation — the
+ * request's i18n service, its protocol (for the #8284 packaged object base)
+ * and the locale parse `RestServer.extractLocale` runs, over this request.
+ */
+function metaTranslationSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaDomainProtocol | undefined,
+    requestLocale: (i18n?: unknown) => string | undefined,
+): MetaListTranslationSources {
+    return {
+        resolveI18nService: async () => {
+            try {
+                return await deps.resolveService(context, 'i18n');
+            } catch {
+                return undefined;
+            }
+        },
+        resolveProtocol: async () => protocol,
+        requestLocale,
+    };
+}
+
+/**
+ * [#20408] Answer ONE `/meta/:type/:name` document this transport is about to
+ * serve: hand the store's envelope to THE item chain (`createMetaItemAnswer`,
+ * the one `RestServer`'s plain read calls — ⛔ no step lives here) and write
+ * its answer on this transport's wire.
+ *
+ * The chain runs, in `RestServer`'s order, absence, the per-caller gate under
+ * the door's `policy`, the doc locale collapse, the ADR-0106 mask under the
+ * posture resolved before the fetch, and the body: the translation and
+ * `sortability` beside an object schema. This read used to run the gate and
+ * the mask alone, so it served every item untranslated, a doc with its whole
+ * `translations` map, an object schema with no `sortability`, no `Vary`, and
+ * no `Cache-Control` on an undetermined posture.
+ *
+ * The answers, in this transport's envelope, with `RestServer`'s status and
+ * code: `absent` → the SAME `deps.error('Not found', 404)` this handler answers
+ * for a name with nothing behind it (ADR-0045 §3: an unpublished app stays
+ * externally unobservable); `app-permission` / `docs-audience` →
+ * `403 PERMISSION_DENIED` / `401 UNAUTHENTICATED`; `mask-fault` → the D6
+ * field-visibility fault. A gate input that could not be read is answered as
+ * that fault — its own status, `500` for a shapeless one — ⛔ never as the
+ * document. `mayWriteItem` is handed in only by a door whose policy honours the
+ * author exemption (see {@link metaItemReadGateSources}).
+ */
+async function answerMetaItem(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaDomainProtocol | undefined,
+    request: { metaType: string; name: string; policy: MetaReadGatePolicy; maskPosture: ObjectSchemaMaskPosture },
+    query: any,
+    envelope: any,
+    mayWriteItem?: boolean,
+): Promise<HttpDispatcherResult> {
+    const requestLocale = (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers, query }, i18n);
+    const translation = metaTranslationSources(deps, context, protocol, requestLocale);
+    const sources: MetaItemAnswerSources = {
+        ...metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+        requestLocale,
+        translateEnvelope: (itemEnvelope, document) =>
+            translateMetaEnvelope(translation, request.metaType, itemEnvelope, document),
+    };
+    let answer: MetaItemAnswer;
+    try {
+        answer = await createMetaItemAnswer(sources, request)(envelope);
+    } catch (e: any) {
+        return { handled: true, response: deps.errorFromThrown(e, 500) };
+    }
+    switch (answer.kind) {
+        case 'serve':
+            return successWithHeaders(deps, answer.envelope, {
+                'Cache-Control': answer.cacheControl,
+                Vary: 'Accept-Language',
+            });
+        case 'mask-fault':
+            return fieldVisibilityFault(deps, answer.object);
+        case 'refuse': {
+            const { refusal } = answer;
+            if (refusal.reason === 'absent') return { handled: true, response: deps.error('Not found', 404) };
+            return { handled: true, response: deps.error(refusal.message, refusal.status, { code: refusal.code }) };
+        }
+    }
+}
+
+/** [#20320] This transport's save-door admission of `:type/:name` — see `saveVerdict` in {@link handleMetadataRequest}. */
+type MetaSaveVerdict = (
+    canonicalType: string,
+    activeOrganizationId: string | undefined,
+) => ReturnType<typeof metaWriteCapabilityVerdict>;
+
+/**
+ * [#20320] `GET /meta/:type/:name?state=draft` for a caller who may read
+ * drafts — the pending draft ROW (ADR-0033), answered exactly as `RestServer`'s
+ * plain read answers that caller:
+ *
+ *  - the protocol's draft read (`state: 'draft'`), whatever the type — the
+ *    `object` branch below included, and ⛔ never the `MetadataService` or
+ *    registry fallbacks, which know only published values;
+ *  - nothing pending → the protocol's own `404 NO_DRAFT`, answered as ITSELF
+ *    (the item IS there, its draft is not) — never this read's plain 404,
+ *    never the published item;
+ *  - [#20408] the item chain (`createMetaItemAnswer`, through
+ *    {@link answerMetaItem}) under `STORED_VERSION_DOOR_POLICY` — the constant
+ *    `RestServer`'s draft branch runs (#20290): per-caller arms only, and an
+ *    app WHOLE for a caller this transport's save door admits (`saveVerdict`,
+ *    the `PUT` branch's own admission, carried as `mayWriteItem`), pruned per
+ *    caller for everyone else; then the doc locale collapse, the ADR-0106 mask
+ *    and the body, as the plain read answers them.
+ *
+ * Only an admitted caller arrives: the switch is declared with
+ * {@link mayReadPendingDrafts} at the item read's entry.
+ *
+ * [#20408] Scoped to the caller's VETTED organization — the read to
+ * {@link metaReadOrganizationId}'s partition, the author exemption to the save
+ * door's verdict over {@link metaCallerOrganizationId} — exactly as
+ * `RestServer`'s plain read scopes both. It read the session's claim as stored,
+ * so a member removed from an organization read that organization's pending
+ * drafts here.
+ */
+async function readPendingDraft(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    type: string,
+    name: string,
+    packageId: string | undefined,
+    previewDrafts: boolean,
+    saveVerdict: MetaSaveVerdict,
+    item: { maskPosture: ObjectSchemaMaskPosture; query: any },
+): Promise<HttpDispatcherResult> {
+    const singularType = pluralToSingular(type);
+    const protocol = await resolveProtocol(deps, context);
+    if (!protocol || typeof protocol.getMetaItem !== 'function') {
+        return { handled: true, response: deps.error('Not found', 404) };
+    }
+    const caller = context.executionContext as MetaReadGateCaller | undefined;
+    let envelope: any;
+    try {
+        envelope = await protocol.getMetaItem({
+            type: singularType, name, packageId, organizationId: metaReadOrganizationId(type, caller), state: 'draft', previewDrafts,
+        });
+    } catch (e: any) {
+        return { handled: true, response: deps.errorFromThrown(e, 404) };
+    }
+    if (envelope?.item == null) return { handled: true, response: deps.error('Not found', 404) };
+
+    const mayWriteItem = saveVerdict(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
+    return answerMetaItem(
+        deps, context, protocol,
+        { metaType: singularType, name, policy: STORED_VERSION_DOOR_POLICY, maskPosture: item.maskPosture },
+        item.query, envelope, mayWriteItem,
+    );
+}
+
+/**
+ * [#20478] The path THIS request's item read arrived on, as the client sent it
+ * — `/api/v1/meta/app/crm` for `GET /api/v1/meta/app/crm?layers=true` — read
+ * off the request's own URL (`createHonoApp` hands `dispatch()` the raw Fetch
+ * `Request`, whose `url` is absolute; a Node request's is path-only), without
+ * its query and trailing slash. `undefined` when the request carries no URL.
+ *
+ * It is the path the deprecated `?layers=` spelling names its successor under
+ * (`metaItemLayersDeprecationHeaders`). This domain is handed a path with the
+ * host's API prefix stripped, so the request's own URL is the only statement of
+ * where this host serves the item; with none there is no successor this
+ * transport can name, and the flag is answered with `Deprecation` alone.
+ */
+function requestedItemPath(context: HttpProtocolContext): string | undefined {
+    const url = (context.request as { url?: unknown } | undefined)?.url;
+    if (typeof url !== 'string' || url.length === 0) return undefined;
+    try {
+        const path = new URL(url, 'http://dispatcher.invalid').pathname.replace(/\/+$/, '');
+        return path.length > 0 ? path : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** [#20478] A protocol whose `getMetaItemLayered` the caller has PROBED — the handle {@link answerMetaLayered} reads through. */
+type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol, 'getMetaItemLayered'>>;
+
+/**
+ * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
+ * deprecated `?layers=` flag on the item read: read the protocol's
+ * `getMetaItemLayered` exactly as `RestServer`'s layered read reads it, hand the
+ * answer to THE layered chain (`createMetaLayeredAnswer`, the one `RestServer`
+ * serves both spellings through; ⛔ no step lives here) and write its answer on
+ * this transport's wire.
+ *
+ * The read is scoped to the caller's VETTED organization
+ * ({@link metaReadOrganizationId}, the partition the plain read reads — ⛔ never
+ * the session's claim as stored) and to `?package=` (ADR-0048). The chain
+ * judges every present layer under `STORED_VERSION_DOOR_POLICY` — whole for a
+ * caller this transport's save door admits (`saveVerdict`, the `PUT` branch's
+ * own admission, carried as `mayWriteItem`), pruned as the plain read prunes
+ * it for everyone else (ruling 5856774816) — and projects every layer through
+ * the ADR-0106 mask under the posture resolved before the read. The dispatcher
+ * served neither spelling: the route answered a located `404 ROUTE_NOT_FOUND`,
+ * and the flag answered the PLAIN read's `{ type, name, item }` with a `200`.
+ *
+ * The answers, in this transport's envelope, with `RestServer`'s status and
+ * code: the layered answer (no `Vary`: it is not translated; `private,
+ * no-store` when an undetermined posture served a schema unmasked);
+ * `absent` → the SAME `deps.error('Not found', 404)` the item read answers for
+ * a name with nothing behind it (ADR-0045 §3); `app-permission` /
+ * `docs-audience` → `403 PERMISSION_DENIED` / `401 UNAUTHENTICATED`;
+ * `mask-fault` → the D6 field-visibility fault; a read or gate input that
+ * could not be read → that fault, `500` for a shapeless one — ⛔ never a layered
+ * view with a layer missing. `headers` (the flag's `Deprecation` and `Link`)
+ * ride EVERY one of those answers.
+ */
+async function answerMetaLayered(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaLayeredProtocol,
+    request: { type: string; name: string; packageId: string | undefined; maskPosture: ObjectSchemaMaskPosture },
+    saveVerdict: MetaSaveVerdict,
+    headers: Readonly<Record<string, string | undefined>> = {},
+): Promise<HttpDispatcherResult> {
+    const { type, name, packageId, maskPosture } = request;
+    const caller = context.executionContext as MetaReadGateCaller | undefined;
+    const organizationId = metaReadOrganizationId(type, caller);
+    const mayWriteItem = saveVerdict(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
+    let answer: MetaLayeredAnswer;
+    try {
+        const layered = await protocol.getMetaItemLayered({
+            type,
+            name,
+            ...(packageId ? { packageId } : {}),
+            ...(organizationId ? { organizationId } : {}),
+        });
+        answer = await createMetaLayeredAnswer(
+            metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+            { metaType: pluralToSingular(type), name, maskPosture },
+        )(layered);
+    } catch (e: any) {
+        return withHeaders(deps.errorFromThrown(e, 500), headers);
+    }
+    switch (answer.kind) {
+        case 'serve':
+            return withHeaders(deps.success(answer.layered), { ...headers, 'Cache-Control': answer.cacheControl });
+        case 'mask-fault':
+            return withHeaders(fieldVisibilityFaultResponse(deps, answer.object), headers);
+        case 'refuse': {
+            const { refusal } = answer;
+            if (refusal.reason === 'absent') return withHeaders(deps.error('Not found', 404), headers);
+            return withHeaders(deps.error(refusal.message, refusal.status, { code: refusal.code }), headers);
+        }
+    }
+}
+
+/**
+ * Percent-decode the `:name` path segment. [commit 7986d973f]
  *
  * This dispatcher splits the RAW path (`path.split('/')`) and, unlike the
  * `packages/rest` Hono routes, nothing decodes its parameters for it —
@@ -455,11 +837,11 @@ async function gateMetaListAnswer(
  * hands to `dispatch()`, returns `/meta/lead/views%2Fall_leads` verbatim while
  * `c.req.param('name')` on the same request yields `views/all_leads`.
  *
- * That difference is load-bearing here. Until #12195 the compound fold
+ * That difference is load-bearing here. Until commit 7986d973f the compound fold
  * (`parts.slice(1).join('/')`) is what let a slash-bearing name be addressed
  * on this transport at all — unencoded, across segments. Retiring the fold
  * without decoding would leave a pre-grammar residue row addressable through
- * `packages/rest` and NOT through the dispatcher, breaking #12194's landed
+ * `packages/rest` and NOT through the dispatcher, breaking commit 311433f6b's landed
  * acceptance criterion that "reads and `deleteMetaItem` still answer for
  * pre-grammar residue rows, so any stored junk name remains listable and
  * clearable". Decoding makes ONE spelling — percent-encoded, the spelling the
@@ -487,21 +869,86 @@ function decodeMetaNameSegment(segment: string): string {
  * Fallback for backward compat: /metadata (all objects), /metadata/:objectName (get object)
  */
 export async function handleMetadataRequest(deps: DomainHandlerDeps, path: string, _context: HttpProtocolContext, method?: string, body?: any, query?: any): Promise<HttpDispatcherResult> {
+    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+
+    // [#12702 · #20320] May this caller SAVE `:type/:name` on THIS transport?
+    // The admission of the item branch's `PUT`, spelled ONCE: that door asks
+    // it, and so does every read door that honours the author exemption — the
+    // `?state=draft` read and [#20478] the layered view, on both of its
+    // spellings (ruling 5856774816, item 1: 「whoever can save it must see it
+    // whole, or a save drops entries silently」), which
+    // `MetaReadGateCaller.mayWriteItem` says must be the transport's own
+    // save-door answer. A second spelling at a read could drift from the door
+    // it stands for. `canonicalType` is the folded segment and
+    // `activeOrganizationId` the one resolution each caller already made, so
+    // authorization and scope read one value. [#20478] Declared here, above
+    // every branch, so the `/layers` branch asks the same one.
+    const saveVerdict: MetaSaveVerdict = (canonicalType, activeOrganizationId) => {
+        const ec: any = _context.executionContext;
+        return metaWriteCapabilityVerdict({
+            isSystem: ec?.isSystem === true,
+            systemPermissions: ec?.systemPermissions,
+            canonicalType,
+            activeOrganizationId,
+            operation: 'save',
+        });
+    };
+
     // Defense-in-depth: the metadata catch-all must honour the same
     // anonymous-deny (#2567) as the REST `/meta` routes (which serve `/meta` on
     // the cloud runtime). Object/field schemas — SYSTEM-object schemas on a
     // tenant-less host — must not be readable by anonymous callers when the
     // an anonymous, non-system caller. Unconditional since #3963.
-    {
-        const ec: any = _context.executionContext;
-        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem })) {
-            return {
-                handled: true,
-                response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
-            };
-        }
+    //
+    // [#20320] …with `RestServer`'s ONE exception, asked of the same
+    // predicate: an anonymous GET of this domain's book or doc LIST or ITEM
+    // read skips the deny, and the ADR-0046 §6.7 audience gate inside that read
+    // decides instead — `'public'` only; `org` and `{ permissionSet }` still
+    // refuse (401). This granted reachability on `RestServer` alone, so a
+    // `public` book answered 401 here. Every other type, every other verb and
+    // every other route shape (`/published`, `/state/:field`, an unrouted
+    // path) keeps the deny.
+    const anonymousDeny = (): HttpDispatcherResult => ({
+        handled: true,
+        response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+    });
+    const anonymous = shouldDenyAnonymous({
+        userId: (_context.executionContext as any)?.userId,
+        isSystem: (_context.executionContext as any)?.isSystem,
+    });
+    if (anonymous && !isPublicAudienceRead(method, metaReadRouteOf(parts), parts[0])) return anonymousDeny();
+
+    // [#21087] …and `RestServer`'s type-level read admission, asked of the same
+    // predicate at the same point — after the anonymous deny, before any branch
+    // reads the store: a read of a datasource-family type is admitted on the
+    // capability that type's own door requires, so a dispatcher-only host
+    // refuses the caller `RestServer` refuses, whatever route shape the read
+    // took and whether or not the name exists. A request that names no verb is
+    // a read here (every read branch below accepts `!method`), so it is asked
+    // as one.
+    const typeReadRefusal = metaTypeReadRefusal(method ?? 'GET', parts[0], _context.executionContext);
+    if (typeReadRefusal) {
+        return {
+            handled: true,
+            response: deps.error(typeReadRefusal.message, typeReadRefusal.status, { code: typeReadRefusal.code }),
+        };
     }
-    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+
+    // [#21124] …and the write-side twin, asked at the same point of the same
+    // predicate `RestServer`'s registrar asks: a write verb on a `/meta` path
+    // whose type is a datasource definition is admitted on the capability the
+    // datasource admin door requires for the same create / update / remove —
+    // before the `PUT` branch's own authoring admission resolves the protocol,
+    // so a refused caller writes nothing, whatever route shape the request
+    // took and whether or not the name exists. A request that names no verb is
+    // a read (see above), so it is never judged here.
+    const typeWriteRefusal = metaTypeWriteRefusal(method, parts[0], _context.executionContext);
+    if (typeWriteRefusal) {
+        return {
+            handled: true,
+            response: deps.error(typeWriteRefusal.message, typeWriteRefusal.status, { code: typeWriteRefusal.code }),
+        };
+    }
 
     // GET /metadata/types
     if (parts[0] === 'types') {
@@ -558,13 +1005,94 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.success({ object: name, field, from: from ?? null, next }) };
     }
 
+    // GET /metadata/book/:name/tree — ADR-0046 §6: a book spine resolved against
+    // the docs that exist NOW into its rendered tree.
+    //
+    // [#20408] `RestServer` serves this route, and this domain had none: the
+    // path fell to the located `ROUTE_NOT_FOUND` tail below, so a
+    // dispatcher-only host answered `404` to a signed-in reader and `401` to an
+    // anonymous reader of a `public` book — the reader the route exists for.
+    // The whole answer is `createMetaBookTreeAnswer` in `@objectstack/rest`, the
+    // one `RestServer`'s handler calls: the book and doc reads (`?package=`
+    // scopes both, ADR-0048), THE `DocsAudience`, the §6.7 gate on the book's
+    // own audience, the doc locale collapse and the tree narrowed per caller.
+    // This branch supplies I/O and writes the answer on this transport's wire.
+    // The anonymous gate above lets an anonymous GET reach it
+    // (`metaReadRouteOf` names it `book-tree`), and the §6.7 gate refuses every
+    // audience but `public` — the one `RestServer` exempts, by the same predicate.
+    if (isBookTreePath(parts) && (!method || method.toUpperCase() === 'GET')) {
+        const protocol = await resolveProtocol(deps, _context);
+        if (!protocol || typeof protocol.getMetaItems !== 'function') {
+            return { handled: true, response: deps.error('Not found', 404) };
+        }
+        const packageId = typeof query?.package === 'string' && query.package.length > 0 ? query.package : undefined;
+        try {
+            const answer = await createMetaBookTreeAnswer(
+                {
+                    ...metaItemReadGateSources(deps, _context, protocol),
+                    listTreeInput: (type, scopedPackageId) =>
+                        Promise.resolve(protocol.getMetaItems!({ type, ...(scopedPackageId ? { packageId: scopedPackageId } : {}) })),
+                    requestLocale: (i18n) => metaRequestLocale({ headers: _context.request?.headers, query }, i18n),
+                },
+                { name: decodeMetaNameSegment(parts[1]), packageId },
+            );
+            if (!answer.ok) {
+                const { refusal } = answer;
+                return { handled: true, response: deps.error(refusal.message, refusal.status, { code: refusal.code }) };
+            }
+            return { handled: true, response: deps.success(answer.tree) };
+        } catch (e: any) {
+            return { handled: true, response: deps.errorFromThrown(e, 500) };
+        }
+    }
+
+    // GET /metadata/:type/:name/layers — the three-layer diagnostic projection
+    // (`code` / `overlay` / `effective`, `GetMetaItemLayeredResponseSchema`) as
+    // its own resource (#5882).
+    //
+    // [#20478] `RestServer` serves this route, and this domain had none: the
+    // path fell to the located `ROUTE_NOT_FOUND` tail below. Everything after
+    // the read is `createMetaLayeredAnswer` in `@objectstack/rest` ({@link
+    // answerMetaLayered}), the chain `RestServer`'s handler calls. EXACTLY three
+    // segments, like `/published` beside it. The anonymous gate above keeps its
+    // deny here (`metaReadRouteOf` names no route), as `RestServer`'s does.
+    if (parts.length === 3 && parts[2] === 'layers' && (!method || method.toUpperCase() === 'GET')) {
+        const type = parts[0];
+        const name = decodeMetaNameSegment(parts[1]);
+        const protocol = await resolveProtocol(deps, _context);
+        // [ADR-0106 D2/D5] Its own schema-serving outlet: the caller's posture,
+        // resolved before the read with the FOLDED type, as `RestServer`'s route
+        // resolves it — and before the capability probe, in the same order.
+        let maskPosture: ObjectSchemaMaskPosture;
+        try {
+            maskPosture = await (await resolveObjectMasker(deps, _context, pluralToSingular(type)))(name);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+            throw maskError;
+        }
+        if (!protocol || typeof protocol.getMetaItemLayered !== 'function') {
+            // A dedicated path cannot fall through to the plain read the way the
+            // `?layers=` flag does — `RestServer`'s `501 NOT_IMPLEMENTED`, in this
+            // transport's envelope.
+            return {
+                handled: true,
+                response: deps.error('Layered metadata view not supported by protocol implementation', 501),
+            };
+        }
+        const packageId = query?.package || undefined;
+        return answerMetaLayered(
+            deps, _context, protocol as MetaLayeredProtocol,
+            { type, name, packageId, maskPosture }, saveVerdict,
+        );
+    }
+
     // GET /metadata/:type/:name/published → get published version
     //
-    // [#12195] EXACTLY three segments, and no fold. This used to be
+    // [commit 7986d973f] EXACTLY three segments, and no fold. This used to be
     // `parts.length >= 3` with `parts.slice(1, -1).join('/')`, which re-joined
     // every middle segment into one slash-bearing key so
     // `lead/views/all_leads/published` resolved as name `views/all_leads`.
-    // Stage 1 (#12194) refuses every slash-bearing name at the publish door,
+    // Stage 1 (commit 311433f6b) refuses every slash-bearing name at the publish door,
     // so that fold could only ever address a name that can no longer be
     // written.
     if (parts.length === 3 && parts[2] === 'published' && (!method || method === 'GET')) {
@@ -618,30 +1146,50 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // serving must be answered as itself — never fall through to the
         // snapshot as though no overlay existed.
         const publishedType = pluralToSingular(type);
-        const publishedMasker = publishedType === 'object' ? await resolveObjectMasker(deps, _context) : undefined;
+        const publishedMasker = publishedType === 'object' ? await resolveObjectMasker(deps, _context, publishedType) : undefined;
         const servePublished = async (document: any): Promise<HttpDispatcherResult> => {
             const gated = await gateMetaItemDocument(deps, _context, protocol, publishedType, name, document);
             if (!gated.ok) return { handled: true, response: gated.response };
             let served = gated.document;
+            let cacheControl: string | undefined;
             if (publishedMasker) {
                 const masked = await maskObjectSchema(publishedMasker, name, served);
                 if (!masked.ok) return fieldVisibilityFault(deps, name);
                 served = masked.document;
+                // [#20408] ADR-0106 D6 tier 2 — as `RestServer`'s `/published`.
+                cacheControl = masked.cacheControl;
             }
-            return { handled: true, response: deps.success(served) };
+            return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
 
         let publishedOverlay: unknown;
         if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {
-                const organizationId = await deps.resolveActiveOrganizationId(_context);
+                // [#20408] The caller's VETTED organization, as `RestServer`'s
+                // `/published` reads it (`ctx.tenantId`, raw — the protocol's
+                // layered read gates it by type itself). The session's claim as
+                // stored served a removed member the overlay of the organization
+                // they had left.
+                const organizationId = metaCallerOrganizationId(_context.executionContext as MetaReadGateCaller | undefined);
                 const layered = await protocol.getMetaItemLayered({
                     type,
                     name,
                     ...(organizationId ? { organizationId } : {}),
                 });
                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                    publishedOverlay = layered.overlay;
+                    // [#21002, ADR-0126 §2] As `RestServer`'s `/published`: when
+                    // the layered read put the LOADER's body over this stored
+                    // row — a shipped flow name, decided by the protocol's
+                    // `isShippedFlowName`, asked with the answer's own `type` /
+                    // `name` and never re-derived here — serve that effective
+                    // layer, not the row (`flow` is Regime C, "never an overlay
+                    // read path"). Every other stored row, an `object`'s
+                    // included, and every row of a protocol without the
+                    // predicate, is served exactly as before.
+                    publishedOverlay = typeof protocol.isShippedFlowName === 'function'
+                        && protocol.isShippedFlowName(layered.type, layered.name)
+                        ? layered.effective
+                        : layered.overlay;
                 }
             } catch { /* fall through to the code/package snapshot below */ }
         }
@@ -649,7 +1197,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
-            // [#10503] FOLDED — the smaller second site of the same class,
+            // [commit 67ceb9aef] FOLDED — the smaller second site of the same class,
             // dispatcher edition (the REST twin folds at the same point). The
             // layered consult above folds internally at the protocol boundary;
             // this fallback reads the code/package registry, which stores
@@ -665,7 +1213,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (metaSvc && typeof (metaSvc as any).getPublished === 'function') {
             let fallbackData: unknown;
             try {
-                // [#10503] Same fold — this slot reads the same canonical store.
+                // [commit 67ceb9aef] Same fold — this slot reads the same canonical store.
                 fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
             } catch { /* fall through */ }
             if (fallbackData !== undefined) return servePublished(fallbackData);
@@ -673,13 +1221,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.error('Not found', 404) };
     }
 
-    // /metadata/:type/:name — EXACTLY two segments. [#12195]
+    // /metadata/:type/:name — EXACTLY two segments. [commit 7986d973f]
     //
     // This used to be `parts.length >= 2` with `parts.slice(1).join('/')`: every
     // segment after the type was re-joined into one slash-bearing lookup key,
     // so `/metadata/lead/views/all_leads` resolved as name `views/all_leads`.
     // That fold WAS compound-name addressing on this transport, and stage 1
-    // (#12194) made every name it could reach unwritable at the publish door.
+    // (commit 311433f6b) made every name it could reach unwritable at the publish door.
     //
     // ⚠️ The `>=` also swallowed three-segment paths that were never compound
     // names at all — `/metadata/object/foo/references` folded to name
@@ -753,21 +1301,24 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // partition, never env-wide and never another org's. The active
             // organization is resolved HERE, once, and reused by the write
             // threading below — authorization and scope read one value (the
-            // single-resolution shape the REST doors carry, #8919). Resolving
+            // single-resolution shape the REST doors carry, commit b5378550e). Resolving
             // it is a session read, not a protocol probe: the 403-vs-501
             // discipline above is untouched.
-            const ec: any = _context.executionContext;
-            // [#10503] Folded at the boundary, once — the verdict and the
+            // [commit 67ceb9aef] Folded at the boundary, once — the verdict and the
             // scope decision below must read the same spelling.
             const canonicalType = canonicalMetaUrlType(type);
-            const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
-            const verdict = metaWriteCapabilityVerdict({
-                isSystem: ec?.isSystem === true,
-                systemPermissions: ec?.systemPermissions,
-                canonicalType,
-                activeOrganizationId,
-                operation: 'save',
-            });
+            // [#20408] The caller's VETTED organization — the `tenantId`
+            // `resolveAuthzContext` left on the execution context, the value
+            // `RestServer`'s `PUT` door reads — ⛔ never the session's claim as
+            // stored: under a walled posture a claim naming an organization the
+            // caller has LEFT is dropped there, and this door read it anyway, so
+            // a removed member's write landed in that organization's partition.
+            // No read at all now, so the 403-vs-501 discipline above is
+            // untouched.
+            const activeOrganizationId = metaCallerOrganizationId(_context.executionContext as MetaReadGateCaller | undefined);
+            // [#20320] Spelled once (`saveVerdict` above), because the
+            // `?state=draft` read's author exemption asks this same question.
+            const verdict = saveVerdict(canonicalType, activeOrganizationId);
             if (!verdict.allowed) {
                 // `deps.error(msg, 403)` derives the code from the status —
                 // `PERMISSION_DENIED`, this transport's pinned spelling.
@@ -811,8 +1362,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // capability gate above already made — scope and
                     // authorization read the same value by construction.
                     //
-                    // [#10503] The segment is FOLDED before the scope decision
-                    // — the correction #10340 landed for the REST `/meta`
+                    // [commit 67ceb9aef] The segment is FOLDED before the scope decision
+                    // — the correction commit 26f3588fb landed for the REST `/meta`
                     // doors, arriving on the second transport. This branch read
                     // the RAW `parts[0]`, while `protocol.saveMetaItem` below
                     // folds the same string through `canonicalizeMetaRequestType`
@@ -840,7 +1391,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     const organizationId = organizationIdForMetaWrite(
                         canonicalType, activeOrganizationId,
                     );
-                    // [#10888] Server-stated face: this branch answers through
+                    // [commit d806081dd] Server-stated face: this branch answers through
                     // `deps.errorFromThrown`, which carries the refusal's
                     // `issues[]` in `details` (see the `details.issues` pin in
                     // `http-dispatcher.test.ts`), so `saveMetaItem`'s 422 renders
@@ -901,7 +1452,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.error('Save not supported', 501) };
         }
 
-        // [#8848] The read `try` below is this block's default answer, and it
+        // [commit 4fc4a3c0b] The read `try` below is this block's default answer, and it
         // used to carry NO method guard at all: every verb that is not `PUT`
         // fell into it and was served the ordinary metadata READ.
         //
@@ -966,7 +1517,95 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             };
         }
 
+        // [#20338 · #20320] The item read's two draft switches, each declared
+        // WITH its admission ({@link mayReadPendingDrafts}), once, above every
+        // branch below — so no branch can re-derive a switch past the gate. A
+        // caller who may not read drafts is answered this read as if neither
+        // switch were present: the published item, pruned as the plain read
+        // prunes it, or its absence.
+        //
+        // `?state=draft` is the pending draft ROW (ADR-0033) — a STORED version,
+        // parsed exactly as `RestServer`'s plain read parses it. It went unread
+        // here, so an admitted builder on a dispatcher-only host was answered
+        // the ACTIVE item, never the draft and never `404 NO_DRAFT`.
+        const isDraftRead = typeof query?.state === 'string'
+            && query.state.toLowerCase() === 'draft'
+            && mayReadPendingDrafts(_context.executionContext);
+        // ADR-0033 draft-overlay preview: `?preview=draft` makes the detail
+        // read prefer a pending draft (falling back to active).
+        // [#20408] Parsed exactly as `RestServer`'s plain read parses it —
+        // case-insensitively — so `?preview=DRAFT` from a builder is a preview
+        // on both transports, not a published read on this one.
+        const previewDrafts = typeof query?.preview === 'string'
+            && query.preview.toLowerCase() === 'draft'
+            && mayReadPendingDrafts(_context.executionContext);
+
+        // [#20408] The caller's VETTED organization (`metaReadOrganizationId`
+        // gates it by the folded type): the partition `RestServer`'s plain read
+        // reads. The session's claim as stored served a member removed from an
+        // organization that organization's overlays here.
+        const caller = _context.executionContext as MetaReadGateCaller | undefined;
+        const singularType = pluralToSingular(type);
+
+        // [ADR-0106 D2/D3 · #20408] ONE posture for this caller × this item,
+        // resolved BEFORE any lookup and applied by the item chain to whichever
+        // lookup answers — `RestServer`'s plain read resolves it at the same
+        // point, so an unevaluable posture (D6 tier 3) is answered as the
+        // field-visibility fault before any read, on both transports. Every
+        // type but `object` is the not-applicable passthrough.
+        let maskPosture: ObjectSchemaMaskPosture;
         try {
+            maskPosture = await (await resolveObjectMasker(deps, _context, singularType))(name);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+            throw maskError;
+        }
+
+        try {
+            // [#5882 · #20478] The DEPRECATED spelling of the layered view,
+            // `?layers=<any non-empty value>` — the parse `RestServer`'s item
+            // read asks (`wantsMetaItemLayers`), answered FIRST, before either
+            // draft switch, as there. Where the protocol has a layered read the
+            // flag is the layered view ({@link answerMetaLayered}, the route's
+            // own answer), with `Deprecation` and a `Link` to the successor on
+            // every answer; where it has none the flag is the plain read, as it
+            // always was on `RestServer`. It answered the plain read's
+            // `{ type, name, item }` here whatever the protocol could do — a
+            // `200` whose `overlay` and `effective` read `undefined`, and an
+            // app pruned for its author where ruling 5856774816 serves it whole.
+            if (wantsMetaItemLayers(query)) {
+                const protocol = await resolveProtocol(deps, _context);
+                if (protocol && typeof protocol.getMetaItemLayered === 'function') {
+                    return await answerMetaLayered(
+                        deps, _context, protocol as MetaLayeredProtocol,
+                        { type, name, packageId, maskPosture }, saveVerdict,
+                        metaItemLayersDeprecationHeaders(requestedItemPath(_context)),
+                    );
+                }
+            }
+
+            if (isDraftRead) {
+                return await readPendingDraft(
+                    deps, _context, type, name, packageId, previewDrafts, saveVerdict, { maskPosture, query },
+                );
+            }
+
+            // [#20408] Every lookup below hands its envelope to THE item chain
+            // (`answerMetaItem` → `createMetaItemAnswer`, the one `RestServer`'s
+            // plain read runs): the per-caller gate, the doc locale collapse,
+            // the mask under the posture resolved above, the translation and
+            // `sortability`. It runs OUTSIDE the lookups' own `try`s — those
+            // classify a miss, and a gate or mask fault must be answered as
+            // itself, never as "not found" and never by falling through to the
+            // next lookup, which would answer with the very body the fault
+            // exists to withhold.
+            const serveItem = (protocol: MetaDomainProtocol | undefined, envelope: any): Promise<HttpDispatcherResult> =>
+                answerMetaItem(
+                    deps, _context, protocol,
+                    { metaType: singularType, name, policy: RENDERED_DOCUMENT_POLICY, maskPosture },
+                    query, envelope,
+                );
+
             // Try specific calls based on type
             if (type === 'objects' || type === 'object') {
                 // Check whether the kernel is project-scoped. When it is,
@@ -982,111 +1621,74 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     : protocol?.environmentId;
                 const scoped = scopedEnv !== undefined;
 
-                // [ADR-0106 D2/D5(3)] ONE posture for this caller × this object,
-                // resolved before any lookup, applied to whichever of the three
-                // lookups below answers. Resolving it per-lookup is how the
-                // registry-backed path ends up unmasked while the protocol-backed
-                // one is masked — two answers to one question, which is the
-                // shape #6562 already records for a different dimension of this
-                // very fan-out.
-                const objectMasker = await resolveObjectMasker(deps, _context);
+                // [#20408] An ADMITTED `?preview=draft` reads a PENDING draft,
+                // which only the protocol knows — the registry holds published
+                // schemas — so the protocol answers first, as it always does on a
+                // scoped kernel. This branch never read the switch, so a builder
+                // previewing an object was answered the ACTIVE schema where
+                // `RestServer` answers the draft.
+                const protocolFirst = scoped || previewDrafts;
 
-                // [#15238] `protocol &&` spelled out, matching the `!scoped` twin
-                // below. Behaviour-identical: `scoped` is derived from
-                // `protocol?.getProjectId` / `protocol?.environmentId`, so it can only
-                // be true when the handle is there. The `any` cast this branch used to
-                // resolve through is what let the two sibling guards drift apart in
-                // spelling — typing the handle is what surfaced it (TS18048).
-                if (scoped && protocol && typeof protocol.getMetaItem === 'function') {
+                // The protocol read `RestServer`'s plain read makes: the same
+                // `?package=` scope (ADR-0048), the same admitted switch and the
+                // same org partition — `organizationIdForMetaRead` never names an
+                // organization for `object`, so no phantom org row resurrects.
+                const readFromProtocol = async (): Promise<any> => {
+                    // [#15238] `protocol &&` spelled out: the `any` cast this
+                    // branch used to resolve through let two sibling guards drift
+                    // apart in spelling — typing the handle surfaced it (TS18048).
+                    if (!protocol || typeof protocol.getMetaItem !== 'function') return undefined;
                     try {
-                        const organizationId = await deps.resolveActiveOrganizationId(_context);
-                        const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
+                        const data = await protocol.getMetaItem({
+                            type: 'object',
+                            name,
+                            organizationId: metaReadOrganizationId(type, caller),
+                            ...(packageId ? { packageId } : {}),
+                            ...(previewDrafts ? { previewDrafts: true } : {}),
+                        });
                         // Protocol returns `{ type, name, item }` — only treat the
                         // lookup as a hit when `item` is really there. [#5563] The
                         // test used to be `data.item ?? data`, which is truthy for
                         // ANY truthy `data`: an item-less answer (what a metadata
                         // store outage resolves to) was served as a hit and the
-                        // registry fallback below never ran. The guard now asks the
-                        // question its own comment claims it asks.
-                        if (data?.item != null) {
-                            // The fault RETURNS from inside the try on purpose:
-                            // a masking failure is not a lookup miss, and
-                            // falling through to the registry below would answer
-                            // with the very body the fault exists to withhold.
-                            const masked = await maskObjectSchema(objectMasker, name, data.item);
-                            if (!masked.ok) return fieldVisibilityFault(deps, name);
-                            return { handled: true, response: deps.success({ ...data, item: masked.document }) };
-                        }
-                    } catch { /* fall through to registry / 404 */ }
-                }
+                        // registry fallback below never ran.
+                        return data?.item != null ? data : undefined;
+                    } catch {
+                        return undefined; // fall through to registry / 404
+                    }
+                };
 
-                const qlService = await deps.getObjectQL(_context);
-                if (qlService?.registry) {
-                    const data = qlService.registry.getObject(name);
+                let found: any = protocolFirst ? await readFromProtocol() : undefined;
+                if (found === undefined) {
+                    const qlService = await deps.getObjectQL(_context);
+                    const data = qlService?.registry?.getObject(name);
                     // [#5563] The registry hands back the bare ObjectSchema, so this
                     // fallback used to answer a different body shape than the
                     // protocol branch above for the very same request. Wrap it in
                     // the declared `GetMetaItemResponseSchema` envelope — `type` and
                     // `name` come from the request, the same values the protocol
                     // would have echoed back.
-                    if (data) {
-                        const masked = await maskObjectSchema(objectMasker, name, data);
-                        if (!masked.ok) return fieldVisibilityFault(deps, name);
-                        return { handled: true, response: deps.success({ type: 'object', name, item: masked.document }) };
-                    }
+                    if (data) found = { type: 'object', name, item: data };
                 }
-
                 // Last-ditch protocol attempt for unscoped kernels whose
                 // registry missed (e.g. object persisted to DB but not
                 // yet hydrated). Skip when we already tried above.
-                if (!scoped && protocol && typeof protocol.getMetaItem === 'function') {
-                    try {
-                        const organizationId = await deps.resolveActiveOrganizationId(_context);
-                        const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
-                        if (data?.item != null) {
-                            const masked = await maskObjectSchema(objectMasker, name, data.item);
-                            if (!masked.ok) return fieldVisibilityFault(deps, name);
-                            return { handled: true, response: deps.success({ ...data, item: masked.document }) };
-                        }
-                    } catch { /* fall through to 404 */ }
-                }
-                return { handled: true, response: deps.error('Not found', 404) };
+                if (found === undefined && !protocolFirst) found = await readFromProtocol();
+                if (found === undefined) return { handled: true, response: deps.error('Not found', 404) };
+                return serveItem(protocol, found);
             }
-
-            // Normalize plural URL paths to singular registry type names
-            const singularType = pluralToSingular(type);
 
             // Try Protocol Service First (Preferred)
             const protocol = await resolveProtocol(deps, _context);
 
-            // [#20193] THE per-caller read gate, on whichever lookup below
-            // answers — the one `RestServer`'s plain read asks, so this read
-            // refuses what that read refuses (a `{ permissionSet }`-gated doc
-            // or book to a non-holder, an app to a caller missing its
-            // `requiredPermissions`) and prunes what it prunes (the nav entries
-            // a caller may not open, a widget whose service is off here). It
-            // runs OUTSIDE the lookups' own `try`s — those classify a miss, and
-            // a gate fault must be answered as itself, never as "not found".
-            // `object` is not judged here: its per-caller gate is the ADR-0106
-            // mask, which the branch above already runs.
-            const serveItem = async (envelope: any): Promise<HttpDispatcherResult> => {
-                const gated = await gateMetaItemDocument(deps, _context, protocol, singularType, name, envelope.item);
-                if (!gated.ok) return { handled: true, response: gated.response };
-                return { handled: true, response: deps.success({ ...envelope, item: gated.document }) };
-            };
-
             let found: any;
             if (protocol && typeof protocol.getMetaItem === 'function') {
                  try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
-                    // ADR-0033 draft-overlay preview: `?preview=draft` makes the
-                    // detail read prefer a pending draft (falling back to active).
-                    // [#20338] Admitted per caller ({@link mayReadPendingDrafts}),
-                    // in this declaration: a caller who may not read drafts
-                    // reads the published item — this read without the switch.
-                    const previewDrafts = query?.preview === 'draft'
-                        && mayReadPendingDrafts(_context.executionContext);
-                    const data = await protocol.getMetaItem({ type: singularType, name, packageId, organizationId, previewDrafts });
+                    // `previewDrafts` is the ADMITTED switch declared above
+                    // this block's branches (#20338).
+                    const data = await protocol.getMetaItem({
+                        type: singularType, name, packageId, organizationId: metaReadOrganizationId(type, caller), previewDrafts,
+                    });
                     // [#18401] The SAME hit test the `object` branch above runs,
                     // asked here for the same reason. `getMetaItem` answers a
                     // miss with the protection envelope around an absent item —
@@ -1120,7 +1722,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // Protocol might throw if not found or not supported
                  }
             }
-            if (found) return serveItem(found);
+            if (found) return serveItem(protocol, found);
 
             // Try MetadataService for runtime-registered types
             const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
@@ -1135,7 +1737,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // MetadataService hands back the bare document, so wrap it in
                 // the declared envelope rather than letting which service
                 // answered decide the caller's parse.
-                if (data) return serveItem({ type: singularType, name, item: data });
+                if (data) return serveItem(protocol, { type: singularType, name, item: data });
             }
             return { handled: true, response: deps.error('Not found', 404) };
         } catch (e: any) {
@@ -1179,7 +1781,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.listDrafts === 'function') {
             try {
-                const organizationId = await deps.resolveActiveOrganizationId(_context);
+                // [#20408] The caller's VETTED organization, raw — what
+                // `RestServer`'s `_drafts` hands down (`ctx.tenantId`). The
+                // session's claim as stored listed a removed member the pending
+                // drafts of the organization they had left.
+                const organizationId = metaCallerOrganizationId(ec);
                 const data = await protocol.listDrafts({
                     packageId: query?.packageId || undefined,
                     type: query?.type || undefined,
@@ -1272,42 +1878,82 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // exit, so a member `RestServer` prunes listed a `{ permissionSet }`-
         // gated doc here with its body (`?include=content`), a set-gated book,
         // and every app with its `requiredPermissions`-gated entries — the list
-        // twin of the item reads' defect. Every exit below that serves a list
-        // goes through `gateList`, OUTSIDE the lookups' own `try`s: those
-        // classify a type the store does not know, and a gate fault must be
-        // answered as itself — never fall through to the next store as though
-        // the first had not answered. Each exit keeps its own projection (the
-        // doc slim), exactly as before.
+        // twin of the item reads' defect.
+        //
+        // [#20320] …and it PROJECTS what that route projects: every exit below
+        // hands its store's answer to `answerList` — THE list chain
+        // `RestServer`'s route runs (`createMetaListAnswer`: the `api`
+        // served-set face, the gate, `?id=`, `?object=`, the doc locale collapse
+        // and slim, the mask, the translation). This branch ran a doc slim of
+        // its own that compared the RAW segment, and none of the rest. Every
+        // exit calls it OUTSIDE the lookups' own `try`s: those classify a type
+        // the store does not know, and a chain fault must be answered as itself
+        // — never fall through to the next store as though the first had not
+        // answered.
         const listType = pluralToSingular(typeOrName);
-        const gateList = (data: any) => gateMetaListAnswer(deps, _context, protocol, typeOrName, listType, data);
+
+        // [#9488 · #20408] A segment that names no metadata type is REFUSED —
+        // `400 INVALID_REQUEST`, the one refusal `RestServer`'s list answers —
+        // before any listing work, rather than served as a real-but-empty
+        // collection (`200 {items: []}` here, until this card). The rule is the
+        // shared one: the static spelling contract UNION the live type set,
+        // fail-open when the live listing cannot be read — so a host whose
+        // protocol has no `getMetaTypes` keeps reaching the legacy
+        // one-segment object-name exit below.
+        try {
+            await refuseUnknownMetaListType(protocol, typeOrName);
+        } catch (e: any) {
+            return { handled: true, response: deps.errorFromThrown(e, 400) };
+        }
+
+        // ADR-0033 draft-overlay preview: `?preview=draft` overlays pending
+        // drafts on the active list so an (admin) reviewer can render the
+        // console off drafts before publishing.
+        // [#20338] Admitted per caller ({@link mayReadPendingDrafts}), in this
+        // declaration: anyone else reads the published list. [#20320] Declared
+        // once, at the branch's entry, because the chain reads it too (the `api`
+        // face is exempt for an admitted preview). [#20408] Parsed exactly as
+        // `RestServer`'s list parses it — case-insensitively.
+        const previewDrafts = typeof query?.preview === 'string'
+            && query.preview.toLowerCase() === 'draft'
+            && mayReadPendingDrafts(_context.executionContext);
+        const answerList = (data: any) =>
+            answerMetaList(deps, _context, protocol, listType, query, previewDrafts, data);
 
         let listed: any;
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
-                const organizationId = await deps.resolveActiveOrganizationId(_context);
-                // ADR-0033 draft-overlay preview: `?preview=draft` overlays
-                // pending drafts on the active list so an (admin) reviewer can
-                // render the console off drafts before publishing.
-                // [#20338] Admitted per caller ({@link mayReadPendingDrafts}),
-                // in this declaration: anyone else reads the published list.
-                const previewDrafts = query?.preview === 'draft'
-                    && mayReadPendingDrafts(_context.executionContext);
+                // [#20408] The caller's VETTED organization, gated by the folded
+                // type — the partition `RestServer`'s list reads.
+                const organizationId = metaReadOrganizationId(
+                    typeOrName, _context.executionContext as MetaReadGateCaller | undefined,
+                );
                 const data = await protocol.getMetaItems({ type: typeOrName, packageId, organizationId, previewDrafts });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) listed = data;
-            } catch {
-                // Protocol doesn't know this type, fall through
+            } catch (e: any) {
+                // [#20590] A throw here is a FAULT, answered as itself — never a
+                // cue to serve the metadata service's list below, which holds
+                // the stored bodies and applies no per-type read-path redaction
+                // (a flow's hook secret, a datasource's password). The protocol
+                // answers a type it holds nothing for with an empty list — it
+                // merges the metadata service's runtime-registered items (agents,
+                // tools) into its own answer — so it never signals "unknown
+                // type" by throwing. What it throws is a failed store read
+                // (503), a metadata app's marked refusal, a redactor failing
+                // closed, or a refused spelling (400). `RestServer`'s list route
+                // answers the same throw the same way ("prefer failing to
+                // falling back", AGENTS.md).
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         }
-        if (listed !== undefined) {
-            // [ADR-0106 D5(2)] The dispatcher's list read is the same outlet as
-            // REST's `GET /meta/object`, reached by a different door.
-            const gated = await gateList(listed);
-            if (!gated.ok) return gated.result;
-            return { handled: true, response: deps.success(slimDocList(typeOrName, gated.data, query)) };
-        }
+        // [ADR-0106 D5(2)] The dispatcher's list read is the same outlet as
+        // REST's `GET /meta/object`, reached by a different door.
+        if (listed !== undefined) return answerList(listed);
 
         // Try MetadataService directly for runtime-registered metadata (agents, tools, etc.)
+        // — reached only by a host whose protocol slot has no list verb, or
+        // whose protocol answered no list at all; never on a protocol fault.
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).list === 'function') {
             let items: any;
@@ -1325,11 +1971,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const sanitizedType = String(typeOrName).replace(/[\r\n\t]/g, '');
                 console.debug(`[HttpDispatcher] MetadataService.list() failed for type:`, sanitizedType, 'error:', e.message);
             }
-            if (items && items.length > 0) {
-                const gated = await gateList({ type: typeOrName, items });
-                if (!gated.ok) return gated.result;
-                return { handled: true, response: deps.success(slimDocList(typeOrName, gated.data, query)) };
-            }
+            if (items && items.length > 0) return answerList({ type: typeOrName, items });
         }
 
         // Try ObjectQL registry directly for object/type lookups
@@ -1337,27 +1979,29 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (qlService?.registry) {
             if (typeOrName === 'objects') {
                 const objs = qlService.registry.getAllObjects(packageId);
-                const gated = await gateList({ type: 'object', items: objs });
-                if (!gated.ok) return gated.result;
-                return { handled: true, response: deps.success(gated.data) };
+                return answerList({ type: 'object', items: objs });
             }
             // Try listing items of the given type
             const items = qlService.registry.listItems?.(typeOrName, packageId);
-            if (items && items.length > 0) {
-                const gated = await gateList({ type: typeOrName, items });
-                if (!gated.ok) return gated.result;
-                return { handled: true, response: deps.success(gated.data) };
-            }
+            if (items && items.length > 0) return answerList({ type: typeOrName, items });
+            // [#20320] The anonymous exemption above grants reachability of the
+            // book and doc LISTS, and this exit is not one: a one-segment path
+            // that names an object (`/meta/book` where an object is called
+            // `book`) serves an object SCHEMA. An anonymous caller never reaches
+            // a schema — the deny it skipped is answered here instead.
+            if (anonymous) return anonymousDeny();
             // Legacy: treat as object name. [ADR-0106 D5(4)] A schema-bearing
             // exit reached by a one-segment path — masked like every other, so
             // the legacy spelling is not a way around the projection.
             const obj = qlService.registry.getObject(typeOrName);
             if (obj) {
                 const masked = await maskObjectSchema(
-                    await resolveObjectMasker(deps, _context), typeOrName, obj,
+                    await resolveObjectMasker(deps, _context, 'object'), typeOrName, obj,
                 );
                 if (!masked.ok) return fieldVisibilityFault(deps, typeOrName);
-                return { handled: true, response: deps.success(masked.document) };
+                // [#20408] ADR-0106 D6 tier 2's `private, no-store`, as every
+                // other object exit here serves it.
+                return successWithHeaders(deps, masked.document, { 'Cache-Control': masked.cacheControl });
             }
         }
         return { handled: true, response: deps.error('Not found', 404) };
@@ -1384,9 +2028,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.success({ types: ['object', 'app', 'plugin'] }) };
     }
 
-    // [#12195] A LOCATED refusal, not a bare `{ handled: false }`.
+    // [commit 7986d973f] A LOCATED refusal, not a bare `{ handled: false }`.
     //
-    // This tail was unreachable until this card: the branches above covered
+    // This tail was unreachable until that commit: the branches above covered
     // zero segments, one segment, and — through the compound fold — every path
     // with two or MORE. Retiring the fold makes it reachable for the first
     // time, and what reaches it is a `/meta` path with no route: three or more

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
 import type { HttpAckResult, HttpDelivery } from './http-outbox.js';
 
 /**
@@ -10,19 +11,26 @@ import type { HttpAckResult, HttpDelivery } from './http-outbox.js';
  * stateless attempt (`sendOnce`) plus the retry-schedule classifier
  * (`classifyAttempt`). The dispatcher owns claim/ack; this module owns the wire.
  *
- * It also owns both halves of the HMAC contract — {@link deliveryBody} (the exact
- * bytes that are signed AND sent) and {@link signBody} (how they are signed) — so
- * the enqueue-time signer and the send-time transport cannot drift into signing
- * one string and posting another. See {@link HttpDelivery.signature} for why the
- * signature is computed once, at enqueue, instead of re-derived at send time from
- * a secret carried on the row.
+ * It also owns the outbox's half of the HMAC contract — {@link deliveryBody}, the
+ * exact bytes that are signed AND sent — so the enqueue-time signer and the
+ * send-time transport cannot drift into signing one string and posting another.
+ * HOW those bytes are signed is not this module's: the scheme is
+ * `@objectstack/core`'s `signHttpBody` / `HTTP_SIGNATURE_HEADER`, shared with the
+ * flow `http` node's inline arm, and re-exported below under this module's
+ * historical names. See {@link HttpDelivery.signature} for why the signature is
+ * computed once, at enqueue, instead of re-derived at send time from a secret
+ * carried on the row.
  */
 
 /** Default per-request timeout. */
 export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 
-/** Header carrying the HMAC-SHA256 signature of the request body. */
-export const SIGNATURE_HEADER = 'X-Objectstack-Signature';
+/**
+ * The signature header and the signer — the SAME bindings `@objectstack/core`
+ * exports, never a second implementation: the outbox and the flow `http` node's
+ * inline arm must mean one thing by one `signingSecret`.
+ */
+export { HTTP_SIGNATURE_HEADER as SIGNATURE_HEADER, signHttpBody as signBody };
 
 /**
  * The exact request body for a delivery — the bytes that get POSTed, and
@@ -37,17 +45,6 @@ export const SIGNATURE_HEADER = 'X-Objectstack-Signature';
  */
 export function deliveryBody(payload: unknown): string {
     return typeof payload === 'string' ? payload : JSON.stringify(payload ?? null);
-}
-
-/**
- * Compute the `X-Objectstack-Signature` value for a body: `sha256=<hex>` of
- * `HMAC-SHA256(body, secret)`.
- *
- * The output is safe to persist (it is handed to the receiver on the wire
- * anyway); the `secret` argument is NOT — see {@link HttpDelivery.signature}.
- */
-export function signBody(body: string, secret: string): string {
-    return `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
 }
 
 /** Truncate response bodies to keep storage cost predictable. */
@@ -105,7 +102,7 @@ export async function sendOnce(
     // signing secret is not on the row for this attempt — or any other — to
     // carry. #7722.
     if (delivery.signature) {
-        headers[SIGNATURE_HEADER] = delivery.signature;
+        headers[HTTP_SIGNATURE_HEADER] = delivery.signature;
     }
 
     const timeoutMs = delivery.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;

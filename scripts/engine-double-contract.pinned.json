@@ -123,8 +123,13 @@
     },
     {
       "file": "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts",
-      "verb": "update",
+      "verb": "findOne",
       "pinned": 3
+    },
+    {
+      "file": "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts",
+      "verb": "update",
+      "pinned": 4
     },
     {
       "file": "packages/metadata-protocol/src/protocol-14038-list-commits-created-at-iso.test.ts",
@@ -452,6 +457,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.credential-channel.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.credential-channel.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.credential-channel.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.dashboard-dataset-publish-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -465,6 +485,16 @@
       "file": "packages/metadata-protocol/src/protocol.dashboard-dataset-publish-gate.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.data-door-stored-content-hash.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.data-door-stored-metadata-redaction.test.ts",
+      "verb": "findOne",
+      "pinned": 2
     },
     {
       "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
@@ -627,6 +657,16 @@
       "pinned": 3
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.flow-by-name-shipped-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.flow-layered-shipped-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.flow-org-override-closed.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -697,6 +737,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.item-name-grammar.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -709,6 +764,11 @@
     {
       "file": "packages/metadata-protocol/src/protocol.item-name-grammar.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -739,6 +799,11 @@
     {
       "file": "packages/metadata-protocol/src/protocol.lifecycle-audit-rows.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.lock-door-read-agree.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -1112,6 +1177,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.read-lock-flags-write-door.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.read-seam-empty-accumulator.test.ts",
       "verb": "findOne",
       "pinned": 6
@@ -1288,6 +1358,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.save-union-issues.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2067,6 +2152,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-packaged-dashboard-base.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-packaged-object-base.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2079,6 +2169,11 @@
     {
       "file": "packages/objectql/src/protocol-packaged-object-base.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-packaged-view-base.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2228,12 +2323,27 @@
     },
     {
       "file": "packages/platform-objects/src/plugin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/plugin.test.ts",
       "verb": "update",
       "pinned": 1
     },
     {
       "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/system/migration-flag.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2417,6 +2527,26 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-hash-migration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-hash-migration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2529,6 +2659,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/auth-manager.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-settings-refusal-isolation.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2839,6 +2974,16 @@
     {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-sharing.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -3362,6 +3507,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-dashboard-view-i18n-explicit-override.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-extension-agreement.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3398,36 +3548,6 @@
     },
     {
       "file": "packages/rest/src/meta-published-overlay.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3702,6 +3822,26 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/stored-metadata-body-reads.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3748,6 +3888,16 @@
     },
     {
       "file": "packages/services/service-automation/src/flow-activation-ledger.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/flow-credential-migration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/flow-credential-migration.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3997,9 +4147,14 @@
       "pinned": 1
     },
     {
-      "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",
+      "file": "packages/services/service-storage/src/files-to-references-migration.test.ts",
       "verb": "findOne",
       "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 2
     },
     {
       "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",

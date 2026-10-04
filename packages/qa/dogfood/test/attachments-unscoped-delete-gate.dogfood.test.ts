@@ -9,7 +9,7 @@
 // "refused outright (#4757)", on the reasoning that "nothing was ever queried"
 // must not read as "nothing to authorize". `attachment-access-hooks.ts` carries
 // exactly that refusal, and `attachment-access-hooks.test.ts` pins it against a
-// wired engine (#9797). This file pins it END TO END, on the real stack, where
+// wired engine (commit 1258dcaee). This file pins it END TO END, on the real stack, where
 // RBAC and plugin-sharing are in the path and the session is a real one.
 //
 // ## History — this file's original verdict has been OVERTAKEN, twice
@@ -20,7 +20,7 @@
 // the `where === undefined` check. That was a PRODUCT gap (#9719), and this
 // file deliberately declined to pin the behaviour of the day.
 //
-// It has since been fixed. #9719/PR #9797 added an opt-in whole-operation
+// It has since been fixed. #9719/commit 1258dcaee added an opt-in whole-operation
 // dispatch to the engine, which #9974 renamed `dispatchUnscopedMultiWrite` when
 // it was ruled onto `beforeUpdate` as well. `attachment-access-hooks.ts`
 // declares it on both sys_attachment write registrations, so the #4757 refusal
@@ -35,7 +35,7 @@
 // properties that look identical on a fixture whose rows split entitled/not —
 // which is exactly the fixture the first block below uses. Measured on this
 // suite: with `dispatchUnscopedMultiWrite` removed from BOTH registrations and
-// service-storage rebuilt (the pre-#9797 world), the first block stays 5/5
+// service-storage rebuilt (the world before commit 1258dcaee), the first block stays 5/5
 // GREEN. It cannot see the refusal it is named for.
 //
 // So the second block seeds the ONE fixture that separates them: a caller who
@@ -163,7 +163,7 @@ describe('sys_attachment delete gate under an unscoped multi-delete (#9483)', ()
 
   it('an unscoped multi-delete is refused OUTRIGHT — on its shape — and deletes NOTHING', async () => {
     // `{ multi: true }` with neither id nor where composes an AST over the whole
-    // table. Since #9797 the refusal that answers is #4757's whole-operation
+    // table. Since commit 1258dcaee the refusal that answers is #4757's whole-operation
     // one, dispatched BEFORE any row is resolved — not the per-row gate, which
     // on this fixture would also have refused (the member is the uploader of
     // one row and neither uploader nor parent-editor of the other).
@@ -193,7 +193,7 @@ describe('sys_attachment delete gate under an unscoped multi-delete (#9483)', ()
 
   it('an empty `where: {}` reaches the same verdict by a DIFFERENT rule — the per-row gate', async () => {
     // ⚠️ Same outcome, deliberately different mechanism, and the difference is
-    // load-bearing. #9797 scoped the whole-operation dispatch to a delete with
+    // load-bearing. Commit 1258dcaee scoped the whole-operation dispatch to a delete with
     // NO `where` at all; a match-all `where: {}` is a real query, so it is NOT
     // refused on shape — it is refused here only because this caller cannot
     // have the foreign row. Asserting the per-row message is what keeps that
@@ -259,7 +259,7 @@ describe('sys_attachment delete gate under an unscoped multi-delete (#9483)', ()
 // whole-operation rule or from the per-row gate, because that fixture holds one
 // row the caller may not touch. Here the caller uploaded BOTH rows, so the
 // per-row gate has nothing to refuse — anything that still refuses is refusing
-// the SHAPE. Pre-#9797 this exact call resolved and emptied the table.
+// the SHAPE. Before commit 1258dcaee this exact call resolved and emptied the table.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('sys_attachment unscoped multi-delete is refused on its SHAPE, not on entitlement (#9483)', () => {
@@ -352,7 +352,7 @@ describe('sys_attachment unscoped multi-delete is refused on its SHAPE, not on e
   });
 
   it('refuses `{ multi: true }` with no id and no where — even though the caller may delete every matched row', async () => {
-    // #9719's measured wipe, end to end: before PR #9797 this call RESOLVED and
+    // #9719's measured wipe, end to end: before commit 1258dcaee this call RESOLVED and
     // took both rows (2 -> 0). The per-row gate licenses each row individually,
     // so nothing but the whole-operation #4757 rule can refuse here — which is
     // what makes this the case that detects its removal.

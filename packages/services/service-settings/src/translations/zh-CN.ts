@@ -257,7 +257,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience: {
           title: '注册受众',
-          description: '谁可以成为本环境应用的用户。除「仅限邀请」外的口径会强制开启邮箱验证。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
+          description: '谁可以成为本环境应用的用户。「邮箱域名」口径始终强制开启邮箱验证。「开放」口径也会强制开启，除非部署方关闭它；在此控制台保存的值无法关闭。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
         },
         password_policy: {
           title: '密码策略',
@@ -298,7 +298,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience_posture: {
           label: '自助注册受众',
-          help: '「仅限邀请」关闭自助注册:用户只能通过运营侧行为进入——邀请、管理员创建/导入、SCIM 开通或企业 SSO。「邮箱域名」仅向下方允许列表中的域名开放;「开放」允许任何人自助注册。除「仅限邀请」外的口径会强制开启邮箱验证,并要求配置下方的自助注册权限集。',
+          help: '「仅限邀请」关闭自助注册:用户只能通过运营侧行为进入——邀请、管理员创建/导入、SCIM 开通或企业 SSO。「邮箱域名」仅向下方允许列表中的域名开放;「开放」允许任何人自助注册。「邮箱域名」与「开放」都要求配置下方的自助注册权限集。「邮箱域名」始终强制开启邮箱验证。「开放」也会强制开启,除非部署方关闭它(OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false,或在 stack 配置中设置 emailAndPassword.requireEmailVerification: false);在此控制台保存的 false 在「开放」下会被拒绝。',
           options: {
             invite_only: '仅限邀请——不开放自助注册(默认)',
             email_domain: '仅允许列表中的邮箱域名',

@@ -6,8 +6,8 @@
  *
  * ## Why this file exists
  *
- * #14722 asserted that a `devPlugins[]` refusal reaches the author keyless.
- * Measured, it does not — `formatZodIssue` descends `invalid_union`, ranks the
+ * A card asserted that a `devPlugins[]` refusal reaches the author keyless. Measured
+ * in commit 23c72be3c, it does not — `formatZodIssue` descends `invalid_union`, ranks the
  * branches through `selectUnionBranches` (`./union-branch-policy.ts`, #8318),
  * drops the string arm as kind-mismatch-only and renders the object branch
  * verbatim. But **nothing pinned that**, so the rendered half was re-reported
@@ -67,6 +67,15 @@
  *   table below, `devPlugins` by #14975's own file
  *   (`kernel/manifest-unknown-keys.test.ts`), `ActionRef` by the CONTROL case
  *   in `automation/state-machine.test.ts`.
+ *
+ *   ⚠️ **Four of the 14 have since left the tree, and the table with them
+ *   (#21320).** `ActionRef`, `GuardRef`, `StateNode.on` and `StateMachine.on`
+ *   were the four string-or-object unions of `automation/state-machine.zod.ts`,
+ *   which was deleted whole when its last authorable door, `agent.lifecycle`,
+ *   was tombstoned (ADR-0049). The class is 10 today: 9 in the table,
+ *   `devPlugins` in its own file. A deleted site is not a re-derivation — the
+ *   other 28 coordinates were not re-scanned for it, and the counts in this
+ *   header above this note are the original derivation's.
  *
  *   ⚠️ Curation and closure are INDEPENDENT, which is the trap. Thirteen of the
  *   14 spell both at once with `strictObject()`. `ui/view.zod.ts:2895` splits
@@ -153,7 +162,6 @@ import { describe, expect, it } from 'vitest';
 
 import { ApprovalNodeConfigSchema } from '../automation/approval.zod';
 import { FlowFunctionEntrySchema } from '../automation/flow-function.zod';
-import { GuardRefSchema, StateMachineSchema, StateNodeSchema } from '../automation/state-machine.zod';
 import { FieldSchema } from '../data/field.zod';
 import { ObjectSchema } from '../data/object.zod';
 import { GroupByNodeSchema } from '../data/query.zod';
@@ -226,8 +234,9 @@ interface UnionMessageSite {
 }
 
 /**
- * The class-A and class-B population minus the two sites already covered
- * (`devPlugins` by #14975, `ActionRef` by `state-machine.test.ts`).
+ * The class-A and class-B population minus the one site already covered
+ * (`devPlugins` by #14975). `ActionRef`'s pin left with
+ * `state-machine.test.ts`, its site with `state-machine.zod.ts` (#21320).
  *
  * ⛔ Rows are not invented: each `site` is a coordinate the scan produced.
  *
@@ -239,45 +248,6 @@ interface UnionMessageSite {
  * own card, not asserted here as though it existed.
  */
 const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
-  ['GuardRef — the object arm of a guard reference', {
-    site: 'automation/state-machine.zod.ts:120',
-    door: GuardRefSchema,
-    reject: { parms: { a: 1 } },
-    selectedBranchIssues: 2,
-    key: 'parms',
-    keyInMessage: '`parms`',
-    surface: 'this guard reference',
-    renameInMessage: '`parms` → `params`',
-    acceptString: 'isManager',
-    acceptObject: { type: 'log', params: { a: 1 } },
-  }],
-  ['StateNode.on — a transition written inline on a state', {
-    site: 'automation/state-machine.zod.ts:231',
-    door: StateNodeSchema,
-    reject: { on: { GO: { guard: 'isX', actions: 'not-an-array' } } },
-    selectedBranchIssues: 2,
-    key: 'guard',
-    keyInMessage: '`guard`',
-    surface: 'this state transition',
-    renameInMessage: '`guard` → `cond`',
-    acceptString: { on: { GO: 'next' } },
-    acceptObject: { on: { GO: { target: 'next' } } },
-  }],
-  ['StateMachine.on — the machine-level listener map', {
-    site: 'automation/state-machine.zod.ts:292',
-    door: StateMachineSchema,
-    reject: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
-      on: { GO: { guard: 'isX', actions: 'not-an-array' } } },
-    selectedBranchIssues: 2,
-    key: 'guard',
-    keyInMessage: '`guard`',
-    surface: 'this state transition',
-    renameInMessage: '`guard` → `cond`',
-    acceptString: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
-      on: { GO: 'idle' } },
-    acceptObject: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
-      on: { GO: { target: 'idle' } } },
-  }],
   ['Approval.decisionOutputs — a declared decision output', {
     site: 'automation/approval.zod.ts:791',
     door: ApprovalNodeConfigSchema,
@@ -442,8 +412,8 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
     it.each(SITES)('%s', (_name, site) => {
       const rendered = render(site, site.reject);
 
-      // The key the author actually mistyped. This is the assertion #14722
-      // believed would fail — the "keyless `Invalid input`" claim.
+      // The key the author actually mistyped. Commit 23c72be3c's card believed this
+      // assertion would fail — the "keyless `Invalid input`" claim.
       expect(rendered, `${site.site}: the undeclared key must reach the author`)
         .toContain(site.keyInMessage);
 
@@ -547,11 +517,14 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
     it('covers every site the scan found outside the two already pinned elsewhere', () => {
       // 14 class-A sites + 1 class-B = 15 with a curated-or-bare unknown-key
       // refusal to lose; `devPlugins` (#14975) and `ActionRef`
-      // (`state-machine.test.ts`) are pinned in their own files, so 13 belong
-      // here. ⚠️ This number certifies the population COMPLETE, which is why
-      // the first pass getting it wrong mattered: at 12 it asserted, forever
-      // and greenly, that `ui/view.zod.ts:2895` was not a member.
-      expect(SITES).toHaveLength(13);
+      // (`state-machine.test.ts`) were pinned in their own files, so 13 belonged
+      // here. #21320 deleted `automation/state-machine.zod.ts` and its four
+      // class-A sites (`ActionRef`, `GuardRef`, `StateNode.on`,
+      // `StateMachine.on`), three of them rows of this table: 10 now. ⚠️ This
+      // number certifies the population COMPLETE, which is why the first pass
+      // getting it wrong mattered: at 12 it asserted, forever and greenly, that
+      // `ui/view.zod.ts:2895` was not a member.
+      expect(SITES).toHaveLength(10);
       // Each row names a distinct `z.union` coordinate.
       expect(new Set(SITES.map(([, s]) => s.site)).size).toBe(SITES.length);
 

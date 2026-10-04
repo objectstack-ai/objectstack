@@ -22,13 +22,18 @@ import { objectStackMiddleware, createHonoApp } from './index';
 
 const mockKernel = { name: 'test-kernel' } as any;
 
+// What `objectStackMiddleware` puts on the context (`c.set('objectStack', kernel)`).
+// An app a test reads it back from must declare that variable: a bare `new Hono()`
+// has no `Variables`, so Hono types `c.get` as taking `never`.
+type KernelEnv = { Variables: { objectStack: { name: string } } };
+
 describe('objectStackMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('sets kernel on context via c.set', async () => {
-    const app = new Hono();
+    const app = new Hono<KernelEnv>();
     const middleware = objectStackMiddleware(mockKernel);
 
     app.use('*', middleware);
@@ -61,7 +66,7 @@ describe('objectStackMiddleware', () => {
   });
 
   it('provides the correct kernel instance', async () => {
-    const app = new Hono();
+    const app = new Hono<KernelEnv>();
     const middleware = objectStackMiddleware(mockKernel);
 
     app.use('*', middleware);

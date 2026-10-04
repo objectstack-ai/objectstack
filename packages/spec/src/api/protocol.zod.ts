@@ -305,19 +305,20 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
 
 /**
  * ADR-0010 read-side protection envelope — the flags a metadata READ publishes
- * alongside the document, all derived from one `resolveLockState()` call.
+ * alongside the document, all derived in one place.
  *
  * These are the UN-prefixed, envelope-level counterparts of the `_lock` /
  * `_provenance` fields `MetadataProtectionFields` splices into the document
- * itself: the document stores `_lock`, and the read RESOLVES it into `lock`
- * plus the three `editable` / `deletable` / `resettable` verdicts Studio
- * renders affordances from (ADR-0010 §5), so no consumer re-implements the
- * lock algebra.
+ * itself: the document stores `_lock`, and the read RESOLVES it — joined with
+ * the write doors' locked-packaged-base verdict — into `lock` plus the three
+ * `editable` / `deletable` / `resettable` verdicts Studio renders affordances
+ * from (ADR-0010 §5), so no consumer re-implements the lock algebra.
  *
  * Shared by {@link GetMetaItemResponseSchema} and
  * {@link GetMetaItemLayeredResponseSchema} — both are produced by the SAME
- * `resolveLockState` call in `metadata-protocol`, so a mixin is what keeps the
- * two declarations from drifting apart key by key. Module-local on purpose: it
+ * derivation in `metadata-protocol` (`resolveLockState` joined with
+ * `packagedBaseRefusal`), so a mixin is what keeps the two declarations from
+ * drifting apart key by key. Module-local on purpose: it
  * is a shape these two responses share, not a new public vocabulary.
  *
  * Every key is optional HERE and tightened per-response where the producer
@@ -329,9 +330,12 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
 const MetadataProtectionEnvelopeFields = {
   lock: MetadataLockSchema.optional().describe(
     'Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; '
-    + '`no-overlay` / `no-delete` / `full` refuse the corresponding write with '
-    + '403 `ITEM_LOCKED`. Resolved from the document\'s `_lock`, with the packaged '
-    + 'artifact winning over any org overlay.',
+    + '`no-overlay` / `no-delete` / `full` mean the write doors refuse the '
+    + 'corresponding write with 403. Joins two refusals: the document\'s own '
+    + '`_lock` (`ITEM_LOCKED`; the packaged artifact wins over any org overlay), '
+    + 'and the locked packaged base — an item a code package ships, on a type with '
+    + 'no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the '
+    + 'write names the read-only package).',
   ),
   lockReason: z.string().optional().describe(
     'Human-readable explanation shown next to a refused write. Present only when '
@@ -1779,7 +1783,9 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
 
 /**
  * `GET /meta/:type/:name/diff` — structural diff between two history
- * versions (`from`/`to`; omit both for previous-vs-current).
+ * versions (`from`/`to`). An omitted `to` is the active version; an omitted
+ * `from` is the nearest earlier version whose body differs from the `to`
+ * side's (a deletion counts as an empty body).
  *
  * Transcribed from `diffMetaItem`'s declared return
  * (`@objectstack/metadata-protocol` `protocol.ts`).
@@ -2116,6 +2122,19 @@ export const ValidateDataRequestSchema = lazySchema(() => z.object({
  * Validate Data Response
  *
  * One entry per submitted row, in submission order.
+ *
+ * A row's `droppedFields` is set by the engine's `validate`, which runs the
+ * write's computed-field strip (every context) and its strips of static
+ * `readonly` and runtime-owned fields (`isSystem`-gated), records what each
+ * takes from each row, and reports it on a row the verdict accepts;
+ * `validateData` relays it. An `update`-mode preview does not run the
+ * `readonlyWhen` or primary-key strips, which judge a prior record and an
+ * update dispatch the preview does not have, so it can report fewer drops than
+ * the update it predicts.
+ * The element IS {@link DroppedFieldsEventSchema} — the same shape and `reason`
+ * vocabulary the write reports, ⛔ never a second enum — so a preview and the
+ * write it predicts answer in one vocabulary, exactly as `errors` / `warnings`
+ * share {@link ValidateDataIssueSchema} with a rejected write.
  */
 export const ValidateDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
@@ -2127,6 +2146,13 @@ export const ValidateDataResponseSchema = lazySchema(() => z.object({
     warnings: z.array(ValidateDataIssueSchema).describe(
       'Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a ' +
       'warn-first posture. The row is valid; the write would store it and log the same complaint.',
+    ),
+    droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
+      'Write-observability for the preview: caller-supplied fields the write would LEGALLY strip from THIS ' +
+      'row, one event per reason, in the shape and reason vocabulary the write itself reports. A strip is ' +
+      'not a finding: `valid` is unaffected, and the fields appear in neither `errors` nor `warnings`. ' +
+      'Present only when at least one field would be dropped. A server that does not produce this report ' +
+      'omits the key too, so an absent key alone does not prove nothing would be dropped.',
     ),
   })).describe('Per-row verdicts, in submission order.'),
   posture: z.object({
@@ -2589,7 +2615,9 @@ export const GetEffectivePermissionsResponseSchema = lazySchema(() => z.object({
 // `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among
 // routes that never existed). The capability the wrappers promised is live
 // elsewhere: record state machines are enforced by the `state_machine`
-// validation rule (`StateMachineSchema` stays authorable on the object),
+// validation rule (a flat `{ from: [to] }` transition table in the object's
+// `validations`, `data/validation.zod.ts` — the XState `StateMachineSchema` was
+// never authorable on the object after ADR-0020 and left the package in #21320),
 // approvals are first-class flow nodes on the approvals runtime (ADR-0019 —
 // decisions via `POST /approvals/requests/:id/{approve,reject}`), and
 // record-triggered automation is lifecycle hooks + `record_change` flows.

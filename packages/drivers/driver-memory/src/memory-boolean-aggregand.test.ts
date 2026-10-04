@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11065] `avg` and `sum` over a BOOLEAN column answer the SQL number here too.
+ * [commit 20950404c] `avg` and `sum` over a BOOLEAN column answer the SQL number here too.
  *
  * ## The measurement this file pins
  *
@@ -248,7 +248,7 @@ describe('[#11065] InMemoryDriver data face — a boolean aggregand is worth 1 o
  *
  * It reaches the numbers by a different route — a mingo `$group` expression
  * rather than JavaScript — and mingo's `$avg` ignores a non-numeric value
- * exactly as MongoDB's does, so before #11065 this face had the identical
+ * exactly as MongoDB's does, so before commit 20950404c this face had the identical
  * divergence on its own account: `{avg: null, sum: 0}` over the same five rows.
  * Aligning the data face alone would have left it free to keep that answer,
  * which is the same mistake #6814 recorded on `count_distinct`.
@@ -259,15 +259,15 @@ describe('[#11065] the analytics face answers the same rate', () => {
     title: 'Cases',
     sql: TABLE,
     measures: {
-      slaViolationRate: { name: 'sla_violation_rate', label: 'SLA Violation Rate', type: 'avg', sql: 'is_sla_violated' },
-      slaViolations: { name: 'sla_violations', label: 'SLA Violations', type: 'sum', sql: 'is_sla_violated' },
-      minViolated: { name: 'min_violated', label: 'Min violated', type: 'min', sql: 'is_sla_violated' },
-      maxViolated: { name: 'max_violated', label: 'Max violated', type: 'max', sql: 'is_sla_violated' },
-      count: { name: 'count', label: 'Cases', type: 'count', sql: 'id' },
-      avgNote: { name: 'avg_note', label: 'Avg note', type: 'avg', sql: 'note' },
+      slaViolationRate: { label: 'SLA Violation Rate', type: 'avg', sql: 'is_sla_violated' },
+      slaViolations: { label: 'SLA Violations', type: 'sum', sql: 'is_sla_violated' },
+      minViolated: { label: 'Min violated', type: 'min', sql: 'is_sla_violated' },
+      maxViolated: { label: 'Max violated', type: 'max', sql: 'is_sla_violated' },
+      count: { label: 'Cases', type: 'count', sql: 'id' },
+      avgNote: { label: 'Avg note', type: 'avg', sql: 'note' },
     },
     dimensions: {
-      isClosed: { name: 'is_closed', label: 'Closed', type: 'boolean', sql: 'is_closed' },
+      isClosed: { label: 'Closed', type: 'boolean', sql: 'is_closed' },
     },
   } as unknown as Cube;
 

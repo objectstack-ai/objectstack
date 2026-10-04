@@ -78,6 +78,9 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // Endpoints are authored as stack artifacts and shipped via
       // `publishPackage`. Same category as `capability`, not deferred work.
       'api',
+      // `picklist` is package-owned (`allowRuntimeCreate: false`): there is no
+      // runtime create surface to seed. Same category as `capability`.
+      'picklist',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));

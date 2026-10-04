@@ -180,11 +180,11 @@ describe('LifecycleSchema (ADR-0057)', () => {
     expect(result.success).toBe(false);
   });
 
-  // [#10527] The retention + ttl + archive triple. Since #10347 the Archiver
-  // selects rows by the ttl cutoff whenever `ttl` is declared, so a triple
-  // whose ttl diverges from the age bound leaves `retention.maxAge` declared
-  // but enforced by nothing — refused at parse time unless the ttl restates
-  // the age bound (same clock, same window).
+  // [commit 5649efbf9] The retention + ttl + archive triple. Since commit
+  // 530c1df65 the Archiver selects rows by the ttl cutoff whenever `ttl` is
+  // declared, so a triple whose ttl diverges from the age bound leaves
+  // `retention.maxAge` declared but enforced by nothing — refused at parse
+  // time unless the ttl restates the age bound (same clock, same window).
   describe('retention + ttl + archive triple (#10527)', () => {
     const messagesOf = (result: ReturnType<typeof LifecycleSchema.safeParse>) =>
       result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
@@ -220,7 +220,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
       // Named values on both sides of the divergence …
       expect(msg).toContain("lifecycle.ttl ('30d' after 'expires_at')");
       expect(msg).toContain("retention.maxAge ('90d' after created_at)");
-      // … and the POST-#10347 runtime truth: the ttl cutoff selects, so the
+      // … and the runtime truth since commit 530c1df65: the ttl cutoff selects, so the
       // age bound is the one left inert (not "moves rows by age alone").
       expect(msg).toContain('the Archiver moves rows by the ttl cutoff when ttl is declared');
       expect(msg).toContain('no longer bounds the hot store');
@@ -310,7 +310,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
       { revoked_at: { $null: 'yes' } }, // $null is z.boolean(), matching FieldOperatorsSchema
       { revoked_at: { $null: true, extra: 1 } }, // strict object: no extra keys
       { revoked_at: null }, // raw null is NOT the predicate — write {$null: true}
-      { revoked_at: { $nin: [null] } }, // unsupported operator, unchanged by #10165
+      { revoked_at: { $nin: [null] } }, // unsupported operator, unchanged by commit 801296050
     ]) {
       const result = LifecycleSchema.safeParse({
         class: 'transient',
@@ -1432,7 +1432,7 @@ describe('ObjectSchema.create()', () => {
 
 // ============================================================================
 // controlled_by_parent × master_detail — the builder forces `required: true`
-// (#9138 — #8772 maintainer ruling, Direction 2 / ADR-0055)
+// (#9138 — commit 75b7c240a, maintainer ruling Direction 2 / ADR-0055)
 // ============================================================================
 
 describe('ObjectSchema.create() forces a required master_detail under controlled_by_parent (#9138)', () => {
@@ -1537,7 +1537,7 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
   });
 
   it('raw .parse()/.safeParse() stay TOLERANT of the old shape — metadata at rest keeps loading', () => {
-    // The other half of the #8772 ruling: the narrowing is authoring-time
+    // The other half of commit 75b7c240a's ruling: the narrowing is authoring-time
     // only. Stored metadata rehydrated through the schema (never through the
     // builder) must keep loading, UNREWRITTEN — runtime tolerance for existing
     // installs stays with the security gate, and the lint rule stays `warning`
@@ -1726,7 +1726,7 @@ describe('ObjectSchema editMode (#11408 — declared by maintainer ruling, #1014
   });
 
   it('rejects a value outside the enum, as a VALUE error located at editMode — not unrecognized_keys', () => {
-    // Before #11408 the failure mode was `unrecognized_keys` at the top level
+    // Before commit f11fc61c5 the failure mode was `unrecognized_keys` at the top level
     // (the key itself was unknown). Declaring the key moves the judgment to
     // the VALUE: a bad spelling must now fail as an enum error at the
     // `editMode` path, proving the key is recognised and its value contract
@@ -1934,7 +1934,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
 
   it('rejects the retired stamp-only `organizationField` with its prescription (#19054)', () => {
     // The shape this used to accept, verbatim — the one declaration the whole
-    // protocol ever carried (`sys_api_key`, #8778). The block is `.strict()`,
+    // protocol ever carried (`sys_api_key`, commit 7901b2dd2). The block is `.strict()`,
     // so the key is REFUSED with the guidance row rather than stripped: a
     // silent strip would swap one no-op for another, which is the class
     // ADR-0049 exists to end.
@@ -2542,7 +2542,7 @@ describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
     const result = ObjectCapabilities.parse({ apiMethods: ['delete', 'restore', 'purge'] });
     expect(result.apiMethods).toEqual(['delete']);
     const msg = warn.mock.calls.map((c) => c[0]).join('\n');
-    expect(msg).toContain('#2377');
+    expect(msg).toContain('`enable.trash` was retired because no runtime ever read it');
   });
 
   it('the authored enum itself no longer admits legacy values', () => {
@@ -2774,19 +2774,45 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
       });
       expect(result.success).toBe(false);
       if (result.success) return;
-      // ⚠️ The refusal is located at the SLOT and no longer at the offending
-      // key. The `banned-keys` arm is a RECORD-level predicate — the only shape
-      // the closed projection list can publish — and `.refine()` carries no
-      // per-key path, so before #19346 this read `fields.<the key>` with code
-      // `invalid_key` and the reason nested one level under zod's fixed
-      // "Invalid key in record". The ban list is closed and two names long, so
-      // the slot is still named and the message names both keys in full.
-      const issue = result.error.issues.find((i) => i.path.join('.') === 'fields');
+      // [#20997] Located AT the offending key — `fields.<the key>` — the path
+      // the `__proto__` guard and the key grammar already report at, so
+      // `saveMetaItem`'s structured issues can point a Studio form at the
+      // field. The `banned-keys` arm is still a RECORD-level predicate (the
+      // only shape the closed projection list can publish); what puts the path
+      // on the key is one single-name refine per reserved name, each carrying
+      // its own name as a static `path`.
+      const issue = result.error.issues.find((i) => i.path.join('.') === `fields.${reserved}`);
       expect(issue).toBeDefined();
       expect(issue?.code).toBe('custom');
       expect(issue?.message).toMatch(/constructor.*prototype|prototype.*constructor/s);
+      // Exactly one refusal, and none left at the bare slot — a pin that only
+      // looked for the keyed issue would pass beside a slot-level duplicate.
+      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual([`fields.${reserved}`]);
     },
   );
+
+  it('refuses `constructor` and `prototype` together as TWO issues, each at its own key', () => {
+    const result = ObjectSchema.safeParse(
+      JSON.parse(
+        '{"name":"lead","label":"Lead","fields":{"constructor":{"type":"text","label":"C"},"prototype":{"type":"text","label":"P"}}}',
+      ),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['custom', 'fields.constructor'],
+      ['custom', 'fields.prototype'],
+    ]);
+  });
+
+  it('CONTROL: a key the snake_case grammar refuses keeps its own path and code (`invalid_key` at the key)', () => {
+    const result = ObjectSchema.safeParse(
+      JSON.parse('{"name":"lead","label":"Lead","fields":{"title":{"type":"text","label":"T"},"Bad Name":{"type":"text","label":"B"}}}'),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_key', 'fields.Bad Name']]);
+  });
 
   it('still accepts an ordinary document with no reserved field names', () => {
     const result = ObjectSchema.safeParse({
@@ -2865,7 +2891,13 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     // The record's own key-TYPE rule survives — the ban is CONJOINED, never
     // substituted, so the reference tables keep the shape they always printed.
     expect(node.propertyNames).toEqual({ type: 'string', pattern: '^[a-z_][a-z0-9_]*$' });
-    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['constructor', 'prototype'] } } }]);
+    // One clause per reserved name (#20997): each name is its own single-name
+    // refine so its refusal can carry the name as its path, and the generator
+    // conjoins the two bans — the same rule as one two-name `enum`.
+    expect(node.allOf).toEqual([
+      { propertyNames: { not: { enum: ['constructor'] } } },
+      { propertyNames: { not: { enum: ['prototype'] } } },
+    ]);
   });
 
   it('the runtime and the published keywords agree on every document in the corpus', () => {
@@ -2876,6 +2908,7 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
       JSON.parse('{"constructor":{"type":"text","label":"R"}}'),
       JSON.parse('{"prototype":{"type":"text","label":"R"}}'),
       JSON.parse('{"title":{"type":"text","label":"T"},"constructor":{"type":"text","label":"R"}}'),
+      JSON.parse('{"constructor":{"type":"text","label":"R"},"prototype":{"type":"text","label":"R"}}'),
       // LIT CONTROLS — names the ban does NOT cover. A rule that banned by
       // prefix, or that asked `in` instead of own-property equality, fails
       // here: `to_string` is not `toString`, and `constructors` is not
@@ -2897,6 +2930,6 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     const census = collectDroppedRefinements('data/Object', ObjectSchema);
     expect(census.dropped.map((site) => site.path)).not.toContain('fields.out.keyType');
     const site = census.projected.find((s) => s.path === 'fields.out');
-    expect(site?.declaredPatterns).toEqual(['banned-keys']);
+    expect(site?.declaredPatterns).toEqual(['banned-keys', 'banned-keys']);
   });
 });

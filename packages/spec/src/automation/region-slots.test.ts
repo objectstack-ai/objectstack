@@ -106,7 +106,7 @@ function regionSlotsAccepted(
 
 const byKey = (a: { key: string }, b: { key: string }) => a.key.localeCompare(b.key);
 
-describe('#4401 — FLOW_REGION_SLOTS reconciles with the ADR-0031 construct schemas', () => {
+describe('FLOW_REGION_SLOTS, the one declaration of where regions live, reconciles with the ADR-0031 construct schemas', () => {
   it('declares exactly the slots each construct accepts, at the right arity', () => {
     for (const [nodeType, schema] of Object.entries(REGION_BEARING_CONFIGS)) {
       const declared = FLOW_REGION_SLOTS
@@ -158,7 +158,7 @@ describe('#4401 — FLOW_REGION_SLOTS reconciles with the ADR-0031 construct sch
   });
 });
 
-describe('#4401 — the derived views stay in step with the source list', () => {
+describe('the derived views stay in step with the source list', () => {
   it('indexes every slot by its container type', () => {
     expect([...FLOW_REGION_SLOTS_BY_TYPE.values()].flat().sort(byKey))
       .toEqual([...FLOW_REGION_SLOTS].sort(byKey));

@@ -34,6 +34,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -72,7 +73,9 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 
 /** Today's shape: one package, declared through the singular `manifest`. */
 const CONFIG_SINGLE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.solo', name: 'solo', version: '1.0.0', type: 'app', namespace: 'solo' },
   objects: [
     {
@@ -82,12 +85,14 @@ export default {
       fields: { title: { type: 'text', label: 'Title' } },
     },
   ],
-};
+}, { strict: false });
 `;
 
 /** ADR-0130 D4: the artifact carries two co-owning packages, wrapper form. */
 const CONFIG_MULTI = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.crm', name: 'crm', version: '1.0.0', type: 'app', namespace: 'crm' },
   packages: [
     { manifest: { id: 'com.example.crm', name: 'crm', version: '1.0.0', type: 'app', namespace: 'crm' } },
@@ -101,7 +106,7 @@ export default {
       fields: { name: { type: 'text', label: 'Name' } },
     },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -109,12 +114,14 @@ export default {
  * element. Must be refused at the compile door, not written to an artifact.
  */
 const CONFIG_FLATTENED = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   packages: [
     { id: 'com.example.flat', name: 'flat', version: '1.0.0', type: 'app', namespace: 'flat' },
   ],
   objects: [],
-};
+}, { strict: false });
 `;
 
 const dirs: Record<string, string> = {};
@@ -130,6 +137,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), source);
+    linkSpec(dir);
     dirs[name] = dir;
   }
 });

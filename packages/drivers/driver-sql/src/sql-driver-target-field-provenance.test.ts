@@ -120,13 +120,13 @@ describe('[#8197] target-field refusals × filter-subtree provenance', () => {
       name: 'JSON column + $in (#7398)',
       where: () => ({ [POLICY_JSON_COL]: { $in: ['usr_1111'] } }),
       target: POLICY_JSON_COL,
-      klass: 'JSON TEXT column',
+      klass: 'at a multi-value or JSON field',
     },
     {
       name: 'JSON column, bare equality spelling (#7398)',
       where: () => ({ [POLICY_JSON_COL]: 'usr_1111' }),
       target: POLICY_JSON_COL,
-      klass: 'JSON TEXT column',
+      klass: 'at a multi-value or JSON field',
     },
     {
       name: 'empty field constraint (#5240)',

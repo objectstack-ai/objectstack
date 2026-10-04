@@ -354,7 +354,7 @@ export function rlsProbePermissionSet(config: any): PermissionSet {
       label: `RLS probe scope for ${o.name}`,
       description:
         'Verifier-authored owner narrowing (select only) — puts the probe persona outside the ' +
-        'scope of every record it did not create, so the by-id-write class is reachable (#7685).',
+        'scope of every record it did not create, so the by-id-write class is reachable.',
       object: o.name,
       operation: 'select',
       using: 'created_by == current_user.id',
@@ -428,7 +428,7 @@ export async function provisionRlsProbePersona(
     throw new Error(
       'verify: cannot provision the RLS probe persona — no ObjectQL engine on this stack. ' +
         'The probe needs object-level read+edit grants, without which every by-id probe is ' +
-        'masked by the object gate and the #1994 class is unreachable (#7685).',
+        'masked by the object gate and a by-id write that bypasses RLS is unreachable.',
     );
   }
   const sysCtx = { context: { isSystem: true } };
@@ -461,7 +461,7 @@ export async function provisionRlsProbePersona(
         description:
           'Ephemeral persona minted by `objectstack verify --rls`: object-level read+edit on every ' +
           'declared object plus an owner-scoped SELECT narrowing, so a by-id refusal is attributable ' +
-          'to the record gate rather than the object gate (#7685).',
+          'to the record gate rather than the object gate.',
         object_permissions: JSON.stringify(probeSet.objects ?? {}),
         field_permissions: '{}',
         system_permissions: '[]',
@@ -550,7 +550,7 @@ export async function provisionRlsPositionPersona(
     throw new Error(
       `verify: cannot provision the RLS position persona for '${position}' — no ObjectQL engine on ` +
         'this stack. Without the position assignment the app\'s position-gated policies are not ' +
-        'applicable to the persona, so the app-authored narrowing is unreachable (#7978).',
+        'applicable to the persona, so the app-authored narrowing is unreachable.',
     );
   }
   const sysCtx = { context: { isSystem: true } };
@@ -572,7 +572,7 @@ export async function provisionRlsPositionPersona(
       business_unit_id: null,
       organization_id: null,
       granted_by: null,
-      reason: `Ephemeral persona minted by \`objectstack verify --rls\`: holds '${position}' and nothing else, so the app's own position-gated RLS narrowing is exercised (#7978).`,
+      reason: `Ephemeral persona minted by \`objectstack verify --rls\`: holds '${position}' and nothing else, so the app's own position-gated RLS narrowing is exercised.`,
     },
     sysCtx,
   );
@@ -765,7 +765,7 @@ async function probeAsPersona(
         object,
         status: 'rls-hole',
         target: origin,
-        detail: `the probe cannot read it (GET ${bRead.status}) yet MUTATED it by id (PATCH ${bWrite.status}) — by-id write bypassed RLS (#1994 class)${via}`,
+        detail: `the probe cannot read it (GET ${bRead.status}) yet MUTATED it by id (PATCH ${bWrite.status}) — by-id write bypassed RLS, and a caller that cannot read a record must not be able to write it${via}`,
       });
     } else {
       results.push({
@@ -905,7 +905,7 @@ function summaryLine(s: RlsSummary): string {
 }
 
 export function formatRlsReport(report: RlsReport): string {
-  const lines: string[] = [`\n=== objectstack verify (RLS / #1994) — ${report.app} ===`];
+  const lines: string[] = [`\n=== objectstack verify (RLS / cross-owner by-id-write invariant) — ${report.app} ===`];
   for (const r of report.results) {
     lines.push(`  ${statusMark(r.status)} ${r.object}  [${r.status}] ${r.detail ?? ''}`);
   }
@@ -940,7 +940,7 @@ export function formatRlsReport(report: RlsReport): string {
   // would claim N× the reach the fan-out actually has.
   const cov = report.positionCoverage;
   lines.push(
-    `\n  ── position personas (#7978) — ${cov.ran.length} of ${cov.declared.length} declared position(s) probed`,
+    `\n  ── position personas (each holds one declared position and nothing else) — ${cov.ran.length} of ${cov.declared.length} declared position(s) probed`,
   );
   if (cov.note) lines.push(`     · ${cov.note}`);
   for (const run of report.positionRuns) {

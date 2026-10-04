@@ -1,5 +1,6 @@
 ---
-title: Solution Blueprint
+title: Solution Blueprint — AI Protocol reference
+navTitle: Solution Blueprint
 description: "The structured-output target an AI agent emits for a high-level goal (\"build me a project-management system\") instead of transcribing a field list."
 ---
 
@@ -44,7 +45,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type?: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `BlueprintApp.nav[number]`
 
@@ -52,7 +53,7 @@ const result = BlueprintAppSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'object' \| 'dashboard'>` | optional (default: `"object"`) | What this nav entry opens |
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
-| **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
+| **label** | `string` | optional | Nav entry label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time (a renamed target shows its new name); present ⇒ rendered verbatim, so never copy the target's label in as a default. |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
 | **viewName** | `string` | optional | For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object's default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration. |
 
@@ -186,7 +187,7 @@ const result = BlueprintAppSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'object' \| 'dashboard'>` | optional (default: `"object"`) | What this nav entry opens |
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
-| **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
+| **label** | `string` | optional | Nav entry label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time (a renamed target shows its new name); present ⇒ rendered verbatim, so never copy the target's label in as a default. |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
 | **viewName** | `string` | optional | For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object's default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration. |
 
@@ -297,7 +298,7 @@ const result = BlueprintAppSchema.parse(data);
 | **assumptions** | `string[]` | optional (default: `[]`) | Design assumptions made from the underspecified goal |
 | **questions** | `string[]` | optional | At most 1-2 structure-deciding questions to confirm before building |
 | **objects** | `{ name: string; label?: string; description?: string; fields: object[]; … }[]` | ✅ | Objects (tables) to create |
-| **views** | `{ object: string; name: string; label?: string; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |
+| **views** | `{ object: string; name: string; label?: string; type?: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |
 | **dashboards** | `{ name: string; label?: string; widgets?: object[] }[]` | optional | Dashboards to create |
 | **app** | `{ name: string; label?: string; icon?: string; nav?: object[] }` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
 | **seedData** | `{ object: string; records: Record<string, any>[] }[]` | optional | Suggested seed data (reported, not auto-applied in Phase C) |
@@ -339,7 +340,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type?: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `SolutionBlueprint.seedData[number]`
 

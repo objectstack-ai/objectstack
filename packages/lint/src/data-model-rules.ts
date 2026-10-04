@@ -61,7 +61,7 @@ export interface LintIssue {
  * runtime gate's `fingerprint` reads `where` and `path` together (making
  * `where` more specific cannot merge two findings that were distinct).
  *
- * [#10064] On the runtime gate's WIRE surface (`RuntimeAuthoringIssue.path`,
+ * [commit def0d3e63] On the runtime gate's WIRE surface (`RuntimeAuthoringIssue.path`,
  * the 422 `issues[]` / 2xx `advisories`), the top-level collection index of a
  * collection-resident finding is rewritten to the entry's NAME
  * (`objects[417].sharingModel` → `objects.acme_invoice.sharingModel`) after
@@ -341,7 +341,8 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
           `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
           `unstated (ADR-0120). Today the bare spelling materializes over exactly its \`fields\`, i.e. installation-wide; ` +
           `an author who meant "unique per organization" gets no per-organization constraint and no error. ` +
-          `Protocol 18 rejects this spelling (#5082).`,
+          `Protocol 18 rejects this spelling, and stored metadata that still carries it converts to ` +
+          `\`unique: 'global'\`, which builds the same physical index.`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
           `State the scope: \`unique: 'global'\` (installation-wide — exactly today's behavior) or ` +
@@ -518,7 +519,7 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
           `"${obj.name}" declares index${indexLabel} [${cols.join(', ')}] with ${spelling} and lists the organization ` +
           `column '${tenantColumn}' itself — the hand-written per-organization composite that predates the scope ` +
           `vocabulary (ADR-0120 S6). It reads as "unique per organization" but materializes as a plain composite, and ` +
-          `SQL UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing (#5030) — which ` +
+          `SQL UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing — which ` +
           `on a single-organization deployment is every row.`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
@@ -627,9 +628,18 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       const type = def.type;
 
       // R8 — option fields need options (or an options source).
+      //
+      // A `picklist` reference IS an options source: the field takes its
+      // options from the shared list it names (`data/picklist.zod.ts`), the
+      // same reading `FIELD_CHOICE_WITHOUT_OPTIONS` in the spec's
+      // functional-completeness rules makes. And the fix names the two
+      // sources as ALTERNATIVES: `FieldSchema` refuses `options` declared
+      // beside `picklist`, so a fix that said "add options" to a
+      // picklist-bound field would prescribe the schema's own refusal.
       if (OPTION_FIELD_TYPES.has(type)) {
         const hasOptions =
           (Array.isArray(def.options) && def.options.length > 0) ||
+          (typeof def.picklist === 'string' && def.picklist !== '') ||
           !!def.optionsFrom || !!def.dataSource || !!refOf(def);
         if (!hasOptions) {
           issues.push({
@@ -637,6 +647,10 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             rule: 'field/select-missing-options',
             message: `${type} field "${obj.name}.${fieldName}" has no options`,
             path: `${fieldPath}.options`,
+            fix:
+              "Give the field ONE options source: inline `options: [{ label: '…', value: '…' }]`, or " +
+              "`picklist: '<name>'` naming a shared list — never both, because a field declaring " +
+              '`options` beside `picklist` is refused.',
           });
         }
       }

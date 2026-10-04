@@ -18,6 +18,37 @@ import type { CelFilterFailReason } from '@objectstack/formula';
 // engine's `where` seam and analytics' read-scope guard call. Called on every
 // compiled policy filter, never restated (see `judgeCompiledComparands`).
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared lowering, run on every
+// compiled policy filter right after the two faces above
+// (`judgeCompiledComparands`), so `using` and `check` hand their consumers the
+// same lowered filter.
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
+// [#21242] The number-comparand verdict the engine's `where` door consults
+// (`@objectstack/objectql`'s `number-comparand-declared-type-door.ts`), read
+// here from the same spec module — one verdict, one set of judged operators,
+// one refusal sentence — and run on every compiled policy filter
+// (`judgeCompiledComparands`).
+import {
+  NUMBER_COMPARAND_DOOR_LIST_OPERATORS,
+  NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS,
+  filterSubtreeProvenanceOf,
+  markFilterSubtreeProvenance,
+  numberComparandDoorVerdict,
+  numberComparandFieldVerdict,
+  numberComparandRefusalMessage,
+  type NumberComparandDoorFieldMeta,
+} from '@objectstack/spec/data';
+// [#21376] The boolean-comparand verdict the engine's `where` door consults
+// beside the number one (`@objectstack/objectql`'s
+// `boolean-comparand-declared-type-door.ts`), read from the same spec module —
+// one verdict, one set of accepted spellings, one refusal sentence — and run in
+// the same walk as the number arm (`judgeCompiledComparands`).
+import {
+  booleanComparandDoorVerdict,
+  booleanComparandFieldVerdict,
+  booleanComparandRefusalMessage,
+  type BooleanComparandDoorFieldMeta,
+} from '@objectstack/spec/data';
 
 /**
  * Why a policy's predicate produced no filter — the compiler's OWN answer,
@@ -85,7 +116,7 @@ interface RLSUserContext {
    * `rlsMembership` bag, because a wall an app could redefine would not be a
    * wall.
    *
-   * ⚠️ Reserving a key obliges someone to FILL it. Until #16518 nobody did:
+   * ⚠️ Reserving a key obliges someone to FILL it. Until commit 470746ae4 nobody did:
    * `packages/spec` declared the key's SHAPE (`accessible_org_ids?: string[]`)
    * and named core as its resolver, an app was refused from supplying it, and
    * this interface did not carry it — so every predicate naming it dropped out
@@ -117,6 +148,42 @@ interface RLSUserContext {
 export interface RlsFieldGuard {
   /** Every column the object declares, exactly as `getObjectFieldNames` builds it. */
   declared: ReadonlySet<string>;
+  /**
+   * [ADR-0053 D-D1 item 7 — #5930] The columns the object declares as
+   * `datetime`, read from the same declaration as {@link declared}. The shared
+   * lowering's whole-day rule (a bare-day `$lte`, a `$between`) rewrites these
+   * columns only, the scope `SqlDriver` holds — so a `date`, `time` or
+   * non-temporal column reaches `using`'s drivers and `check`'s evaluator
+   * byte-identical to before. Absent (no guard, or a caller that did not read
+   * the types) means the seam cannot read the declared type, so the rule
+   * applies TYPE-BLIND (item 7's second half — the engine's `where` seam reads
+   * an object with no field map the same way): the drivers keep no copy of the
+   * rule to fall back on, and on `Field.date` text `< next-day` orders exactly
+   * as `<= day`. The NULL-polarity guards do not depend on it.
+   */
+  datetime?: ReadonlySet<string>;
+  /**
+   * [#21242] Each declared column as the spec's number-comparand verdict reads
+   * it (its `type`, and a `formula`'s `returnType`), from the same declaration
+   * as {@link declared}. A compiled policy comparand a NUMERIC column cannot be
+   * compared with — a string the numeric grammar does not read, a boolean, a
+   * `Date`, an array — is refused here as the engine's `where` door refuses
+   * it (`INVALID_FILTER` / 400 there), and a numeric string is narrowed to its
+   * number ({@link judgeCompiledComparands}). Absent, nothing is judged: the
+   * door the engine runs for an object with no field map judges nothing
+   * either.
+   *
+   * [#21376] The map records EVERY declared column (`security-plugin.ts`'s
+   * `loadObjectFieldNames` writes each one, and leaves the class to the
+   * verdict), so it is also the slice the spec's boolean-comparand verdict
+   * reads — the same `type` / `returnType` pair (`BooleanComparandDoorFieldMeta`).
+   * A comparand a BOOLEAN column cannot be compared with (`'yes'`, a number
+   * other than `1` / `0` — whatever the verdict refuses) is refused here as the
+   * engine's `where` door refuses it, and an accepted spelling is narrowed to
+   * its boolean. Each verdict decides which columns it judges; the two classes
+   * are disjoint.
+   */
+  number?: ReadonlyMap<string, NumberComparandDoorFieldMeta>;
 }
 
 /** {@link judgeCompiledFields}' answer. */
@@ -276,16 +343,61 @@ type RlsComparandVerdict =
  * the engine's composed `where` could do neither: the write check never passes
  * it, and there a refusal could only be a 400 the caller cannot act on.
  *
+ * [#21242] With the guard's declared column types ({@link RlsFieldGuard.number}),
+ * a third face runs between those two: the spec's number-comparand verdict, the
+ * one the engine's `where` door consults ({@link narrowPolicyComparands}).
+ * A comparand a numeric column cannot be compared with is refused through the
+ * same route, and a numeric string is narrowed to its number.
+ *
+ * [#21376] The same walk carries the boolean arm, as the engine's walk does:
+ * the spec's boolean-comparand verdict, read off the same declared types. A
+ * comparand a boolean column cannot be compared with (`'yes'`, `2`) is refused
+ * through the same route, and `'true'` / `'false'`, `'1'` / `'0'` and `1` / `0`
+ * narrow to the boolean each names. Before it ran, `record.flag != 'true'`
+ * compiled to `{ flag: { $ne: 'true' } }`, which the read compared with the
+ * stored `1` / `0` on SQLite and so kept EVERY row — the exclusion the author
+ * wrote was not applied — and which the write check admitted for every row.
+ *
  * Returns the faces' own filter (the type face narrows an exact-range `bigint`
- * copy-on-write and returns the same reference otherwise). A thrown value
+ * copy-on-write and returns the same reference otherwise), then LOWERED by the
+ * shared `lowerFilterCondition` (ADR-0053 D-D1, amended — #5930): this is the
+ * RLS compile seam the amendment names, so the `$between` split, the whole-day
+ * upper bound on the guard's `datetime` columns (on every column, type-blind,
+ * when the guard carries no type set — {@link rlsLowering}) and the
+ * NULL-polarity guards are applied here once, for `using` and `check` alike. A thrown value
  * without the ADR-0112 envelope (a string `code` and a numeric `status`) is not
  * a verdict about the filter, so it is re-thrown rather than dressed up as one.
  */
-function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandVerdict {
+function judgeCompiledComparands(
+  filter: Record<string, unknown>,
+  lowering: FilterLoweringOptions,
+  declaredFields?: ReadonlyMap<string, NumberComparandDoorFieldMeta>,
+  clause: 'using' | 'check' = 'using',
+): RlsComparandVerdict {
   try {
     assertListComparandShapes(filter);
-    return { ok: true, filter: normalizeFilterComparandTypes(filter) };
+    // [#21242] The number-comparand door, in the engine's `where` order:
+    // after the shape door, before the comparand-type door. A refusal here
+    // leaves through the catch below like the other faces' refusals, so the
+    // policy is dropped for `using` and `check` alike: the read gets the deny
+    // sentinel and the write a 403, one answer for one comparison. [#21376]
+    // The boolean arm rides the same walk, so its refusal leaves the same way.
+    const judged = declaredFields ? narrowPolicyComparands(filter, declaredFields, clause, clause) : filter;
+    // [ADR-0053 D-D1, amended — #5930] The RLS compile seam's lowering, AFTER
+    // both faces (the amendment's items 2-3). No token resolution precedes it
+    // because none exists on either clause: the engine resolves the caller's
+    // `where` before its middleware composes this filter, and the write check
+    // evaluates it directly — measured, a policy comparand `'{today}'` compiles
+    // and reaches both consumers verbatim, so the lowering reads it as the
+    // non-day string it is and leaves it as written, as every face does today.
+    // Never refuses: a shape it does not lower passes through for the face that
+    // owns its refusal.
+    return { ok: true, filter: lowerFilterCondition(normalizeFilterComparandTypes(judged), lowering) };
   } catch (thrown) {
+    // [#21242, #21376] A declared-type arm's refusal carries its own detail,
+    // already written for the clause being compiled (see `numberRefusalDetail`
+    // and `booleanRefusalDetail`).
+    if (thrown instanceof PolicyComparandRefusal) return { ok: false, detail: thrown.detail };
     const { code, status } = (thrown ?? {}) as { code?: unknown; status?: unknown };
     if (!(thrown instanceof Error) || typeof code !== 'string' || typeof status !== 'number') throw thrown;
     // The face's sentence is quoted whole (it names the operator, the field and
@@ -299,6 +411,255 @@ function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandV
         `filter: ${thrown.message.replace(/\.$/, '')}`,
     };
   }
+}
+
+/**
+ * The operators whose one comparand the declared-type arms judge — the spec's
+ * list, never a re-listing. [#21376] The boolean arm's list is the number
+ * door's BY IDENTITY (`BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS`), as in the
+ * engine's walk, so both arms judge at the same positions by construction.
+ */
+const NUMBER_DOOR_SCALAR_OPERATORS: ReadonlySet<string> = new Set(NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS);
+/** The operators each of whose MEMBERS the declared-type arms judge (likewise shared by identity). */
+const NUMBER_DOOR_LIST_OPERATORS: ReadonlySet<string> = new Set(NUMBER_COMPARAND_DOOR_LIST_OPERATORS);
+
+/** A plain object: a filter node or an operator map, never a comparand (a `Date` is data). */
+function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** `to`, carrying the filter-subtree provenance mark of `from`, the node it replaces. */
+function withProvenanceOf<T>(from: unknown, to: T): T {
+  const mark = filterSubtreeProvenanceOf(from);
+  return mark === null ? to : markFilterSubtreeProvenance(to, mark);
+}
+
+/**
+ * [#21242] A declared-type arm's refusal of one compiled policy comparand. It
+ * carries the ADR-0112 envelope the shared faces' refusals carry, and the
+ * detail the fail-closed WARN line prints, already written for the clause
+ * being compiled ({@link numberRefusalDetail}, {@link booleanRefusalDetail}).
+ * [#21376] One class for both arms: {@link judgeCompiledComparands} routes
+ * them the same way.
+ */
+class PolicyComparandRefusal extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly detail: string;
+  constructor(detail: string, code: string, status: number) {
+    super(detail);
+    this.name = 'PolicyComparandRefusal';
+    this.detail = detail;
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * The WARN detail for a number-door refusal, naming the clause. The spec's
+ * sentence is quoted whole bar its closing full stop (the WARN line appends its
+ * own sentence), rooted at the clause (`check.amount.$lte`), and it names
+ * PostgreSQL's server error only for `using`: that clause is composed into the
+ * read a driver binds, while `check` is evaluated in-process and reaches no
+ * bind at all (the spec's `NumberComparandRefusalSite.boundByDriver`).
+ */
+function numberRefusalDetail(clause: 'using' | 'check', code: string, message: string): string {
+  const consumer = clause === 'using'
+    ? 'the read, where a driver binds it'
+    : 'the write check, which evaluates it in-process';
+  return (
+    `the compiled \`${clause}\` predicate compares a numeric column with a comparand that is not a number (${code}), ` +
+    `so the policy was not handed to ${consumer}. In the platform's number-comparand words: ${message.replace(/\.$/, '')}`
+  );
+}
+
+/**
+ * [#21376] The WARN detail for a boolean-arm refusal, naming the clause — the
+ * number detail's shape. The spec's sentence is quoted whole bar its closing
+ * full stop, rooted at the clause (`using.flag.$ne`).
+ */
+function booleanRefusalDetail(clause: 'using' | 'check', code: string, message: string): string {
+  const consumer = clause === 'using'
+    ? 'the read, where a driver binds it'
+    : 'the write check, which evaluates it in-process';
+  return (
+    `the compiled \`${clause}\` predicate compares a boolean column with a comparand that is not a boolean (${code}), ` +
+    `so the policy was not handed to ${consumer}. In the platform's boolean-comparand words: ${message.replace(/\.$/, '')}`
+  );
+}
+
+/**
+ * One declared-type arm's judgment of ONE comparand at a judged position: the
+ * narrowed value, the comparand unchanged, or a thrown
+ * {@link PolicyComparandRefusal}. [#21376] {@link narrowedFieldSpec} hands it
+ * every judged position, so both arms judge at the same boundaries.
+ */
+type JudgeOne = (comparand: unknown, path: string) => unknown;
+
+/**
+ * The number arm, bound to a numeric column: by the spec's verdict, the
+ * narrowed number, the comparand unchanged, or a thrown
+ * {@link PolicyComparandRefusal} in the spec's words — the refusal
+ * {@link judgeCompiledComparands} routes.
+ */
+const numberArm = (meta: NumberComparandDoorFieldMeta, field: string, clause: 'using' | 'check'): JudgeOne =>
+  (comparand, path) => {
+    const verdict = numberComparandDoorVerdict(meta, comparand);
+    if (verdict.verdict === 'narrows') return verdict.value;
+    if (verdict.verdict !== 'door-refusal') return comparand;
+    const message = numberComparandRefusalMessage({
+      field,
+      declaredType: meta.type,
+      ...(meta.returnType === undefined ? {} : { returnType: meta.returnType }),
+      path,
+      value: comparand,
+      form: verdict.form,
+      boundByDriver: clause === 'using',
+    });
+    // The envelope is spelled as literals, the ones the spec's verdict types its
+    // refusal with (`code: 'INVALID_FILTER'`, `status: 400`), so the codes this
+    // site stamps are readable at the site (`check:dispatcher-error-vocabulary`).
+    throw new PolicyComparandRefusal(numberRefusalDetail(clause, 'INVALID_FILTER', message), 'INVALID_FILTER', 400);
+  };
+
+/**
+ * [#21376] The boolean arm, bound to a boolean column (`boolean`, `toggle`, a
+ * `formula` returning `boolean`): by the spec's verdict
+ * (`booleanComparandDoorVerdict`), the boolean an accepted spelling names, the
+ * comparand unchanged, or a thrown {@link PolicyComparandRefusal} in the
+ * spec's words (`booleanComparandRefusalMessage`). ⛔ Nothing here reads a
+ * spelling: the verdict does.
+ */
+const booleanArm = (meta: BooleanComparandDoorFieldMeta, field: string, clause: 'using' | 'check'): JudgeOne =>
+  (comparand, path) => {
+    const verdict = booleanComparandDoorVerdict(meta, comparand);
+    if (verdict.verdict === 'narrows') return verdict.value;
+    if (verdict.verdict !== 'door-refusal') return comparand;
+    const message = booleanComparandRefusalMessage({
+      field,
+      declaredType: meta.type,
+      ...(meta.returnType === undefined ? {} : { returnType: meta.returnType }),
+      path,
+      value: comparand,
+      form: verdict.form,
+    });
+    // Literals, as the number arm spells them (`check:dispatcher-error-vocabulary`).
+    throw new PolicyComparandRefusal(booleanRefusalDetail(clause, 'INVALID_FILTER', message), 'INVALID_FILTER', 400);
+  };
+
+/** One judged column's constraint, `{ amount: <spec> }`, with its comparands judged by `judge`. */
+function narrowedFieldSpec(judge: JudgeOne, spec: unknown, path: string): unknown {
+  // Not filter structure: the implicit-equality comparand.
+  if (!isPlainFilterNode(spec)) return judge(spec, path);
+  // A `{ $field }` reference is not a literal, and a plain object with no `$`
+  // key is not this door's subject — each is left for the face that owns it.
+  if (typeof spec.$field === 'string' || !Object.keys(spec).some((k) => k.startsWith('$'))) return spec;
+  let out: Record<string, unknown> | undefined;
+  for (const [op, comparand] of Object.entries(spec)) {
+    if (NUMBER_DOOR_SCALAR_OPERATORS.has(op)) {
+      const judged = judge(comparand, `${path}.${op}`);
+      if (judged !== comparand) (out ??= { ...spec })[op] = judged;
+      continue;
+    }
+    if (!NUMBER_DOOR_LIST_OPERATORS.has(op) || !Array.isArray(comparand)) continue;
+    let members: unknown[] | undefined;
+    comparand.forEach((member, index) => {
+      const judged = judge(member, `${path}.${op}[${index}]`);
+      if (judged !== member) (members ??= [...comparand])[index] = judged;
+    });
+    if (members) (out ??= { ...spec })[op] = withProvenanceOf(comparand, members);
+  }
+  return out ? withProvenanceOf(spec, out) : spec;
+}
+
+/**
+ * [#21242] The compiled policy filter with every comparand on a declared
+ * numeric column judged by the spec's number-comparand verdict
+ * (`numberComparandFieldVerdict` / `numberComparandDoorVerdict`), the one
+ * the engine's `where` door consults: refused (thrown, `INVALID_FILTER` /
+ * 400), narrowed copy-on-write, or kept. The positions are that door's: the
+ * implicit-equality comparand, the scalar comparisons and every member of the
+ * list operators, at undotted keys naming a declared column, through `$and`,
+ * `$or` and `$not`. A subtree nothing narrowed is returned by reference.
+ *
+ * Before this ran, a policy such as `record.amount <= '9999-12-31'` on a
+ * `number` column compiled and reached both consumers: the read compared the
+ * stored number with the text by the driver's own ordering (measured on
+ * SQLite, which showed the row), while the write check's evaluator answered by
+ * its own reading. The same comparison in a caller's `where` is refused by the
+ * engine's door, so the policy is refused here, once, for both clauses. The
+ * paths are rooted at the clause being compiled (`check.amount.$lte`).
+ *
+ * [#21376] Where the number arm does not judge a key, the boolean arm may
+ * (`booleanComparandFieldVerdict` / `booleanComparandDoorVerdict`): the two
+ * classes are disjoint, so at most one arm judges a key — the engine walk's
+ * order, in one traversal with one set of boundaries.
+ */
+function narrowPolicyComparands<T>(
+  node: T,
+  fields: ReadonlyMap<string, NumberComparandDoorFieldMeta>,
+  path: string,
+  clause: 'using' | 'check',
+  depth = 0,
+): T {
+  if (depth > 32 || !isPlainFilterNode(node)) return node;
+  let out: Record<string, unknown> | undefined;
+  for (const [key, value] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    let next: unknown = value;
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) continue;
+      let arms: unknown[] | undefined;
+      value.forEach((arm, index) => {
+        const walked = narrowPolicyComparands(arm, fields, `${here}[${index}]`, clause, depth + 1);
+        if (walked !== arm) (arms ??= [...value])[index] = walked;
+      });
+      if (arms) next = withProvenanceOf(value, arms);
+    } else if (key === '$not') {
+      next = narrowPolicyComparands(value, fields, here, clause, depth + 1);
+    } else {
+      // Another `$` key is not a column, and a dotted key names a path, not a
+      // declared column: neither is this door's subject.
+      if (key.startsWith('$') || key.includes('.')) continue;
+      const meta = fields.get(key);
+      if (!meta) continue;
+      // Only a judged field can refuse or narrow a comparand; a `formula` whose
+      // return type is unreadable is `deferred` and everything else
+      // `not-judged` — each spec verdict decides, never a list here.
+      if (numberComparandFieldVerdict(meta) === 'judged') {
+        next = narrowedFieldSpec(numberArm(meta, key, clause), value, here);
+      } else if (booleanComparandFieldVerdict(meta) === 'judged') {
+        next = narrowedFieldSpec(booleanArm(meta, key, clause), value, here);
+      } else {
+        continue;
+      }
+    }
+    if (next !== value) (out ??= { ...node })[key] = next;
+  }
+  return (out ? withProvenanceOf(node, out) : node) as T;
+}
+
+/**
+ * [ADR-0053 D-D1 item 7 — #5930, #20822] The RLS seam's declared-type reader: a
+ * column is `datetime` when the caller's guard says so
+ * ({@link RlsFieldGuard.datetime}).
+ *
+ * With no type set to read — no guard (the security plugin could not resolve
+ * the object's declaration), or a guard built without types — this seam
+ * cannot read the declared type, so it hands the lowering NO reader and the
+ * whole-day rule applies type-blind: item 7's reading for a seam that cannot
+ * read the type, and the engine seam's for an object with no field map. This
+ * branch used to read "no column is `datetime`", which left a bare-day upper
+ * bound to the drivers' own copies of the rule; those copies are deleted
+ * (#20822), and a `using` filter is composed into the query after the
+ * engine's seam has run, so nothing downstream would lower it.
+ */
+function rlsLowering(fieldGuard: RlsFieldGuard | undefined): FilterLoweringOptions {
+  const datetime = fieldGuard?.datetime;
+  if (datetime === undefined) return {};
+  return { isDatetimeColumn: (column) => datetime.has(column) };
 }
 
 /**
@@ -319,6 +680,29 @@ function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandV
 export const RLS_DENY_FILTER: Record<string, unknown> = Object.freeze({
   id: '__rls_deny__:00000000-0000-0000-0000-000000000000',
 });
+
+/**
+ * [#20355] Which policy each compiled policy filter came from — recorded by
+ * {@link RLSCompiler.compileFilter} as it keeps a policy's filter, read by
+ * {@link compiledPolicyNameOf}.
+ *
+ * The composed answer is either one policy's filter itself or `{ $or: [...] }`
+ * of them, and both are built fresh by every compile, so the identity of a
+ * member IS its policy. A WeakMap rather than a property on the filter: the
+ * filter is handed to drivers and evaluators that walk its own keys, and a
+ * record kept beside it can neither leak into a query nor outlive it.
+ */
+const POLICY_OF_COMPILED_FILTER = new WeakMap<object, string>();
+
+/**
+ * [#20355] The name of the policy whose compiled filter `node` is, or
+ * `undefined` for any other node (a composed `$or`, a sub-condition, the deny
+ * sentinel). Lets a caller that refuses a compiled filter name the policy it
+ * refused, which the composed filter no longer says.
+ */
+export function compiledPolicyNameOf(node: unknown): string | undefined {
+  return node !== null && typeof node === 'object' ? POLICY_OF_COMPILED_FILTER.get(node) : undefined;
+}
 
 /**
  * Is this field constraint an emptied membership, and what CONSTANT does it
@@ -520,7 +904,7 @@ export class RLSCompiler {
       organization_id: executionContext?.tenantId,
       positions: executionContext?.positions,
       org_user_ids: (executionContext as any)?.org_user_ids,
-      // [ADR-0105 D2 / #16518] The caller's union org scope, copied from the
+      // [ADR-0105 D2 / commit 470746ae4] The caller's union org scope, copied from the
       // execution context exactly as `org_user_ids` is. Both are core-resolved
       // membership sets the runtime pre-resolves so this compiler never has to
       // issue a subquery; the ONLY reason this line was missing is that nobody
@@ -621,9 +1005,10 @@ export class RLSCompiler {
           // refusal joins `deniedBy` like the rows above — the per-request
           // fail-closed route a list under `==` already takes — so `using` and
           // `check` refuse together and a granting sibling still grants.
-          const comparands = judgeCompiledComparands(outcome.filter);
+          const comparands = judgeCompiledComparands(outcome.filter, rlsLowering(fieldGuard), fieldGuard?.number, clause);
           if (comparands.ok) {
             filters.push(comparands.filter);
+            POLICY_OF_COMPILED_FILTER.set(comparands.filter, (policy as { name?: string }).name ?? '(unnamed)');
           } else {
             deniedBy.push({ policy, cause: { reason: 'refused-comparand', detail: comparands.detail } });
           }

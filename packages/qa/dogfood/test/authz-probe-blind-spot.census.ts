@@ -7,7 +7,7 @@
 // "ratchets completeness over a CURATED table of HTTP/transport entry points"
 // and that "a new ungated route there is UNCLASSIFIED ... and breaks CI". That
 // promise is true only for the entry points a probe can actually mint a key
-// for. This module measures, for EVERY one of the 13 files the `PROBES` table
+// for. This module measures, for EVERY one of the 14 files the `PROBES` table
 // names, how far that reach extends — and records the result so it cannot rot.
 //
 // ⭐ Since 2026-08-31 two of those files are the ROUTE LEDGERS, and they are
@@ -101,12 +101,12 @@
 // conclusion that gets re-derived from scratch otherwise:
 //
 // WHAT THE LEDGERS DO COVER — richly, and more than this table ever has.
-//   `packages/rest/src/rest-route-ledger.ts`: 83 audited rows over 18 families,
+//   `packages/rest/src/rest-route-ledger.ts`: 82 audited rows over 18 families,
 //     every route `@objectstack/rest` mounts, enumerated through
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 81 rows over 21 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 82 rows over 21 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
@@ -283,7 +283,11 @@ export interface ProbeTableReading {
   keys: number;
 }
 
-export const PROBE_TABLE: ProbeTableReading = { entries: 18, files: 13, keys: 15 };
+// [#21061] 18 / 13 / 15 -> 19 / 14 / 17: the `/analytics` domain gate joined the
+// table as a GATE_PIN on `packages/runtime/src/domains/analytics.ts`, and the
+// `anonymous-deny-analytics` row covers its key plus the `/analytics`
+// dispatcher-domain key that left the shrink-only ledger baseline.
+export const PROBE_TABLE: ProbeTableReading = { entries: 19, files: 14, keys: 17 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -301,8 +305,11 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 18, files: 13, keys: 15
  * next probe added without moving the prose is RED instead of a fact recorded
  * in a third file. ⛔ Do not re-point this at a hand-written number — it is
  * read out of the matrix header's own text.
+ *
+ * [#21061] 18 -> 19, moved in the same change as the header sentence and the
+ * probe it counts, which is exactly what the inverted pin asks for.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 18;
+export const MATRIX_HEADER_PROBE_CLAIM = 19;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   // ── the two LEDGER files: the population source since 2026-08-31 ───────
@@ -325,18 +332,25 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
     keys: 18,
-    population: 83,
-    reachable: 83,
+    // [#21180] 83 / 83 / 0 -> 82 / 82 / 0: the anonymous lookup-picker row
+    // (`GET /api/v1/forms/:slug/lookup/:field`) left the ledger with its route.
+    // It carried `family: 'forms'`, a family the two surviving form rows still
+    // carry, so `reachable` moves with `population`, the blind spot stays 0 and
+    // `keys` stays 18 (18 distinct families before and after, re-derived).
+    population: 82,
+    reachable: 82,
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
-    controls: { "route: '": 83, "family: '": 83, RestRouteLedgerEntry: 2 },
+    controls: { "route: '": 82, "family: '": 82, RestRouteLedgerEntry: 2 },
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 18 families; 1 classified by a ' +
-      'matrix row (metadata), 17 enumerated in the shrink-only baseline. Re-measured 91 -> 83 (19 -> 18 families) ' +
+      'matrix row (metadata), 17 enumerated in the shrink-only baseline. Re-measured 83 -> 82 when the anonymous ' +
+      'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
+      'still carry, so `reachable` moved with `population` and the families stay 18. Earlier re-measured 91 -> 83 (19 -> 18 families) ' +
       'when the whole saved-report `reports` family left with its eight routes, all eight carrying the family, so ' +
       '`reachable` moved with `population`. Earlier re-measured 94 -> 91 when the ' +
       'three REST package read/delete rows (GET /packages, GET /packages/:id, DELETE /packages/:id) left the ' +
@@ -362,11 +376,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // route (door ④ — the list is `GET /meta/flow`). It carried
     // `domain: '/automation'`, a key other rows still carry, so `reachable`
     // moves with `population`, `blindSpot` stays 0 and `keys` stays 21.
-    population: 81,
-    reachable: 81,
+    // [#20676] 81 -> 82: the `POST /automation/:name/clone` row arrived with its
+    // mount (ADR-0126 §7.1). It carries `domain: '/automation'`, an EXISTING
+    // key, so `reachable` moves with `population`, `blindSpot` stays 0 and
+    // `keys` stays 21 (21 distinct domains before and after, re-derived).
+    population: 82,
+    reachable: 82,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 81, "domain: '": 81, RouteLedgerEntry: 2 },
+    controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
@@ -381,9 +399,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION', 'TRIPWIRE'],
     probes: 3,
     keys: 1,
-    population: 72,
+    population: 71,
     reachable: 19,
-    blindSpot: 53,
+    blindSpot: 52,
     populationRule:
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
@@ -427,9 +445,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `this.routeManager.register(` reads 73 because the helper's forwarder is
     // one of them, and it is sliced out before counting.
     //
-    // [#13214] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
+    // [commit cc837dbfe] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
     // exists to prove this census is still reading the file it thinks it is, and
-    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling on #13214
+    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling (commit cc837dbfe)
     // was supposed to cause — `registerUiEndpoints` was the ONE route in this
     // file that resolved no identity, and it is now guarded. The move is +3 over
     // the whole file (`occurrences` counts the bare term, comments included):
@@ -441,9 +459,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // ⚠️ The three sibling numbers were re-derived and did NOT move, which is
     // what says this is a guard change and not a surface change: `population`
     // 80, `reachable` 19, `private register*Endpoints(` 17 and
-    // `this.routeManager.register(` 80 are all unchanged — #13214 added no route
+    // `this.routeManager.register(` 80 are all unchanged — commit cc837dbfe added no route
     // and no registrar. `blindSpot` therefore stays 61 as well.
-    // ⚠️ That last figure is the reading AS OF #13214 and is left as written:
+    // ⚠️ That last figure is the reading AS OF commit cc837dbfe and is left as written:
     // the control is 73 today for the spelling reason recorded above, and the
     // population it feeds is still 80. Do not "correct" the paragraph — it is a
     // dated measurement, not a live claim.
@@ -471,9 +489,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // registrar's comments did not name the term). None of the eight was
     // inside `registerMetadataEndpoints`, so `reachable` does not move and the
     // blind spot shrinks by exactly the eight routes that no longer exist.
+    // [#21180] 72 / 19 / 53 -> 71 / 19 / 52: the anonymous lookup-picker route
+    // (`GET /forms/:slug/lookup/:field`) was deleted with its handler — one
+    // direct `this.routeManager.register(` site (65 -> 64) inside
+    // `registerFormEndpoints`, NOT inside `registerMetadataEndpoints`, so it
+    // was a BLIND SPOT: `reachable` does not move and the blind spot shrinks by
+    // exactly that one route. Measured on the tree before the deletion and
+    // after it: 72 / 19 / 53 there, 71 / 19 / 52 here. The other controls did
+    // not move: the handler never called `enforceAuth` (the public-form routes
+    // bypass it), so that stays 56, and `registerFormEndpoints` survives, so
+    // `private register*Endpoints(` stays 16.
     controls: {
       'private register*Endpoints(': 16,
-      'this.routeManager.register(': 65,
+      'this.routeManager.register(': 64,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -486,7 +514,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
       'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, ' +
-      'registerSharingRuleEndpoints, registerUiEndpoints and the rest. A runtime mount census reads 77/19/58. ' +
+      'registerSharingRuleEndpoints, registerUiEndpoints and the rest. A runtime mount census reads 76/19/57. ' +
       'registerUiEndpoints is NOT special — it is simply the registrar a census happened to walk past.',
   },
   {
@@ -539,6 +567,22 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: '`export async function handle*Request` entry points',
     controls: { 'shouldDenyAnonymous(': 1, handlePackagesRequest: 2 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    // [#21061] The analytics domain joined the anonymous-deny floor; the gate is
+    // the handler's first statement, so this row has the actions.ts shape. Its
+    // handler name occurs 3 times: the declaration, the DomainRoute call site
+    // and the file docblock's link to it.
+    file: 'packages/runtime/src/domains/analytics.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleAnalyticsRequest: 3 },
     note: 'Same shape as domains/actions.ts.',
   },
   {
@@ -652,7 +696,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
 /**
  * Entry points inside the probe table's OWN files that no mintable key can
  * reach, counting only the route/handler surfaces the ratchet's completeness
- * claim is about: rest-server.ts (53 static / 58 runtime), http-dispatcher.ts
+ * claim is about: rest-server.ts (52 static / 57 runtime), http-dispatcher.ts
  * (13) and domains/mcp.ts (1).
  *
  * hono-plugin.ts's 6 mounts are deliberately EXCLUDED from this total and
@@ -661,8 +705,11 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
  * not the six.
  */
 // [#20102] 75 / 80 -> 67 / 72: the retired saved-report routes left rest-server.ts.
-export const BLIND_SPOT_TOTAL_STATIC = 67;
-export const BLIND_SPOT_TOTAL_RUNTIME = 72;
+// [#21180] 67 / 72 -> 66 / 71: the retired anonymous lookup-picker route left
+// rest-server.ts as one blind-spot call site and one runtime mount (measured:
+// `RestServer.getRoutes()` against a bare protocol, 73 mounts -> 72).
+export const BLIND_SPOT_TOTAL_STATIC = 66;
+export const BLIND_SPOT_TOTAL_RUNTIME = 71;
 
 /**
  * Re-measure every row above from the same sources the probes read.
@@ -864,11 +911,12 @@ export function deriveProbeFileCensus(): {
     });
   }
 
-  // ── the four runtime domain files (GATE_PIN) ────────────────────────────
+  // ── the five runtime domain files (GATE_PIN) ────────────────────────────
   const domains: Array<[string, string, string]> = [
     ['packages/runtime/src/domains/actions.ts', 'shouldDenyAnonymous(', 'handleActionsRequest'],
     ['packages/runtime/src/domains/automation.ts', 'shouldDenyAnonymous(', 'handleAutomationRequest'],
     ['packages/runtime/src/domains/packages.ts', 'shouldDenyAnonymous(', 'handlePackagesRequest'],
+    ['packages/runtime/src/domains/analytics.ts', 'shouldDenyAnonymous(', 'handleAnalyticsRequest'],
   ];
   for (const [rel, gate, handler] of domains) {
     const src = read(rel);

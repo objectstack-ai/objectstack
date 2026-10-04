@@ -37,7 +37,8 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { jsonColumnOperatorRefusalText } from '@objectstack/core';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -51,6 +52,11 @@ const POLICY_COL = 'secret_policy_col';
 const SECRET = 'PSECRET_LITERAL';
 const SECRET_NUM = 7770123;
 const UNDECLARED_KEY = '$psecret_combinator';
+/**
+ * [#21178] The one column the half-2 transport is told is stored as JSON — the
+ * JSON-column gate's refusal needs the driver's rule injected to be reachable.
+ */
+const POLICY_JSON_COL = 'secret_policy_json_col';
 
 type Door = {
   /** The `RemoteTransport` method this row drives — asserted by the error's stack. */
@@ -150,11 +156,36 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, SECRET],
     klass: 'Operator "$exists" in this filter requires a boolean comparand',
   },
+  // ── #20444: the `$empty` operator, born in the seam ─────────────────────────
+  {
+    builder: 'nonBooleanEmptyComparand',
+    where: () => ({ [POLICY_COL]: { $empty: SECRET } }),
+    secrets: [POLICY_COL, SECRET],
+    klass: 'Operator "$empty" in this filter requires a boolean comparand',
+  },
+  {
+    // A bare transport holds no declaration for any field, so the flag on a
+    // real column is refused here — the standalone half of the rule.
+    builder: 'undeclaredEmptyOperatorField',
+    where: () => ({ [POLICY_COL]: { $empty: true } }),
+    secrets: [POLICY_COL],
+    klass: 'targets a field whose declaration this driver does not hold',
+  },
   {
     builder: 'uncompilableComparand',
     where: () => ({ [POLICY_COL]: { $contains: { k: SECRET } } }),
     secrets: [POLICY_COL, SECRET],
     klass: 'a value this transport cannot bind',
+  },
+  // ── #21178: the JSON-column gate, born in the seam ─────────────────────────
+  {
+    // The class is read from the shared builder, never spelled here: its words
+    // belong to `@objectstack/core`, and the operator it names in prose
+    // (`$nin`) is the class, not a secret — the FIELD is what is withheld.
+    builder: 'jsonColumnOperator',
+    where: () => ({ [POLICY_JSON_COL]: { $nin: [SECRET] } }),
+    secrets: [POLICY_JSON_COL],
+    klass: jsonColumnOperatorRefusalText(POLICY_JSON_COL, '$nin', false).message,
   },
 ];
 
@@ -222,6 +253,19 @@ const ARMS: readonly Door[] = [
     secrets: [POLICY_COL, '$in[1]'],
     klass: 'A comparand in this filter is undefined',
     label: "{ secret_policy_col: { $in: ['a', undefined] } }",
+  },
+  // [#21178] The gate's two bare-equality positions: a value and `null`.
+  {
+    builder: 'jsonColumnOperator',
+    where: () => ({ [POLICY_JSON_COL]: SECRET }),
+    secrets: [POLICY_JSON_COL],
+    klass: jsonColumnOperatorRefusalText(POLICY_JSON_COL, '=', true).message,
+  },
+  {
+    builder: 'jsonColumnOperator',
+    where: () => ({ [POLICY_JSON_COL]: null }),
+    secrets: [POLICY_JSON_COL],
+    klass: jsonColumnOperatorRefusalText(POLICY_JSON_COL, '=', true).message,
   },
 ];
 
@@ -326,6 +370,10 @@ function transport() {
   const t = new RemoteTransport();
   t.setClient(client as any);
   t.setDiagnosticSink((m) => sink.push(m));
+  // [#21178] Only `POLICY_JSON_COL` is a JSON column, so every other row
+  // compiles exactly as it does on a transport handed no rule at all.
+  // [#21236] The resolver answers the column's class; this one is multi-value.
+  t.setJsonColumnResolver((_object, field) => (field === POLICY_JSON_COL ? 'multi-value-or-json' : undefined));
   return { t, sink, client };
 }
 
@@ -465,6 +513,9 @@ describe('[#20039] TursoDriver LOCAL and REMOTE withhold these classes alike', (
     ['undeclared combinator', () => ({ [UNDECLARED_KEY]: 'x' }), UNDECLARED_KEY],
     // [#20041] Written on both compilers as one sentence from the start.
     ['U+0000 in a pattern', () => ({ [POLICY_COL]: { $like: `${SECRET}${String.fromCharCode(0x00)}` } }), SECRET],
+    // [#20444] …and so were the `$empty` operator's two refusals.
+    ['$empty non-boolean flag', () => ({ [POLICY_COL]: { $empty: SECRET } }), SECRET],
+    ['$empty on an undeclared field', () => ({ secret_undeclared_col: { $empty: true } }), 'secret_undeclared_col'],
   ];
 
   for (const [label, where, secret] of SHARED) {
@@ -622,8 +673,14 @@ describe('[#20094] TursoDriver LOCAL and REMOTE refuse a $between that is not tw
     ['bare days on a datetime column', { closed_at: { $between: ['2026-01-01', '2026-01-31'] } }, ['r1', 'r2']],
   ];
 
-  for (const [label, where, expected] of CONTROLS) {
+  for (const [label, authored, expected] of CONTROLS) {
     it(`well-formed control, ${label}: both faces return the same rows, and count agrees`, async () => {
+      // [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a TYPED seam
+      // hands both faces: the whole-day rule is the shared lowering's, applied
+      // to the declared `datetime` column only; neither face keeps a copy.
+      const where = lowerFilterCondition(authored, {
+        isDatetimeColumn: (column) => (OBJECT.fields as Record<string, { type: string }>)[column]?.type === 'datetime',
+      });
       for (const driver of [local, remote]) {
         const rows = await driver.find(OBJECT.name, { where } as DriverQuery);
         expect(rows.map((row) => String(row.id)).sort(), driver.transportMode).toEqual(expected);

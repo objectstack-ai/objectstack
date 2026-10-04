@@ -37,7 +37,7 @@ import { ManifestSchema } from './manifest.zod';
 // satisfies what #6142 is actually after: it goes red if the refusal moves to
 // the wrong key, loses its code, or stops carrying the fix — none of which a
 // bare `toThrow()` can see.
-describe('[#4914] manifest.loading retirement', () => {
+describe('manifest.loading retirement', () => {
   /** A manifest that is valid except for whatever the individual test adds. */
   const baseManifest = {
     id: 'com.example.plugin',
@@ -122,7 +122,7 @@ describe('[#4914] manifest.loading retirement', () => {
       'PluginPerformanceMonitoringSchema',
     ];
     for (const name of retired) {
-      expect(kernel, `${name} must not be exported after #4914`).not.toHaveProperty(name);
+      expect(kernel, `${name} must not be exported after its retirement`).not.toHaveProperty(name);
     }
 
     // Anti-vacuity: this pin is only meaningful if the barrel really resolved

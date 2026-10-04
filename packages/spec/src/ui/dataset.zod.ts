@@ -9,6 +9,12 @@ import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
+import {
+  ANALYTICS_COLUMN_PATH,
+  ANALYTICS_COLUMN_REFERENCE,
+  rowWildcardOutsideCount,
+  rowWildcardOutsideCountRefusal,
+} from '../data/analytics-column-reference';
 
 /**
  * Analytics Dataset — the one semantic layer (ADR-0021).
@@ -80,6 +86,54 @@ const DATASET_NO_SQL =
   + 'Joins are compiled from `Dataset.include` — you never write an ON clause.';
 
 /**
+ * A dataset dimension's and measure's `field` is a COLUMN REFERENCE, never a
+ * SQL expression (#21220; ADR-0021 "zero raw SQL / zero raw expressions",
+ * ADR-0049 enforce-or-remove) — the accept set the cube members it compiles to
+ * already hold (#20943), from the one shared declaration in
+ * `../data/analytics-column-reference.ts`: the dataset compiler copies `field`
+ * into the cube member's `sql` verbatim, so the two slots are one value.
+ *
+ * The module header said so from the start ("no raw SQL"), and the field's own
+ * description named a field or a relationship path, but the slot was a bare
+ * `z.string()` and parsed anything. The runtime has refused an expression
+ * `field` at the analytics dataset door since #21190 (`PERMISSION_DENIED` /
+ * 403, inline or saved), so an expression could be saved and never answered —
+ * declared, never enforced. That door stays, as defence in depth for a dataset
+ * that reaches the service without meeting this parse. It never judged an
+ * empty `field` (it skips one); a stored `count` measure with `field: ''` is
+ * repaired on load by the D2 conversion `dataset-count-measure-empty-field-removed`.
+ *
+ * A measure admits the row wildcard `'*'` (a count's `COUNT(*)`) under
+ * `aggregate: 'count'` only — the measure's refinement asks the one shared
+ * predicate (#21409); a dimension does not admit it at all. Both restrictions,
+ * and their measurements, are stated in `../data/analytics-column-reference.ts`.
+ * An empty string is refused on both: on a measure the wildcard's spelling is
+ * `'*'` or no `field` at all, and on a dimension it names nothing to group by.
+ */
+const DATASET_FIELD_EXPRESSION_REFUSED =
+  'A SQL expression there names no single field, so no platform check can judge which fields it reads, '
+  + 'and the analytics dataset door refuses it on every query (ADR-0021: the dataset layer takes no raw SQL '
+  + 'and no raw expressions; ADR-0049 enforce-or-remove).';
+
+const DATASET_DIMENSION_FIELD_NOT_COLUMN =
+  '`dimensions[].field` is a column reference: a field of the dataset\'s object (`stage`), or a relationship '
+  + 'path ending in one (`account.region`) whose relationships are declared in `include`. '
+  + `${DATASET_FIELD_EXPRESSION_REFUSED} Group by the column itself. \`'*'\` is no dimension: it names every `
+  + 'column at once, which is not an axis. A bucket computed over a column\'s values (a CASE over them) has no '
+  + 'expression form in the dataset layer: keep the bucket as a field of the object and name that field here.';
+
+const DATASET_MEASURE_FIELD_NOT_COLUMN =
+  '`measures[].field` is a column reference: a field of the dataset\'s object (`amount`), a relationship path '
+  + 'ending in one (`account.amount`) whose relationships are declared in `include`, or `\'*\'` for a count; '
+  + `a count may also omit \`field\`. ${DATASET_FIELD_EXPRESSION_REFUSED} Name the column the measure `
+  + 'aggregates. A derived value is declared in the ADR-0021 form, where the platform judges every field it '
+  + 'reads: a conditional count or sum is a measure with its own structured `filter` '
+  + '(`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a ratio, sum, '
+  + 'difference or product of measures is `derived: { op, of: [...] }` over measures named in this dataset '
+  + '(`{ name: \'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', \'task_count\'] }, format: '
+  + '\'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a percentage).';
+
+/**
  * Dimension — a groupable axis (e.g. "region", "close_date by quarter").
  */
 export const DatasetDimensionSchema = lazySchema(() => strictObject({
@@ -121,8 +175,13 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
    * ending in a field — e.g. `account.region` or `account.owner.region`
    * (ADR-0071 multi-hop). The join chain is DERIVED from the relationship(s)
    * declared in `Dataset.include`; the author never writes a predicate.
+   * A column reference only (#21220, see `DATASET_FIELD_EXPRESSION_REFUSED`):
+   * a SQL expression, `'*'` or an empty string is refused at parse.
    */
-  field: z.string().describe('Base field, or `relationship[.relationship].field` path').meta({ title: 'Field' }),
+  field: z.string()
+    .regex(ANALYTICS_COLUMN_PATH, { error: () => DATASET_DIMENSION_FIELD_NOT_COLUMN })
+    .describe('Base field, or `relationship[.relationship].field` path. A column reference, never a SQL expression.')
+    .meta({ title: 'Field' }),
   type: z.enum(['string', 'number', 'date', 'boolean', 'lookup']).optional().meta({ title: 'Type' }),
   /** Default bucketing for date dimensions (day/week/month/quarter/year). */
   dateGranularity: DateGranularity.optional().meta({ title: 'Date Granularity' }),
@@ -185,8 +244,18 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
   /** Aggregation function — reuses the canonical query.zod enum. */
   aggregate: AggregationFunction.optional().describe('Aggregation (sum/avg/count/...); omit when `derived` is set')
     .meta({ title: 'Aggregate' }),
-  /** Base field, or `relationship[.relationship].field` path. Optional for `count` (count(*)). */
-  field: z.string().optional().describe('Aggregated field; optional for count(*)').meta({ title: 'Field' }),
+  /**
+   * Base field, or `relationship[.relationship].field` path, or `'*'` for a
+   * `count`. Optional for `count` (count(*)). A column reference only (#21220,
+   * see `DATASET_FIELD_EXPRESSION_REFUSED`): a SQL expression or an empty string
+   * is refused at parse, and `'*'` under any other aggregate is refused by the
+   * schema's refinement below (#21409).
+   */
+  field: z.string()
+    .regex(ANALYTICS_COLUMN_REFERENCE, { error: () => DATASET_MEASURE_FIELD_NOT_COLUMN })
+    .optional()
+    .describe('Aggregated field: a base field, a relationship path, or "*" for a count; optional for count(*). Never a SQL expression.')
+    .meta({ title: 'Field' }),
   /**
    * Measure-scoped filter (e.g. only won deals for "won_amount"). [#20080] A
    * list in the equality slot inside a nested relation is refused on save, as
@@ -214,15 +283,56 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `f8a9d0fb0`; re-derived at that pin 2026-09-24 — both files moved on this
-   * hop (objectui `ad694ac3d`, objectui#10026: the shared date path refuses a
+   * `2e818d0b5`; re-derived at that pin 2026-10-04 — `date-display.ts` and
+   * `dataset-format.ts` are byte-identical to `ab1879721` (`git diff --quiet`),
+   * so every anchor held unmoved. At `ab1879721`, re-derived there
+   * 2026-10-03 — `date-display.ts` is
+   * byte-identical to `89cad75d5`, so `formatDate` `445-480` and the ±7-day
+   * fallback `399` held unmoved and were re-READ in place; `dataset-format.ts`
+   * changed (+53/-36, objectui#11475: `scalePercent` scales at the storage
+   * its caller states, through the spec's `percentScaleOf`, instead of
+   * guessing from the value's magnitude), above `formatMeasureDate` in the
+   * percent-scaling helpers and below it in `formatMeasure`'s docblock (line
+   * for line) and its percent arm, so
+   * `formatMeasureDate` `:229-263` -> `:240-274`, its datetime arm `:259`-`:261`
+   * -> `:270`-`:272` and its call `:369` -> `:380` MOVED byte-identical,
+   * re-READ with the same reading below. At `89cad75d5` (2026-10-02)
+   * `dataset-format.ts` and `date-display.ts` were byte-identical to
+   * `31971ff1e`, so every anchor below held unmoved and was re-READ in place.
+   * At `31971ff1e` (2026-10-01) both
+   * files were byte-identical to `e420df310`, so every anchor held unmoved and
+   * was re-READ in place. At `e420df310` (2026-09-30)
+   * `dataset-format.ts` was byte-identical to `db11afd49`, so `formatMeasureDate` `:229-263`, its call
+   * at `:369` and its datetime arm `:259`-`:261` did not move and were re-READ
+   * in place, and `date-display.ts` changed (+68/-1, objectui `858eafb4f`,
+   * objectui#11141: a header comment naming the new `toDisplayEndDate` /
+   * `toInclusiveEndDay` exports, and those two functions added after
+   * `toDisplayDate`, above every anchor here), so `formatDate` `378-413` ->
+   * `445-480` and the ±7-day fallback `332` -> `399` MOVED byte-identical,
+   * re-READ with the same reading below. At `db11afd49` (2026-09-29)
+   * `date-display.ts` was
+   * byte-identical to `dd3f7e1be` and `dataset-format.ts` changed only in three
+   * comment lines (`:529`, `:589`, `:660`, objectui `63ab76112`), all below every
+   * anchor here, so `formatDate` `378-413`, the ±7-day fallback `332`,
+   * `formatMeasureDate` `:229-263`, its call at `:369` and its datetime arm
+   * `:259`-`:261` were re-READ and did not move. At `dd3f7e1be` (2026-09-28)
+   * both files changed again on
+   * that hop (objectui `544aca24f`, objectui#10301, the date-time half of
+   * objectui#10026: `toDisplayDate` now refuses a date-TIME written on a day
+   * that does not exist as well, and `dataset-format.ts` rewrote the
+   * `ISO_DATETIME_RE` docblock that said such a value still rolls over, four
+   * comment lines for four, so nothing below it moved), while the style
+   * handling this record cites re-reads unchanged: `formatDate` `355-390` ->
+   * `378-413` and the ±7-day fallback `309` -> `332` MOVED byte-identical, and
+   * `formatMeasureDate` `:229-263`, its call at `:369` and its datetime arm at
+   * `:259`-`:261` did not move. At `f8a9d0fb0` (2026-09-24) both files had
+   * moved (objectui `ad694ac3d`, objectui#10026: the shared date path refuses a
    * date-only calendar day that does not exist, with the dash it renders for
    * any unparsable value, and `dataset-format.ts` rewrote
    * `formatMeasureDate`'s comment on that case), while the style handling
-   * this record cites re-reads unchanged: `formatDate` `271-306` -> `355-390`
-   * and the ±7-day fallback `225` -> `309` MOVED byte-identical, and
-   * `formatMeasureDate` is `:229-263` (one comment line shorter), its call at
-   * `:369` and its datetime arm at `:259`-`:261`. At `62597c588` (2026-09-23)
+   * re-read unchanged: `formatDate` `271-306` -> `355-390` and the ±7-day
+   * fallback `225` -> `309` MOVED byte-identical, and `formatMeasureDate` came
+   * out one comment line shorter. At `62597c588` (2026-09-23)
    * `dataset-format.ts` was byte-identical to `87af769e9`, and `date-display.ts`
    * had moved (objectui `516583b54`, +77/-4): `formatDate` parses through
    * `toDisplayDate`, so a date-only value renders the calendar day it names in
@@ -234,17 +344,17 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * into and widening that published signature was refused) in
    * objectui
    * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
-   * non-numeric value through `formatMeasureDate` (`:229-263`, was `:229-264`
-   * and before that `:185-198`) at `:369`,
+   * non-numeric value through `formatMeasureDate` (`:240-274`, was `:229-263`,
+   * `:229-264` and before that `:185-198`) at `:380`,
    * whose date-only arm threads `format` into the STYLE parameter of
-   * `formatDate` (`utils/date-display.ts:355-390`, was `:271-306`, `:198-233`
-   * and before that `:131-164`, whose `relative` branch falls back to the absolute form
-   * beyond ±7 days at `:309`, was `:225`, `:152` and `:117` — the fallback strips the style through
+   * `formatDate` (`utils/date-display.ts:445-480`, was `:378-413`, `:355-390`, `:271-306`,
+   * `:198-233` and before that `:131-164`, whose `relative` branch falls back to the absolute form
+   * beyond ±7 days at `:399`, was `:332`, `:309`, `:225`, `:152` and `:117` — the fallback strips the style through
    * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
-   * `formatRelativeDate` (`:259`), `short` with
-   * `formatDateTime(v, { locale, style: 'compact' })` (`:260`) and everything
+   * `formatRelativeDate` (`:270`), `short` with
+   * `formatDateTime(v, { locale, style: 'compact' })` (`:271`) and everything
    * else — a date PATTERN included — with the bare
-   * `formatDateTime(v, { locale })` (`:261`).
+   * `formatDateTime(v, { locale })` (`:272`).
    * Teaching
    * the shared path a pattern grammar would change every list cell that reads
    * it, so that gap is still DOCUMENTED here rather than closed (objectui#7178
@@ -306,6 +416,21 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     /** Names of other measures in this dataset (2+ for ratio/difference). */
     of: z.array(SnakeCaseIdentifierSchema).min(1),
   }).optional().meta({ title: 'Derived From' }),
+}).superRefine((measure, ctx) => {
+  // [#21409] `'*'` is the row wildcard a `count` aggregates (`COUNT(*)`), and
+  // only a `count` consumes it: under any other aggregate — or none, as on a
+  // `derived` measure — it names no column. Measured at
+  // `POST /analytics/dataset/query` before this rule: `{ aggregate: 'sum',
+  // field: '*' }` compiled to `SUM(*)` and answered 500 on both strategies.
+  // Cross-field, so a refinement (a declared dropped-refinement site). The rule
+  // is the ONE predicate the cube measure calls too (`MetricSchema`).
+  if (rowWildcardOutsideCount(measure.field, measure.aggregate)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['field'],
+      message: rowWildcardOutsideCountRefusal('measures[].field', 'aggregate', measure.aggregate),
+    });
+  }
 }));
 
 /**

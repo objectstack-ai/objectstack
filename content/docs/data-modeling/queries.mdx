@@ -285,6 +285,17 @@ pattern the metadata-revision / flow-run / notification list endpoints already u
 }
 ```
 
+Without `fields`, a read returns the object's **declared** fields plus the platform's
+system columns (`id`, `created_at`, `updated_at`, and the tenant, owner and audit columns
+the registry adds). A column no metadata declares is never returned — for example one a
+retired field left in the table until `os migrate apply --allow-destructive` drops it — and
+naming it in `fields` on the data API is refused with `400 INVALID_FIELD`. To read such a column's values
+for a one-time conversion, run the conversion before the field is retired, or, once it is
+retired, read them with the operator-only
+[`os migrate unmapped-columns`](/docs/deployment/cli#os-migrate-unmapped-columns) and convert
+them before `os migrate apply --allow-destructive` drops the column. No runtime door serves
+them.
+
 ### Nested / Related Fields
 
 {/* os:check */}
@@ -370,12 +381,20 @@ querying the related object directly.
 | `count_distinct` | Count unique values | `{ function: 'count_distinct', field: 'category', alias: 'categories' }` |
 
 <Callout type="warn">
-`count_distinct` is not yet lowered by the SQL drivers. They map
-`count`/`sum`/`avg`/`min`/`max` and refuse it as a **capability gap** —
-`501 NOT_IMPLEMENTED`, "declared but not implemented by this backend" — rather than as a
-caller mistake, because the query is spelled correctly and the gap is the backend's
-(#5907). It works on the MongoDB driver and on the engine's in-memory fallback, and its
-SQL lowering (`COUNT(DISTINCT field)`) is scheduled.
+`count_distinct` is computed on every backend. The SQL drivers (`SqlDriver`, and both
+Turso transports) lower it to `COUNT(DISTINCT field)`; the MongoDB driver, the in-memory
+driver and the engine's in-memory fallback count the distinct non-null values. Nulls are
+not counted, and a `count_distinct` with no `field` is refused `400 INVALID_QUERY`
+(`COUNT(DISTINCT *)` is not SQL).
+
+The one real limit is the field's type: a `count_distinct` over a JSON-stored field — the
+structured-JSON types (`json`, `composite`, `repeater`, `record`, `location`, `address`,
+`vector`), `multiselect` / `checkboxes` / `tags`, or a `select` / `lookup` / `user` /
+`file` / `image` declared `multiple: true` — is refused `400 INVALID_FIELD` by the engine
+before any driver runs, because no two backends compare such values for equality alike.
+Store the part you count in a field of its own, or count the rows with `count`. `min`, `max` and
+`avg` over a type the table refuses answer the same `400 INVALID_FIELD` on every driver
+(`sum` is not judged by that door yet).
 </Callout>
 
 <Callout type="warn">
@@ -662,15 +681,15 @@ A `groupBy` entry is either a bare field name or a structured node that buckets 
 
 `dateGranularity` accepts `day` | `week` | `month` | `quarter` | `year`. The engine
 pushes bucketing down to the driver only when that driver advertises the granularity
-via `supports.queryDateGranularity` — SQLite reports `week: false`, for instance, so a
-weekly bucket falls back to fetching rows and bucketing in memory. The fallback is
-transparent to the query — you get the same buckets either way.
+via `supports.queryDateGranularity` — the Turso remote transport reports none, for
+instance, so every bucket there falls back to fetching rows and bucketing in memory. The
+fallback is transparent to the query — you get the same buckets either way.
 
 <Callout type="warn">
 Buckets are computed in **UTC**. A non-UTC reference timezone is only reachable through
 `ObjectQL.aggregate(object, { …, timezone })`; the `POST /api/v1/data/:object/query`
-route forwards only `where` / `groupBy` / `aggregations`, so a query sent over REST
-always buckets on UTC calendar boundaries.
+route does not forward `timezone` to the engine, so a query sent over REST always
+buckets on UTC calendar boundaries.
 
 The optional `alias` on a structured `groupBy` node is honoured only on the in-memory
 path. The SQL driver ignores it and always projects the bucket under the **field name**,

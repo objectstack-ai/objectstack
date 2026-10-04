@@ -24,7 +24,7 @@ function createMockClient(body: any, status = 200) {
     return { client, fetchMock };
 }
 
-// [#9934] The producer-marked user-facing refusal text (`userMessage`) — the
+// [commit 79c46da90] The producer-marked user-facing refusal text (`userMessage`) — the
 // SDK surfaces it from BOTH live envelopes' declared spots, the same
 // two-dialect rule as `code`/`fields`, so the console can render a marked hook
 // refusal and keep its generic #3821 substitution for everything unmarked.
@@ -354,10 +354,10 @@ describe('ObjectStackClient', () => {
         // card. It used to require the slash to survive UNENCODED, so the
         // request would reach the compound handler
         // `/meta/:type/:section/:name` instead of collapsing onto the
-        // two-segment route. #12176 retired compound-name addressing: that
+        // two-segment route. Commit 7986d973f retired compound-name addressing: that
         // handler is gone, so `%2F` is now the correct and only spelling.
         //
-        // Encoding is a no-op for every name #12194's grammar admits (snake
+        // Encoding is a no-op for every name commit 311433f6b's grammar admits (snake
         // case, optionally dot-qualified), so this changes nothing a legal
         // caller sends. What it changes is a pre-grammar residue name: it now
         // reaches the surviving door with its slash intact as `%2F`, which Hono
@@ -509,7 +509,7 @@ describe('Security explain & global search (#3587 gap closure)', () => {
     });
 
     it('security.explain accepts the recordIds batch spelling and forwards it verbatim (#8480)', async () => {
-        // [#8480] Typed-client completion of #8326's batch spelling. The
+        // [commit caaae2cca] Typed-client completion of #8326's batch spelling. The
         // client does NOT validate the cap or the recordId/recordIds
         // mutual exclusion — that stays the server's job
         // (`ExplainRequestSchema`); this pins that the body goes over the
@@ -875,7 +875,7 @@ describe('Notifications namespace', () => {
     });
 
     it('[#6361] never puts a `cursor` on the query string — the SDK producer is gone', async () => {
-        // The retired half of #6361 asserted where it was PRODUCED. `cursor` was
+        // The retired half of commit 90bbf2510 asserted where it was PRODUCED. `cursor` was
         // never a server-read filter; what made it harmful rather than inert is
         // that this method appended it, so a caller paginating by the published
         // contract re-read the first window forever with no error.
@@ -1387,7 +1387,7 @@ describe('ObjectStackClient.automation', () => {
         // TS2353 excess-property error, which a runtime assertion cannot reach.
         // This pins the RUNTIME half, which tsc cannot: an untyped caller
         // (plain JS, a `Record` spread, a hand-built options object) must not
-        // smuggle the parameter through. The same shape #6361 left behind one
+        // smuggle the parameter through. The same shape commit 90bbf2510 left behind one
         // door over.
         //
         // All THREE surfaces are swept, because all three appended it and a
@@ -2162,7 +2162,7 @@ describe('ScopedEnvironmentClient', () => {
 
     it('[#14879] a custom dataPrefix no longer makes the base underivable — `routes.metadata` is the second equation (case B1)', async () => {
         const { client, fetchMock } = createMockClient({ types: [] });
-        // WAS pinned the other way. Until #14879 this case asserted the
+        // WAS pinned the other way. Until commit cf74a1128 this case asserted the
         // convention `/api/v1/...`, because the only suffix `_apiBase()` knew
         // how to strip was the literal `/data`, so a custom `crud.dataPrefix`
         // made the base undetectable and the client fell back.
@@ -2194,8 +2194,8 @@ describe('ScopedEnvironmentClient', () => {
         // with the conventional `/data` AND there is no `routes.metadata` to
         // supply the missing equation, so `{realBase}{dataPrefix}` stays one
         // string with two unknowns. The client must NOT guess a split — it
-        // falls back to the convention, byte-identical to the pre-#14879
-        // behavior.
+        // falls back to the convention, byte-identical to the behavior before
+        // commit cf74a1128.
         (client as any)['discoveryInfo'] = {
             routes: { data: '/backend/api/v9/records' },
         };
@@ -2866,7 +2866,7 @@ describe('[#11391] meta.saveItem query string (unscoped client)', () => {
     it('[#12195] a slash-bearing name is ENCODED and still gets the query string', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
         await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' }, { force: true });
-        // Inverted by #12195: the slash used to be required to survive raw so
+        // Inverted by commit 7986d973f: the slash used to be required to survive raw so
         // the request reached `PUT /meta/:type/:section/:name`, which had read
         // `?force` since #11095. That door is retired; `%2F` reaches the
         // surviving door, which has always read `?force`.

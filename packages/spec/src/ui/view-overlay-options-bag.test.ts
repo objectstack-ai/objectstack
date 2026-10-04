@@ -244,3 +244,58 @@ describe('[#20051] the form overlay cannot take the bag the list overlay refused
     expect(ViewMetadataSchema.safeParse(body).success).toBe(true);
   });
 });
+
+/**
+ * [#20051] Stage (iv), Q3: the same legacy bag on a ViewItem RECORD
+ * (`{ name, object, viewKind, config }`) is refused by name, on both arms, with
+ * the prescription to write `config.KIND`. The record member's top-level
+ * `.strip()` used to drop it unread; with the save storing the parsed body it
+ * would have vanished on a `200` instead.
+ */
+describe('[#20051] a ViewItem record carries no top-level `options` bag', () => {
+  const record = (extra: Record<string, unknown> = {}) => ({
+    name: 'crm_lead.board',
+    object: 'crm_lead',
+    viewKind: 'list',
+    config: {
+      type: 'kanban',
+      data: { provider: 'object', object: 'crm_lead' },
+      columns: ['name'],
+      kanban: { groupByField: 'stage', columns: ['name'] },
+    },
+    ...extra,
+  });
+
+  function recordIssueAtOptions(body: unknown): Issue {
+    const d = diagnoseViewMetadata(body);
+    expect(d.success, `expected a refusal for ${JSON.stringify(body)}`).toBe(false);
+    if (d.success) throw new Error('unreachable');
+    expect(d.branch).toBe('viewItem');
+    const hit = (d.issues as unknown as Issue[]).find((i) => i.path.length === 1 && i.path[0] === 'options');
+    expect(hit, JSON.stringify(d.issues)).toBeDefined();
+    return hit!;
+  }
+
+  it('on the list arm: refused at `options`, prescribing `config.KIND`', () => {
+    const hit = recordIssueAtOptions(record({ options: { kanban: { groupByField: 'stage' } } }));
+    expect(hit.message).toMatch(/^A view item record carries no top-level `options` bag/);
+    expect(hit.message).toContain('Move each `options.KIND` block to `config.KIND`');
+    expect(VIEW_METADATA_MEMBERS.viewItem.safeParse(record({ options: {} })).success).toBe(false);
+  });
+
+  it('on the form arm too', () => {
+    const hit = recordIssueAtOptions({
+      name: 'lead.contact_us',
+      object: 'lead',
+      viewKind: 'form',
+      config: { type: 'simple', data: { provider: 'object', object: 'lead' } },
+      options: { timeline: { titleField: 'name' } },
+    });
+    expect(hit.message).toMatch(/^A view item record carries no top-level `options` bag/);
+  });
+
+  it('CONTROL: the record without the bag parses, and `config.kanban` is where the block lives', () => {
+    const parsed = ViewMetadataSchema.safeParse(record());
+    expect(parsed.success).toBe(true);
+  });
+});

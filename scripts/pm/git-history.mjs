@@ -122,6 +122,60 @@
  * the shallow FILE, so it needs no common-dir resolution from a linked
  * worktree, and it catches a graft from any source.
  *
+ * ## The fourth trap, no graft at all: a bare date is read at NOW's time of day
+ *
+ * The coverage proof places `--since` with `Date.parse`, and ECMA-262 reads a
+ * date-only `YYYY-MM-DD` as that day's 00:00:00Z. git places the SAME string
+ * with its approxidate, which fills a missing time of day from the CURRENT
+ * WALL CLOCK. Passed through verbatim, `--since=2026-09-30` therefore proved
+ * one window, counted a narrower one that shrank as the day went on, and
+ * printed the wider one in its receipt — at exit 0, on exactly the spelling
+ * the usage text recommends (#21601). Measured on ref a7ab047cf6, the clock
+ * injected through git's own `GIT_TEST_DATE_NOW`:
+ *
+ *   | `count --since=…` on a7ab047cf6 | git's clock | answer |
+ *   |---------------------------------|-------------|--------|
+ *   | `2026-09-30` (bare)             | 00:30Z      | 472    |
+ *   | `2026-09-30` (bare)             | 12:45Z      | 410    |
+ *   | `2026-09-30` (bare)             | 15:17Z      | 393    |
+ *   | `2026-09-30T00:00:00Z`          | any         | 474    |
+ *
+ * The 410 and the 393 are the two answers the filing card recorded by hand at
+ * those hours; the receipt was identical on all four rows. Every other
+ * spelling git approxidates fails the same way (`Sep 30 2026`, `2026/09/30`:
+ * a midnight to `Date.parse`, now's time of day to git), and `--until` has the
+ * mirror image. So a window edge is normalised ONCE, by `windowInstant()`, to
+ * the complete UTC instant `Date.parse` already put it at; that instant is
+ * what git is handed and what the receipt prints, and a complete instant is
+ * parsed exactly and never consults the clock.
+ *
+ * ## The fifth trap, no git at all: a piped answer is cut at one buffer-full
+ *
+ * The answer leaves in ONE `process.stdout.write`. Node completes that write
+ * at once when stdout is a FILE, but when stdout is a PIPE (on POSIX) it puts
+ * in only what the pipe takes in one go and queues the rest for the event
+ * loop. The entry used to end with `process.exit(main(...))`, which tears the
+ * process down before that queue drains — so `log … | wc -l`, the natural
+ * spelling of a count taken through `log`, read one buffer-full at exit 0
+ * (#21659). Measured at 7d0781482d on this repository's shallow clone, the
+ * same `log --since=2026-08-14T00:00:00Z --ref=3711e0b763` two ways:
+ *
+ *   | stdout                         | lines | exit |
+ *   |--------------------------------|-------|------|
+ *   | redirected to a file           | 5455  | 0    |
+ *   | piped to `wc -l`, three runs   | 346   | 0    |
+ *
+ * 346 lines is about one 64 KiB pipe buffer. `count` and `touch` print one
+ * line, which always fits, so they never showed it. The entry therefore sets
+ * `process.exitCode` and returns: the process ends when its last queued write
+ * has drained, on every stdout kind. `main()` and `touchMain()` RETURN their
+ * exit codes; the one `process.exit` left is `usage()`'s, and every call to it
+ * comes before anything is written to stdout. A reader that closes early
+ * (`| head -1`) turns the queued rest into EPIPE; that is the reader's choice,
+ * not a lost answer, so it is absorbed and the answer's own exit code stands.
+ * The self-test pins a piped `log`, many buffers long, byte for byte against
+ * the same `log` sent to a file.
+ *
  * ## Cost, measured — because a tool nobody runs fixes nothing
  *
  *   | case                                            | wall  |
@@ -135,7 +189,8 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -158,14 +213,16 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'pure decisions': 10,
-  'real repos': 15,
+  'real repos': 17,
   'historyHorizon: the read-only reading the #9902 adopters call': 12,
+  'bare dates: the instant the proof reads is the instant git counts': 16,
   'touch: the provenance reading a shallow clone fabricates': 26,
+  'piped stdout: the answer a pipe reads is the answer a file holds': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -275,9 +332,14 @@ export function ensureWindowCovered({ cwd, ref, sinceMs, allowFetch = true, allo
   const remotes = (git(['remote'], { cwd, allowFail: true }) || '').split('\n').filter(Boolean);
   const target = splitRemoteRef(ref, remotes);
   if (!target) {
+    // The boundaries were READ above; a ref that names no remote (a bare sha, a
+    // local branch) cannot be deepened, but its floor is still known, so the
+    // refusal prints it rather than `shallow floor: unknown`.
     return {
       covered: false,
       steps,
+      shallow: shallow0,
+      boundaries: boundaries0,
       reason:
         `history is truncated inside the window and '${ref}' names no remote to deepen from ` +
         `(remotes here: ${remotes.length ? remotes.join(', ') : 'none'})`,
@@ -314,6 +376,27 @@ export function ensureWindowCovered({ cwd, ref, sinceMs, allowFetch = true, allo
 }
 
 // ── answering ────────────────────────────────────────────────────────────────
+
+/**
+ * A window edge as the ONE instant every reader of it uses — the coverage
+ * proof, git, and the receipt (the fourth trap in the header).
+ *
+ * `Date.parse` decides the instant, because the proof already reads it that
+ * way: a bare `2026-09-30` is that day's 00:00:00Z. It comes back as a COMPLETE
+ * UTC instant, the one spelling git parses exactly instead of approxidating
+ * against the current time of day. A complete instant comes back as the same
+ * instant — byte-identical when already in `Z` with whole seconds; an offset
+ * is restated in `Z`; whole seconds drop the `.000` — so the self-test's
+ * complete-instant windows reach git exactly as they did before.
+ *
+ * @param {string} raw the edge as given on the command line
+ * @returns {string|null} the complete instant, or null when `Date.parse` cannot place `raw`
+ */
+export function windowInstant(raw) {
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().replace(/\.000Z$/, 'Z');
+}
 
 function windowArgs({ since, until }) {
   const args = [`--since=${since}`];
@@ -669,12 +752,28 @@ function resolveSince(opts) {
     return new Date(Date.now() - opts.days * 24 * 60 * 60 * 1000).toISOString();
   }
   if (opts.since === undefined) usage('--since=<date> or --days=<n> is required');
-  const ms = Date.parse(opts.since);
+  const instant = windowInstant(opts.since);
   // Refuse what cannot be compared to a boundary rather than guessing: git
   // accepts "30 days ago", but a window this tool cannot place on a timeline is
   // a window whose coverage it cannot prove.
-  if (!Number.isFinite(ms)) usage(`--since=${opts.since} is not a date this tool can place (use YYYY-MM-DD, or --days=<n>)`);
-  return opts.since;
+  if (instant === null) usage(`--since=${opts.since} is not a date this tool can place (use YYYY-MM-DD, or --days=<n>)`);
+  // What is returned is the instant the proof reads, never the raw string: git
+  // reads a bare YYYY-MM-DD at the current time of day (the fourth trap).
+  return instant;
+}
+
+/**
+ * `--until`, normalised the way `--since` is: a bare `2026-10-01` reaches git
+ * as `2026-10-01T00:00:00Z` — "before that day began" at every hour, where the
+ * raw string meant "before now's time of day on it". No coverage proof reads
+ * `--until`, so a spelling `Date.parse` cannot place still reaches git exactly
+ * as given, the way it always has, and the receipt prints it as given: the
+ * ruling was to normalise the recommended input, not to add a refusal.
+ */
+function resolveUntil(opts) {
+  if (opts.until === undefined) return undefined;
+  const instant = windowInstant(opts.until);
+  return instant === null ? opts.until : instant;
 }
 
 function main(argv) {
@@ -686,7 +785,7 @@ function main(argv) {
           + 'so no success line was printed. Exiting 0 here would report a self-test\n'
           + 'that never finished as a self-test that passed.\n',
       );
-      process.exit(1);
+      return 1;
     }
     return selfTestCode;
   }
@@ -696,6 +795,7 @@ function main(argv) {
   if (cmd === 'touch') return touchMain(opts);
 
   const since = resolveSince(opts);
+  const until = resolveUntil(opts);
   const sinceMs = Date.parse(since);
   const cwd = opts.cwd || process.cwd();
 
@@ -711,21 +811,21 @@ function main(argv) {
   if (!ensured.covered) {
     process.stderr.write(
       `⛔ git-history REFUSES to answer — ${ensured.reason}.\n` +
-        `   ref: ${opts.ref}   window: since ${String(since).slice(0, 10)}` +
-        `${opts.until ? ` until ${opts.until}` : ''}\n` +
+        `   ref: ${opts.ref}   window: since ${since}` +
+        `${until ? ` until ${until}` : ''}\n` +
         `   shallow floor: ${describeFloor(ensured.boundaries)} (the oldest commit this clone can see on that ref)\n` +
         `${ensured.steps.length ? `   tried: ${ensured.steps.join(' · ')}\n` : ''}` +
         `   Any number derived here would be real, plausible and WRONG — the missing\n` +
         `   commits are invisible to git log, which reports no error (#9878).\n` +
         `   Remedy: git -C ${cwd} fetch --unshallow ${splitRemoteRef(opts.ref, ['origin']) ? 'origin' : '<remote>'}\n`,
     );
-    process.exit(2);
+    return 2;
   }
 
   const receipt =
     `method: ${cmd === 'log' ? 'git log' : 'git rev-list --count'}` +
-    `${opts.firstParent ? ' --first-parent' : ''} ${opts.ref} since ${String(since).slice(0, 10)}` +
-    `${opts.until ? ` until ${opts.until}` : ''}` +
+    `${opts.firstParent ? ' --first-parent' : ''} ${opts.ref} since ${since}` +
+    `${until ? ` until ${until}` : ''}` +
     `${opts.paths.length ? ` -- ${opts.paths.join(' ')}` : ''}` +
     ` · floor ${describeFloor(ensured.boundaries)} · tip ${refTip(cwd, opts.ref)} · ${ensured.steps.join(' · ')}`;
 
@@ -738,8 +838,8 @@ function main(argv) {
   const pathArgs = opts.paths.length ? ['--', ...opts.paths] : [];
   const out =
     cmd === 'count'
-      ? git(['rev-list', '--count', ...fp, ...windowArgs({ since, until: opts.until }), opts.ref, ...pathArgs], { cwd })
-      : git(['log', ...fp, `--format=${opts.format}`, ...windowArgs({ since, until: opts.until }), opts.ref, ...pathArgs], { cwd });
+      ? git(['rev-list', '--count', ...fp, ...windowArgs({ since, until }), opts.ref, ...pathArgs], { cwd })
+      : git(['log', ...fp, `--format=${opts.format}`, ...windowArgs({ since, until }), opts.ref, ...pathArgs], { cwd });
 
   process.stdout.write(out.endsWith('\n') ? out : `${out}\n`);
   process.stderr.write(`${receipt}\n`);
@@ -879,7 +979,10 @@ function selfTest() {
   // additionally leaves 12 h — half the fixture's daily cadence, the widest gap
   // available — between it and the nearest commit stamp. `collect-release-notes.sh
   // --self-test`, which runs over an identical fixture in the same `lint.yml`
-  // step, has always spelled its window this way.
+  // step, has always spelled its window this way. The CLI now normalises a bare
+  // date itself (`windowInstant()`), but the BASELINE below hands these edges to
+  // raw git, which still approxidates; the 'bare dates' battery pins the
+  // normalisation at two injected clocks.
   battery('real repos');
   const FIXTURE_EPOCH = '2026-06-01T12:00:00Z';
   const FIXTURE_COMMITS = 40;
@@ -986,6 +1089,21 @@ function selfTest() {
     t('the clone is still shallow after that answer — proving the predicate is the floor, '
       + 'not the shallow flag', isShallow(shallowDeep) === true);
 
+    // A ref that names no remote — a bare sha, the way a tree is usually quoted —
+    // cannot be deepened, so a window crossing its floor is refused. The floor
+    // printed beside that refusal is the one already READ, never `unknown`.
+    // Nothing is fetched on this path, so `shallowDeep` keeps its depth.
+    const shallowDeepTip = g(['rev-parse', 'origin/main'], shallowDeep).trim();
+    const bareShaRefusal = runCliAllowFail(['count', `--since=${WINDOW_SINCE}`, `--ref=${shallowDeepTip}`], shallowDeep);
+    t('a bare-sha --ref whose window crosses the shallow floor is REFUSED, exit 2 with EMPTY stdout, '
+      + 'because it names no remote to deepen from',
+      bareShaRefusal.code === 2 && bareShaRefusal.stdout.trim() === ''
+        && /names no remote to deepen from/.test(bareShaRefusal.stderr), JSON.stringify(bareShaRefusal));
+    t('and the refusal prints the floor it READ, 2026-07-06, not `shallow floor: unknown` — the no-remote '
+      + 'branch used to return without the boundaries it had already read',
+      /shallow floor: 2026-07-06 /.test(bareShaRefusal.stderr) && !/shallow floor: unknown/.test(bareShaRefusal.stderr),
+      bareShaRefusal.stderr);
+
     // ── historyHorizon: the read-only reading the #9902 adopters call ───────
   battery('historyHorizon: the read-only reading the #9902 adopters call');
     const hFull = historyHorizon({ cwd: full, ref: 'origin/main', sinceMs: Date.parse(WINDOW_SINCE) });
@@ -1036,6 +1154,118 @@ function selfTest() {
     const ens = runCliAllowFail(['ensure', `--since=${NARROW_SINCE}`], shallowDeep);
     t('ensure proves coverage and prints no number', ens.code === 0 && ens.stdout.trim() === '',
       JSON.stringify(ens));
+
+    // ── bare dates: the instant the proof reads is the instant git counts ───
+    // The fourth trap in the header. git reads a bare YYYY-MM-DD at the CURRENT
+    // time of day; the proof reads it as that day's 00:00:00Z. So both clocks
+    // here are INJECTED, through git's own `GIT_TEST_DATE_NOW` (epoch seconds,
+    // the clock its approxidate consults), and every pin is taken at a morning
+    // AND an evening: a pin read at one wall-clock hour is the shape that kept
+    // this battery's predecessor green before noon and red after it. `TZ` is
+    // pinned as well, because git approxidates a bare date in LOCAL time and
+    // each BASELINE has to form the same way on every runner. The BASELINEs
+    // come first and prove the injected clock reaches git, so a pin that holds
+    // below holds because the tool normalised, not because the clock was ignored.
+    battery('bare dates: the instant the proof reads is the instant git counts');
+    const BARE_SINCE = WINDOW_SINCE.slice(0, 10); // 2026-06-20; c19 landed that day at 12:00Z
+    const BARE_NARROW = NARROW_SINCE.slice(0, 10); // 2026-07-08; c37 landed that day at 12:00Z
+    const BARE_UNTIL = '2026-07-10'; // c39, the fixture's last commit, landed that day at 12:00Z
+    const MORNING = '2026-07-15T06:00:00Z';
+    const EVENING = '2026-07-15T18:00:00Z';
+    const clockEnv = (nowIso) => ({
+      ...process.env,
+      TZ: 'UTC',
+      GIT_TEST_DATE_NOW: String(Math.floor(Date.parse(nowIso) / 1000)),
+    });
+    const runCliAt = (nowIso, args, cwd) => {
+      const r = spawnSync(process.execPath, [self, ...args, `--cwd=${cwd}`], {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: clockEnv(nowIso),
+      });
+      return { stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), code: r.status };
+    };
+    const rawCountAt = (nowIso, windowFlags, cwd) => execFileSync(
+      'git', ['rev-list', '--count', '--first-parent', ...windowFlags, 'origin/main'],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: clockEnv(nowIso) },
+    ).trim();
+
+    t('windowInstant reads a bare date as that day\'s 00:00:00Z — the instant Date.parse already gave the proof',
+      windowInstant(BARE_SINCE) === WINDOW_SINCE, String(windowInstant(BARE_SINCE)));
+    t('windowInstant hands every complete-instant edge of the battery above back BYTE-IDENTICAL, so those '
+      + 'windows reach git exactly as they did before normalising existed',
+      [WINDOW_SINCE, WINDOW_UNTIL, NARROW_SINCE].every((e) => windowInstant(e) === e),
+      JSON.stringify([WINDOW_SINCE, WINDOW_UNTIL, NARROW_SINCE].map(windowInstant)));
+    t('an offset is restated in Z and milliseconds survive (the --days shape), so the instant never moves',
+      windowInstant('2026-06-20T08:00:00+08:00') === WINDOW_SINCE
+        && windowInstant('2026-06-20T00:00:00.250Z') === '2026-06-20T00:00:00.250Z');
+    t('a spelling Date.parse cannot place is null, never guessed — resolveSince refuses it as usage, as before',
+      windowInstant('30 days ago') === null);
+
+    const rawMorning = rawCountAt(MORNING, [`--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    const rawEvening = rawCountAt(EVENING, [`--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    t('BASELINE — raw git counts the bare --since window as 21 at 06:00Z and 20 at 18:00Z: the injected clock '
+      + 'reaches its approxidate, and the day\'s 12:00Z commit falls out after noon (the defect, reproduced)',
+      rawMorning === '21' && rawEvening === '20', `morning ${rawMorning} evening ${rawEvening}`);
+    const rawUntilMorning = rawCountAt(MORNING, [`--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    const rawUntilEvening = rawCountAt(EVENING, [`--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    t('BASELINE — raw git counts the bare --until window the other way round, 20 at 06:00Z and 21 at 18:00Z',
+      rawUntilMorning === '20' && rawUntilEvening === '21', `morning ${rawUntilMorning} evening ${rawUntilEvening}`);
+    const rawSlashEvening = rawCountAt(EVENING, ['--since=2026/06/20', `--until=${WINDOW_UNTIL}`], full);
+    t('BASELINE — the bare date is one spelling of the trap, not the trap: raw git reads `2026/06/20` at '
+      + '18:00Z as well, and answers 20',
+      rawSlashEvening === '20', `evening ${rawSlashEvening}`);
+
+    const bareMorning = runCliAt(MORNING, ['count', `--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    const bareEvening = runCliAt(EVENING, ['count', `--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    const explicitEvening = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    t('the tool answers the bare --since window with 21 at 06:00Z AND at 18:00Z — the explicit-instant answer, '
+      + 'whatever the time of day',
+      bareMorning.code === 0 && bareEvening.code === 0 && bareMorning.stdout.trim() === '21'
+        && bareEvening.stdout.trim() === '21' && explicitEvening.stdout.trim() === '21',
+      JSON.stringify({ bareMorning, bareEvening, explicitEvening }));
+    t('and its receipt names the instant git counted from, not the bare date it was given',
+      bareEvening.stderr.includes(` since ${WINDOW_SINCE} until ${WINDOW_UNTIL} · `)
+        && !bareEvening.stderr.includes(` since ${BARE_SINCE} `), bareEvening.stderr);
+
+    const untilMorning = runCliAt(MORNING, ['count', `--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    const untilEvening = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    const untilExplicit = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}T00:00:00Z`], full);
+    t('a bare --until is that day\'s 00:00:00Z too: 20 at both hours, the explicit-instant answer',
+      untilMorning.stdout.trim() === '20' && untilEvening.stdout.trim() === '20' && untilExplicit.stdout.trim() === '20',
+      JSON.stringify({ untilMorning, untilEvening, untilExplicit }));
+    t('and the receipt names that instant as the until edge',
+      untilEvening.stderr.includes(` until ${BARE_UNTIL}T00:00:00Z · `), untilEvening.stderr);
+
+    const slashEvening = runCliAt(EVENING, ['count', '--since=2026/06/20', `--until=${WINDOW_UNTIL}`], full);
+    t('every spelling Date.parse places is normalised the same way: `2026/06/20` answers 21 at 18:00Z and its '
+      + 'receipt names 2026-06-20T00:00:00Z',
+      slashEvening.code === 0 && slashEvening.stdout.trim() === '21'
+        && slashEvening.stderr.includes(` since ${WINDOW_SINCE} `), JSON.stringify(slashEvening));
+
+    const shallowEvening = runCliAt(EVENING, ['count', `--since=${BARE_NARROW}`, `--until=${WINDOW_UNTIL}`, '--no-fetch'], shallowDeep);
+    const rawShallowEvening = rawCountAt(EVENING, [`--since=${BARE_NARROW}`, `--until=${WINDOW_UNTIL}`], shallowDeep);
+    t('the filing card\'s shape — a shallow clone whose floor predates the window, asked after noon — answers 3 '
+      + 'without fetching, the complete-instant answer of the battery above, where the raw bare date counts 2',
+      shallowEvening.code === 0 && shallowEvening.stdout.trim() === narrow.stdout.trim()
+        && shallowEvening.stdout.trim() === '3' && /no fetch/.test(shallowEvening.stderr) && rawShallowEvening === '2',
+      JSON.stringify({ shallowEvening, rawShallowEvening }));
+
+    const logEvening = runCliAt(EVENING, ['log', `--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`, '--format=%H'], full);
+    t('`log` reads the same normalised window as `count`: 21 lines at 18:00Z',
+      logEvening.code === 0 && logEvening.stdout.trim().split('\n').length === 21, JSON.stringify(logEvening));
+
+    const refusedEvening = runCliAt(EVENING, ['count', `--since=${BARE_SINCE}`, '--no-fetch'], shallowDeep);
+    t('a refusal names the instant too, with exit 2 and EMPTY stdout',
+      refusedEvening.code === 2 && refusedEvening.stdout.trim() === ''
+        && refusedEvening.stderr.includes(`window: since ${WINDOW_SINCE}`), JSON.stringify(refusedEvening));
+
+    const untilNow = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, '--until=now'], full);
+    t('an --until Date.parse cannot place still reaches git as given, and the receipt prints it as given — '
+      + 'normalising added no refusal',
+      untilNow.code === 0 && untilNow.stdout.trim() === '21' && untilNow.stderr.includes(' until now · '),
+      JSON.stringify(untilNow));
 
     // ── touch: the provenance reading a shallow clone fabricates ────────────
     // The fixture's `charter.md` was last touched at c2; every shallow clone
@@ -1192,6 +1422,90 @@ function selfTest() {
       never.code === 1 && never.stdout.trim() === '' && /no commit on/.test(never.stderr), JSON.stringify(never));
     const noPath = runCliAllowFail(['touch'], full);
     t('touch without --path is usage', noPath.code === 1 && noPath.stdout.trim() === '', JSON.stringify(noPath));
+
+    // ── piped stdout: the answer a pipe reads is the answer a file holds ────
+    // The fifth trap in the header. A file takes the whole answer in one write;
+    // a pipe takes what fits and the rest waits on the event loop, which the
+    // entry's old `process.exit()` ended. Every answer above fits in one
+    // buffer-full, so none of them could see it. This one is padded to many:
+    // `%<(16384)` pads a field to 16384 columns (git ignores wider), four to a
+    // line, 21 lines. A child's pipe here is a socketpair, so a buffer-full is
+    // the socket's send buffer (212992 bytes by default on Linux) rather than a
+    // FIFO's 64 KiB; the answer is sized well past both. `full` is read-only
+    // here, so this battery's place after the deepening ones changes nothing.
+    battery('piped stdout: the answer a pipe reads is the answer a file holds');
+    const wideArgs = [
+      'log', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`, `--format=${'%<(16384)%H'.repeat(4)}`, `--cwd=${full}`,
+    ];
+    const newlines = (buf) => buf.reduce((n, b) => n + (b === 10 ? 1 : 0), 0);
+
+    const wideFile = join(root, 'wide-answer.txt');
+    const wideFd = openSync(wideFile, 'w');
+    let toFile;
+    try {
+      toFile = spawnSync(process.execPath, [self, ...wideArgs], { cwd: full, encoding: 'utf8', stdio: ['ignore', wideFd, 'pipe'] });
+    } finally {
+      closeSync(wideFd);
+    }
+    const fileBytes = readFileSync(wideFile);
+    const fileLines = newlines(fileBytes);
+    t('FIXTURE — the wide `log` sent to a FILE holds the 21 answer lines, exit 0, and is over 1 MiB: many times '
+      + 'what a pipe takes in one go. Read first, because an answer that fits one buffer-full passes the piped '
+      + 'pins below with or without the fix',
+      toFile.status === 0 && fileLines === 21 && fileBytes.length > 1024 * 1024,
+      `exit ${toFile.status} lines ${fileLines} bytes ${fileBytes.length} stderr ${JSON.stringify(toFile.stderr)}`);
+
+    // The reader is its own process, so the tool's stdout is a real pipe whose
+    // far end nothing else drains. It attaches its listener at once (Node
+    // discards a child's unread output when the child exits, which would look
+    // like a truncation of the reader's own making), holds the stream paused
+    // for 200 ms so the tool fills the pipe and has to wait, then reads to EOF —
+    // or, in `close-early` mode, takes one chunk and closes, the shape of `| head -1`.
+    const PIPE_READER = [
+      "const { spawn } = require('node:child_process');",
+      "const { createHash } = require('node:crypto');",
+      'const [mode, ...cmd] = process.argv.slice(1);',
+      "const child = spawn(process.execPath, cmd, { stdio: ['ignore', 'pipe', 'pipe'] });",
+      "const hash = createHash('sha256');",
+      "let bytes = 0; let lines = 0; let stderr = '';",
+      "child.stderr.on('data', (d) => { stderr += d; });",
+      'const take = (d) => { bytes += d.length; lines += d.reduce((n, b) => n + (b === 10 ? 1 : 0), 0); hash.update(d); };',
+      "if (mode === 'close-early') child.stdout.once('data', (d) => { take(d); child.stdout.destroy(); });",
+      "else child.stdout.on('data', take);",
+      'child.stdout.pause();',
+      'setTimeout(() => child.stdout.resume(), 200);',
+      "child.on('close', (code, signal) => process.stdout.write(JSON.stringify({ code, signal, bytes, lines, sha256: hash.digest('hex'), stderr })));",
+    ].join('\n');
+    const readThroughPipe = (mode) => {
+      const r = spawnSync(process.execPath, ['-e', PIPE_READER, mode, self, ...wideArgs], {
+        cwd: full,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+      });
+      try {
+        return JSON.parse(r.stdout);
+      } catch {
+        return { code: null, readerExit: r.status, readerSignal: r.signal, readerError: String(r.error ?? ''),
+          readerStdout: String(r.stdout).slice(0, 300), stderr: String(r.stderr).slice(0, 300) };
+      }
+    };
+
+    const piped = readThroughPipe('slow');
+    t('the same `log` through a pipe whose reader holds off reads the SAME 21 lines, exit 0 — where the entry\'s '
+      + 'old process.exit() delivered one buffer-full and still exited 0',
+      piped.code === 0 && piped.lines === fileLines, JSON.stringify(piped));
+    t('and the piped bytes ARE the file\'s bytes: the same length and the same sha256, not just the same line count',
+      piped.bytes === fileBytes.length && piped.sha256 === createHash('sha256').update(fileBytes).digest('hex'),
+      `piped ${piped.bytes} bytes ${piped.sha256} · file ${fileBytes.length} bytes`);
+
+    const early = readThroughPipe('close-early');
+    t('a reader that closes after its first chunk (the `| head -1` shape, proved by reading less than the file '
+      + 'holds) costs the tool no `write EPIPE` trace: it exits with the answer\'s code, 0, and its stderr is the '
+      + 'one-line method receipt',
+      early.code === 0 && early.bytes > 0 && early.bytes < fileBytes.length
+        && /^method: git log [^\n]*\n$/.test(early.stderr ?? '') && !/EPIPE/.test(early.stderr ?? ''),
+      JSON.stringify(early));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1248,5 +1562,13 @@ function selfTest() {
 
 const invokedDirectly = isEntrypoint(import.meta.url);
 if (invokedDirectly) {
-  process.exit(main(process.argv.slice(2)) || 0);
+  // The fifth trap in the header: `process.exit()` here ended the process with
+  // most of a piped `log` answer still queued. Setting the exit code and
+  // returning lets the queued writes drain first, on every stdout kind.
+  process.stdout.on('error', (err) => {
+    // A reader that stopped reading (`| head -1`) took what it wanted; the rest
+    // of the answer has nowhere to go. Anything else is a real failure.
+    if (err?.code !== 'EPIPE') throw err;
+  });
+  process.exitCode = main(process.argv.slice(2)) || 0;
 }

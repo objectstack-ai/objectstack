@@ -4,7 +4,7 @@
  * #9416 — the resume body refuses a MIS-SHAPED VALUE on an accepted key, and a
  * body that is not a JSON object at all.
  *
- * #8796 closed the resume envelope's KEY set; this is the same silent-drop
+ * Commit a4331227b closed the resume envelope's KEY set; this is the same silent-drop
  * family one axis over, on the VALUE. The assembly type-guarded each accepted
  * key and skipped whatever failed the guard, so `{"inputs":"a string"}` passed
  * the closed key set (the key IS accepted), lost its value, and answered HTTP
@@ -16,7 +16,7 @@
  *
  * Maintainer ruling on the card — **Option A**: refuse, 400, located, naming
  * the key and the expected type; non-object and array bodies refuse the same
- * way. It inherits #8796's ruling together with its reason, plus #3899's
+ * way. It inherits the ruling commit a4331227b landed together with its reason, plus #3899's
  * toggle-arm precedent (a truthy non-boolean `enabled` is refused there, never
  * coerced or dropped). ⛔ Option B — forward the raw value and let the engine
  * judge — was rejected: `ResumeSignal` types `variables`/`output` as
@@ -184,7 +184,7 @@ describe('#9416 — a type-mismatched value on an accepted key is refused, not d
 
     it('refuses the mis-shaped value even when a sibling key is perfectly valid', async () => {
         // The half-wrong body must not be silently half-dropped — the same
-        // reasoning #8796 used to decline "refuse only when nothing is
+        // reasoning commit a4331227b used to decline "refuse only when nothing is
         // recognized".
         const r = await refusalFor({ inputs: { real: 'value' }, branchLabel: 7 });
         expect(r.details?.fields).toMatchObject([{ field: 'branchLabel', code: 'invalid_type' }]);
@@ -194,7 +194,7 @@ describe('#9416 — a type-mismatched value on an accepted key is refused, not d
     it('reports an unknown KEY ahead of a mis-shaped value — #8796 message unchanged', async () => {
         // Ordering pin: a body that is both misspelled and mis-shaped still
         // reports the misspelling, which is the correction the caller needs
-        // first and the one #8796 pinned.
+        // first and the one commit a4331227b pinned.
         const r = await refusalFor({ inputs: 'a string', values: { x: 1 } });
         expect(r.details?.fields).toMatchObject([{ field: 'values', code: 'unknown_field' }]);
         expect(r.message).toMatch(/`values`/);

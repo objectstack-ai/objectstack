@@ -913,7 +913,7 @@ describe('translation unknown-key strictness (#4001)', () => {
     });
 
     it('refuses `submitLabel` with the retirement prescription (#10926)', () => {
-      // Flipped, not deleted: until #10926 this case pinned `submitLabel` as
+      // Flipped, not deleted: until commit d173125fb this case pinned `submitLabel` as
       // an accepted copy key (latterly on a bespoke component type, after
       // #9249 retired `element:form`, its only spec-declared carrier). The
       // maintainer ruled retire over re-anchor, so the same authored shape now
@@ -995,20 +995,44 @@ describe('translation unknown-key strictness (#4001)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // #7862 — `dashboards.<name>.widgets.<id>.subCaption`, the metric widget's
-  // sub-caption (`options.description`). #5428 item 4: two authored fields,
-  // two keys — `description` translates `widget.description`, `subCaption`
-  // translates `widget.options.description`; sharing one key is forbidden.
+  // The metric sub-caption, RETIRED at both ends (#21257; ruling C on
+  // objectui#11389, which reverses #5428 item 4). `subCaption` was added by
+  // #7862 to translate the widget's `options.description`; it is now a
+  // `retiredKey()` tombstone, and its former `subtitle` alias carries the
+  // retirement as `guidance` rather than a rename onto a tombstone. A widget
+  // keeps one authored description, `widget.description`.
   // ──────────────────────────────────────────────────────────────────────────
-  describe('dashboard widget sub-caption (#7862)', () => {
+  describe('dashboard widget sub-caption — retired (#21257)', () => {
     const parse = (widgets: unknown) =>
       TranslationDataSchema.safeParse({ dashboards: { sales: { widgets } } });
 
-    it('accepts `subCaption` on the widget node, alongside title/description', () => {
+    it('refuses `subCaption` with the retirement prescription, at the key', () => {
+      // Flipped, not deleted: until #21257 this case pinned `subCaption` as an
+      // accepted member of the widget node. The same authored shape now pins
+      // the refusal, and the refusal must carry the upgrade.
       const result = parse({
         rev: { title: '营收', description: '本季度确认的营收', subCaption: '较上季度' },
       });
-      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues.find((i) => i.path.at(-1) === 'subCaption');
+      expect(issue?.code).toBe('invalid_type');
+      expect(issue?.path).toEqual(['dashboards', 'sales', 'widgets', 'rev', 'subCaption']);
+      expect(issue?.message).toMatch(/^`dashboards\.<name>\.widgets\.<id>\.subCaption` was removed in @objectstack\/spec 17\.7\.0/);
+      expect(issue?.message).toContain("translate it through this widget's `description` entry");
+      // Only the retired key is refused: the live siblings raise nothing.
+      expect(result.error?.issues).toHaveLength(1);
+    });
+
+    it('is refused on every face the widget node is spread into — bundle entry, platform bundle, item', () => {
+      const dashboards = { sales: { widgets: { rev: { subCaption: 'vs last quarter' } } } };
+      for (const result of [
+        TranslationDataSchema.safeParse({ dashboards }),
+        PlatformTranslationDataSchema.safeParse({ dashboards }),
+        TranslationItemSchema.safeParse({ locale: 'en', dashboards }),
+      ]) {
+        expect(result.success).toBe(false);
+        expect(result.error?.issues.map((i) => i.path.at(-1))).toEqual(['subCaption']);
+      }
     });
 
     it('keeps `title`/`description` byte-identical through the parse', () => {
@@ -1027,23 +1051,28 @@ describe('translation unknown-key strictness (#4001)', () => {
       expect(message).toContain('`footnote`');
     });
 
-    it('sends `subtitle` to `subCaption`, not to `description`', () => {
-      // On a metric widget the string an author calls the "subtitle" is the
-      // sub-caption under the number (`options.description`). Pointing it at
-      // `description` would steer authors to precisely the shared key the
-      // #5428 ruling forbids (「两个作者字段两个 key」).
+    it('refuses `subtitle` with the retirement, renaming it onto neither `subCaption` nor `description`', () => {
+      // `subtitle` was the alias of `subCaption`. An alias onto a tombstone
+      // sends the author into a second rejection, and repointing it at
+      // `description` would silently change what the word is taken to mean —
+      // so the refusal names both readings and lets the author choose.
       const result = parse({ rev: { subtitle: '较上季度' } });
       expect(result.success).toBe(false);
       const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
-      expect(message).toContain('`subtitle` → `subCaption`');
+      expect(message).toContain('`subtitle` was the alias spelling of `subCaption`');
+      expect(message).toContain("belongs under this widget's `description` entry");
+      expect(message).not.toContain('`subtitle` → `subCaption`');
       expect(message).not.toContain('`subtitle` → `description`');
     });
 
-    it('suggests `subCaption` for a near-miss spelling', () => {
+    it('no longer suggests the tombstone for a near-miss spelling', () => {
+      // The edit-distance fallback excludes keys that accept nothing, so a
+      // misspelling of the retired key is not sent to it.
       const result = parse({ rev: { subCaptoin: '较上季度' } });
       expect(result.success).toBe(false);
-      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
-        .toContain('→ `subCaption`');
+      const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      expect(message).toContain('`subCaptoin`');
+      expect(message).not.toContain('→ `subCaption`');
     });
   });
 
@@ -1150,32 +1179,32 @@ describe('translation unknown-key strictness (#4001)', () => {
         .toContain('`title` → `label`');
     });
 
-    it('refuses `help` on a screen field, and says the string exists but the key does not', () => {
-      // The report proposed label/placeholder/help. `help` is still refused —
-      // but ⚠️ its reason changed with #17306 and this pin changed with it.
-      // The old reason was that the field declared nothing help-shaped; it now
-      // declares `inlineHelpText` (the object field's spelling), so the copy is
-      // real and only THIS face's key for it is missing. The refusal must not
-      // keep telling an author the field has no help copy when it has.
+    it('translates a screen field\'s help text under the key the field itself declares', () => {
+      // The report proposed label/placeholder/help. The face carries the help
+      // line as `inlineHelpText` — the screen field's own key (the object
+      // field's spelling), declared on `ScreenFieldConfigSchema` by #17306 —
+      // because the overlay writes each translation back onto the key it names.
       const declared = Object.keys((ScreenFieldConfigSchema as unknown as z.ZodObject<z.ZodRawShape>).shape);
-      expect(declared).toContain('inlineHelpText');
-      // The bare spellings stay undeclared on the schema — `inlineHelpText` is
-      // the one landing key, so the translation face has exactly one candidate.
-      expect(declared).not.toContain('help');
-      expect(declared).not.toContain('helpText');
-      expect(declared).toContain('label');
-      expect(declared).toContain('placeholder');
+      for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) expect(declared).toContain(key);
+      expect(FLOW_SCREEN_FIELD_COPY_KEYS).toContain('inlineHelpText');
 
-      const message = parse({ lead_conversion: { screens: { s1: { fields: { f: { help: 'x' } } } } } })
-        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
-      expect(message).toContain('would translate nothing');
-      expect(message).toContain('inlineHelpText');
-      // …and it must not be re-pointed at `placeholder`, which means something else.
-      expect(message).not.toContain('`help` → `placeholder`');
-      // The card that moved this reason is named in the code comment above the
-      // string, never IN the string: this text is printed AT the author, who
-      // has no tracker, so `#NNNN` resolves to nothing (check:doc-authoring).
-      expect(message).not.toMatch(/#\d{3,5}\b/);
+      const result = parse({ lead_conversion: { screens: { s1: { fields: { f: { inlineHelpText: '介于 1 到 10 之间' } } } } } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    });
+
+    it('refuses the neighbouring help spellings by name, with the rename to `inlineHelpText`', () => {
+      // `help` is right on an object FIELD translation, `helpText` on an action
+      // param; here each is refused (`.strict()`) and the message names the key
+      // that would have been read. `description` rides the same rename: an object
+      // field uses it for tooltip copy, and a screen field has no description.
+      for (const spelling of ['help', 'helpText', 'hint', 'tooltip', 'description']) {
+        const issue = parse({ lead_conversion: { screens: { s1: { fields: { f: { [spelling]: 'x' } } } } } })
+          .error?.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(issue, spelling).toBeDefined();
+        expect(issue?.message).toContain(`\`${spelling}\` → \`inlineHelpText\``);
+        // …never re-pointed at `placeholder`, the in-input hint, a different string.
+        expect(issue?.message).not.toContain('→ `placeholder`');
+      }
     });
 
     it('says why select-option labels are not translatable here', () => {
@@ -1285,7 +1314,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
       messages: { 'common.save': 'Save' },
       globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
-      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', subCaption: 'vs last quarter' } }, globalFilters: { region: { label: 'Region', options: { emea: 'EMEA' } } } } },
+      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', description: 'vs last quarter' } }, globalFilters: { region: { label: 'Region', options: { emea: 'EMEA' } } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
       flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } } } },
       metadataForms: { object: { label: 'Object', fields: { name: { label: 'Name' } } } },

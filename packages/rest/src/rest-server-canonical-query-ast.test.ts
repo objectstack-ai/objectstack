@@ -66,19 +66,15 @@
  * if that table ever stops making them equal, this section is where it is
  * reported rather than in production.
  *
- * ⛔ What §3 is NOT: a claim that either dialect is SERVED. The public picker's
- * pair is asserted equal by both REFUSING — its `where` carries
- * `ViewFilterRule` rows, which the ingress declines with `400 INVALID_FILTER`
- * before and after this card alike. Equality is the assertion; the verdict on
- * either side is the ingress's.
+ * ⛔ What §3 is NOT: a claim that either dialect is SERVED. Equality is the
+ * assertion; the verdict on either side is the ingress's.
  *
- * [#16581] The ROUTE no longer builds that literal — it lowers the rule rows to
- * the `FilterArray` grammar before dispatch — but the pair stays exactly as
- * frozen here, and its CONTROL becomes load-bearing in a second way: it is one
- * of the two independent pins that the object dialect is still REFUSED, i.e.
- * that #16581 lowered the route rather than loosening the parser. ⛔ Never
- * "update" the picker pair to the lowered shape: a frozen BEFORE that is
- * rewritten to match the after measures nothing.
+ * [#21180] The public picker's pair and its refusal CONTROL left with the
+ * route: ruling E on #21079 deleted the anonymous lookup picker, so there is
+ * no door left that builds that literal. The property the control also held —
+ * the ingress still REFUSES an array of `{ field, operator, value }` condition
+ * objects with `400 INVALID_FILTER` — is a property of the normalizer, and the
+ * metadata-protocol package's own malformed-filter suite pins it directly.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -88,13 +84,14 @@ import { dirname, resolve } from 'node:path';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { FindDataRequest } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
-import type { ImportProtocolLike } from './import-runner.js';
+import type { ImportProtocolLike } from '@objectstack/core';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
 
 const REST_SERVER = sourceOf('rest-server.ts');
-const IMPORT_RUNNER = sourceOf('import-runner.ts');
+// [#20919] The runner moved to `@objectstack/core`, beside `bulkWrite`.
+const IMPORT_RUNNER = readFileSync(resolve(HERE, '../../core/src/utils/import-runner.ts'), 'utf8');
 
 interface CensusEntry {
     /** File name, relative to this test — the census reads package sources only. */
@@ -115,7 +112,12 @@ interface CensusEntry {
 }
 
 const CENSUS: CensusEntry[] = [
-    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 5, noDoor: false },
+    // [#21180] 5 -> 4: the anonymous lookup picker's `pickerRequest` literal
+    // left with its route. Re-derived with `querySlots` itself: 5 slots on the
+    // tree before the deletion, 4 after (`req.query`, the import-job read and
+    // the two remaining server-built literals). The floor equals the measured
+    // count, so a slot that stops matching reds here as before.
+    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 4, noDoor: false },
     { file: 'import-runner.ts', source: IMPORT_RUNNER, minQuerySlots: 3, noDoor: true },
 ];
 
@@ -292,13 +294,12 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
     });
 });
 
-describe('[#16337] §1 the three sites rest-server.ts names are canonical, by name', () => {
+describe('[#16337] §1 the two sites rest-server.ts names are canonical, by name', () => {
     it('names them', () => {
         // Belt to §1's braces: the class-wide assertions above would still pass
-        // over a file that had lost these literals entirely.
+        // over a file that had lost these literals entirely. [#21180] There
+        // were three; the public picker's literal left with its route.
         expect(REST_SERVER).toContain("orderBy: [{ field: 'created_at', order: 'desc' }],");
-        expect(REST_SERVER).toContain("orderBy: [{ field: displayFields[0], order: 'asc' }],");
-        expect(REST_SERVER).toContain("fields: ['id', ...displayFields],");
         expect(REST_SERVER).toMatch(/expand: Object\.fromEntries\(/);
     });
 });
@@ -599,24 +600,6 @@ const PAIRS: { site: string; wire: Record<string, unknown>; canonical: Record<st
         wire: { $filter: { id: { $in: ['job_1', 'job_2'] } }, $top: 2 },
         canonical: { object: 'sys_import_job', where: { id: { $in: ['job_1', 'job_2'] } }, limit: 2 },
     },
-    {
-        site: 'public reference picker (GET /forms/:slug/lookup/:field)',
-        wire: {
-            limit: 10,
-            offset: 0,
-            filters: [{ field: 'status', operator: 'equals', value: 'done' }],
-            select: ['id', 'object_name'],
-            sort: [{ field: 'object_name', order: 'asc' }],
-        },
-        canonical: {
-            object: 'sys_import_job',
-            limit: 10,
-            offset: 0,
-            where: [{ field: 'status', operator: 'equals', value: 'done' }],
-            fields: ['id', 'object_name'],
-            orderBy: [{ field: 'object_name', order: 'asc' }],
-        },
-    },
 ];
 
 describe('[#16337] §3 the rewrite moves nothing — driven through the real normalizer', () => {
@@ -633,25 +616,6 @@ describe('[#16337] §3 the rewrite moves nothing — driven through the real nor
             normalized({ object: 'sys_import_job', limit: 1 }),
             normalized({ object: 'sys_import_job', limit: 2 }),
         ]).then(([one, two]) => expect(one).not.toEqual(two));
-    });
-
-    it('CONTROL: the picker pair is equal by REFUSING, and the refusal is the ingress\'s', async () => {
-        // Stated rather than left implicit: this pair's equality is not evidence
-        // that the picker query is served. Both sides carry `ViewFilterRule`
-        // rows on the filter slot, which is not a `FilterCondition`.
-        //
-        // [#16581] ⭐ And this is now the discriminating control for that card:
-        // the route lowers those rows before dispatch, so it no longer sends
-        // this literal — while the literal itself must still be REFUSED. A
-        // green picker search plus a green line here means "the route lowers";
-        // a green picker search with this line flipped would have meant "the
-        // parser was loosened", the repair the ruling excludes.
-        // [#16638] Located by NAME, not by index: three import-runner pairs were
-        // inserted above and a positional reference would silently start
-        // measuring a different row.
-        const picker = PAIRS.find((p) => p.site.startsWith('public reference picker'))!;
-        const outcome = await normalized(picker.canonical) as { refused?: { code?: string; status?: number } };
-        expect(outcome.refused).toEqual({ code: 'INVALID_FILTER', status: 400 });
     });
 });
 

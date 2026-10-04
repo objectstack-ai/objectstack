@@ -31,6 +31,25 @@
  * a driver-native value here would fork that convention into a second source of
  * truth and break the moment a query crosses datasources.
  *
+ * [#20844] A day outside the years 0001..9999 has no `YYYY-MM-DD` form; it is
+ * spelled in the expanded-year form instead (`+010026-10-01`), so every reader
+ * reads the year it resolved to — see {@link asYmd}. Which years a field takes
+ * is the engine's question, not this module's: it refuses a resolved token
+ * outside its field's years.
+ *
+ * # A date macro past the instants a `Date` holds refuses here
+ *
+ * [#21068] An offset can land past every instant a JavaScript `Date` can hold
+ * (ECMA-262's time values, ±8.64e15 ms around 1970): `{300000_years_ago}`,
+ * `{99999999999999999999_minutes_ago}`. Such a macro names no day and no time,
+ * so there is no year left for the engine to judge. It used to resolve to the
+ * text `Invalid Date` (a day-or-coarser macro), which compares as text and
+ * answered every row of a `$lt`, or to throw an uncoded `RangeError` from
+ * `toISOString` (a sub-day one), which the REST door answered `500`. It is
+ * refused instead, `INVALID_FILTER` / 400 naming the placeholder — see
+ * {@link DateMacroPastDateRangeError}. The test is the `Date`'s own validity,
+ * asked once, of the instant the macro computed: ⛔ never a copy of the range.
+ *
  * # Period `_end` resolves to a calendar DAY — its WIDTH is ADR-0053 D-D
  *
  * `{current_year_end}` resolves to `2026-12-31`, per the spec's own
@@ -91,7 +110,13 @@ import {
   parseDateMacroParam,
   type DateMacroUnit,
 } from '@objectstack/spec/data';
-import { calendarPartsInTzOrUtc } from './datetime.js';
+import type { StandardErrorCode } from '@objectstack/spec/api';
+import { calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
+import {
+  isOutsideTemporalYearRange,
+  SUPPORTED_TEMPORAL_YEARS,
+  temporalStorageForm,
+} from './temporal-storage-form.js';
 
 /**
  * The slice of an execution context the resolver reads. Structural on purpose —
@@ -180,10 +205,44 @@ export class UnresolvedFilterTokenError extends Error {
   }
 }
 
-/** `YYYY-MM-DD` for a calendar day, zero-padded. */
-function ymd(year: number, month: number, day: number): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${year}-${p(month)}-${p(day)}`;
+/** A year as a refusal spells it: four digits, `0001`. */
+const fourDigitYear = (year: number): string => String(year).padStart(4, '0');
+
+/**
+ * [#21068] Raised when a date macro's offset lands past every instant a
+ * JavaScript `Date` can hold, so the macro names no day and no time — see the
+ * module doc. `token` names the placeholder.
+ *
+ * `INVALID_FILTER` / 400, the code a date macro's family already answers: the
+ * engine refuses one that resolved outside its column's years with it, and the
+ * temporal-comparand door a literal of the same value. This one lands past
+ * every column's years, and the author's fix is the same (a smaller offset).
+ * ⛔ Not `FILTER_TOKEN_UNRESOLVED`: its declared meaning is a context the
+ * request does not carry ({@link UnresolvedFilterTokenError}: "the spelling is
+ * correct, the context is not"), and here the context is complete. ⛔ Not
+ * `FILTER_TOKEN_UNKNOWN` either: the token is in the vocabulary.
+ *
+ * Not exported: a caller reads `code` and `status`, as for every door's
+ * refusal, and the module's public surface stays as it was.
+ */
+class DateMacroPastDateRangeError extends Error {
+  readonly token: string;
+  readonly status = 400;
+  readonly code = 'INVALID_FILTER' satisfies StandardErrorCode;
+
+  constructor(token: string) {
+    const { date, datetime } = SUPPORTED_TEMPORAL_YEARS;
+    super(
+      `Relative-date placeholder "{${token}}" names no instant: its offset lands past every instant ` +
+      'a JavaScript Date can hold, so it resolves to no day and no time, and it is refused rather ' +
+      `than compared. A date value names a year from ${fourDigitYear(date.first)} to ` +
+      `${fourDigitYear(date.last)}, and a datetime value a year from ${fourDigitYear(datetime.first)} ` +
+      `to ${fourDigitYear(datetime.last)}: use a relative-date placeholder whose offset lands inside ` +
+      'those years.',
+    );
+    this.name = 'DateMacroPastDateRangeError';
+    this.token = token;
+  }
 }
 
 /**
@@ -192,13 +251,41 @@ function ymd(year: number, month: number, day: number): string {
  * (a local-midnight `Date` can shift by an hour when `setMonth` crosses a
  * transition); the zone only decides WHICH calendar day "now" is, which
  * {@link calendarPartsInTzOrUtc} answers from the platform tz database.
+ *
+ * [#20599] Every proxy date in this file is built by `wallClockToUtcMs`, never
+ * `Date.UTC`, which reads a year from 0 to 99 as 1900 + year: a step that lands
+ * in 0001..0099 (`{1977_years_ago}`) stays there.
  */
 function proxyDay(now: Date, timezone?: string): Date {
-  const { year, month, day } = calendarPartsInTzOrUtc(now, timezone);
-  return new Date(Date.UTC(year, month - 1, day));
+  return new Date(wallClockToUtcMs(calendarPartsInTzOrUtc(now, timezone)));
 }
 
-const asYmd = (d: Date): string => ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+/**
+ * `YYYY-MM-DD` of a proxy date: the storage rule's `date` spelling, whose year
+ * is padded to four digits (`0049-09-30`, never `49-09-30`, which names no
+ * day). [#20599] Before the proxy dates kept their year, a step into
+ * 0001..0099 came out in the 1900s instead, so this spelling was never reached
+ * for those years; a step into 0100..0999 was already spelled unpadded.
+ *
+ * [#20844] A day outside 0001..9999 has no `YYYY-MM-DD` form, and the storage
+ * rule's spelling of one (`10026-10-01`, `0-10-01`, `-1-10-01`) is read by
+ * nothing as the day it names: `Date.parse` takes it through the host's
+ * legacy parser, in the host's zone, and reads `-1-10-01` as 2001-01-10. So
+ * `{2027_years_ago}` was judged inside the range by core's
+ * `isOutsideTemporalYearRange` and compared as a day in 2001. Such a day is
+ * spelled in the expanded-year form of ECMAScript's date time string format
+ * instead (`+010026-10-01`, `-000001-10-01`), the day half of what
+ * `toISOString` spells for its instant: every reader reads it as that UTC day,
+ * on every host. The range is core's one range, asked of the day itself, never
+ * re-derived here. A step past the instants a `Date` holds is not one of these:
+ * it has no day at all, and [#21068] never reaches here — {@link resolveFilterToken}
+ * refuses it first.
+ */
+function asYmd(d: Date): string {
+  if (!isOutsideTemporalYearRange(d, 'date')) return String(temporalStorageForm(d, 'date'));
+  const iso = d.toISOString();
+  return iso.slice(0, iso.indexOf('T'));
+}
 
 type PeriodKind = 'week' | 'month' | 'quarter' | 'year';
 
@@ -212,17 +299,19 @@ function startOfPeriod(kind: PeriodKind, d: Date): Date {
       return r;
     }
     case 'month':
-      return new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth(), 1));
+      return new Date(wallClockToUtcMs({ year: r.getUTCFullYear(), month: r.getUTCMonth() + 1, day: 1 }));
     case 'quarter':
-      return new Date(Date.UTC(r.getUTCFullYear(), Math.floor(r.getUTCMonth() / 3) * 3, 1));
+      return new Date(
+        wallClockToUtcMs({ year: r.getUTCFullYear(), month: Math.floor(r.getUTCMonth() / 3) * 3 + 1, day: 1 }),
+      );
     case 'year':
-      return new Date(Date.UTC(r.getUTCFullYear(), 0, 1));
+      return new Date(wallClockToUtcMs({ year: r.getUTCFullYear(), month: 1, day: 1 }));
   }
 }
 
-/** Days in the given (0-based) month of `year`. */
+/** Days in the given (0-based) month of `year`: day 0 of the next month rolls back to its last. */
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(wallClockToUtcMs({ year, month: month + 2, day: 0 })).getUTCDate();
 }
 
 /**
@@ -240,10 +329,10 @@ function addMonthsClamped(d: Date, n: number): Date {
   const targetYear = year + Math.floor(month / 12);
   const targetMonth = ((month % 12) + 12) % 12;
   const day = Math.min(d.getUTCDate(), daysInMonth(targetYear, targetMonth));
-  return new Date(Date.UTC(
-    targetYear, targetMonth, day,
-    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds(),
-  ));
+  return new Date(wallClockToUtcMs({
+    year: targetYear, month: targetMonth + 1, day,
+    hour: d.getUTCHours(), minute: d.getUTCMinutes(), second: d.getUTCSeconds(), millisecond: d.getUTCMilliseconds(),
+  }));
 }
 
 /** Shift `d` by `n` whole periods of `kind` (negative shifts backwards). */
@@ -276,12 +365,12 @@ function addUnits(unit: DateMacroUnit, d: Date, n: number): Date {
 
 /**
  * `current|last|next` × `week|month|quarter|year` × `start|end`, plus the bare
- * `week_start`-style aliases (which mean `current_`). Returns `undefined` when
- * the token is not a period token.
+ * `week_start`-style aliases (which mean `current_`). Returns the period's
+ * bounding day, or `undefined` when the token is not a period token.
  */
 const PERIOD_RE = /^(?:(current|last|next)_)?(week|month|quarter|year)_(start|end)$/;
 
-function resolvePeriodToken(token: string, today: Date): string | undefined {
+function resolvePeriodToken(token: string, today: Date): Date | undefined {
   const m = PERIOD_RE.exec(token);
   if (!m) return undefined;
   const rel = (m[1] ?? 'current') as 'current' | 'last' | 'next';
@@ -294,19 +383,59 @@ function resolvePeriodToken(token: string, today: Date): string | undefined {
   // is involved at all — so the answer never depends on the clamp policy, and
   // the arithmetic reads the same for every `kind`.
   const periodStart = startOfPeriod(kind, addPeriods(kind, startOfPeriod(kind, today), offset));
-  if (bound === 'start') return asYmd(periodStart);
+  if (bound === 'start') return periodStart;
   // `_end` = the last calendar DAY of the period: the day before the next
   // period begins. See the module doc on half-open ranges.
   const next = addPeriods(kind, periodStart, 1);
   next.setUTCDate(next.getUTCDate() - 1);
-  return asYmd(next);
+  return next;
+}
+
+/**
+ * [#21068] The instant a date macro computes, and how it is spelled: an
+ * instant (`{now}`, `{N_hours_*}`, `{N_minutes_*}`) or a calendar day (every
+ * other macro). `undefined` when `token` is not a date macro. Computing it
+ * apart from spelling it lets {@link resolveFilterToken} ask the one question
+ * every macro owes before either spelling — does the instant exist? — in one
+ * place.
+ */
+function dateMacroInstant(
+  token: string,
+  now: Date,
+  timezone: string | undefined,
+): { at: Date; spelled: 'instant' | 'day' } | undefined {
+  const today = proxyDay(now, timezone);
+
+  switch (token) {
+    case 'now': return { at: now, spelled: 'instant' };
+    case 'today': return { at: today, spelled: 'day' };
+    case 'yesterday': return { at: addUnits('day', today, -1), spelled: 'day' };
+    case 'tomorrow': return { at: addUnits('day', today, 1), spelled: 'day' };
+  }
+
+  const period = resolvePeriodToken(token, today);
+  if (period !== undefined) return { at: period, spelled: 'day' };
+
+  const param = parseDateMacroParam(token);
+  if (!param) return undefined;
+  const sign = param.direction === 'ago' ? -1 : 1;
+  // Sub-day units are instants — they must keep their time-of-day, so they
+  // shift `now` and render as a full ISO timestamp. Day-and-coarser units are
+  // calendar quantities and render as `YYYY-MM-DD` off the reference day.
+  if (param.unit === 'minute' || param.unit === 'hour') {
+    return { at: addUnits(param.unit, now, sign * param.n), spelled: 'instant' };
+  }
+  return { at: addUnits(param.unit, today, sign * param.n), spelled: 'day' };
 }
 
 /**
  * Resolve one token NAME (the bit inside the braces) to its concrete value.
  * Throws {@link UnresolvedFilterTokenError} for a vocabulary token the request
- * carries no value for. Returns `undefined` only when the token is outside the
- * vocabulary — callers turn that into {@link UnknownFilterTokenError}.
+ * carries no value for, and [#21068] `INVALID_FILTER` / 400 for a date macro
+ * whose offset lands past every instant a `Date` holds
+ * ({@link DateMacroPastDateRangeError}). Returns `undefined` only when the
+ * token is outside the vocabulary — callers turn that into
+ * {@link UnknownFilterTokenError}.
  */
 export function resolveFilterToken(
   token: string,
@@ -355,31 +484,14 @@ export function resolveFilterToken(
   }
 
   // ── Date macros ───────────────────────────────────────────────────────
-  const today = proxyDay(now, ctx.timezone);
-
-  switch (token) {
-    case 'now': return now.toISOString();
-    case 'today': return asYmd(today);
-    case 'yesterday': return asYmd(addUnits('day', today, -1));
-    case 'tomorrow': return asYmd(addUnits('day', today, 1));
-  }
-
-  const period = resolvePeriodToken(token, today);
-  if (period !== undefined) return period;
-
-  const param = parseDateMacroParam(token);
-  if (param) {
-    const sign = param.direction === 'ago' ? -1 : 1;
-    // Sub-day units are instants — they must keep their time-of-day, so they
-    // shift `now` and render as a full ISO timestamp. Day-and-coarser units are
-    // calendar quantities and render as `YYYY-MM-DD` off the reference day.
-    if (param.unit === 'minute' || param.unit === 'hour') {
-      return addUnits(param.unit, now, sign * param.n).toISOString();
-    }
-    return asYmd(addUnits(param.unit, today, sign * param.n));
-  }
-
-  return undefined;
+  const macro = dateMacroInstant(token, now, ctx.timezone);
+  if (macro === undefined) return undefined;
+  // [#21068] An offset past every instant a `Date` holds computes an invalid
+  // `Date`: `asYmd` would spell it as the text `Invalid Date` and
+  // `toISOString` would throw an uncoded `RangeError`. Refused here, once,
+  // before either spelling.
+  if (Number.isNaN(macro.at.getTime())) throw new DateMacroPastDateRangeError(token);
+  return macro.spelled === 'instant' ? macro.at.toISOString() : asYmd(macro.at);
 }
 
 /**

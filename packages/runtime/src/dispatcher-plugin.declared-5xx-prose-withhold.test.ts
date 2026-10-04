@@ -1,16 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12281] `errorResponseBase` withholds the message of EVERY **declared** 5xx,
+ * [commit 0783d7b80] `errorResponseBase` withholds the message of EVERY **declared** 5xx,
  * aligning this exit to `/data` — and still keeps an **undeclared** 5xx legible.
  *
  * ## The ruling this pins
  *
- * Maintainer, 2026-08-27, on #12509 (option D), propagated verbatim to #12281:
+ * Maintainer, 2026-08-27, on #12509 (option D), landed in commit 0783d7b80:
  *
  * > `errorResponseBase` adopts the **structural withhold for every declared 5xx
  * > message**, aligning to `/data`'s rule; the author-facing text channel is
- * > `userMessage` (#9934), never the raw message.
+ * > `userMessage` [commit 79c46da90], never the raw message.
  *
  * ## The two axes it closes
  *
@@ -36,7 +36,7 @@
  *
  * ## ⛔ Why every case below DRIVES the shape rather than asserting the predicate
  *
- * The #12281 measurement established that the population reaching this door is
+ * Commit 0783d7b80's measurement established that the population reaching this door is
  * **EMPTY** today: `metadata-protocol`'s `deleteMetaItem` reaches only the REST
  * `/meta` door (the dispatcher plugin mounts neither `/meta` nor `/data`), and
  * `action-execution.ts`'s seven `statusCode` throws are all caught before this
@@ -71,6 +71,13 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so this harness signs its caller in: an `auth` slot in the shape
+// `resolveExecutionContext` reads answers a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 // ── harness (the shape the sibling withhold test uses) ───────────────────────
 
 function makeFakeServer() {
@@ -92,8 +99,8 @@ function makeFakeServer() {
 
 function makeCtx(fakeServer: any, analytics: unknown) {
     const kernel = {
-        getService: (name: string) => (name === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : undefined),
+        getService: (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     return {
         getKernel: () => kernel,

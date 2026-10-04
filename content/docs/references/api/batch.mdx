@@ -1,5 +1,6 @@
 ---
-title: Batch
+title: Batch schema — API Protocol property reference
+navTitle: Batch
 description: "Batch Operations API — Provides efficient bulk data operations with transaction support."
 ---
 
@@ -42,7 +43,7 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | Enable batch operations |
 | **maxRecordsPerBatch** | `integer` | optional (default: `200`) | Maximum records per batch |
-| **defaultOptions** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Default batch options |
+| **defaultOptions** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Default batch options |
 
 ### Nested Shape: `BatchConfig.defaultOptions`
 
@@ -67,7 +68,7 @@ const result = BatchConfigSchema.parse(data);
 | **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error. A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back. |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` / TRUE `readonlyWhen` on update, or the in-engine static `readonly` strip on create. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` / TRUE `readonlyWhen` on update, or the in-engine static `readonly` strip on create. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 ### Nested Shape: `BatchOperationResult.errors[number]`
 
@@ -91,7 +92,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
 
 
 ---
@@ -143,7 +144,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
 | **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Batch operation options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Batch operation options |
 
 ### Nested Shape: `BatchUpdateRequest.records[number]`
 
@@ -212,7 +213,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error. A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back. |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` / TRUE `readonlyWhen` on update, or the in-engine static `readonly` strip on create. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` / TRUE `readonlyWhen` on update, or the in-engine static `readonly` strip on create. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---
@@ -227,7 +228,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
 | **index** | `integer` | ✅ | Index of the operation in the request `operations` array |
 
 
@@ -253,7 +254,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operations** | `{ object: string; action: Enum<'create' \| 'update' \| 'delete'>; id?: string; data?: Record<string, any> }[]` | ✅ | Ordered operations executed in one transaction |
+| **operations** | `{ object: string; action?: Enum<'create' \| 'update' \| 'delete'>; id?: string; data?: Record<string, any> }[]` | ✅ | Ordered operations executed in one transaction |
 | **atomic** | `boolean` | optional (default: `true`) | Always true — the cross-object batch is all-or-nothing |
 
 ### Nested Shape: `CrossObjectBatchRequest.operations[number]`
@@ -275,7 +276,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **results** | `any[]` | ✅ | Per-operation result, index-aligned with the request operations |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'>; index: integer }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` or a TRUE `readonlyWhen` predicate. This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>; index: integer }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` or a TRUE `readonlyWhen` predicate. This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
 
 ### Nested Shape: `CrossObjectBatchResponse.droppedFields[number]`
 
@@ -285,7 +286,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
 | **index** | `integer` | ✅ | Index of the operation in the request `operations` array |
 
 
@@ -298,7 +299,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Delete options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Delete options |
 
 ### Nested Shape: `DeleteManyRequest.options`
 
@@ -331,7 +332,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Update options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Update options |
 
 ### Nested Shape: `UpdateManyRequest.records[number]`
 

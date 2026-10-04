@@ -222,7 +222,7 @@ describe('attachment access — beforeDelete (uploader or parent editor)', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// #10091 — beforeUpdate: uploader or parent editor, + the attach rule on a
+// [commit da891e0ef] beforeUpdate: uploader or parent editor, + the attach rule on a
 // re-point. The delete gate's rule applied to the verb that could otherwise
 // rewrite it away (the comment kit — derived from this one — has gated
 // update since #4630; the source kit was missing the limb its derivative
@@ -618,7 +618,7 @@ describe('unscoped multi-delete (no id, no where) — #4757 through the wired en
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// #10091 through the WIRED engine — the update verb.
+// Commit da891e0ef's gate through the WIRED engine — the update verb.
 //
 // Same rig as the #4757 block above, driving `ql.update('sys_attachment', …)`
 // end to end: the unscoped refusal reaches the handler through the
@@ -763,7 +763,7 @@ describe('unscoped multi-update (no id, no where) — #10091 through the wired e
 // rebuilt a five-field projection of the caller's execution envelope before
 // handing it to `ISharingService.canEdit`, whose contract declares the FULL
 // envelope and whose doc block tells callers they "MUST NOT rebuild a subset
-// of it" (#6523 / the #6206 ruling).
+// of it" (commit aa4b90d9a, the full-envelope ruling).
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
@@ -911,9 +911,9 @@ describe('#7145 — caller envelope forwarded to the sharing gate', () => {
     );
 
     const forwarded = canEdit.mock.calls[0]![2] as unknown as Record<string, unknown>;
-    // Every principal field survives — the #6523 contract's unit is the
-    // envelope, and #6206 forbids rebuilding a subset of it. `uploaded_by`
-    // stamping does not touch the context.
+    // Every principal field survives — the contract's unit is the envelope
+    // (commit aa4b90d9a), and the full-envelope ruling forbids rebuilding a
+    // subset of it. `uploaded_by` stamping does not touch the context.
     expect(forwarded).toEqual(DELEGATED_PRINCIPAL_FIELDS);
     // …and every middleware-private key resolved for `sys_attachment` is gone.
     for (const key of OPERATION_PRIVATE_KEYS) expect(forwarded).not.toHaveProperty(key);

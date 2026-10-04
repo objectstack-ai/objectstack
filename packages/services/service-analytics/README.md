@@ -28,11 +28,11 @@ const ordersCube: Cube = {
   title: 'Orders',
   sql: 'orders',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-    total_amount: { name: 'total_amount', label: 'Total Amount', type: 'sum', sql: 'amount' },
+    count: { label: 'Count', type: 'count', sql: '*' },
+    total_amount: { label: 'Total Amount', type: 'sum', sql: 'amount' },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
   },
 };
 
@@ -97,16 +97,17 @@ is rejected rather than dropped.
 | `dimensions` | `string[]?` | |
 | `where` | `FilterCondition?` | Canonical Query DSL filter — the same shape `find()` takes. |
 | `timeDimensions` | `{ dimension, granularity?, dateRange? }[]?` | Also strict per item. |
-| `order` | `Record<string, 'asc' \| 'desc'>?` | |
+| `order` | `Record<string, 'asc' \| 'desc'>?` | Each key must be a selected `dimensions` / `measures` entry, or a `timeDimensions` entry with a `granularity`, spelled as selected. Any other key is refused with `400 INVALID_FIELD`. |
 | `limit` | `number?` | |
 | `offset` | `number?` | |
 | `timezone` | `string?` | IANA name. No default — an absent timezone means the engine resolves it. |
 
 There is no `filters` key and no `aggregations` key. `filters` is rejected at the REST
 door with a 400 naming `where`. There is no per-metric filter key either — the cube
-metric's `filters` was removed (#10414: no strategy ever read it); fold a per-metric
-condition into the metric's own `sql` expression, or use an ADR-0021 dataset measure's
-structured `filter`.
+metric's `filters` was removed (#10414: no strategy ever read it). A measure that counts
+or sums only some rows is an ADR-0021 dataset measure with its own structured `filter`;
+a cube member's `sql` is a column reference (a field, a relationship path ending in one,
+or `'*'`), never a SQL expression (#20943).
 
 ```typescript
 const revenueByStatus = await analytics.query({
@@ -182,8 +183,24 @@ import { AnalyticsService, CubeRegistry } from '@objectstack/service-analytics';
 const registry = new CubeRegistry();
 registry.registerAll([ordersCube]);
 
-const service = new AnalyticsService({ cubes: [ordersCube] });
+const service = new AnalyticsService({
+  cubes: [ordersCube],
+  // The declared type (and `multiple`) of a source object's field — what
+  // `AnalyticsServicePlugin` relays from the engine's registry.
+  sourceFieldMeta: (object, field) => {
+    const f = engine.getObject(object)?.fields?.[field];
+    return f ? { type: f.type, multiple: f.multiple === true } : undefined;
+  },
+});
 ```
+
+`sourceFieldMeta` is how the service knows a field's declared type. The view
+operators `is_empty` / `is_not_empty` — the `$empty` operator — need it: what
+counts as empty depends on the type (null or `''` for a text-like field, null or
+`[]` for a multi-value field, null only for every other type). A host built
+without it refuses them with `INVALID_FILTER` (a read scope, with
+`READ_SCOPE_COMPILE_FAILED`) rather than guess; pass `sourceFieldMeta`, or filter
+with `is_null` / `is_not_null` there.
 
 ## License
 

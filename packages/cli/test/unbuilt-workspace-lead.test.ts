@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The DECISION half of #12964 — when oclif's "command … not found" is really a
+ * The DECISION half of commit e6fd1caf7 — when oclif's "command … not found" is really a
  * dependency that has no build output, and when it is genuinely a missing
  * command and must be left alone.
  *
@@ -24,6 +24,12 @@
  * NEITHER `parse` nor `showHelp`. That is why `invocationFailureLine` (whose
  * `isInvocationError` requires both) answers `undefined` for this failure and
  * why it could not be the place this lands.
+ *
+ * Each fixture's `module:` line names the `@oclif/core` its run loaded
+ * (4.13.3) and stays as recorded, because a transcript is evidence of one run.
+ * Nothing here reads that line — the classifier works off `message:` — and
+ * `@oclif/core` 5.1.2 builds the detail from the same lines in the same order,
+ * re-measured when the CLI moved to the 5 line.
  *
  * ⚠️ This file pins the decision only. Whether `bin/run-dev.js` actually asks
  * the question and prints the answer is a different fact with its own test —
@@ -173,7 +179,7 @@ describe('unbuiltWorkspaceLines — build output that was never consulted (#1654
     const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX, () => REDIRECTED_TO);
 
     expect(lines).toHaveLength(2);
-    // Still contradicts "not found" — that half of #12964 is unchanged.
+    // Still contradicts "not found" — that half of commit e6fd1caf7 is unchanged.
     expect(lines?.[0]).toContain('NOT A MISSING COMMAND');
     // …but the attribution is inverted, and says so in words a reader cannot
     // misread as the old line: the precondition is NOT the build output.

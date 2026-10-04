@@ -84,9 +84,16 @@
 // every entry: labels fell back to raw ids, and cross-object rebucketing filed
 // every row under `'(restricted)'` while the grand total still reconciled.
 
-import { bucketDateKey } from '@objectstack/core';
+import { bucketDateKey, compensatedSum } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
-import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.js';
+import {
+  aggregationFilterClause,
+  assertAggregationFilterReferencesAreDeclared,
+  assertAggregationFilterSparesJsonStoredFields,
+  declaredFieldClasses,
+  declaredJsonStoredFields,
+  matchesAggregationFilter,
+} from './having-filter.js';
 
 /**
  * Group + aggregate raw rows according to the AST's `groupBy` /
@@ -102,24 +109,68 @@ import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.
  * handed one — the rule the driver applies to the same comparand in a `where`
  * (having-filter.ts `checkCondition`). Absent (a registry-less caller) ⇒ every
  * comparand is compared as written, as before.
+ *
+ * [#20873] …and `$contains` / `$notContains` on a declared JSON-stored field ask
+ * MEMBERSHIP (having-filter.ts `declaredJsonStoredFields`), the reading the
+ * same condition gets in a `where`. Absent ⇒ the substring reading, as before.
+ *
+ * [#21007] …and a scalar comparison on such a field (`$in`, `$nin`, `$eq`, an
+ * ordering, `$between`, implicit equality) is REFUSED `INVALID_FILTER` / 400,
+ * in the words `where` refuses it in — judged once per `aggregations[i].filter`
+ * by having-filter.ts `assertAggregationFilterSparesJsonStoredFields`, the same
+ * function `engine.aggregate` calls, BEFORE any row is judged. So an empty
+ * `rows` and a row set the per-row walk would short-circuit past refuse alike;
+ * the per-row arm is only the backstop. `reportWithheld` is where the withheld
+ * half of that refusal goes — the field, the operator and the position, which
+ * the message does not name. This entry point holds no logger of its own, so a
+ * host that wants the diagnostic passes its log here; absent ⇒ it is dropped,
+ * and the caller still gets the refusal's code, status and prescription.
+ * `engine.aggregate` has judged the filter already (and logged it) before it
+ * calls this, so it passes none.
+ *
+ * [#21299] …and, before that, every `{ $field }` reference in each filter takes
+ * the reference rules `engine.aggregate` applies to the same position, through
+ * the same function (having-filter.ts `assertAggregationFilterReferencesAreDeclared`):
+ * the referent (and an `addDays` offset column) names a declared field, the
+ * spec's comparison-class verdict refuses a `cross-class` or a `no-class` pair,
+ * and an `addDays` pair follows its class rule — the cross-field rules `where`
+ * gets from `driver-sql`'s compiler. Before, a host calling this with a field
+ * map met none of them: a datetime against a date, a text against an image or
+ * a reference to a field the map does not declare was counted. Absent `fields`
+ * (every in-repo caller but the engine) ⇒ nothing is judged, as before. The
+ * withheld diagnostic names no object (this entry point is not told one).
  */
 export function applyInMemoryAggregation(
   rows: any[],
   ast: Pick<QueryAST, 'groupBy' | 'aggregations'>,
   timezone?: string,
   fields?: Record<string, unknown>,
+  reportWithheld?: (diagnostic: string) => void,
 ): any[] {
   const groupBy = (ast.groupBy ?? []) as GroupByNode[];
   const aggregations = (ast.aggregations ?? []) as AggregationNode[];
   if (groupBy.length === 0 && aggregations.length === 0) return rows;
   // [#20176] Read once per call, and only when some aggregation carries a filter.
-  const filterClasses = fields && aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0)
-    ? declaredFieldClasses(fields)
-    : undefined;
+  const anyFilter = aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0);
+  // [#21299] The reference rules, then [#21007] the JSON-column rule — the
+  // order `engine.aggregate` takes them in — judged on each FILTER before any
+  // row is: the complete doors, not the per-row backstop. See the docblock above.
+  if (fields && anyFilter) {
+    const declared = { fields, reportWithheld: reportWithheld ?? (() => undefined) };
+    for (const [index, agg] of aggregations.entries()) {
+      if (!agg?.filter || Object.keys(agg.filter).length === 0) continue;
+      const root = aggregationFilterClause(index).root;
+      assertAggregationFilterReferencesAreDeclared(agg.filter, root, declared);
+      assertAggregationFilterSparesJsonStoredFields(agg.filter, root, declared);
+    }
+  }
+  const filterClasses = fields && anyFilter ? declaredFieldClasses(fields) : undefined;
+  // [#20873] Read once per call too, from the same declaration.
+  const filterJsonStored = fields && anyFilter ? declaredJsonStoredFields(fields) : undefined;
 
   if (groupBy.length === 0) {
     // Pure aggregation — single result row.
-    return [aggregateBucket(rows, aggregations, filterClasses)];
+    return [aggregateBucket(rows, aggregations, filterClasses, filterJsonStored)];
   }
 
   const buckets = new Map<string, { key: Record<string, any>; rows: any[] }>();
@@ -147,7 +198,7 @@ export function applyInMemoryAggregation(
 
   const out: any[] = [];
   for (const { key, rows: bucketRows } of buckets.values()) {
-    const aggValues = aggregateBucket(bucketRows, aggregations, filterClasses);
+    const aggValues = aggregateBucket(bucketRows, aggregations, filterClasses, filterJsonStored);
     out.push({ ...key, ...aggValues });
   }
   return out;
@@ -182,6 +233,7 @@ function aggregateBucket(
   allRows: any[],
   aggregations: AggregationNode[],
   filterClasses?: ReturnType<typeof declaredFieldClasses>,
+  filterJsonStored?: ReadonlySet<string>,
 ): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [index, agg] of aggregations.entries()) {
@@ -198,7 +250,7 @@ function aggregateBucket(
     // still lists, objectui#3136).
     const aggFilter = agg.filter;
     const rows = aggFilter && Object.keys(aggFilter).length > 0
-      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index, filterClasses))
+      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index, filterClasses, filterJsonStored))
       : allRows;
     if (fn === 'count') {
       // `*` is the count-all sentinel: the Cube `count` measure and a dataset
@@ -228,12 +280,17 @@ function aggregateBucket(
       case 'count_distinct':
         out[alias] = new Set(values.filter((v) => v != null)).size;
         break;
+      // [#20489] Both arms add through ONE compensated fold
+      // ({@link compensatedSum}) — the summation SQLite's own `sum` / `avg`
+      // use — so the rows path and SQLite's native path answer the same double.
+      // [#20544] The fold is `@objectstack/core`'s now, and driver-memory's
+      // two faces and the analytics draft preview call the same one.
       case 'sum':
-        out[alias] = values.reduce((a, b) => a + toNumber(b), 0);
+        out[alias] = compensatedSum(values.map(toNumber));
         break;
       case 'avg': {
         const nums = values.filter((v) => v != null).map(toNumber);
-        out[alias] = nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0) / nums.length;
+        out[alias] = nums.length === 0 ? null : compensatedSum(nums) / nums.length;
         break;
       }
       // [#11152] `min`/`max` read a BOOLEAN as the number it is worth (0/1) —
@@ -241,7 +298,7 @@ function aggregateBucket(
       // booleans aggregate as NUMBERS on every face, with no per-aggregate
       // exception, so the order statistics answer in the same numeric domain
       // `sum`/`avg` already answer in (`toNumber`, `Number(true) === 1`). The
-      // coercion is BOOLEAN-ONLY, exactly like driver-memory's (#11065):
+      // coercion is BOOLEAN-ONLY, exactly like driver-memory's (commit 20950404c):
       // strings, dates and numbers reach the same raw comparison they always
       // did — widening it would change `min` over a text column.
       case 'min': {

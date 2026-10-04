@@ -19,7 +19,7 @@
  * guest envelope (`{ isSystem: false, positions: [], permissions: [] }`) —
  * and throws `AuthzStoreUnavailableError` (503) for the one class of fault
  * that leaves the answer undetermined: an authorization INPUT that exists and
- * could not be read (a permission-store read that failed, #13279; a `tenancy`
+ * could not be read (a permission-store read that failed, commit 6a180e42d; a `tenancy`
  * service that is registered and failed to build, #13906 decision 1 A). The
  * dispatcher's net (`HttpDispatcher.resolveRequestScope`) re-raises exactly
  * that class and degrades everything else to anonymous, as before.
@@ -194,7 +194,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   //    no-tenancy composition: no wall exists, and refusing there would break
   //    every single-organization embedder.
   //  - registered and FAILED to build → unbranded → re-raised as the same loud
-  //    answer a failed permission-store read gives (#13279): the posture is an
+  //    answer a failed permission-store read gives (commit 6a180e42d): the posture is an
   //    authorization INPUT, so admission was never decided. A posture that
   //    could not be READ is not a posture that is ABSENT.
   //
@@ -203,7 +203,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // `HttpDispatcher.resolveRequestScope` hands THIS read the classified
   // rejection rather than the probe's collapsed answer.
   //
-  // [#17114] The CLASSIFICATION above is `classifyAdmissionTenancyPosture`'s,
+  // [commit 4af758d47] The CLASSIFICATION above is `classifyAdmissionTenancyPosture`'s,
   // not a hand-written copy of it: this seam was one of the two that #16013
   // left behind, and a copy of this decision is by construction the stale one.
   // ⛔ The RESOLUTION is still this door's own and must stay so — `opts.getService`
@@ -221,7 +221,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     tenancyPosture,
   });
 
-  // [#6216 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
+  // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
   // ASSEMBLY now lives in ONE place too (`assembleExecutionContext*`,
   // @objectstack/core), shared with the REST face. Everything above is
   // transport-specific plumbing; the field set is closed by type over there, so
@@ -273,7 +273,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // the Chinese label of the very field it names. The PRECEDENCE lives in the
     // shared assembler so the two faces cannot disagree about it.
     requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
-    // A NAMED divergence (#6216): this face has always carried the session
+    // A NAMED divergence (commit f586f1a89): this face has always carried the session
     // bearer down to hooks (`session.accessToken`); the REST face never has.
     // Both are preserved — see the assembler's `accessToken` doc.
     accessToken: authz.accessToken,

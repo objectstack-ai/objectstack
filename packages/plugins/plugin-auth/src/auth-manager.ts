@@ -23,9 +23,11 @@ import {
   decideAudienceAdmission,
   isHumanUserRow,
   resolveAudience,
+  resolveEmailVerificationRequirement,
   AUDIENCE_CONFIG_ERROR,
   type AudienceCreationClass,
   type ResolvedAudience,
+  type VerificationDeclarant,
 } from './audience-posture.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 import type { IDataEngine } from '@objectstack/core';
@@ -125,7 +127,7 @@ import {
   interpolatePhoneSms,
   loadPhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
-// #14762 — the stored rung of the ruled locale ladder reuses the messaging
+// commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
 // seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
 // is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
 // refusal of the stringified-nothing literals (`"undefined"`, `"null"`) is part
@@ -1302,6 +1304,16 @@ export class AuthManager {
   private authBuild: Promise<Auth<any>> | null = null;
   private config: AuthManagerOptions;
   /**
+   * [#20389] Whether the DEPLOYMENT declared email verification off — the
+   * constructor config, or a later `applyConfigPatch()` whose
+   * `requireEmailVerification` came from the deployment (host code, or an
+   * `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override) rather than from a value
+   * stored in the settings console. Under posture `open` an explicit `false`
+   * is honoured only while this is true: the console can agree with the
+   * deployment's opt-out, never make one (`assertAudienceConfig`).
+   */
+  private deploymentDeclaredVerificationOff: boolean;
+  /**
    * [#3653] The auth secret, resolved ONCE per manager. `generateSecret()`'s
    * dev fallback is `'dev-secret-' + Date.now()` — a fresh value per call — so
    * every consumer that needs the same key material (better-auth's own
@@ -1371,10 +1383,13 @@ export class AuthManager {
     // reason as the OTP guard above: an unusable audience declaration must
     // refuse the boot loudly, not surface as a 403 on the first sign-up.
     // Off-vocabulary postures, inert declarations (ADR-0078) and the
-    // open-posture-with-verification-off contradiction are all refused here;
+    // email_domain-with-verification-off contradiction are all refused here;
     // `applyConfigPatch` runs the same assertion on the merged result so no
-    // entry path can smuggle an invalid declaration past boot.
-    assertAudienceConfig(config.audience, config.emailAndPassword);
+    // entry path can smuggle an invalid declaration past boot. [#20389] The
+    // constructor config IS the deployment's declaration, so under `open` its
+    // explicit `requireEmailVerification: false` is honoured.
+    this.deploymentDeclaredVerificationOff = config.emailAndPassword?.requireEmailVerification === false;
+    assertAudienceConfig(config.audience, config.emailAndPassword, { verificationDeclaredBy: 'deployment' });
 
     // [#13816] SCIM ⇄ admin coherence — same boot-loudly rationale as the two
     // asserts above: effective SCIM with an explicit `plugins.admin: false`
@@ -1623,15 +1638,19 @@ export class AuthManager {
           // [#11739] Invariant: a posture that permits self-registration
           // (email_domain / open) FORCES email verification on — an
           // unverified allowlisted-domain signup is colleague impersonation
-          // and makes the domain gate decorative. The explicit-false
-          // contradiction was already refused at config entry
-          // (assertAudienceConfig), so this forcing never overrides a value
-          // the entry validation accepted; getPublicConfig() mirrors it so
+          // and makes the domain gate decorative. [#20389] One exception:
+          // under `open` the deployment may declare it off with an explicit
+          // `false`. The entry validation (assertAudienceConfig) already
+          // refused every other explicit false, so this never overrides a
+          // value it accepted; getPublicConfig() reads the SAME resolver, so
           // the advertised flag cannot disagree with the wired one.
-          ...(audiencePermitsSelfRegistration(this.getAudience().posture)
-            ? { requireEmailVerification: true }
-            : (this.config.emailAndPassword?.requireEmailVerification != null
-              ? { requireEmailVerification: this.config.emailAndPassword.requireEmailVerification } : {})),
+          ...((() => {
+            const posture = this.getAudience().posture;
+            const declared = this.config.emailAndPassword?.requireEmailVerification;
+            return audiencePermitsSelfRegistration(posture) || declared != null
+              ? { requireEmailVerification: resolveEmailVerificationRequirement(posture, declared) }
+              : {};
+          })()),
           ...(this.config.emailAndPassword?.minPasswordLength != null
             ? { minPasswordLength: this.config.emailAndPassword.minPasswordLength } : {}),
           ...(this.config.emailAndPassword?.maxPasswordLength != null
@@ -1672,7 +1691,7 @@ export class AuthManager {
           // background-task handling (see sendVerificationEmail) and the
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
-          // #14762 — the ladder's stored rung. It matters most HERE: an
+          // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
           // admin-initiated reset (`admin-import-users.ts` calls
           // `requestPasswordReset`) reaches this callback with the ADMIN's
           // request, so without this rung the user's mail carries the admin's
@@ -1737,7 +1756,7 @@ export class AuthManager {
             // template/loader errors, and returns status:'failed' on transport
             // errors — surface both so resend is honest and signup stays
             // resilient via better-auth's background-task error handling.
-            // #14762 — the stored rung, same ladder as the reset above. An
+            // commit 35e94c96b — the stored rung, same ladder as the reset above. An
             // admin re-triggering verification for a user is the same
             // requester-is-not-the-recipient shape.
             const storedLocale = await this.storedRecipientLocale({ id: user.id });
@@ -2145,7 +2164,7 @@ export class AuthManager {
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
             //
-            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (#11477) — and it DOES
+            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (commit 6dd3e6968) — and it DOES
             // still reach this hook, which is the opposite of the line above
             // and is the point. Its mount only runs `gateAdmin` and then
             // RE-DISPATCHES the request through `handleRequest`, so it re-enters
@@ -2273,10 +2292,12 @@ export class AuthManager {
             // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
             //
             // We turn that shield on ourselves: a posture that permits
-            // self-registration FORCES `requireEmailVerification` on (see
-            // `createAuthInstance`), so `email_domain` and `open` sign-ups for an
-            // address that already exists answered 200 while `invite_only`
-            // answered 422 on the same population. Measured on a real ObjectQL
+            // self-registration forces `requireEmailVerification` on by default
+            // (see `createAuthInstance` — always under `email_domain`, and under
+            // `open` unless the deployment declared it off, #20389), so
+            // `email_domain` and `open` sign-ups for an address that already
+            // exists answered 200 while `invite_only` answered 422 on the same
+            // population. Measured on a real ObjectQL
             // engine with the posture held CONSTANT and only the verification flag
             // moved, so the divergence is the flag's, not the posture's: zero
             // inserts reach the engine, no `sys_account` appears, and the next
@@ -2554,7 +2575,7 @@ export class AuthManager {
         // default root domain — see project-provisioning.ts) pass CSRF checks
         // without operators having to configure trustedOrigins manually.
         //
-        // NON-PRODUCTION ONLY (#10366). This substitution is a development
+        // NON-PRODUCTION ONLY (commit bbe643c08). This substitution is a development
         // convenience and is now gated on the same `NODE_ENV` dev signal used
         // by the fallback auth secret and the dev Origin synthesis below, so
         // the boundary this comment claims is the boundary that is enforced.
@@ -2813,7 +2834,7 @@ export class AuthManager {
       console.error(
         '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
           '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header. See objectstack#3585 and re-check ' +
+          'instead of degrading to a missing set-auth-jwt header. Re-check ' +
           'the better-auth version in better-auth-schema-parity.test.ts.',
       );
     }
@@ -3348,7 +3369,7 @@ export class AuthManager {
           //     `routes/crud-invites.mjs`, so an existing account being invited
           //     elsewhere reaches this callback normally). Their column is a
           //     language they chose for themselves — the same authority the
-          //     reset / verification sends read since #14762.
+          //     reset / verification sends read since commit 35e94c96b.
           //  2. NO row — a genuinely new invitee. Their language is still truly
           //     unknown at invitation time, so the deployment default stands,
           //     exactly as before.
@@ -3390,7 +3411,7 @@ export class AuthManager {
               },
               relatedObject: 'sys_invitation',
               relatedId: invitation.id,
-              // #11741 — the invitation HOLDS its organization; thread it so
+              // commit b706af987 — the invitation HOLDS its organization; thread it so
               // the sys_email row is stamped. Org-less auth mail (reset /
               // verification / magic link) deliberately threads nothing.
               ...(invitation.organizationId
@@ -4140,7 +4161,18 @@ export class AuthManager {
    * request is enough. If an instance already exists, reset it so the next
    * request rebuilds with the new policy.
    */
-  applyConfigPatch(patch: Partial<AuthManagerOptions>): void {
+  applyConfigPatch(
+    patch: Partial<AuthManagerOptions>,
+    options: {
+      /**
+       * [#20389] Who declared the patch's `emailAndPassword.requireEmailVerification`.
+       * Defaults to `deployment` (host code); the settings binding passes
+       * `console` for a value an administrator stored, and `deployment` for an
+       * `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override.
+       */
+      requireEmailVerificationFrom?: VerificationDeclarant;
+    } = {},
+  ): void {
     const next: AuthManagerOptions = {
       ...this.config,
       ...patch,
@@ -4177,8 +4209,19 @@ export class AuthManager {
     if ('audience' in patch) {
       next.audience = patch.audience;
     }
+    // [#20389] A patch that sets `requireEmailVerification` from the
+    // deployment re-declares the deployment's opt-out; one from the console
+    // leaves it as it stood (the console can agree with it, never make it).
+    const deploymentDeclaredVerificationOff =
+      patch.emailAndPassword !== undefined &&
+      'requireEmailVerification' in patch.emailAndPassword &&
+      (options.requireEmailVerificationFrom ?? 'deployment') === 'deployment'
+        ? patch.emailAndPassword.requireEmailVerification === false
+        : this.deploymentDeclaredVerificationOff;
     if ('audience' in patch || 'emailAndPassword' in patch) {
-      assertAudienceConfig(next.audience, next.emailAndPassword);
+      assertAudienceConfig(next.audience, next.emailAndPassword, {
+        verificationDeclaredBy: deploymentDeclaredVerificationOff ? 'deployment' : 'console',
+      });
     }
     // [#13816] Same entry validation the constructor runs, on the MERGED
     // plugins block: a patch must not be able to smuggle the
@@ -4189,6 +4232,7 @@ export class AuthManager {
     }
 
     this.config = next;
+    this.deploymentDeclaredVerificationOff = deploymentDeclaredVerificationOff;
     // [#17176] An in-flight build is discarded alongside a materialised one:
     // it was composed from the pre-patch config, so adopting it would serve
     // the superseded configuration to every later caller. `getOrCreateAuth()`
@@ -5113,7 +5157,7 @@ export class AuthManager {
   }
 
   /**
-   * [#11640] Whether an outbound email transport is wired RIGHT NOW.
+   * [commit bf8d129b5] Whether an outbound email transport is wired RIGHT NOW.
    *
    * The one public read of the fact every verification link depends on: with
    * no transport the `sendVerificationEmail` callback has nowhere to send, so
@@ -5154,7 +5198,7 @@ export class AuthManager {
    * entirely and `EmailService`'s ladder resolves its documented `en-US`
    * default exactly as before.
    *
-   * #14762 layered the per-recipient stored preference on TOP of both rungs:
+   * Commit 35e94c96b layered the per-recipient stored preference on TOP of both rungs:
    * `sys_user.locale` (#13881, ruling 2026-09-01) when the account holds one,
    * then this request's `Accept-Language`, then the deployment default. The
    * request rung did not lose its argument — it is still what answers for an
@@ -5178,7 +5222,7 @@ export class AuthManager {
       // address that would actually land.
       const target = newEmail.trim().toLowerCase();
       if (!target) return;
-      // #14762 — the stored rung on top of the #14319 ladder. The recipient is
+      // commit 35e94c96b — the stored rung on top of the #14319 ladder. The recipient is
       // the account holder, so their own column outranks the header the
       // request happened to carry.
       const storedLocale = from.id ? await this.storedRecipientLocale({ id: from.id }) : undefined;
@@ -5299,7 +5343,7 @@ export class AuthManager {
     // one provider template covers sign-in and reset, and the SMS reveals
     // nothing about what the code unlocks.
     //
-    // #14762 — the recipient of an OTP IS the user, so the locale is theirs to
+    // commit 35e94c96b — the recipient of an OTP IS the user, so the locale is theirs to
     // name: `sys_user.locale` first, the deployment default underneath.
     //
     // ⚠️ The row is looked up here rather than taken from the callback: the
@@ -5416,7 +5460,7 @@ export class AuthManager {
    * `kernel:ready` and on every settings change (same pattern as
    * {@link setAppName}). Unset ⇒ the built-in English text.
    *
-   * #14762 — this is now the SECOND rung, not the whole answer. The OTP send
+   * Commit 35e94c96b — this is now the SECOND rung, not the whole answer. The OTP send
    * reads the recipient's own `sys_user.locale` first (#13881, ruling
    * 2026-09-01, the same column the messaging channels resolve per recipient)
    * and falls here when the account holds none. #14641 gave the SMS INVITE
@@ -5469,7 +5513,7 @@ export class AuthManager {
    *
    * Per-user locale EXISTS since #13881 (maintainer ruling 2026-09-01):
    * `sys_user.locale`, resolved per recipient by service-messaging for
-   * notification mail (`recipient-locale.ts`). #14762 layered it on top of
+   * notification mail (`recipient-locale.ts`). Commit 35e94c96b layered it on top of
    * this ladder for the sends that hold a recipient row — reset, verification
    * and the change-email notice — so the order is stored → request → this
    * rung, per the #14788 option-D ruling of 2026-09-03. Nothing here changed:
@@ -5486,7 +5530,7 @@ export class AuthManager {
   private emailLocale?: string;
 
   /**
-   * #14762 — the ladder's TOP rung: the recipient's own `sys_user.locale`,
+   * Commit 35e94c96b — the ladder's TOP rung: the recipient's own `sys_user.locale`,
    * read best-effort off the identity row.
    *
    * Returns `undefined` for every shape that cannot name a language — no data
@@ -5501,7 +5545,7 @@ export class AuthManager {
    * The read is one row on an indexed predicate, projected to the single
    * column, under a system context — the recipient's own language must resolve
    * regardless of who triggered the send, which is exactly the
-   * admin-initiated case #14762 was about, and the INVITER-triggered case
+   * admin-initiated case commit 35e94c96b fixed, and the INVITER-triggered case
    * #14641 added. Three predicates, one per caller shape: `sys_user.id` (the
    * sends that hold a user row), the unique `phone_number` (the SMS sends,
    * which are handed a number and nothing else), and the unique `email` (the
@@ -5536,7 +5580,7 @@ export class AuthManager {
    * what the ladder's "no locale means the DOCUMENTED default" contract is
    * written against.
    *
-   * #14762 — three rungs now, in the order ruled for #14788 on 2026-09-03
+   * Commit 35e94c96b — three rungs now, in the order ruled for #14788 on 2026-09-03
    * (option D): the recipient's own **stored** `sys_user.locale` → the
    * **request**'s `Accept-Language` (#14319) → the **deployment** default
    * (#8195). The recorded reasoning is that a value the user chose is stronger
@@ -5571,7 +5615,7 @@ export class AuthManager {
    * one exists, else the built-in bilingual text. Template lookups are
    * best-effort — an outage must never block an OTP send.
    *
-   * #14762 — `storedLocale` is the recipient's own `sys_user.locale` when the
+   * Commit 35e94c96b — `storedLocale` is the recipient's own `sys_user.locale` when the
    * caller could resolve one ({@link storedRecipientLocale}); the deployment
    * default stands underneath it. There is NO request rung on this surface:
    * the ruled ladder's middle rung is the request's `Accept-Language`, and an
@@ -5582,7 +5626,7 @@ export class AuthManager {
    * row as {@link phoneSmsLocaleChain}'s terminal floor exactly as before.
    *
    * A caller that passes nothing — or one whose recipient resolves no row —
-   * gets exactly the pre-#14762 deployment-default behaviour. #14641 made the
+   * gets exactly the deployment default, as before commit 35e94c96b. #14641 made the
    * SMS invite path a passer rather than an abstainer; it is no longer the
    * standing example of a caller that names nothing.
    */
@@ -6613,12 +6657,14 @@ export class AuthManager {
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
       disableSignUp: ssoOnly ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
-      // Mirrors the wiring in createAuthInstance(): a self-registration-
-      // permitting posture forces verification ON — the advertised flag must
-      // not disagree with the wired one.
-      requireEmailVerification: audiencePermitsSelfRegistration(audience.posture)
-        ? true
-        : (emailPasswordConfig.requireEmailVerification ?? false),
+      // Mirrors the wiring in createAuthInstance() through the SAME resolver:
+      // a self-registration-permitting posture forces verification ON, except
+      // an `open` deployment's explicit opt-out (#20389) — the advertised flag
+      // must not disagree with the wired one.
+      requireEmailVerification: resolveEmailVerificationRequirement(
+        audience.posture,
+        emailPasswordConfig.requireEmailVerification,
+      ),
     };
 
     // Extract enabled features
@@ -7505,10 +7551,10 @@ export class AuthManager {
    * (this file, ~line 671) declares `{ info?; warn }` and NO `error`, and it is
    * re-exported from the package `index.ts`, so adding `error?` is a
    * published-shape change. #12981's ruling routes that LEVEL question to
-   * #13398 and tells this batch to fix the SILENCE only — the same split
-   * batches 1 and 2 landed for `plugin-security`'s two exported sinks. `warn`
-   * is the guaranteed channel here and the lowest level a reader still reads as
-   * a failure, so nothing is lost but loudness.
+   * the published-sink ruling (commit e238c79f0) and tells this batch to fix the
+   * SILENCE only — the same split batches 1 and 2 landed for `plugin-security`'s
+   * two exported sinks. `warn` is the guaranteed channel here and the lowest
+   * level a reader still reads as a failure, so nothing is lost but loudness.
    *
    * ⛔ Call `warn` through the PROPERTY, never through an extracted reference —
    * `@objectstack/core`'s `ObjectLogger` is class-based and its `warn` reaches
@@ -7977,7 +8023,7 @@ export class AuthManager {
         fields: ['id', 'password', 'previous_password_hashes'],
         context: SYSTEM_CTX,
       } as any);
-      // [#8676] Both columns are `internal: true`, so the engine's read path
+      // [commit d6e80b28b] Both columns are `internal: true`, so the engine's read path
       // omits them from the row above — with no `isSystem` carve-out and in
       // spite of the explicit projection (#7728's design). Recover them
       // through the privileged accessor, or `compareList` below is empty and
@@ -8025,7 +8071,7 @@ export class AuthManager {
         context: SYSTEM_CTX,
       } as any);
       if (!account?.id) return;
-      // [#8676] As above — the flagged column is omitted from the read, so
+      // [commit d6e80b28b] As above — the flagged column is omitted from the read, so
       // recover it before extending the ring. Without this the ring is rebuilt
       // from an empty history on every change and never grows past one entry.
       await recoverInternalFieldsForSystemRead(

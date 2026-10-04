@@ -21,10 +21,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The parser the hook-budget block at the bottom of this file reads THIS file with.
+import ts from 'typescript';
 // The registry itself, so the denominator block at the bottom of this file can
 // hold the gate's output answerable to it rather than to a copied list (#18133).
 import {
@@ -43,6 +45,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '../..');
 const GATE = path.join(HERE, 'check-liveness.mts');
 const LEDGERS = path.join(SPEC, 'liveness');
+
+// The budget the gate-spawning CASES run under: `testTimeout` in vitest.config.ts
+// (60_000 in both projects). A HOOK runs under `hookTimeout` instead, vitest's
+// 10_000 ms default, which that config does not set — so a hook that spawns the
+// whole gate names the case budget itself (#21421). A literal, not an import: the
+// config cannot be imported from a test (its top level runs the filter preflights
+// against process.argv) and exports no constant. The last block of this file holds
+// this value at or above the config's, so the two cannot drift apart unseen.
+const GATE_BUDGET_MS = 60_000;
 
 // A repo-rooted path shaped exactly like a real pointer (so `evidence.mts`
 // extracts it) that this repo has never contained.
@@ -71,6 +82,19 @@ function setChildEvidence(root: string, type: string, prop: string, child: strin
   const ledger = JSON.parse(readFileSync(file, 'utf8'));
   ledger.props[prop].children[child].evidence = evidence;
   writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+/** Rewrite one property's `status` in a copied ledger. */
+function setStatus(root: string, type: string, prop: string, status: string): void {
+  const file = path.join(root, `${type}.json`);
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  ledger.props[prop].status = status;
+  writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+/** One property's row, read back from a copied ledger. */
+function readRow(root: string, type: string, prop: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path.join(root, `${type}.json`), 'utf8')).props[prop];
 }
 
 /**
@@ -388,13 +412,23 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   });
 
   it('FAILS when a `planned` entry cites a repo-local file that is gone', () => {
-    // `field.useGrouping` is `planned` and carries no evidence today, so the
-    // pointer this writes is the only thing that can fail — and the rot is the
-    // plainest kind, the one the existence check has caught for `live` entries
-    // since #5623.
+    // The row is MADE `planned` in the copy rather than found that way. This
+    // case used to rely on `field.useGrouping` being `planned` in the shipped
+    // ledger, and when that row went `live` the case kept passing while it drove
+    // a `live` row — the one leg it exists for went unexercised, silently. The
+    // row's shipped `producer` and `evidenceScope` cite only objectui-attributed
+    // paths and trip nothing on a `planned` row, and `moveCount` keeps the copy's
+    // count shard in step with the flip, so the pointer written below is still
+    // the run's only cause — and the rot is the plainest kind, the one the
+    // existence check has caught for `live` entries since #5623.
     const root = path.join(tmp, 'planned-missing-file');
     cpSync(LEDGERS, root, { recursive: true });
+    const shipped = String(readRow(root, 'field', 'useGrouping').status);
+    setStatus(root, 'field', 'useGrouping', 'planned');
+    if (shipped !== 'planned') moveCount(root, 'field', shipped, 'planned');
     setEvidence(root, 'field', 'useGrouping', `${ROTTED} (rotted by the self-test)`);
+    // The control: the row this run judges IS `planned` in the copy.
+    expect(readRow(root, 'field', 'useGrouping').status).toBe('planned');
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
@@ -403,18 +437,28 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   });
 
   it('FAILS when an `experimental` entry cites a repo-local file that is gone', () => {
-    // The other half of the widening. `agent.lifecycle` is `experimental` and
-    // its shipped evidence is a prose absence claim ("no runtime reader"), which
-    // extracts no path at all — so before this change nothing about it could
-    // ever fail, and after it, a pointer written there is held to the same
-    // standard as a `live` one.
+    // The other half of the widening: a pointer written on an `experimental`
+    // row is held to the same standard as a `live` one. The row is MADE
+    // `experimental` in the copy rather than found that way, the `planned`
+    // case's shape above: this case used to borrow `agent.lifecycle`, whose
+    // shipped evidence was a prose absence claim, and #21320 retired that key
+    // (`dead` now) — a borrowed `experimental` row is a claim with a timestamp.
+    // `tool.outputSchema`'s shipped pointers are all cloud-attributed, which
+    // this check never resolves, so the pointer written below is the run's
+    // only cause.
     const root = path.join(tmp, 'experimental-missing-file');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'agent', 'lifecycle', `${ROTTED} (rotted by the self-test)`);
+    const shipped = String(readRow(root, 'tool', 'outputSchema').status);
+    setStatus(root, 'tool', 'outputSchema', 'experimental');
+    if (shipped !== 'experimental') moveCount(root, 'tool', shipped, 'experimental');
+    setEvidence(root, 'tool', 'outputSchema', `${ROTTED} (rotted by the self-test)`);
+    // The control: the row this run judges IS `experimental` in the copy.
+    expect(readRow(root, 'tool', 'outputSchema').status).toBe('experimental');
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toContain(`agent/lifecycle → ${ROTTED}`);
+    expect(output).toContain(`${SCANNED_LABEL} entr(ies) cite a file that is missing from THIS repo`);
+    expect(output).toContain(`tool/outputSchema → ${ROTTED}`);
   });
 
   // THE BOUNDARY, and it is a real one rather than an oversight — which is the
@@ -428,14 +472,23 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   // row's pointer is the retirement story in `note` — which no check scans — so
   // scanning `dead.evidence` would hold 6 rows to a standard, read nothing of
   // the other 74, and publish that as coverage of the class.
+  //
+  // The carrier is `flow.active`, a `retiredKey()` tombstone, because the gate
+  // itself holds a tombstoned row at `dead` (the #19062 join) — so it cannot be
+  // re-graded out from under this case. The carrier used to be `flow.description`,
+  // a docs-shaped row that WAS re-graded `live` (#20299): a borrowed `dead` row is
+  // a claim with a timestamp, and the precondition below says so if it moves.
   it('stays GREEN when a `dead` entry carries the SAME rotted pointer', () => {
+    const shipped = JSON.parse(readFileSync(path.join(LEDGERS, 'flow.json'), 'utf8'));
+    expect(shipped.props.active.status, 'the carrier row must be `dead` in the shipped ledger').toBe('dead');
+
     const root = path.join(tmp, 'dead-excluded');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'flow', 'description', `${ROTTED} (rotted by the self-test)`);
+    setEvidence(root, 'flow', 'active', `${ROTTED} (rotted by the self-test)`);
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(0);
-    expect(output).not.toContain(`flow/description → ${ROTTED}`);
+    expect(output).not.toContain(`flow/active → ${ROTTED}`);
   });
 
   // The partition itself, pinned at the source — the precedent is the
@@ -646,13 +699,15 @@ describe('check:liveness — the README state table (#7257)', () => {
   });
 });
 
-// The generated count artifact (#7377). Same argument as the block above and the
-// same mechanism: on a green tree the artifact is current and the README carries
-// no numbers, so `pnpm check:liveness` passing says nothing about whether these
-// legs can fire. `--ledger-root` points the REAL gate at a copy — which `cpSync`
-// carries `state-counts.md` into alongside README.md — so a case can delete the
-// artifact, skew one number, or put a column back and read the real exit code.
-describe('check:liveness — the generated count artifact (#7377)', () => {
+// The generated count artifact (#7377), one shard per governed type (#20361).
+// Same argument as the block above and the same mechanism: on a green tree the
+// shards are current and the README carries no numbers, so `pnpm check:liveness`
+// passing says nothing about whether these legs can fire. `--ledger-root` points
+// the REAL gate at a copy — which `cpSync` carries the `state-counts/` directory
+// into alongside README.md — so a case can delete the shards, skew one number,
+// bring the retired single file back or put a column back, and read the real
+// exit code.
+describe('check:liveness — the generated count artifact (#7377, sharded #20361)', () => {
   let tmp: string;
 
   beforeAll(() => {
@@ -669,7 +724,7 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
   }
 
   it('FAILS when the artifact is gone — the numbers are published by nothing', () => {
-    const root = withCopy('missing', (r) => rmSync(path.join(r, 'state-counts.md')));
+    const root = withCopy('missing', (r) => rmSync(path.join(r, 'state-counts'), { recursive: true }));
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
@@ -681,9 +736,9 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
   // The leg that replaces what the hand-edit used to buy. It must name the line
   // that moved: "the file is stale" sends the next reader to diff 30 rows, and
   // the point of the failure is the ONE row whose Note may no longer hold.
-  it('FAILS on a single skewed count, and names the line', () => {
+  it('FAILS on a single skewed count, and names the shard and the line', () => {
     const root = withCopy('skewed', (r) => {
-      const f = path.join(r, 'state-counts.md');
+      const f = path.join(r, 'state-counts', 'view.md');
       const md = readFileSync(f, 'utf8');
       const before = md.match(/^\| `view` \| (\d+) \|/m);
       expect(before, 'the view row moved — repoint this case').not.toBeNull();
@@ -692,11 +747,24 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toContain('is STALE');
+    expect(output).toContain('state-counts/view.md is STALE');
     expect(output).toContain('first difference at line');
     expect(output).toContain('`view`');
     // The half of the hand-edit worth keeping — regenerate AND re-read the Note.
     expect(output).toContain('READ the diff');
+  });
+
+  // The transition hazard (#20361). A branch cut before the split meets the
+  // deletion as a modify/delete on its next base merge; a resolution that keeps
+  // the file would publish a stale table and a stale TOTAL beside the shards,
+  // re-rendered by nothing. It must be red, and the repair must be named.
+  it('FAILS when the retired single-file artifact comes back beside the shards', () => {
+    const root = withCopy('legacy', (r) => writeFileSync(path.join(r, 'state-counts.md'), '| **total** | **1** |\n'));
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('state-counts.md is RETIRED');
+    expect(output).toContain('gen:liveness-counts');
   });
 
   // The leg neither of the others can see: a re-added column leaves the artifact
@@ -727,18 +795,45 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toContain('where README.md and state-counts.md disagree');
-    expect(output).toContain('qa — counted in state-counts.md, no row in the README table');
+    expect(output).toContain('where README.md and state-counts/ disagree');
+    expect(output).toContain('qa — counted in state-counts/qa.md, no row in the README table');
   });
 
-  // The control for all four: the same copy, unedited, is green and says so.
+  // The control for all five: the same copy, unedited, is green and says so.
   // Without it every "exit 1" above is also satisfied by the copy being unusable.
-  it('is green against a verbatim copy, and says the artifact is current', () => {
+  //
+  // It is also the PARITY pin the split owes (#20361). The total is no longer
+  // committed anywhere, so the one place it is published is this line — and it
+  // must be the sum of the shards actually on disk, read back here row by row,
+  // not a second copy of the gate's own arithmetic.
+  it('is green against a verbatim copy, says the shards are current, and prints their sum', () => {
     const root = path.join(tmp, 'verbatim');
     cpSync(LEDGERS, root, { recursive: true });
     const { status, output } = runGate(root);
     expect(status, output).toBe(0);
-    expect(output).toMatch(/state-counts\.md is current — the same \d+ row\(s\), no count column left/);
+    expect(output).toMatch(/state-counts\/ is current — one shard per governed type, the same \d+ row\(s\) as the README/);
+
+    const printed = output.match(/summed at read time and committed nowhere: (.+) = (\d+) classified\./);
+    expect(printed, output).not.toBeNull();
+    const byColumn = Object.fromEntries(
+      printed![1].split(' · ').map((part) => {
+        const [n, c] = part.split(' ');
+        return [c, Number(n)];
+      }),
+    );
+
+    const onDisk = readdirSync(path.join(root, 'state-counts'));
+    expect(onDisk.length).toBeGreaterThan(0);
+    const summed = new Array(STATUS_COLUMNS.length + 1).fill(0);
+    for (const name of onDisk) {
+      const rows = readFileSync(path.join(root, 'state-counts', name), 'utf8')
+        .split('\n')
+        .filter((l) => /^\| `[a-z_]+` \|/.test(l));
+      expect(rows, name).toHaveLength(1);
+      rows[0].split('|').slice(2, -1).forEach((c, i) => (summed[i] += Number(c.trim())));
+    }
+    expect(STATUS_COLUMNS.map((c) => byColumn[c])).toEqual(summed.slice(0, STATUS_COLUMNS.length));
+    expect(Number(printed![2])).toBe(summed[STATUS_COLUMNS.length]);
   });
 });
 
@@ -834,7 +929,7 @@ describe('check:liveness — the manifest is inside the governed universe (#1072
 
 // A ledger `status` was free text: any truthy string was classified and counted,
 // then dropped by `foldStateCounts`, which reads four names and nothing else. The
-// gate stayed GREEN over an understated total, because `state-counts.md` computes
+// gate stayed GREEN over an understated total, because the count artifact computes
 // its `classified` column as the sum of those four columns and the freshness leg
 // compares it against a re-render of the same fold — every reconciliation in the
 // gate comparing that number against itself.
@@ -853,21 +948,16 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
   });
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  /** Rewrite one property's `status` in a copied ledger. */
-  function setStatus(root: string, type: string, prop: string, status: string): void {
-    const file = path.join(root, `${type}.json`);
-    const ledger = JSON.parse(readFileSync(file, 'utf8'));
-    ledger.props[prop].status = status;
-    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
-  }
-
   /** A copy of the real ledger root with `field.useGrouping` misspelled. */
   function typodRoot(name: string): string {
     const root = path.join(tmp, name);
     cpSync(LEDGERS, root, { recursive: true });
-    // `field.useGrouping` is `planned` and carries no evidence, so the misspelling
-    // is the only thing in the copy that can move a verdict — no evidence-scan
-    // finding can be confused for it.
+    // The misspelling is the only thing in the copy that can move a verdict — no
+    // evidence-scan finding can be confused for it. The gate scans `evidence`
+    // only for a status in `EVIDENCE_SCANNED_STATUSES`, which `planed` is not,
+    // and it resolves `producer` at any status, but every path this row's
+    // `producer` cites is objectui-attributed, so none of them is resolved
+    // against this checkout.
     setStatus(root, 'field', 'useGrouping', 'planed');
     return root;
   }
@@ -1297,30 +1387,31 @@ interface Carrier {
   eligible: number;
 }
 
-/** Move one unit between two status columns of a copied `state-counts.md`. */
+/**
+ * Move one unit between two status columns of a copied `state-counts/<type>.md`
+ * shard. Its own row only: no file commits a total any more (#20361), so there
+ * is no second line to keep in step.
+ */
 function moveCount(root: string, type: string, from: string, to: string): void {
   const fromCol = STATUS_COLUMNS.indexOf(from as (typeof STATUS_COLUMNS)[number]);
   const toCol = STATUS_COLUMNS.indexOf(to as (typeof STATUS_COLUMNS)[number]);
   expect(fromCol, `unknown status "${from}"`).toBeGreaterThanOrEqual(0);
   expect(toCol, `unknown status "${to}"`).toBeGreaterThanOrEqual(0);
 
-  const countsFile = path.join(root, 'state-counts.md');
+  const countsFile = path.join(root, 'state-counts', `${type}.md`);
   let text = readFileSync(countsFile, 'utf8');
   // The generated count artifact is checked on every run, so a sample that
   // moves a verdict and leaves the counts behind goes red for the WRONG reason
   // and masks the verdict this block is reading.
-  const shift = (rowRe: RegExp, wrap: (n: number) => string): void => {
-    const m = rowRe.exec(text);
-    expect(m, `no state-counts row matching ${rowRe}`).not.toBeNull();
-    const nums = m![1].split('|').map((c) => Number(c.trim().replaceAll('*', '')));
-    expect(nums).toHaveLength(STATUS_COLUMNS.length + 1);
-    nums[fromCol] -= 1;
-    nums[toCol] += 1;
-    const rebuilt = `${m![0].slice(0, m![0].indexOf('|', 1) + 1)} ${nums.map(wrap).join(' | ')} |`;
-    text = text.slice(0, m!.index) + rebuilt + text.slice(m!.index + m![0].length);
-  };
-  shift(new RegExp(`^\\| \`${type}\` \\| (.+) \\|$`, 'm'), (n) => String(n));
-  shift(/^\| \*\*total\*\* \| (.+) \|$/m, (n) => `**${n}**`);
+  const rowRe = new RegExp(`^\\| \`${type}\` \\| (.+) \\|$`, 'm');
+  const m = rowRe.exec(text);
+  expect(m, `no state-counts row matching ${rowRe}`).not.toBeNull();
+  const nums = m![1].split('|').map((c) => Number(c.trim()));
+  expect(nums).toHaveLength(STATUS_COLUMNS.length + 1);
+  nums[fromCol] -= 1;
+  nums[toCol] += 1;
+  const rebuilt = `${m![0].slice(0, m![0].indexOf('|', 1) + 1)} ${nums.join(' | ')} |`;
+  text = text.slice(0, m!.index) + rebuilt + text.slice(m!.index + m![0].length);
   writeFileSync(countsFile, text);
 }
 
@@ -1328,6 +1419,8 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
   let tmp: string;
   let carrier: Carrier;
 
+  // The one hook in this file that spawns the gate: it runs under the case budget
+  // (GATE_BUDGET_MS, last argument), not vitest's 10 s `hookTimeout` default (#21421).
   beforeAll(() => {
     tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-tombstone-'));
 
@@ -1358,7 +1451,7 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
       enumerated: enumerated.length,
       eligible: eligible.length,
     };
-  });
+  }, GATE_BUDGET_MS);
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
   /**
@@ -1439,10 +1532,12 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
     const red = sampleWith('apart-live', 'live');
     const green = sampleWith('apart-dead', 'dead');
 
-    const differing = readdirSync(green).filter(
-      (f) => readFileSync(path.join(green, f), 'utf8') !== readFileSync(path.join(red, f), 'utf8'),
-    );
-    expect(differing.sort()).toEqual([`${carrier.type}.json`, 'state-counts.md'].sort());
+    // Recursive: the counts are a directory of shards now (#20361), and a
+    // top-level listing would read that directory as a file.
+    const differing = (readdirSync(green, { recursive: true }) as string[])
+      .filter((f) => statSync(path.join(green, f)).isFile())
+      .filter((f) => readFileSync(path.join(green, f), 'utf8') !== readFileSync(path.join(red, f), 'utf8'));
+    expect(differing.sort()).toEqual([`${carrier.type}.json`, path.join('state-counts', `${carrier.type}.md`)].sort());
 
     const redLedger = JSON.parse(readFileSync(path.join(red, `${carrier.type}.json`), 'utf8'));
     const greenLedger = JSON.parse(readFileSync(path.join(green, `${carrier.type}.json`), 'utf8'));
@@ -1482,5 +1577,211 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
     expect(reached, 'the printed population and the enumerated one are the same reading').toBe(carrier.enumerated);
     expect(line).toContain(`${reached} graded with a status the tombstone allows`);
     expect(line).not.toContain('FORBIDDEN');
+  });
+});
+
+// ── #21127: a `live` row never opts into `authorWarn` ──
+//
+// The author-side lint (`packages/lint/src/lint-liveness-properties.ts`) picks
+// the verdict it shows from a warned row's STATUS, and its `describe()` throws
+// on `live` by design — so a warned `live` row turns `os validate` / `os lint`
+// into exit 1 for every stack that authors the key. `mapping.connectorSource`
+// shipped that row, a CONTAINER that drills into `children`, which is exactly
+// the row the graded walk never reads. Every case runs the REAL gate via
+// `--ledger-root`, for the #5623 reason the blocks above state.
+//
+// The carriers are derived from the shipped ledgers by SHAPE — a top-level
+// `live` container row with `children`, and a `live` drilled child — never named,
+// for the #19062 reason: a named row is a moving verdict. Adding `authorWarn:
+// true` to a `live` row moves no status, so the count shards stay byte-identical
+// and the red run has exactly one cause.
+
+/** What a derived carrier is: a coordinate in one shipped ledger. */
+interface WarnCarrier {
+  type: string;
+  /** `prop` or `prop.child` — the row the fixture marks. */
+  path: string;
+}
+
+/** Every `(type, path)` the shipped ledgers carry with a given shape, sorted. */
+function liveRows(shape: 'container' | 'child'): WarnCarrier[] {
+  const out: WarnCarrier[] = [];
+  for (const file of readdirSync(LEDGERS).filter((f) => f.endsWith('.json')).sort()) {
+    const type = file.slice(0, -'.json'.length);
+    const props: Record<string, any> = JSON.parse(readFileSync(path.join(LEDGERS, file), 'utf8')).props ?? {};
+    for (const [prop, row] of Object.entries(props)) {
+      if (shape === 'container' && row?.status === 'live' && row?.children && row?.authorWarn !== true) {
+        out.push({ type, path: prop });
+      }
+      if (shape === 'child') {
+        for (const [child, crow] of Object.entries<any>(row?.children ?? {})) {
+          if (crow?.status === 'live' && !crow?.children && crow?.authorWarn !== true) {
+            out.push({ type, path: `${prop}.${child}` });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+describe('check:liveness — a `live` row may not opt into `authorWarn` (#21127)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-authorwarn-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Copy the shipped ledgers and mark one row `authorWarn: true`, read back from disk. */
+  function sampleWarned(name: string, carrier: WarnCarrier): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    const file = path.join(root, `${carrier.type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    const [prop, child] = carrier.path.split('.');
+    const row = child ? ledger.props[prop].children[child] : ledger.props[prop];
+    row.authorWarn = true;
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+    // Proof the edit reached disk — an editor's exit code is not evidence.
+    const back = JSON.parse(readFileSync(file, 'utf8')).props[prop];
+    expect((child ? back.children[child] : back).authorWarn, `${carrier.type}/${carrier.path} not marked on disk`).toBe(true);
+    return root;
+  }
+
+  // THE CONTROL, and the census. Green on a verbatim copy, and the line names
+  // the population it asked: a `planned` row with `authorWarn` is the legal
+  // shape (a consumer is being built — keep the key, it does nothing yet), so
+  // the shipped ledgers carry some and the gate leaves them alone.
+  it('is green on the shipped ledgers, which carry warned `planned` rows and no warned `live` one', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    expect(output).toContain('no `live` row opts into an author warning');
+    const line = output.split('\n').find((l) => l.startsWith('author warnings:')) ?? '';
+    expect(line, 'the gate must publish the population it asked').not.toBe('');
+    const reached = Number(/^author warnings: (\d+) /.exec(line)?.[1] ?? 0);
+    expect(reached, 'a walk reaching zero warned rows is a degraded walk, not a clean tree').toBeGreaterThan(0);
+    expect(line).toMatch(/\bplanned [1-9]\d*\b/);
+    expect(line).toContain('; 0 on a `live` row.');
+    expect(line).not.toContain('FORBIDDEN');
+  });
+
+  // The regression's own shape: a `live` CONTAINER row, whose status the graded
+  // walk never reads because only its children are classified.
+  it('FAILS when a `live` container row that drills into `children` opts in', () => {
+    const [carrier] = liveRows('container');
+    expect(carrier, 'no top-level `live` row with `children` in the shipped ledgers to carry the sample').toBeDefined();
+
+    const { status, output } = runGate(sampleWarned('container', carrier));
+    expect(status, output).toBe(1);
+    expect(output).toContain('✗ 1 `live` ledger row(s) opt into `authorWarn` — the author-side lint throws on them:');
+    expect(output).toContain(`    ${carrier.type}/${carrier.path}\n`);
+    // The prescription travels with the finding, and rules out the wrong fix.
+    expect(output).toContain('Do NOT teach `describe()` a `live` branch');
+    // ONE cause: a second ✗ block would mean the sample dragged another check in.
+    expect(output.split('\n').filter((l) => l.startsWith('✗')), output).toHaveLength(1);
+  });
+
+  // The lint reads a container's direct children too, and the walk goes to any
+  // depth `children` nests — a drilled `live` row is the same crash.
+  it('FAILS when a drilled `live` child row opts in', () => {
+    const [carrier] = liveRows('child');
+    expect(carrier, 'no drilled `live` child row in the shipped ledgers to carry the sample').toBeDefined();
+
+    const { status, output } = runGate(sampleWarned('child', carrier));
+    expect(status, output).toBe(1);
+    expect(output).toContain(`    ${carrier.type}/${carrier.path}\n`);
+    expect(output.split('\n').filter((l) => l.startsWith('✗')), output).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A hook that spawns the gate runs under the case budget (#21421)
+//
+// The cases above spawn the whole gate under `testTimeout`; a hook spawning the
+// same gate defaults to `hookTimeout` (10 s), so a 5 to 9 s run had 1 to 5 s of
+// margin and a loaded CI shard spent it — the `beforeAll` of the #19062 block
+// timed out and its cases were skipped behind it. This reads THIS file's own
+// source for every lifecycle hook whose callback reaches `spawnSync`, directly
+// or through another function here, and holds each to `GATE_BUDGET_MS` as its
+// timeout argument. Parsed rather than matched as text, so a hook is judged by
+// its call, never by what a comment or this block's own prose happens to spell.
+// ---------------------------------------------------------------------------
+describe('check:liveness — a hook that spawns the gate carries the case budget (#21421)', () => {
+  const HOOKS = new Set(['beforeAll', 'beforeEach', 'afterAll', 'afterEach']);
+  const self = fileURLToPath(import.meta.url);
+  const sf = ts.createSourceFile(self, readFileSync(self, 'utf8'), ts.ScriptTarget.Latest, true);
+
+  const calleeOf = (n: ts.Node): string => (ts.isCallExpression(n) && ts.isIdentifier(n.expression) ? n.expression.text : '');
+  const callsAny = (root: ts.Node, names: ReadonlySet<string>): boolean => {
+    let hit = false;
+    const walk = (n: ts.Node): void => {
+      if (hit) return;
+      if (names.has(calleeOf(n))) hit = true;
+      else ts.forEachChild(n, walk);
+    };
+    walk(root);
+    return hit;
+  };
+
+  // Every function in this file that reaches `spawnSync`, to a fixpoint.
+  const bodies = new Map<string, ts.Node>();
+  const collect = (n: ts.Node): void => {
+    if (ts.isFunctionDeclaration(n) && n.name && n.body) bodies.set(n.name.text, n.body);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer
+      && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))) {
+      bodies.set(n.name.text, n.initializer.body);
+    }
+    ts.forEachChild(n, collect);
+  };
+  collect(sf);
+  const spawners = new Set(['spawnSync']);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, body] of bodies) {
+      if (!spawners.has(name) && callsAny(body, spawners)) {
+        spawners.add(name);
+        grew = true;
+      }
+    }
+  }
+
+  const hooks: { hook: string; line: number; spawns: boolean; timeout: string | null }[] = [];
+  const visit = (n: ts.Node): void => {
+    if (HOOKS.has(calleeOf(n))) {
+      const [fn, timeout] = (n as ts.CallExpression).arguments;
+      hooks.push({
+        hook: calleeOf(n),
+        line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1,
+        spawns: fn !== undefined && callsAny(fn, spawners),
+        timeout: timeout === undefined ? null : timeout.getText(sf),
+      });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  // The scan must be capable of finding something: a refactor that renames
+  // `runGate` or the hooks would otherwise leave the next case green over nothing.
+  it('sees the gate runner and this file\'s hooks', () => {
+    expect(spawners.has('runGate'), 'the scan no longer recognises runGate as reaching spawnSync').toBe(true);
+    expect(hooks.length, 'the scan found no lifecycle hook in this file').toBeGreaterThan(0);
+  });
+
+  it('every hook whose callback reaches the gate passes GATE_BUDGET_MS as its timeout', () => {
+    const unbudgeted = hooks
+      .filter((h) => h.spawns && h.timeout !== 'GATE_BUDGET_MS')
+      .map((h) => `${h.hook} at line ${h.line}: timeout argument ${h.timeout ?? 'absent (vitest hookTimeout default, 10 s)'}`);
+    expect(
+      unbudgeted,
+      'a hook that spawns the gate must run under the case budget — pass GATE_BUDGET_MS as its second argument',
+    ).toEqual([]);
+  });
+
+  it('GATE_BUDGET_MS is not below the testTimeout vitest.config.ts gives the cases', () => {
+    const config = readFileSync(path.join(SPEC, 'vitest.config.ts'), 'utf8');
+    const budgets = [...config.matchAll(/\btestTimeout:\s*([\d_]+)/g)].map((m) => Number((m[1] ?? '').replaceAll('_', '')));
+    expect(budgets.length, 'no testTimeout found in vitest.config.ts').toBeGreaterThan(0);
+    expect(GATE_BUDGET_MS, `vitest.config.ts testTimeout values: ${budgets.join(', ')}`).toBeGreaterThanOrEqual(Math.max(...budgets));
   });
 });

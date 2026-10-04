@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
-import type { AnalyticsQuery, AnalyticsResult, IAnalyticsService } from '@objectstack/spec/contracts';
+import type { AnalyticsQuery, AnalyticsResult, AnalyticsStrategy, IAnalyticsService } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 import { CubeRegistry } from '../cube-registry.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
@@ -17,21 +17,20 @@ const ordersCube: Cube = {
   title: 'Orders',
   sql: 'orders',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-    total_amount: { name: 'total_amount', label: 'Total Amount', type: 'sum', sql: 'amount' },
-    avg_amount: { name: 'avg_amount', label: 'Avg Amount', type: 'avg', sql: 'amount' },
+    count: { label: 'Count', type: 'count', sql: '*' },
+    total_amount: { label: 'Total Amount', type: 'sum', sql: 'amount' },
+    avg_amount: { label: 'Avg Amount', type: 'avg', sql: 'amount' },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
     created_at: {
-      name: 'created_at',
       label: 'Created At',
       type: 'time',
       sql: 'created_at',
       granularities: ['day', 'week', 'month'],
     },
   },
-  public: false,
+  public: true,
 };
 
 const baseQuery: AnalyticsQuery = {
@@ -177,18 +176,16 @@ describe('NativeSQLStrategy', () => {
       sql: 'opportunity',
       public: true,
       measures: {
-        count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+        count: { label: 'Count', type: 'count', sql: '*' },
         account_revenue: {
-          name: 'account_revenue',
           label: 'Account Revenue (Sum)',
           type: 'sum',
           sql: 'account.annual_revenue',
         },
       },
       dimensions: {
-        stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+        stage: { label: 'Stage', type: 'string', sql: 'stage' },
         account_industry: {
-          name: 'account_industry',
           label: 'Industry',
           type: 'string',
           sql: 'account.industry',
@@ -228,12 +225,12 @@ describe('NativeSQLStrategy', () => {
       sql: 'opportunity',
       public: true,
       measures: {
-        amount_sum: { name: 'amount_sum', label: 'Amount (Sum)', type: 'sum', sql: 'amount' },
+        amount_sum: { label: 'Amount (Sum)', type: 'sum', sql: 'amount' },
       },
       dimensions: {
         // Frontend will send `account.industry`; cube key uses underscore.
         account_industry: {
-          name: 'account_industry', label: 'Industry', type: 'string', sql: 'account.industry',
+          label: 'Industry', type: 'string', sql: 'account.industry',
         },
       },
     };
@@ -250,7 +247,9 @@ describe('NativeSQLStrategy', () => {
 
     expect(sql).toContain('LEFT JOIN "account" ON "opportunity"."account" = "account"."id"');
     expect(sql).toContain('"account"."industry" AS "account.industry"');
-    expect(sql).toContain('SUM(amount)');
+    // [#21249] The cube declares no join, but the statement joins `account`, so
+    // the base column the measure sums is qualified against the base table.
+    expect(sql).toContain('SUM("opportunity"."amount")');
   });
 
   it('should execute query and return structured result', async () => {
@@ -561,8 +560,24 @@ describe('AnalyticsService', () => {
     // when no Cube has been declared for "case" — used to crash with
     // "Cannot read properties of undefined (reading 'sql')".
     const executeAggregate = vi.fn().mockResolvedValue([{ 'case.count': 7 }]);
+    // [#20381] The inferred cube lives only in this request — it is never
+    // registered — so it is read where the request's strategies read it: a
+    // probe ahead of them records `ctx.getCube` and declines.
+    const handed: Cube[] = [];
+    const probe: AnalyticsStrategy = {
+      name: 'RequestCubeProbe',
+      priority: 0,
+      canHandle: (q, ctx) => {
+        const cube = ctx.getCube(q.cube!);
+        if (cube) handed.push(cube);
+        return false;
+      },
+      execute: vi.fn(),
+      generateSql: vi.fn(),
+    };
     const service = new AnalyticsService({
       logger: silentLogger,
+      strategies: [probe],
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
       executeAggregate,
     });
@@ -580,7 +595,11 @@ describe('AnalyticsService', () => {
       ]),
     }));
     expect(result.rows).toBeDefined();
-    expect(service.cubeRegistry.has('case')).toBe(true);
+    // A minimal cube was inferred for the request, over the object itself…
+    expect(handed).toHaveLength(1);
+    expect(handed[0]).toMatchObject({ name: 'case', sql: 'case' });
+    // …and it stayed in the request: the shared registry does not gain it.
+    expect(service.cubeRegistry.has('case')).toBe(false);
   });
 
   it('should auto-infer measures from suffix conventions (_sum, _avg, _max)', async () => {

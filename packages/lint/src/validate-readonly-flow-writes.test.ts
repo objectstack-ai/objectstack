@@ -56,7 +56,7 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.approval_status');
     expect(findings[0].message).toContain('approval_status');
     expect(findings[0].message).toContain('crm_opportunity');
-    expect(findings[0].message).toContain('#2948');
+    expect(findings[0].message).toContain('silently strips readonly fields from the UPDATE payload, so this write never lands');
     expect(findings[0].where).toBe('flow "stamp_approval" › node "Stamp approval"');
   });
 
@@ -143,7 +143,7 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].rule).toBe(FLOW_UPDATE_READONLY_WHEN_FIELD);
-    expect(findings[0].message).toContain('#3042');
+    expect(findings[0].message).toContain('a bulk update strips it from every matched row once any one of them is locked');
   });
 
   // The hint is the WHOLE product of an advisory rule - the finding blocks
@@ -233,7 +233,7 @@ describe('validateReadonlyFlowWrites', () => {
     // The message states the run identity it was judged under, so a reader of
     // the finding cannot mistake it for the user-run case.
     expect(findings[0].message).toContain("runAs:'system'");
-    expect(findings[0].message).toContain('#3042');
+    expect(findings[0].message).toContain('a bulk update strips it from every matched row once any one of them is locked');
     expect(findings[0].hint).toContain('NOT waived by a system context');
   });
 
@@ -364,7 +364,7 @@ describe('validateReadonlyFlowWrites', () => {
       // No tracker id in the string an author reads (`check:doc-authoring`);
       // the ruling's id lives in the rule's comment.
       expect(findings[0].message).not.toMatch(/#\d{4,}/);
-      expect(findings[0].message).not.toContain('UPDATE payload (#2948)');
+      expect(findings[0].message).not.toContain('from the UPDATE payload, so this write never lands');
       // The remedy names the create verb, the system channel and the own-object
       // beforeInsert stamp.
       expect(findings[0].hint).toContain("runAs:'system'");

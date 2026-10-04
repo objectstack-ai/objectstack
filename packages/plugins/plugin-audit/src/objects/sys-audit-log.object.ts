@@ -256,7 +256,7 @@ export const SysAuditLog = ObjectSchema.create({
       group: 'Target',
     }),
 
-    // [#11374 route A] The bound is derived by referenced-column transitivity
+    // [commit f64668d3c, route A] The bound is derived by referenced-column transitivity
     // from the id this column holds, never guessed: `driver-sql` creates every
     // table's primary key as `table.string('id').primary()` — knex's
     // `varchar(255)`, which the driver spells out as
@@ -298,7 +298,7 @@ export const SysAuditLog = ObjectSchema.create({
       // internal-id-shaped value passes through untouched.
       //
       // ⚠️ ORDERING, and why this object differs from its three siblings
-      // (#11674): this id half is OPTIONAL, so a seed that names a target
+      // (commit 1cba33f16): this id half is OPTIONAL, so a seed that names a target
       // loaded later is genuinely order-independent — pass 1 inserts without
       // the column and pass 2 back-fills it through the internal id captured at
       // insert time, measured end-to-end against the real engine in

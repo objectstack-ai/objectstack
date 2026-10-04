@@ -38,9 +38,9 @@ const authoredCube: Cube = {
     name: 'authored_cube',
     title: 'Authored',
     sql: 'some_physical_table',
-    measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+    measures: { count: { label: 'Count', type: 'count', sql: '*' } },
     dimensions: {},
-    public: false,
+    public: true,
 };
 
 /** Records which object each aggregate ran against, so we can assert none ran. */
@@ -50,6 +50,8 @@ function makeService(opts: {
     wireRegistry?: boolean;
 } = {}) {
     const aggregated: string[] = [];
+    /** Every name the existence gate was asked about. */
+    const gateAsked: string[] = [];
     const service = new AnalyticsService({
         logger: silentLogger,
         ...(opts.cubes ? { cubes: opts.cubes } : {}),
@@ -60,9 +62,14 @@ function makeService(opts: {
         },
         ...(opts.wireRegistry === false
             ? {}
-            : { isRegisteredObject: (n: string) => (opts.knownObjects ?? []).includes(n) }),
+            : {
+                  isRegisteredObject: (n: string) => {
+                      gateAsked.push(n);
+                      return (opts.knownObjects ?? []).includes(n);
+                  },
+              }),
     });
-    return { service, aggregated };
+    return { service, aggregated, gateAsked };
 }
 
 const CUBE_NOT_FOUND = { code: 'CUBE_NOT_FOUND', status: 404 };
@@ -101,13 +108,20 @@ describe('#3867 — cube auto-inference existence gate', () => {
     });
 
     it('still auto-infers for a REGISTERED object — the intended KPI path is unchanged', async () => {
-        const { service, aggregated } = makeService({ knownObjects: ['crm_account'] });
+        const { service, aggregated, gateAsked } = makeService({ knownObjects: ['crm_account'] });
 
         const result = await service.query({ cube: 'crm_account', measures: ['count'] } as any);
 
         expect(result).toBeTruthy();
         expect(aggregated).toEqual(['crm_account']);
-        expect(service.cubeRegistry.get('crm_account')).toBeTruthy();
+        expect(gateAsked).toEqual(['crm_account']);
+        // [#20381] The inferred cube served its own request and was not
+        // registered, so the next request of the name infers again — through
+        // this gate again — and is served the same way.
+        expect(service.cubeRegistry.get('crm_account')).toBeUndefined();
+        await service.query({ cube: 'crm_account', measures: ['count'] } as any);
+        expect(aggregated).toEqual(['crm_account', 'crm_account']);
+        expect(gateAsked).toEqual(['crm_account', 'crm_account']);
     });
 
     it('never gates an authored cube — its `sql` is whatever it declares', async () => {

@@ -315,7 +315,7 @@ describe('#6437 — the refusal message is composed from `drops`, not from the c
       `API-boundary caller, isSystem included. A value DERIVED by a beforeUpdate hook is ` +
       `not a caller write and is never stripped — that is the sanctioned write path for a ` +
       `conditionally-locked derived field). To let the strip happen and merely observe it, drop ` +
-      `strictReadonlyWrites and pass options.onFieldsDropped instead (#3407).`,
+      `strictReadonlyWrites and pass options.onFieldsDropped instead.`,
     );
   });
 

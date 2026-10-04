@@ -318,7 +318,13 @@ const MODULES = {
     // 44 → 43 (#20102): the saved-report `/reports` family was retired whole,
     // and one of its arms spelled a literal string `error`. Deleted, not
     // converted — banked per the ratchet's own rule.
-    stringError: 43,
+    //
+    // 43 → 39 (#21180): the anonymous public-form lookup picker route
+    // (`GET /forms/:slug/lookup/:field`) was retired whole by ruling E on
+    // #21079 — its four `{ code, error }` answers (400 `INVALID_REQUEST`, 404
+    // `FORM_NOT_FOUND`, 403 `LOOKUP_NOT_PUBLIC`, 500 `LOOKUP_TARGET_MISSING`)
+    // left with the handler. Deleted, not converted; banked per the same rule.
+    stringError: 39,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -353,7 +359,10 @@ const MODULES = {
     // with the saved-report stack — its eleven `{ code, error }` sites (the
     // `*_FAILED` 500s and `SCHEDULE_DELETE_FAILED`) left with the eight routes.
     // Deleted rather than converted, so no wire answer that still exists moved.
-    siblingCode: 58,
+    //
+    // 58 → 54 (#21180): the same four picker-route answers as `stringError`
+    // above, counted again here — the route was deleted, not converted.
+    siblingCode: 54,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -493,9 +502,15 @@ const DISPATCHER_DOMAINS = {
   // document while nothing was deleted. The restored guard answers 405, and it
   // must carry `Allow:` to name what is allowed to a machine, which
   // `deps.error` cannot express — the same reason `mcp.ts` hand-rolls its 405.
+  //
+  // [#20320] Was 1. The `/meta/:type` list answer now varies by
+  // `Accept-Language` — the list chain it shares with `RestServer` translates
+  // it and collapses each doc to the request's locale — so it must carry
+  // `Vary: Accept-Language`, as `RestServer`'s list does, and `deps.success`
+  // takes no headers. Its body is still `deps.success`'s envelope, spread.
   'meta.ts': {
-    handBuilt: 1,
-    note: 'one 405 on /metadata/:type/:name that must carry an `Allow:` header (`deps.error` takes none); the body is the declared envelope and its code is derived from the status',
+    handBuilt: 2,
+    note: 'one 405 on /metadata/:type/:name that must carry an `Allow:` header (`deps.error` takes none), and the /meta/:type list answer that must carry `Vary: Accept-Language` (`deps.success` takes none); both bodies are the declared envelope, the 405 code derived from the status',
   },
 
   // Kinds 1 and 2 together.

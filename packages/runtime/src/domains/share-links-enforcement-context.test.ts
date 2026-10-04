@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6551 / #6206 / #6430] Dispatcher-face `/share-links` enforcement context.
+ * [#6551 / commit 8e13ca876 / #6430] Dispatcher-face `/share-links` enforcement context.
  *
  * The dispatcher domain used to rebuild a two-field `{ userId, tenantId }`
  * out of the request's ALREADY-COMPLETE resolved `ExecutionContext` and hand
  * that to `svc.createLink` / `svc.listLinks` / `svc.revokeLink` — the same
- * consumption-site truncation #6206 fixed on the plugin-sharing face (PR
+ * consumption-site truncation commit 8e13ca876 fixed on the plugin-sharing face (PR
  * #6552), one entry point over. Structural subtyping keeps the trimmed object
  * compiling against the contract's `ExecutionContext` parameter, so only a
  * behavioural repro + a seam-parity pin can hold this boundary.
@@ -52,8 +52,9 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { PermissionDeniedError, SecurityPlugin } from '@objectstack/plugin-security';
-import { ShareLinkService } from '@objectstack/plugin-sharing';
+import { ShareLinkService, SharingServicePlugin, registerShareLinkRoutes } from '@objectstack/plugin-sharing';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { apiErrorResponse } from '../error-envelope.js';
@@ -133,8 +134,8 @@ const EAST_VIEWER: PermissionSet = PermissionSetSchema.parse({
  * withholds read. This set is therefore wired as BOTH the caller's explicit set
  * and the fallback in the #6649 cases below: `allowCreate` alone, so
  * `checkObjectPermission('find', 'crm_account', …)` is false and the security
- * middleware throws `PermissionDeniedError` — the `statusCode`-only shape whose
- * status the domain used to drop.
+ * middleware throws `PermissionDeniedError` — the shape whose status the domain
+ * used to drop, because it declared `statusCode` alone until #21405.
  */
 const ACCT_NO_READ: PermissionSet = PermissionSetSchema.parse({
     name: 'acct_no_read',
@@ -498,7 +499,7 @@ describe('[#6551] the dispatcher seam itself', () => {
         for (const verb of ['createLink', 'listLinks', 'revokeLink'] as const) {
             expect(svc[verb]).toHaveBeenCalledTimes(1);
             const got = seen[verb];
-            // The #6206 contract: the WHOLE `resolveExecutionContext` envelope,
+            // The contract commit 8e13ca876 set: the WHOLE `resolveExecutionContext` envelope,
             // unchanged — a re-trim shows up here as the exact keys it dropped.
             const dropped = Object.keys(envelope as any).filter(
                 (k) => !(k in got) || got[k] !== (envelope as any)[k],
@@ -550,6 +551,11 @@ describe('[#6551] the dispatcher seam itself', () => {
  * which reads `status` OR `statusCode`. These cases assert `status` AND `code`
  * together on purpose: a denial arriving as 403 under the wrong code would be
  * just as wrong as the 500, and only the pair separates them.
+ *
+ * [#21405] The paragraphs above describe the class as #6649 found it. It now
+ * carries `status` beside `statusCode`, which is what fixed the OTHER door, and
+ * the shared-catch case below keeps a `statusCode`-only throw so this catch's
+ * second channel stays pinned.
  */
 
 /** The ADR-0112 envelope checks every case below shares. */
@@ -635,17 +641,26 @@ describe('[#6649] a security-middleware refusal keeps its own status through the
         expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
     }, 30_000);
 
-    it('the catch is shared, so list and revoke answer the statusCode-only refusal identically', async () => {
-        // Driven with a service double raising the REAL `PermissionDeniedError`
-        // (the production class, `statusCode` and no `status`), because what is
-        // under test here is the CATCH, not a second trip through the middleware.
-        for (const verb of ['GET', 'DELETE'] as const) {
-            const res = await refusalFromService(
-                new PermissionDeniedError(`[Security] Access denied: operation on object '${OBJECT}'`),
-                verb,
-            );
-            expect(res.status, `${verb} status`).toBe(403);
-            expect(expectDeclaredEnvelope(res).code, `${verb} code`).toBe('PERMISSION_DENIED');
+    it('the catch is shared, so list and revoke answer the refusal identically — the production class and a statusCode-only throw', async () => {
+        // Driven with a service double, because what is under test here is the
+        // CATCH, not a second trip through the middleware. Two throws: the REAL
+        // `PermissionDeniedError`, and a `statusCode`-only twin of the shape that
+        // class had until #21405. The class now carries `status` beside
+        // `statusCode`, so it no longer reaches the catch's `statusCode` channel
+        // by itself; the twin keeps that channel pinned.
+        const throws = {
+            production: () => new PermissionDeniedError(`[Security] Access denied: operation on object '${OBJECT}'`),
+            statusCodeOnly: () => Object.assign(
+                new Error(`[Security] Access denied: operation on object '${OBJECT}'`),
+                { code: 'PERMISSION_DENIED', statusCode: 403 },
+            ),
+        };
+        for (const [shape, thrown] of Object.entries(throws)) {
+            for (const verb of ['GET', 'DELETE'] as const) {
+                const res = await refusalFromService(thrown(), verb);
+                expect(res.status, `${shape} ${verb} status`).toBe(403);
+                expect(expectDeclaredEnvelope(res).code, `${shape} ${verb} code`).toBe('PERMISSION_DENIED');
+            }
         }
     });
 
@@ -916,4 +931,483 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
 
         expectIndistinguishable(await h.resolve(token, { password: 'hunter2' }), await h.resolve(UNKNOWN_TOKEN));
     });
+});
+
+/**
+ * [#21405] The SAME refusal through the OTHER door.
+ *
+ * `/share-links` has two doors. This file's subject is the dispatcher domain;
+ * `plugin-sharing`'s `registerShareLinkRoutes` is the other, and it is the one
+ * that serves `/api/v1/share-links` on the standalone server (the dispatcher
+ * plugin mounts no route for the path there). Both hand the caller's envelope
+ * to `ShareLinkService`, so one caller and one request reach one refusal, and
+ * the only thing left to differ is how each door's catch reads the throw's
+ * status.
+ *
+ * They differed. The plugin door's catch reads `err?.status ?? 500`, and
+ * `PermissionDeniedError` declared `statusCode = 403` with no `status`, so the
+ * #6649 refusal below — the CRUD gate's denial on `createLink`'s visibility
+ * read — answered 403 here and 500 there. Measured on a showcase boot as a
+ * plain member, `POST /api/v1/share-links` on a record they cannot read: 500
+ * `PERMISSION_DENIED` through the plugin door, 403 through this domain. The
+ * ruled fix is in the class: `PermissionDeniedError` carries `status` beside
+ * `statusCode`, as every sibling in `plugin-security/src/errors.ts` does, so
+ * no door's catch changes.
+ *
+ * ## What is real here
+ *
+ * Both doors, their production entries: `registerShareLinkRoutes` mounted on a
+ * route recorder, and `handleShareLinksRequest` over the dispatcher's own
+ * `errorFromThrown`. ONE engine double with the WHOLE `SecurityPlugin`
+ * middleware booted on it, ONE `ShareLinkService` over that engine, ONE
+ * envelope — so the throw each door catches is the middleware's own
+ * `PermissionDeniedError` from the same read, not a double's.
+ *
+ * ## Why create only
+ *
+ * The list's refusal (the member's read of `sys_share_link`) no longer
+ * reaches either door: the member's own list became a self-scoped read
+ * (#21328), and both doors force the creator filter to the caller. Measured on
+ * the showcase boot after that change: `GET /share-links` answers 200 through
+ * both doors.
+ */
+
+/** The smallest `IHttpServer` that keeps the handlers a registrar mounts. */
+class RouteRecorder implements IHttpServer {
+    readonly routes = new Map<string, RouteHandler>();
+    get(path: string, handler: RouteHandler) { this.routes.set(`GET ${path}`, handler); }
+    post(path: string, handler: RouteHandler) { this.routes.set(`POST ${path}`, handler); }
+    put(path: string, handler: RouteHandler) { this.routes.set(`PUT ${path}`, handler); }
+    delete(path: string, handler: RouteHandler) { this.routes.set(`DELETE ${path}`, handler); }
+    patch(path: string, handler: RouteHandler) { this.routes.set(`PATCH ${path}`, handler); }
+    use() { /* no middleware is mounted by the registrar under test */ }
+    async listen() { /* never listens: handlers are driven in-process */ }
+}
+
+/** `POST /share-links` through the plugin door, with `envelope` as the resolved caller. */
+async function mintOnPluginDoor(
+    engine: any,
+    svc: ShareLinkService,
+    envelope: ExecutionContext,
+    body: { object: string; recordId: string } = { object: OBJECT, recordId: RECORD },
+): Promise<{ status: number; body: any }> {
+    const http = new RouteRecorder();
+    registerShareLinkRoutes(http, svc, engine, { contextFromRequest: () => envelope });
+    const handler = http.routes.get('POST /api/v1/share-links');
+    if (!handler) throw new Error('registerShareLinkRoutes mounted no POST /api/v1/share-links');
+    const captured: { status: number; body: any } = { status: 200, body: undefined };
+    const res: IHttpResponse = {
+        json: (data: any) => { captured.body = data; },
+        send: () => { /* the share-link routes answer JSON only */ },
+        status: (code: number) => { captured.status = code; return res; },
+        header: () => res,
+    };
+    const req: IHttpRequest = {
+        params: {},
+        query: {},
+        body,
+        headers: {},
+        method: 'POST',
+        path: '/api/v1/share-links',
+    };
+    await handler(req, res);
+    return captured;
+}
+
+describe('[#21405] the plugin route door answers the same refusal with the same status', () => {
+    for (const posture of ['single', 'group'] as const) {
+        it(`${posture} posture: no allowRead on the object answers 403 PERMISSION_DENIED through BOTH doors`, async () => {
+            const caller = noReadCaller(posture);
+            const tables: Record<string, any[]> = {
+                [OBJECT]: caller.records,
+                sys_share_link: [],
+                sys_permission_set: [],
+            };
+            const engine = makeEngine(tables);
+            await bootSecurity(engine, posture, caller.permissionSets, caller.fallbackPermissionSet);
+            const svc = new ShareLinkService({ engine: engine as any });
+
+            const plugin = await mintOnPluginDoor(engine, svc, caller.envelope);
+            const dispatched = await handleShareLinksRequest(
+                makeDeps(engine, svc),
+                '',
+                'POST',
+                { object: OBJECT, recordId: RECORD },
+                {},
+                httpContext(caller.envelope),
+            );
+            const dispatcher = dispatched.response as { status: number; body: any };
+
+            expect(plugin.status, `plugin door: ${JSON.stringify(plugin.body)}`).toBe(403);
+            expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+            expect(dispatcher.status, `dispatcher door: ${JSON.stringify(dispatcher.body)}`).toBe(403);
+            expect(expectDeclaredEnvelope(dispatcher).code).toBe('PERMISSION_DENIED');
+            // Neither refused mint wrote a link.
+            expect(tables.sys_share_link).toEqual([]);
+        }, 30_000);
+    }
+});
+
+/**
+ * [#21329 — ADR-0111 D8 rule 1, ruling 5950188467 (A′)] Who may mint a link on
+ * an OWNER-PRIVATE object, read at BOTH doors.
+ *
+ * ## The object
+ *
+ * An analogue of the conversation object the card measured: `access.default:
+ * 'private'` (ADR-0066 D2), so the member baseline's `'*'` wildcard grant does
+ * not cover it and no member reads it through the data door; an `owner_id` the
+ * owner holds; and the `publicSharing` opt-in. On it the visibility read
+ * `createLink` runs refuses the OWNER too — the CRUD gate throws before any
+ * row is looked at — so on the visibility rule alone the owner could never
+ * share their own record.
+ *
+ * ## The ruled matrix
+ *
+ * "the owner mints on an owner-private object; a hierarchy manager without
+ * visibility is refused; a non-owner member is refused; Modify-All mints" —
+ * plus the anonymous resolve of the owner's link, which is what the mint is
+ * for. Each refusal is read as the pair (`status`, `code`) and against the
+ * STORE: a refused mint writes no row.
+ *
+ * ## The capability hard stop
+ *
+ * A second object is gated on a capability too (`requiredPermissions`,
+ * ADR-0066 D3). An owner who lacks it is refused there: neither alternative
+ * applies past that gate. The control is an owner who holds the capability and
+ * is refused only by the CRUD grant, and mints.
+ *
+ * ## What is real here
+ *
+ * Both doors' production entries — the dispatcher domain body and the plugin's
+ * `registerShareLinkRoutes` (via `mintOnPluginDoor` above) — over ONE link
+ * service; the whole `SecurityPlugin` (its CRUD gate, its `hasWriteBypass` and
+ * `resolveWriteScope` probes, booted over the same engine double); and the
+ * whole `SharingServicePlugin`, booted with `registerShareLinkRoutes: false`,
+ * the per-environment configuration for which the dispatcher domain is the
+ * only share-link surface. The plugin composes the link service itself, so the
+ * authority each case reaches is the production wiring, not a hand-assembled
+ * copy of it. DOUBLES: storage (`makeEngine` above) and the enterprise
+ * hierarchy resolver, which this open edition does not ship.
+ */
+describe('[#21329] mint authority on an owner-private object, at both doors (ruling A′)', () => {
+    const CONV = 'ai_conversations';
+    const CONV_ID = 'conv_1';
+    const OWNER = 'u_owner';
+    const STRANGER = 'u_stranger';
+    const ADMIN = 'u_admin';
+    const MANAGER = 'u_manager';
+    /** Owns a record on the capability-gated object AND holds its capability. */
+    const CAPABLE_OWNER = 'u_capable_owner';
+    /** Owner-private AND capability-gated (ADR-0066 D3): a read needs `view_vault`. */
+    const VAULT = 'vault_notes';
+
+    const CONVERSATION_SCHEMA = {
+        name: CONV,
+        access: { default: 'private' },
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+    };
+
+    /** The member baseline: a `'*'` wildcard grant, the shape `member_default` has. */
+    const MEMBER_BASELINE: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_member_baseline',
+        label: 'Member baseline (wildcard grant)',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    });
+
+    /** Modify All on the wildcard, which a private object honours (the super-user bits). */
+    const MODIFY_ALL: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_modify_all',
+        label: 'Modify All',
+        objects: {
+            '*': {
+                allowRead: true,
+                allowCreate: true,
+                allowEdit: true,
+                allowDelete: true,
+                viewAllRecords: true,
+                modifyAllRecords: true,
+            },
+        },
+    });
+
+    /**
+     * A hierarchy manager: WRITE depth `unit` on the object and no read grant —
+     * a principal `canManageShares` admits (ADR-0111 D1 DEPTH) on a record the
+     * data door will not let them read.
+     */
+    const UNIT_WRITER: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_unit_writer',
+        label: 'Unit-depth writer, no read',
+        objects: { [CONV]: { allowEdit: true, writeScope: 'unit' } },
+    });
+
+    /** The object a capability gates, on top of being owner-private. */
+    const VAULT_SCHEMA = {
+        name: VAULT,
+        access: { default: 'private' },
+        requiredPermissions: ['view_vault'],
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+    };
+
+    /** The capability, and nothing else: no object grant rides with it. */
+    const VAULT_CAPABLE: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_vault_capable',
+        label: 'Holds view_vault',
+        objects: {},
+        systemPermissions: ['view_vault'],
+    });
+
+    const SETS = [MEMBER_BASELINE, MODIFY_ALL, UNIT_WRITER, VAULT_CAPABLE];
+
+    /** The envelope `resolveExecutionContext` assembles for a human member of org A. */
+    const principal = (userId: string, permissions: string[]): ExecutionContext =>
+        ({
+            userId,
+            tenantId: ORG_A,
+            email: `${userId}@example.com`,
+            isSystem: false,
+            principalKind: 'human',
+            posture: 'MEMBER',
+            positions: [],
+            permissions,
+            systemPermissions: [],
+            org_user_ids: [userId],
+            accessible_org_ids: [ORG_A],
+        }) as unknown as ExecutionContext;
+
+    const owner = () => principal(OWNER, ['conv_member_baseline']);
+    const stranger = () => principal(STRANGER, ['conv_member_baseline']);
+    const admin = () => principal(ADMIN, ['conv_member_baseline', 'conv_modify_all']);
+    const manager = () => principal(MANAGER, ['conv_member_baseline', 'conv_unit_writer']);
+    const capableOwner = () => principal(CAPABLE_OWNER, ['conv_member_baseline', 'conv_vault_capable']);
+
+    interface World {
+        tables: Record<string, any[]>;
+        sharing: any;
+        mint(as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** The same mint through the plugin's route door. */
+        mintOnPlugin(as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** The same mint on the capability-gated object, at each door. */
+        mintVault(recordId: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        mintVaultOnPlugin(recordId: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** A data-door read of a vault record under `as`. */
+        readVault(recordId: string, as: ExecutionContext): Promise<unknown>;
+        resolve(token: string): Promise<{ status: number; body: any }>;
+        revoke(idOrToken: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** A data-door read of the record under `as` — the visibility leg itself. */
+        read(as: ExecutionContext): Promise<unknown>;
+        resolveWriteScopeCalls(): number;
+    }
+
+    async function bootWorld(): Promise<World> {
+        const tables: Record<string, any[]> = {
+            [CONV]: [{ id: CONV_ID, title: 'My chat', owner_id: OWNER, organization_id: ORG_A }],
+            [VAULT]: [
+                { id: 'vault_owner', title: 'Owner\'s note', owner_id: OWNER, organization_id: ORG_A },
+                { id: 'vault_capable', title: 'Capable owner\'s note', owner_id: CAPABLE_OWNER, organization_id: ORG_A },
+            ],
+            sys_share_link: [],
+            sys_permission_set: [],
+        };
+        const engine = makeEngine(tables, { [CONV]: CONVERSATION_SCHEMA, [VAULT]: VAULT_SCHEMA });
+        const services: Record<string, any> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: { get: async () => null, list: async () => SETS },
+            // Cloud's topology: one database per environment, no organization wall.
+            tenancy: { posture: 'single' },
+            // The enterprise seam, doubled: the manager's `unit` covers the owner.
+            'hierarchy-scope-resolver': {
+                resolveOwnerIds: async (c: any, scope: string) =>
+                    c?.userId === MANAGER && scope === 'unit' ? [MANAGER, OWNER] : [String(c?.userId)],
+            },
+        };
+        const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        const getService = (name: string) => {
+            if (name in services) return services[name];
+            throw new Error(`service not registered: ${name}`);
+        };
+        const registerService = (name: string, service: unknown) => { services[name] = service; };
+
+        const securityCtx: any = { logger, hook: vi.fn(), registerService, getService };
+        const security = new SecurityPlugin({
+            defaultPermissionSets: SETS,
+            fallbackPermissionSet: 'conv_member_baseline',
+        });
+        await security.init(securityCtx);
+        await security.start(securityCtx);
+
+        // Count the DEPTH probe, so a mint that consults it is visible.
+        let writeScopeCalls = 0;
+        const realResolveWriteScope = services.security.resolveWriteScope.bind(services.security);
+        services.security.resolveWriteScope = (...args: unknown[]) => {
+            writeScopeCalls += 1;
+            return realResolveWriteScope(...args);
+        };
+
+        const hooks: Record<string, Array<() => Promise<void> | void>> = {};
+        const sharingCtx: any = {
+            logger,
+            hook: (event: string, handler: () => Promise<void> | void) => { (hooks[event] ??= []).push(handler); },
+            registerService,
+            getService,
+        };
+        const plugin = new SharingServicePlugin({ enforce: false, registerShareLinkRoutes: false });
+        await plugin.init(sharingCtx);
+        await plugin.start(sharingCtx);
+        for (const handler of hooks['kernel:ready'] ?? []) await handler();
+
+        const svc = services[SHARE_LINK_SERVICE];
+        if (!svc) throw new Error('the sharing plugin registered no share-link service');
+        const deps = makeDeps(engine, svc);
+        const drive = async (
+            subPath: string,
+            method: string,
+            body: unknown,
+            as: ExecutionContext | undefined,
+        ): Promise<{ status: number; body: any }> => {
+            const res = await handleShareLinksRequest(deps, subPath, method, body, {}, httpContext(as));
+            if (!res.handled || !res.response) throw new Error(`${method} /share-links${subPath} was not handled`);
+            return res.response as { status: number; body: any };
+        };
+
+        return {
+            tables,
+            sharing: services.sharing,
+            mint: (as) => drive('', 'POST', { object: CONV, recordId: CONV_ID }, as),
+            mintOnPlugin: (as) => mintOnPluginDoor(engine, svc, as, { object: CONV, recordId: CONV_ID }),
+            mintVault: (recordId, as) => drive('', 'POST', { object: VAULT, recordId }, as),
+            mintVaultOnPlugin: (recordId, as) => mintOnPluginDoor(engine, svc, as, { object: VAULT, recordId }),
+            readVault: async (recordId, as) => engine.find(VAULT, { where: { id: recordId }, limit: 1, context: as }),
+            resolve: (token) => drive(`/${token}/resolve`, 'GET', undefined, undefined),
+            revoke: (idOrToken, as) => drive(`/${idOrToken}`, 'DELETE', undefined, as),
+            read: async (as) => engine.find(CONV, { where: { id: CONV_ID }, limit: 1, context: as }),
+            resolveWriteScopeCalls: () => writeScopeCalls,
+        };
+    }
+
+    it('[persona] the object is owner-private: the owner\'s own data-door read is refused at the CRUD gate', async () => {
+        const w = await bootWorld();
+        // The visibility leg is CLOSED for the owner — without this, a 201 below
+        // would prove nothing about the owner branch.
+        await expect(w.read(owner())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        await expect(w.read(stranger())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        await expect(w.read(manager())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        // The Modify-All holder reads it: the super-user bits are honoured on a private object.
+        expect(await w.read(admin())).toHaveLength(1);
+    }, 30_000);
+
+    it('[owner] the owner mints a link on their own record at both doors, and an anonymous holder resolves it', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(owner());
+        const plugin = await w.mintOnPlugin(owner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: OWNER });
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(plugin.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: OWNER });
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([OWNER, OWNER]);
+
+        const resolved = await w.resolve(String(res.body.data.token));
+        expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
+        expect(resolved.body.data.record).toMatchObject({ id: CONV_ID, title: 'My chat' });
+    }, 30_000);
+
+    it('[stranger] a non-owner member is refused with the visibility read\'s own refusal at both doors, and nothing lands', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(stranger());
+        const plugin = await w.mintOnPlugin(stranger());
+
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+    }, 30_000);
+
+    it('[modify-all] a Modify-All holder mints at both doors', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(admin());
+        const plugin = await w.mintOnPlugin(admin());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: ADMIN });
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([ADMIN, ADMIN]);
+    }, 30_000);
+
+    it('[manager] a hierarchy manager without visibility is refused, though they ARE a share-manager of the record', async () => {
+        const w = await bootWorld();
+
+        // The control: this principal holds ADR-0111 D1 DEPTH authority over the
+        // record. Without it the refusal below could be "not a manager at all".
+        expect(await w.sharing.canManageShares(CONV, CONV_ID, manager())).toBe(true);
+        const callsBefore = w.resolveWriteScopeCalls();
+
+        const res = await w.mint(manager());
+        const plugin = await w.mintOnPlugin(manager());
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+        // The DEPTH branch is not part of mint authority at all: minting never
+        // asked for the caller's write scope.
+        expect(w.resolveWriteScopeCalls(), 'the mint consulted the hierarchy-depth probe').toBe(callsBefore);
+
+        // ...while their revoke authority over the record (D8 rule 2) stands.
+        const minted = await w.mint(owner());
+        expect(minted.status, JSON.stringify(minted.body)).toBe(201);
+        const revoked = await w.revoke(String(minted.body.data.id), manager());
+        expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+        expect(w.tables.sys_share_link[0]?.revoked_at).toBeTruthy();
+    }, 30_000);
+    it('[capability persona] the vault refuses the owner at the CAPABILITY gate, and the capable owner only at the CRUD grant', async () => {
+        const w = await bootWorld();
+        const ownerRead = await w.readVault('vault_owner', owner()).then(() => null, (e) => e);
+        expect(ownerRead).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        expect(ownerRead?.details?.missingPermissions, 'the owner lacks view_vault').toEqual(['view_vault']);
+        const capableRead = await w.readVault('vault_capable', capableOwner()).then(() => null, (e) => e);
+        expect(capableRead).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        expect(capableRead?.details?.missingPermissions, 'the capable owner is refused by the CRUD grant, not the capability').toBeUndefined();
+    }, 30_000);
+
+    it('[capability] an owner lacking the object\'s required capability is refused with that refusal at both doors, and nothing lands', async () => {
+        const w = await bootWorld();
+        const res = await w.mintVault('vault_owner', owner());
+        const plugin = await w.mintVaultOnPlugin('vault_owner', owner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        // The wire carries the refusal's user-facing sentence only — which gate
+        // refused (the capability's `missingPermissions`) stays off the wire, so
+        // that half is pinned beside the service, on the rejection itself.
+        expect(res.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+        // The owner alternative itself holds; the hard stop is what refused.
+        expect(await w.sharing.canManageShares(VAULT, 'vault_owner', owner())).toBe(true);
+    }, 30_000);
+
+    it('[capability control] the owner who HOLDS the capability mints on the same object at both doors', async () => {
+        const w = await bootWorld();
+        const res = await w.mintVault('vault_capable', capableOwner());
+        const plugin = await w.mintVaultOnPlugin('vault_capable', capableOwner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([CAPABLE_OWNER, CAPABLE_OWNER]);
+    }, 30_000);
 });

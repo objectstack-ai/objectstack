@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8885] ADR-0112 pins for the two wire codes the card measured, on the REST
+ * [commit 30b1c636a] ADR-0112 pins for the two wire codes the sweep measured, on the REST
  * emitters themselves.
  *
  * ## 1. `sendFieldVisibilityFault` — the ADR-0106 D6 tier-3 refusal
@@ -24,7 +24,7 @@
  *
  * ## 2. `mapDataError`'s comment-access branch — `RECORD_NOT_ACCESSIBLE`
  *
- * #8885's table claimed this code is in NEITHER `StandardErrorCode` nor the
+ * The sweep table behind commit 30b1c636a claimed this code is in NEITHER `StandardErrorCode` nor the
  * ledger. That row was a measurement error: `RECORD_NOT_ACCESSIBLE` has been a
  * `StandardErrorCode` member (Authorization block, "Sharing rule restriction")
  * since before the card's own measured commit — the #4630 branch comment

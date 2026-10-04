@@ -2,7 +2,7 @@
 
 /**
  * [#19912] The local `Field.json` storage backfill
- * (`SqlDriver.backfillCanonicalJsonEncoding`, #12380) lets the driver's own
+ * (`SqlDriver.backfillCanonicalJsonEncoding`, commit 4045b954d) lets the driver's own
  * codec decide which cell to rewrite. SQL only pre-filters.
  *
  * The defect: the backfill was one `UPDATE … set col = json_quote(col) where
@@ -92,7 +92,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A cell the way a pre-#12380 door (or any raw writer) left it: bound as-is. */
+/** A cell the way a door before commit 4045b954d (or any raw writer) left it: bound as-is. */
 async function plantRaw(d: SqlDriver, id: string, val: unknown): Promise<void> {
   await d.execute(`insert into "${T}" ("id", "label", "val") values (?, ?, ?)`, [id, id, val as any]);
 }
@@ -116,7 +116,7 @@ describe('[#19912] the local json backfill leaves JSON nested past SQLite\'s dep
   it('the card\'s reproduction: only `bare` is quoted; the 1001-level array reads as an array after a SECOND backfill', async () => {
     const d = await makeDriver();
     await d.syncSchema(T, SCHEMA); // creates the table: no backfill
-    await plantRaw(d, 'bare', 'bare'); // the pre-#12380 form of the string 'bare'
+    await plantRaw(d, 'bare', 'bare'); // the form of the string 'bare' before commit 4045b954d
     await d.create(T, { id: 'deep', label: 'deep', val: deepArray(1001) }, { bypassTenantAudit: true });
     await d.create(T, { id: 'pair', label: 'pair', val: [1, 2] }, { bypassTenantAudit: true });
 

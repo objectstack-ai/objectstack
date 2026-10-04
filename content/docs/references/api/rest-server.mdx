@@ -1,5 +1,6 @@
 ---
-title: Rest Server
+title: Rest Server schema — API Protocol reference
+navTitle: Rest Server
 description: "Defines the REST API server configuration for automatically generating RESTful CRUD endpoints, metadata endpoints, and batch operations."
 ---
 
@@ -86,7 +87,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxBatchSize** | `integer` | optional (default: `200`) | Maximum records per batch operation |
 | **enableBatchEndpoint** | `boolean` | optional (default: `true`) | Enable POST /data/:object/batch endpoint |
-| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean }` | optional | Enable/disable specific batch operations |
+| **operations** | `{ createMany?: boolean; updateMany?: boolean; deleteMany?: boolean }` | optional | Enable/disable specific batch operations |
 | **defaultAtomic** | `never` | optional | [REMOVED] `batch.defaultAtomic` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no batch handler ever consulted it: atomicity is decided per request by `options.atomic` in the batch body (`BatchOptions`, ADR-0119 D4, opt-in), and a server-side default that flipped it silently would change the failure semantics of callers who send nothing. Delete the key; a caller that needs all-or-nothing sends `options: { atomic: true }`. |
 
 ### Nested Shape: `BatchEndpointsConfig.operations`
@@ -107,7 +108,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
+| **operations** | `{ create?: boolean; read?: boolean; update?: boolean; delete?: boolean; … }` | optional | Enable/disable operations |
 | **patterns** | `never` | optional | [REMOVED] `crud.patterns` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route is mounted from the fixed method/path pairs in the REST server's `registerCrudEndpoints`, so a custom pattern was validated and ignored. Delete the key. The mounted CRUD paths are the contract the client SDK, the discovery document and the served /openapi.json all describe, and `crud.dataPrefix` is the one live knob that moves them; an endpoint on a custom path or method is a declarative `api` endpoint (`type: 'object_operation'`, `ApiEndpoint` in `@objectstack/spec/api`), which is matched, executed and documented. |
 | **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
 | **objectParamStyle** | `never` | optional | [REMOVED] `crud.objectParamStyle` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route takes the object name as a path segment, so `'query'` was validated and mounted exactly what `'path'` mounts. Delete the key; the object name is always a path segment. |
@@ -215,7 +216,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
 | **cacheTtl** | `never` | optional | [REMOVED] `metadata.cacheTtl` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` endpoint's `cacheTtl` is the key that does reach the wire. |
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
-| **endpoints** | `{ types: boolean; items: boolean; item: boolean; maintenance: boolean }` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types?: boolean; items?: boolean; item?: boolean; maintenance?: boolean }` | optional | Enable/disable specific endpoints |
 
 ### Nested Shape: `MetadataEndpointsConfig.endpoints`
 
@@ -249,7 +250,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **documentation** | `{ title: string; description?: string; version?: string; termsOfService?: string; … }` | optional | OpenAPI/Swagger documentation config |
+| **documentation** | `{ title?: string; description?: string; termsOfService?: string; contact?: object; … }` | optional | Publisher identity of the served OpenAPI document: each member set here overlays its `info` on both /openapi.json doors, and nothing set serves the bundled `info` unchanged. `info.version` is always the protocol version |
 | **responseFormat** | `never` | optional | [REMOVED] `api.responseFormat` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: `envelope`, `includeMetadata` and `includePagination` were parsed, defaulted and copied into the REST server's config and never consulted, so `envelope: false` unwrapped no response. Delete the key. Response shapes are fixed, not a server-wide option: each route answers in the response schema `@objectstack/spec/api` declares for it, which is what the client SDK parses and the served /openapi.json describes, so no configuration changes them. |
 
 ### Nested Shape: `RestApiConfig.documentation`
@@ -257,12 +258,12 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `never` | optional | [REMOVED] `api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: whether the server publishes its OpenAPI document is decided by the sibling `api.enableOpenApi` at the mount, so `enabled: false` turned nothing off. Delete the key; `api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` viewer unmounted. |
-| **title** | `string` | optional (default: `"ObjectStack API"`) | API documentation title |
-| **description** | `string` | optional | API description |
-| **version** | `string` | optional | Documentation version |
-| **termsOfService** | `string` | optional | Terms of service URL |
-| **contact** | `{ name?: string; url?: string; email?: string }` | optional |  |
-| **license** | `{ name: string; url?: string }` | optional |  |
+| **title** | `string` | optional | Title of the served OpenAPI document (`info.title`); unset keeps the bundled title |
+| **description** | `string` | optional | Description of the served OpenAPI document (`info.description`); unset keeps the bundled description. Your app's own release number belongs here |
+| **version** | `never` | optional | [REMOVED] `api.documentation.version` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it, and the served OpenAPI document's `info.version` has one source: the protocol version, i.e. the version of the `@objectstack/spec` package that generated the document, which no deployment configuration overrides. Delete the key. To publish your app's own release number, write it into `api.documentation.description`, which the served `info.description` carries. |
+| **termsOfService** | `string` | optional | Terms-of-service URL of the served OpenAPI document (`info.termsOfService`); unset serves none |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional | Contact of the served OpenAPI document; replaces the bundled `info.contact` whole, so a member left out is absent rather than inherited. Unset keeps the bundled contact |
+| **license** | `{ name: string; url?: string }` | optional | License of the served OpenAPI document; replaces the bundled `info.license` whole, so a license without `url` serves no URL. Unset keeps the bundled license |
 
 
 ---
@@ -273,10 +274,10 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **api** | `{ version: string; basePath: string; apiPath?: string; enableCrud: boolean; … }` | optional | REST API configuration |
-| **crud** | `{ operations?: object; dataPrefix: string }` | optional | CRUD endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
-| **metadata** | `{ prefix: string; enableCache: boolean; maskObjectFields: boolean; endpoints?: object }` | optional | Metadata endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
-| **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object }` | optional | Batch endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
+| **api** | `{ version?: string; basePath?: string; apiPath?: string; enableCrud?: boolean; … }` | optional | REST API configuration |
+| **crud** | `{ operations?: object; dataPrefix?: string }` | optional | CRUD endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
+| **metadata** | `{ prefix?: string; enableCache?: boolean; maskObjectFields?: boolean; endpoints?: object }` | optional | Metadata endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
+| **batch** | `{ maxBatchSize?: integer; enableBatchEndpoint?: boolean; operations?: object }` | optional | Batch endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
 | **routes** | `{  }` | optional | Route generation configuration |
 | **openApi31** | `never` | optional | [REMOVED] `RestServerConfig.openApi31` was removed in @objectstack/spec 17 (ADR-0049) — no runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the pre-generated contract enriched with the live server URL and the registered objects, so webhook/callback definitions declared here never appeared in it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`. |
 
@@ -297,14 +298,14 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **documentation** | `{ title: string; description?: string; version?: string; termsOfService?: string; … }` | optional | OpenAPI/Swagger documentation config |
+| **documentation** | `{ title?: string; description?: string; termsOfService?: string; contact?: object; … }` | optional | Publisher identity of the served OpenAPI document: each member set here overlays its `info` on both /openapi.json doors, and nothing set serves the bundled `info` unchanged. `info.version` is always the protocol version |
 | **responseFormat** | `never` | optional | [REMOVED] `api.responseFormat` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: `envelope`, `includeMetadata` and `includePagination` were parsed, defaulted and copied into the REST server's config and never consulted, so `envelope: false` unwrapped no response. Delete the key. Response shapes are fixed, not a server-wide option: each route answers in the response schema `@objectstack/spec/api` declares for it, which is what the client SDK parses and the served /openapi.json describes, so no configuration changes them. |
 
 ### Nested Shape: `RestServerConfig.crud`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
+| **operations** | `{ create?: boolean; read?: boolean; update?: boolean; delete?: boolean; … }` | optional | Enable/disable operations |
 | **patterns** | `never` | optional | [REMOVED] `crud.patterns` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route is mounted from the fixed method/path pairs in the REST server's `registerCrudEndpoints`, so a custom pattern was validated and ignored. Delete the key. The mounted CRUD paths are the contract the client SDK, the discovery document and the served /openapi.json all describe, and `crud.dataPrefix` is the one live knob that moves them; an endpoint on a custom path or method is a declarative `api` endpoint (`type: 'object_operation'`, `ApiEndpoint` in `@objectstack/spec/api`), which is matched, executed and documented. |
 | **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
 | **objectParamStyle** | `never` | optional | [REMOVED] `crud.objectParamStyle` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route takes the object name as a path segment, so `'query'` was validated and mounted exactly what `'path'` mounts. Delete the key; the object name is always a path segment. |
@@ -317,7 +318,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
 | **cacheTtl** | `never` | optional | [REMOVED] `metadata.cacheTtl` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` endpoint's `cacheTtl` is the key that does reach the wire. |
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
-| **endpoints** | `{ types: boolean; items: boolean; item: boolean; maintenance: boolean }` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types?: boolean; items?: boolean; item?: boolean; maintenance?: boolean }` | optional | Enable/disable specific endpoints |
 
 ### Nested Shape: `RestServerConfig.batch`
 
@@ -325,7 +326,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxBatchSize** | `integer` | optional (default: `200`) | Maximum records per batch operation |
 | **enableBatchEndpoint** | `boolean` | optional (default: `true`) | Enable POST /data/:object/batch endpoint |
-| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean }` | optional | Enable/disable specific batch operations |
+| **operations** | `{ createMany?: boolean; updateMany?: boolean; deleteMany?: boolean }` | optional | Enable/disable specific batch operations |
 | **defaultAtomic** | `never` | optional | [REMOVED] `batch.defaultAtomic` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no batch handler ever consulted it: atomicity is decided per request by `options.atomic` in the batch body (`BatchOptions`, ADR-0119 D4, opt-in), and a server-side default that flipped it silently would change the failure semantics of callers who send nothing. Delete the key; a caller that needs all-or-nothing sends `options: { atomic: true }`. |
 
 

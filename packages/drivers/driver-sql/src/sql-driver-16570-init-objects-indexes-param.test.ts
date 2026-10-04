@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16570] `initObjects` and `registerObjectMetadata` accept `indexes` — the
+ * [commit b72226f48] `initObjects` and `registerObjectMetadata` accept `indexes` — the
  * key they have always READ — spelled as a **fresh object literal**.
  *
  * ## The defect this pins

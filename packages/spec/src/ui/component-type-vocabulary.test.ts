@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Pins for the page-component type vocabulary claim (#12950) — the
+ * Pins for the page-component type vocabulary claim (commit 225e7690f) — the
  * `vocabulary-derivation.test.ts` discipline applied to the namespace claim:
  * every set here is DERIVED in the source module, so these tests assert the
  * derivation still holds and the ledger still earns its rows. The failure mode
@@ -98,7 +98,7 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
   });
 
   /**
-   * #12950's own readiness verdict, pinned: `global:search` and
+   * Commit 225e7690f's own readiness verdict, pinned: `global:search` and
    * `global:notifications` STAY declared — the 2026-08-26 ruling retires a
    * member only when no data source covers the horizon, and both are backed by
    * shipped platform data sources (the cross-object search protocol behind
@@ -126,6 +126,23 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
     expect(hasReservedComponentNamespace('user:profile')).toBe(false);
     expect(isKnownComponentType('user:profile')).toBe(true);
   });
+
+  /**
+   * #21504 — `ai:chat_window` is retired BY NAME the `user:profile` way: out
+   * of the enum, KNOWN through its kept `ComponentPropsMap` row, and out of the
+   * typo candidates so no suggester renames an author into it. Unlike
+   * `user:profile`, its namespace STAYS reserved — `ai:suggestion` still
+   * populates `ai:` — so the namespace list above is unchanged and the
+   * `component-type-unknown` rule keeps claiming `ai:`.
+   */
+  it('ai:chat_window is known through its kept row, not a candidate, and `ai:` stays reserved (#21504)', () => {
+    expect(PageComponentType.options).not.toContain('ai:chat_window');
+    expect(isKnownComponentType('ai:chat_window')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).not.toContain('ai:chat_window');
+    expect(hasReservedComponentNamespace('ai:chat_window')).toBe(true);
+    // Lit control: the kept member of the same namespace is a candidate.
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('ai:suggestion');
+  });
 });
 
 describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {
@@ -137,9 +154,9 @@ describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {
       // type — a ledger row there is dead weight.
       expect(hasReservedComponentNamespace(entry), entry).toBe(true);
       // An enum member or a map row is already known — a ledger row for one is
-      // a grandfather clause pretending to be an exemption. When
-      // `record:line_items` is measured into the map, this assertion forces
-      // its ledger row OUT in the same PR.
+      // a grandfather clause pretending to be an exemption. This assertion
+      // forced `record:line_items`'s ledger row OUT in the change that measured
+      // it into the map (#21142).
       expect(enumSet.has(entry), entry).toBe(false);
       expect(mapKeys.has(entry), entry).toBe(false);
     }
@@ -149,6 +166,23 @@ describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {
     for (const entry of STRING_ARM_REGISTERED_TYPES) {
       expect(isKnownComponentType(entry), entry).toBe(true);
     }
+  });
+
+  /**
+   * #21142 — the ledger's one entry was measured into the map, and the
+   * discipline above forced it out. `record:line_items` stays KNOWN (the
+   * `component-type-unknown` rule still accepts it) through its row now, and
+   * it is still not an enum member: it reaches the type union through the open
+   * string arm, as `element:metadata_viewer` does. With the ledger empty the
+   * two loops above hold vacuously, which is why this pin names the type.
+   */
+  it('record:line_items is known through its ComponentPropsMap row, not the ledger', () => {
+    expect(STRING_ARM_REGISTERED_TYPES).not.toContain('record:line_items');
+    expect(Object.keys(ComponentPropsMap)).toContain('record:line_items');
+    expect(PageComponentType.options).not.toContain('record:line_items');
+    expect(hasReservedComponentNamespace('record:line_items')).toBe(true);
+    expect(isKnownComponentType('record:line_items')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('record:line_items');
   });
 });
 

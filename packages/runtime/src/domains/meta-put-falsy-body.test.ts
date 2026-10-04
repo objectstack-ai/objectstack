@@ -180,7 +180,7 @@ describe('#8842 — dispatcher PUT /meta/:type/:name with a falsy body', () => {
 
             // This drove `/lead/views/all_leads` — the compound arity, which
             // folded the trailing segments into `views/all_leads`. That arity
-            // is retired (#12176 stage 3), so the same name is addressed
+            // is retired (stage 3, commit 7986d973f), so the same name is addressed
             // percent-encoded, which keeps the path at two segments and lands
             // on the same `saveMetaItem`. The #8842 falsy-body hole this file
             // exists for is a property of that handler, not of the spelling.

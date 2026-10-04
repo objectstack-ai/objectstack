@@ -1,5 +1,1439 @@
 # @objectstack/driver-memory
 
+## 17.6.0
+
+### Minor Changes
+
+- f1e921a: feat(spec)!: `$empty` joins `FILTER_OPERATORS`, and the view operators `is_empty` / `is_not_empty` lower to it (#20446)
+  
+  A stored 「is empty」 / 「is not empty」 — `['field', 'is_empty', …]`, `isempty`, `is_not_empty`, `isnotempty`, in a view rule, a sharing rule or any filter array — now lowers to `{ field: { $empty: true | false } }` instead of `$null`. `$empty` is answered by the field's DECLARED type: a text-like field is empty when it is null or `''`, a multi-value field (multiselect, checkboxes, tags, or a select / radio / lookup / user / file / image with `multiple: true`) when it is null or `[]`, and every other type only when it is null. So an 「is empty」 rule on a text field now also finds `''`, and on a multi-value field also finds `[]`, which the `$null` lowering missed. `is_not_empty` is its exact complement. `$empty` is in `FILTER_OPERATORS` (and `ALL_OPERATORS`) now, and `canonicalAstOperator` folds the empty pair onto `is_empty` / `is_not_empty` rather than onto `is_null` / `is_not_null`. On `@objectstack/driver-memory`, a QueryAST comparison node (`{ type: 'comparison', operator: 'is_empty' }`) is answered by the same declared-type arm.
+  
+  **BREAKING**: two things accepted before are refused now, each loudly and with its fix.
+  
+  - **A `{ $empty: … }` object written as a field value** (a `where` pasted into an insert or update payload) is refused with `VALIDATION_FAILED` (`invalid_type`, "$empty is a filter operator, not a value"). Before, a text-like field stored it as data.
+    FROM `update('task', { title: { $empty: true } })` → TO write the value itself (`{ title: '' }`, `{ title: null }`); a filter belongs in `where`.
+  - **`is_empty` / `is_not_empty` where no face holds the column's declared type** is refused with `INVALID_FILTER` / 400 (`READ_SCOPE_COMPILE_FAILED` / 500 on an analytics read scope). The `$null` lowering answered these. The compositions:
+    - the built-in `id`, which no object declares. FROM `['id', 'is_empty', true]` → TO `['id', 'is_null', true]` / `is_not_null`;
+    - a federated (external) object on a driver that does not implement `registerExternalObject` (driver-memory, driver-mongodb). The boot already reports such an object as NOT bound to its remote table, naming it, and its reads answered from a table named after the object. FROM `is_empty` on such an object → TO bind it on a driver that implements federation (driver-sql and its heirs, driver-turso);
+    - an `AnalyticsService` constructed without `sourceFieldMeta`. FROM such a host → TO pass `sourceFieldMeta` (the package README shows it), or filter with `is_null` / `is_not_null`;
+    - a multi-value column on a SQL dialect `driver-sql` does not model (a knex client other than SQLite, PostgreSQL or MySQL). FROM `['tags', 'is_empty', true]` there → TO `['tags', 'is_null', true]` / `is_not_null`.
+  
+  Stored sharing rules and views that use 「is empty」 are not rewritten; they are re-read under the new meaning. Production rules that use 「is empty」 on a text or multi-value field were not measured; each finds more rows (the `''` / `[]` ones) from this release.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered filter-is-empty-lowers-to-empty-operator -->
+- 793fb83: `MemoryAnalyticsService` (the in-memory analytics cube face) now runs the two shared filter comparand doors every other analytics face runs, then the shared filter lowering of ADR-0053 D-D1 (as amended), before it compiles a query's `where`. It also compiles `$or` and `$null`, the two parts of the lowering's output it could not.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: no spec key, export name or stored row moves. What changes is which filter comparand values one runtime face of this package accepts, to the set every other face already accepts; which value the caller meant by a refused comparand is not something a ledger entry can decide. The package publishes (not `unpublished`); no ADR-0087 id covers a comparand check (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `query()` and `generateSql()` now refuse, with `INVALID_FILTER` / 400, filter comparands they used to answer. Each is refused the same way by every other analytics face and by the query engine, so a filter that worked here worked nowhere else. Measured on a fixture where `d` is `'v1'`, `'v2'`, `null` and absent:
+  
+  - `undefined` in any comparand position — `{ d: undefined }` and `{ d: { $eq: undefined } }` answered the no-value rows, `{ d: { $ne: undefined } }` the valued ones, `{ d: { $in: ['v1', undefined] } }` row `v1`;
+  - a `null` member of `$in` / `$nin` (`{ d: { $in: ['v1', null] } }` answered `v1` and both no-value rows), and a `null` under an ordering operator (`{ d: { $gt: null } }` answered no row);
+  - a scalar where `$in` / `$nin` takes a list (`{ d: { $in: 'v1' } }`);
+  - a plain object, a `Map` or a binary value as a comparand — `{ d: { $ne: { a: 1 } } }` and `{ d: new Map() }` answered EVERY row.
+  
+  The fix is to write the comparand you mean: `null` or `{ $null: true }` for "has no value", a list for `$in` / `$nin` (and `{ $null: true }` in a `$or` for "one of these, or no value"), a scalar for an ordering operator.
+  
+  Corrected answers, each now what the live query path (`find()`) returns:
+  
+  - a bigint comparand within 2^53 (`{ n: { $gt: 2n } }`) is read as its number and answered; beyond 2^53 it is refused `INVALID_FILTER` / 400. Both used to fail with an uncoded error.
+  - `$between` is answered as its two bounds, with a bare-day maximum widened to the whole day before it is converted to the field's storage form; it was refused.
+  - `$null` (true: no value; false: has a value) and `$or` (a `{}` branch is TRUE, `$or: []` is FALSE) are compiled on both exits; they were refused. `$not`, `$startsWith`, `$endsWith` and `$empty` stay refused. `ANALYTICS_FILTER_CAPABILITIES` names `$null` and the `$or` combinator accordingly.
+  
+  The `generateSql()` echo and the `query()` pipeline dump for `$ne`, `$nin` and `$notContains` now show the lowering's NULL escape around this face's own guard — `(d IS NULL OR (d IS NULL OR d != 'v1'))` — the same rows as before.
+- 95fed33: `MemoryAnalyticsService` lowers the `FilterArray` spelling of `where` instead of dropping it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: no spec key, export name or stored row moves. What changes is which `where` values one runtime face of this package answers: a `where` array that `isFilterAST` rejects, which `AnalyticsQuerySchema.where` (a `FilterConditionSchema`) never admitted, is now refused as the analytics `where` door and the query engine already refuse it, where it used to answer every row. Which filter the caller meant by such an array is not something a ledger entry can decide. The package publishes (not `unpublished`); no ADR-0087 id covers a runtime filter-shape refusal (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  An array `where` such as `[['stage', '=', 'won']]` used to skip every filter step of the
+  analytics (cube) face: `query()` aggregated every row and `generateSql()` echoed no `WHERE`,
+  while the object spelling `{ stage: 'won' }` answered its rows. The array is now lowered by
+  `@objectstack/spec`'s `isFilterAST` / `parseFilterAST` — the lowering the analytics `where` door
+  and the engine already apply — so both spellings answer the same rows and echo the same `WHERE`
+  on both exits. `[]` still means no filter.
+  
+  **BREAKING**: `query()` and `generateSql()` now refuse, with `INVALID_FILTER` / 400, a `where`
+  array that is not a filter — one `isFilterAST` rejects. Each such array used to answer EVERY row
+  and echo no `WHERE`; the analytics `where` door and the query engine refuse the same shapes.
+  Measured on a fixture where `d` is `'v1'`, `'v2'`, `null` and absent, each of these answered all
+  four rows:
+  
+  - an infix join, `[['d', '=', 'v1'], 'or', ['d', '=', 'v2']]`;
+  - an operator outside the filter-array vocabulary, `[['d', 'sounds_like', 'v1']]`;
+  - a list of scalars, `[1, 2, 3]`;
+  - a cube-style entry list, `[{ member: 'd', operator: 'equals', values: ['v1'] }]`.
+  
+  An array that does lower but carries a comparand or operator the face refuses in its object
+  spelling (`[['d', 'in', 'v1']]`, `[['d', 'starts_with', 'v']]`) is now refused as that object
+  spelling is; it too used to answer every row.
+  
+  The fix is to write the filter you mean: the prefix form `['or', condA, condB]` for an infix
+  join, an operator from the filter-array vocabulary, or the `FilterCondition` object.
+- f8178ff: fix(driver-memory): `$contains` / `$notContains` on a multi-valued or JSON-stored field answer by membership, as the SQL drivers do
+  
+  Clause-②: yes (widening) — one new public method on the exported `InMemoryDriver` class, `filterContainsTest`; its return type `MemoryContainsTest` is not re-exported from the package entry. No accepted filter key or operator is added: `$contains` and `$notContains` keep their declared shape.
+  
+  On a field whose declaration makes it JSON-stored (`multiple: true` on a `lookup`, `user`, `select`, `radio`, `file` or `image` field, a `multiselect`, `checkboxes` or `tags` field, or a structured type such as `json`), the in-memory driver now answers `{ field: { $contains: v } }` by whole-element membership: some element of the stored array equals `v`. It used to match each element by substring, so `u1` matched a row storing `['u10']` and `'red'` matched a row storing `['redwood']`. A number member answered nothing: `{ nums: { $contains: '1' } }` missed `[1, 2]`. `$notContains` is the exact complement, and a row with no value still satisfies it. A scalar text column keeps the case-exact substring test.
+  
+  `driver-sql` gives the same answer on SQLite, PostgreSQL and MySQL; the two drivers were measured over the same fixture. The answer holds on every face of this driver:
+  
+  - `find()` and `count()`, in both filter spellings;
+  - the nested-relation filter on a multi-valued relation, which the engine lowers to one `$contains` per related id;
+  - `MemoryAnalyticsService`'s query, and its SQL echo, which now renders SQLite's `json_each` membership construct for such a column.
+  
+  The comparand is still a string. A number or boolean member is named by its text: `'1'` matches the stored number `1` (and `'1.50'` the number `1.5`), `'true'` matches the boolean `true`, and `'null'` matches a `null` member. A field the driver holds no declaration for, such as a field on an object never passed through `syncSchema`, keeps the substring reading.
+  
+  New: `InMemoryDriver.filterContainsTest(object, field, value)` returns the one test every face above lowers `$contains` to. It is a narrow seam for the analytics face, beside `filterSubstringPattern` and `filterComparandStorageForm`. The added public method is why this entry is `minor`.
+  
+  **If your tests relied on the old answer:** on the in-memory driver, a filter that matched an id by prefix or a tag by substring now returns only the member rows. That is what SQL already returned in production. Write `$contains` with the whole member value.
+- a3dc817: fix(driver-memory, driver-mongodb)!: a non-boolean `$exists` comparand is refused with `INVALID_FILTER` / 400, as `$null`'s is, instead of selecting the rows with no value (#20897)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered filter-query-face-comparands-refused-at-save) this narrows the query faces to the rule that registered entry already records: its reason states that every query face refuses a non-boolean $null / $exists flag, and its replacement is this change's whole migration (a flag is the boolean itself; $exists true is "has a value", false "has no value"). This change makes that statement true on the two drivers that did not yet refuse. No authorable key, spelling, export or published type moves, and no stored row is read or rewritten; a stored filter carrying such a flag is already refused when it is saved, by that entry. -->
+  
+  **BREAKING**: this narrows what the in-memory driver and the MongoDB driver accept in a filter. A `$exists` comparand that is not a boolean (a string, a number, `null`, `undefined`, an object) is now refused with `INVALID_FILTER` / 400, where these two drivers used to answer it. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  `FieldOperatorsSchema` declares `$exists` as a boolean, and `driver-sql`, `driver-sqlite-wasm` and both Turso transports already refused any other comparand. The in-memory driver and the MongoDB driver did not: they read `$exists` as `value === true`, so every other value asked for the rows with NO value. `{ stage: { $exists: "yes" } }` and `{ stage: { $exists: 1 } }` returned the rows without a stage, the opposite of what was written. `0`, `null` and the string `"false"` landed on that same side by the same default, not because anything read them. The in-memory driver's analytics face read the same flag by truthiness and answered the valued rows for the same filter, so that driver gave two different answers.
+  
+  **What an author sees now.** `400 INVALID_FILTER` with `driver-sql`'s message, beginning `Operator "$exists" on field "FIELD" requires a boolean comparand (true or false).` and naming the position (`filter.stage.$exists`). On the in-memory driver the refusal covers `find`, `findOne`, `count`, `aggregate`, `updateMany`, `deleteMany` and the analytics face (`query()` and `generateSql()`). There, an `undefined` or object comparand is refused first by that face's comparand-type check, also `INVALID_FILTER` / 400, in its own words. A refused write changes nothing.
+  
+  **What to write instead.** Write the boolean itself. `"$exists": true` matches rows whose field has a value, and `"$exists": false` matches rows whose field has none.
+  
+  **Who is affected.** A caller that sent a non-boolean `$exists` to `InMemoryDriver` or `MongoDBDriver` (a test suite, a local or embedded deployment, a flow or hook calling the engine in-process) and read the answer as a real one. On `SqlDriver` the same filter was already a 400.
+  
+  **Unchanged.** `$exists: true` and `$exists: false` answer exactly as before. The aggregation `filter` and `having` positions, which the engine evaluates itself after the driver, are not changed by this entry.
+- 45ce12a: fix(driver-memory)!: on a declared JSON-stored field, the query path and the analytics face refuse `$eq` / `$ne` / an ordering / `$between` / `$in` / `$nin` / implicit equality with `INVALID_FILTER` / 400, in the words the SQL family refuses them in, instead of answering each per element
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at this driver's filter gate: the operator x declared-type pairs refused are exactly the pairs driver-sql's where refuses on a JSON-stored column and the engine's per-aggregation filter refuses on the same declared fields, read from the one set @objectstack/core holds. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query this driver answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour, with no published export or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (`@objectstack/driver-memory`): this narrows what the driver's filter doors accept, for every caller that reaches them: `find`, `findOne`, `count`, `updateMany`, `deleteMany` and `aggregate` with a `where`, through the engine or called directly, and `MemoryAnalyticsService`'s `query` and `generateSql`. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field the object declares JSON-stored (a structured-JSON type such as `json` or `address`, an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`), a `where` that compares the field with `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin` or implicit equality (`{ "owners": "u1" }`) is refused with `INVALID_FILTER` / 400, whatever the comparand (`null` and an empty list included), at any depth under `$and` / `$or` / `$not`, before any row is read. On the analytics face a `where` key is a cube member, judged by the field it resolves to. That is the set `driver-sql` refuses on such a column, for the same reason.
+  
+  **What an author sees now.** The body `driver-sql` answers for the same filter: the filter WAS NOT APPLIED, the comparison can never equal one member of a stored list, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership, or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message, and the full diagnostic, naming both and the position in the filter, is written to the driver's (or the analytics service's) logger at `warn`.
+  
+  **Why a refusal.** This driver answered each of those operators per element, through mingo's array semantics. Measured through `engine.find` over six rows of a `multiple: true` lookup, two of them holding `u1`: `{ owners: { $eq: 'u1' } }` and `{ owners: { $in: ['u1', 'u9'] } }` returned those two rows, `$nin` the other four, and `{ owners: { $gt: 'u1' } }` four rows by comparing each member as text, where every SQL dialect answers the same filters 400. An application whose tests run on this driver passed on a filter its production backend refuses.
+  
+  **Who is affected.** A test suite, demo or dev setup on this driver that filters a JSON-stored field with one of those operators and read the per-element rows as the answer. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not declared JSON-stored; and an object this driver holds no declaration for (one never passed through `syncSchema`), where nothing is judged and every operator answers as before. `InMemoryDriver` gains one method, `filterFieldDeclarations`, tagged `@internal`: it exists so the analytics face judges its `where` by the same declarations, and it is not a consumer contract.
+
+### Patch Changes
+
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- b785c3b: fix: `sum` / `avg` answer the same double on every face the platform owns, added with one compensated fold that `@objectstack/core` now exports as `compensatedSum` (#20544)
+  
+  Clause-②: yes
+  
+  **New export.** `@objectstack/core` exports `compensatedSum(nums)`: the sum of
+  `nums`, added in order with Kahan-Babuska-Neumaier compensation, which is the
+  summation SQLite (3.43 and later) uses for its own `sum` and `avg`. It moved
+  here from `@objectstack/objectql`'s rows path (`in-memory-aggregation.ts`),
+  which now imports it instead of keeping a private copy.
+  
+  **What changed.** Three folds still added a group's values naively, and now call
+  the same function:
+  
+  - `@objectstack/driver-memory`'s `aggregate()` and `find()` with aggregations,
+    the path `engine.aggregate` takes on an in-memory datasource;
+  - `@objectstack/driver-memory`'s analytics face (`MemoryAnalyticsService`),
+    whose `sum` / `avg` measures are now a `$group` `$accumulator` in place of
+    mingo's `$sum` / `$avg`;
+  - `@objectstack/service-analytics`' draft preview.
+  
+  Over a `number` column holding `0.1`, `0.2` and `0.3`, each of them answered
+  `0.6000000000000001` / `0.20000000000000004`. They now answer `0.6` /
+  `0.19999999999999998`, as SQLite and the engine's rows path do. Over
+  `1e16, 1, -1e16` they answered `0` and now answer `1`. On driver-memory,
+  `engine.aggregate` gave two answers depending on its path: `having { s: { $eq:
+  0.6 } }` kept the group on the rows path and dropped it on the native path. It
+  now keeps it on both.
+  
+  **What did not move.** Two addends, integers whose running total stays within
+  2^53, and a non-finite total give the same answer as before. Which values count
+  as addends did not change either: booleans as 1 / 0, and nulls and non-numeric
+  strings left out, as each face already had it. `count`, `min` and `max` are
+  untouched. The analytics face's pipeline dump (`result.sql`) now renders the
+  accumulator's functions by name, so a `sum` measure and an `avg` measure still
+  dump differently.
+  
+  **Residual.** PostgreSQL and MySQL add their doubles natively without
+  compensation, and the platform does not wrap that arithmetic. So over three or
+  more fractions their native path can still differ from these faces in the last
+  place. An exact `$eq` on a fractional sum compares doubles; compare with a range.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- d3f88fa: fix(driver-memory): a cube `where` `$lte` on a bare day keeps the whole day on a declared `datetime` field (#20661)
+  
+  Clause-②: no
+  
+  `MemoryAnalyticsService` put a `$lte` comparand into the field's storage form before it applied the whole-day rule for a bare-day upper bound. On a field declared `datetime` (through `syncSchema`) the storage form of `'2026-07-28'` is the instant `'2026-07-28T00:00:00.000Z'`, and the whole-day rule does not widen an instant. So `where: { created_at: { $lte: '2026-07-28' } }` compiled an inclusive bound at that midnight and dropped every row later in the named day, while `find()` with the same filter kept them. `generateSql()` echoed the same narrowed bound.
+  
+  Both exits now follow ADR-0053's order: the bare day is widened first, and only the resulting bound is converted to the storage form. On a declared `datetime` field the example compiles `created_at < '2026-07-29T00:00:00.000Z'` and answers the same rows as `find()`. On `9999-12-31`, the last supported day, a declared `datetime` field now asks only for a value (`IS NOT NULL` in the echo), as an undeclared field already did.
+  
+  Unchanged: an undeclared field, a declared `date` field, a full timestamp or `Date` comparand (inclusive, as written), and a `timeDimensions[].dateRange` end, which already widened the day before building its bounds. `$between` stays refused on this face (`INVALID_FILTER`, 400). Nothing is removed or renamed, and there is nothing to migrate.
+- 8fec76a: refactor(driver-memory): the cube face's own whole-day bound and the in-memory reference matcher are deleted; no answer a caller gets moves (#5930 step 4, #20822)
+  
+  Clause-②: no
+  
+  - **`MemoryAnalyticsService` (the cube face).** Its `where` door has run the shared `lowerFilterCondition` (`@objectstack/spec/data`) since #5930 step 3, on every column. A bare-day `$lte` therefore reaches the `lte` row already lowered: as `$lt` the next day, or as `$null: false` on `9999-12-31`. The row's own copy of that rule is deleted, and the `lte` row now compiles the comparison it is handed on both exits. The rows `query()` returns and the SQL `generateSql()` echoes are unchanged. An explicit `dateRange` end still widens a bare day through its own window arm (ADR-0053 D-D1 item 8).
+  - **The reference matcher (`memory-matcher.ts`, `match()`) is retired** (ruling D6 on #5930). No production code called it and the package never exported it: the published `dist` exports are the same 33 names before and after. `InMemoryDriver` keeps `getValueByPath`, the one helper it imported from that module. The matcher's tests now assert the live query path (`InMemoryDriver.find`), the shared filter shape gate, or the spec predicate the matcher evaluated.
+- 8460592: fix: the whole-day bound on a bare `YYYY-MM-DD` upper bound is applied at the seams only — `DatabaseLoader.queryHistory` in driver mode becomes one, the engine seam lowers type-blind for an object with no field map, and `InMemoryDriver` drops its own copy (ADR-0053 D-D1 items 5 and 7, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/metadata` — `DatabaseLoader.queryHistory` in driver mode lowers its own filter.** With a raw `IDataDriver` (`MetadataManager.setDatabaseDriver`) the history filter reaches the driver without passing any seam. The loader now runs the shared `lowerFilterCondition` (`@objectstack/spec/data`) on it, typed by the history object it syncs: `until: 'YYYY-MM-DD'` reads `recorded_at < next day`, so every version recorded on that day is kept on every driver, and an instant `until` is kept as written. Engine mode is unchanged (the engine's own `where` seam lowers it). Before this, the whole day was kept only by each driver's own copy of the rule; with `@objectstack/driver-memory`'s copy deleted below, `until` = today would have gone from every version of the day to none.
+  - **`@objectstack/objectql` — an object with no field map is lowered type-blind.** The engine's `where` seam (on `find`, `findOne`, `count`, `update`, `delete` and `aggregate`'s `where` / `aggregations[i].filter`) reads the object's declared field map and rewrites a declared `datetime` column only. For an object the registry does not hold there is no declaration to read, and the seam now applies the whole-day rules to every column (a bare-day `$lte` becomes `$lt` the next day, a `$between` splits), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the declared type. It used to leave such an object to each driver's own copy. Visible on `SqlDriver`: a bare-day `$lte` on a non-`datetime` column of an unregistered object that holds ISO instant text now keeps the whole day; a `datetime` or `date` column answers as before. An object with a field map is unchanged.
+  - **`@objectstack/driver-memory` — `InMemoryDriver` compiles the comparison it is handed.** Its four copies of the whole-day rule are deleted (the `$lte` and `$between` arms of the filter translator, the `<=` and `between` arms of the AST-node translator). A read through the engine hands it a `where` the engine's seam has already lowered, so on that path a declared `datetime` column keeps the whole named day, and a declared `date` column answers as before. A row-level security `using` filter is not lowered by the engine's seam: the security middleware ANDs it into the query's `where` after that seam has run, and only the RLS compile seam lowers it, rewriting just the columns its field guard declares `datetime`. Two answers converge on what `SqlDriver` already returns (ADR-0053 D-D1 item 7's scope): on a registered object, a bare-day `$lte` / `$between` on a declared `text` column holding ISO instant text, or on a column the object does not declare, is now compared as written, where this driver used to widen it to the whole day. One path narrows outside those two: an RLS `using` policy with a bare-day upper bound, on an object whose declared fields the security plugin cannot resolve, is compiled with no field guard, so the RLS compile seam reads no column as `datetime` and the bound reaches this driver as written, where this driver used to widen it to the whole day; that holds until #20822 group 2 makes the RLS compile seam type-blind when it has no guard. A direct `find()` that passed no seam gets the comparison it wrote (item 5); lower the filter with `lowerFilterCondition` first to keep the whole-day reading.
+- 682873d: fix(core): the refusal a filter gets for a scalar comparison or text operator on a multi-value or JSON field reads true on every backend that prints it, and reaches a REST caller whole
+  
+  Clause-②: no
+  
+  The `INVALID_FILTER` / 400 refusal `driver-sql`'s `where`, the engine's per-aggregation `filter` and `driver-memory` all print (`jsonColumnOperatorRefusalText`) explained itself with `driver-sql`'s storage ("a field this driver stores as a JSON TEXT column") and the two wrong answers SQL used to give. That is untrue on the engine and on `driver-memory`. The message was also 748 characters, and the REST envelope cuts a 4xx message at 499 plus an ellipsis, so callers on SQLite and PostgreSQL read `…Refused rather than compiled because the answ…` and never reached the sentence saying the field and the operator were withheld.
+  
+  The message now reads, on every backend, in 486 characters: `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison or text operator at a multi-value or JSON field, which it cannot test for one member.`, then the same `$contains` / `$or` of `$contains` remedy, then `For no value, use "$null" or "$empty".` (a `null` comparand such as `{ f: null }`, `$eq: null` or `$ne: null` is refused too, and `$contains` could not express it), then `The field and the operator are withheld from the message; the full diagnostic is in the server log.` The diagnostic (the server-log text, and what a filter's own author is shown) gives the same reason with the operator named, names the field, and spells the remedy with the field's name. It drops the storage and the SQL history too, and is now whole on the wire for field names up to 26 characters (it was 643 characters or more and always cut).
+  
+  Code, status, the refused operator set and the `$contains` remedy are unchanged. A client that matched on the old words `JSON TEXT column` or `Refused rather than compiled` should match on `code: "INVALID_FILTER"` instead.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/types@17.6.0
+
+## 17.5.0
+
+### Minor Changes
+
+- 8a44ce7: fix(spec, drivers)!: a `$like` / `$ilike` pattern holding U+0000 is refused by every driver that answers `$like`, instead of being cut at the NUL on SQLite
+  
+  Clause-②: yes (narrowing)
+  
+  On the SQLite faces `$like` / `$ilike` compile to `GLOB`, and SQLite reads a pattern only up to its first U+0000. A pattern holding U+0000 was cut there, so the filter answered a different question, and nothing raised. Measured through `find` over 13 stored values (12 non-NULL), against `@objectstack/formula` on the same rows: all 20 U+0000 cases of the probe (10 patterns, bare and under `$not`) differed on `SqlDriver` over better-sqlite3, on `SqliteWasmDriver`, on `TursoDriver`'s local mode, and on its remote mode over a stub and over a real `@libsql/client` engine, with identical answers on all five. For example:
+  
+  - `$like: '%'` + U+0000 returned all 12 non-NULL rows, where `formula` returns the two ending in U+0000;
+  - `$like: 'a'` + U+0000 + `'b'` also returned `'a'`;
+  - `$ilike: 'AB'` + U+0000 also returned `'AB'` and `'ab'`.
+  
+  `driver-memory` answered all 20 as `formula` does. SQLite has no NUL-safe pattern primitive to compile to instead: `LIKE` cuts the same way, `replace()` cannot target U+0000, and `instr()` has no wildcards. So the one contract is a refusal, the way a pattern ending in a lone unpaired backslash is refused.
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A filter that answered before is now refused**: a `$like` or `$ilike` pattern holding U+0000 anywhere (at the start, in the middle, at the end, alone, or after a backslash) gets `INVALID_FILTER` / 400, on every door that already refused the lone trailing backslash:
+  
+  - `@objectstack/driver-sql`: on the filter walk, before a dialect is chosen, so SQLite, Postgres and MySQL all refuse it. `@objectstack/driver-sqlite-wasm` and `TursoDriver`'s local mode inherit it; `@objectstack/driver-sqlite-wasm`'s own code does not change.
+  - `@objectstack/driver-turso`: the remote transport's `$like` / `$ilike` arm, before anything is sent to the engine.
+  - `@objectstack/driver-memory`: the shape gate of the query path and of the reference matcher `match()`, and the QueryAST `comparison` spelling (`like` / `ilike`).
+  - `@objectstack/spec` exports the shared test, `hasNulInLikePattern`, beside `hasDanglingLikeEscape`, and the `$like` operator's description now names the refusal.
+  
+  On `driver-sql` and the Turso remote transport the refusal goes through the read-scope provenance seam, like every other filter-compile refusal there. On `driver-sql` (and so `driver-sqlite-wasm` and Turso's local mode), a caller whose predicate is marked `'author'` reads the operator, the field, the filter path and the pattern, with U+0000 written as `\u0000`. Any other caller gets only the class statement, and the rest goes to the server log. The remote transport withholds the same way, and through `TursoDriver` in remote mode no mark reaches it, so every caller gets the class statement there. On `driver-memory` every caller reads the full text, as for its dangling-escape refusal.
+  
+  A pattern that ends in a lone unpaired backslash AND holds U+0000 keeps the dangling-escape refusal it had before.
+  
+  **What stays accepted**, pinned per face: every `$like` / `$ilike` pattern without U+0000 answers exactly as before.
+  
+  **Not changed here:**
+  
+  - A pattern without U+0000 matched against a STORED value that holds U+0000 is not refused: it is well formed, and on the SQLite faces it reads the whole stored value, by its own entry in this release.
+  - `@objectstack/formula` still evaluates such a pattern. It refuses nothing, and answers `false` for a dangling escape rather than refusing it, so it is not one of these doors.
+  - `driver-mongodb`, objectql `having` and `service-analytics` refused every `$like` / `$ilike` before this change, and still do.
+  
+  **What an affected author does.** Remove the U+0000 from the pattern. No escape makes it portable: a backslash before it still leaves a U+0000 in the pattern.
+  
+  Blast radius, measured on this tree: no example or template writes a `$like` or `$ilike`, and the published `objectstack-query` skill and the hand-written docs that show one show no pattern holding U+0000. Whether any out-of-repo caller sends one is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing at the filter-compile doors: no key, Zod schema, object definition or stored representation is added, removed or renamed. `$like` and `$ilike` keep their names and their `z.string()` comparand, and the only spec symbol added is the predicate `hasNulInLikePattern`. What moves is which PATTERN VALUES the drivers answer, and no rewrite of a stored pattern keeps its meaning (dropping the U+0000 changes which rows match), so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. -->
+- 93cfc3f: `$like` / `$ilike`: `_` matches exactly one Unicode code point on every face, so an emoji or any other character outside the Basic Multilingual Plane is one `_`, as SQL `LIKE` and SQLite `GLOB` count it (#20143).
+  
+  The SQLite faces (`driver-sql` on better-sqlite3, `driver-sqlite-wasm`, `driver-turso` local and remote) already answered by code points. The JavaScript faces did not: they compiled the spec's `likePatternToRegexSource` with no regular-expression flags, so `_` read one UTF-16 code unit, which is half of an emoji. The same REST filter returned a different row set depending on which driver backed the object. Measured at `e7f69dbb` over values holding `😀` (U+1F600) and `𝒜` (U+1D49C), 48 answer cells on the JS faces differed from the SQLite faces; after this change, none do.
+  
+  - **`@objectstack/spec`**: a new export, `likePatternToRegExp(pattern, foldAscii?)`, compiles the translation with the `u` flag, the one compilation in which `_` is one code point. `matchesLikePattern` evaluates it. `likePatternToRegexSource` is unchanged and still exported; its source means one code point per `_` only under `u`. The `$like` description now says that a character is one Unicode code point.
+  - **`@objectstack/formula`**: `matchesFilterCondition` answers `$like` / `$ilike` by code points, through the spec's `matchesLikePattern`. Its own CEL `size()` already counted code points.
+  - **`@objectstack/driver-memory`**: all three `$like` doors (the `$like` filter and the AST `like` / `ilike` node through mingo, and the reference matcher) answer by code points.
+  
+  The answer set moves in both directions on those three faces, only for values holding a character outside the BMP:
+  
+  | pattern | a stored `😀` | `a😀b` | `a😀😀b` |
+  |---|---|---|---|
+  | `_` | now matches | — | — |
+  | `__` | no longer matches | — | — |
+  | `a_b` | — | now matches | — |
+  | `a__b` | — | no longer matches | now matches |
+  
+  `$ilike` moves the same way. No pattern is newly refused and no refusal is lifted. Values made only of characters inside the BMP answer exactly as before.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes is removed or renamed: no spec key, no export and no config field moves, and no stored metadata representation changes, so `objectstack migrate meta` has nothing to rewrite. What moves is the row set a `$like` / `$ilike` query returns on the JavaScript faces, and only for stored values holding a character outside the BMP, where it now equals what every SQLite face already returned. -->
+- fb38607: feat(drivers,formula,objectql): the engine's filter faces answer the staged `$empty` operator (#20444)
+  
+  Clause-②: yes (widening)
+  
+  `$empty: true | false` is declared by `@objectstack/spec` (`FieldOperatorsSchema`) with a per-type meaning: a text-like field is empty when it is null or `''`, a multi-value field (multiselect, checkboxes, tags, or a select / radio / lookup / user / file / image with `multiple: true`) when it is null or `[]`, and every other type only when it is null. `$empty: false` is the exact complement. Until now every face in this list refused it (`INVALID_FILTER` / 400), except `matchesFilterCondition`, which answered `false` for every record. **A driver or evaluator called directly now answers it:**
+  
+  - **By the field's declared type**, through the spec's one expansion (`expandEmptyOperator`): `driver-sql`'s filter compiler (and so `driver-sqlite-wasm` and `driver-turso`'s local transport, which inherit it), `driver-turso`'s remote transport, `driver-memory`'s query path (`find` / `count` / `update` / `delete`) and `driver-mongodb`'s `translateFilter` (its `find`, its aggregate `$match`). The declaration is the one each driver already receives — `initObjects` / `registerObjectMetadata` / `registerExternalObject` on the SQL family, `syncSchema` on the others. On SQL a multi-value field's empty list is tested as stored JSON per dialect (SQLite `json_array_length` behind a `json_valid` guard, PostgreSQL a `jsonb` comparison, MySQL `JSON_LENGTH`), never as an equality comparand.
+  - **By value** — null, a missing value, `''` and `[]` are empty (`isEmptyFilterValue`) — on the faces that read no field declaration: `@objectstack/formula`'s `matchesFilterCondition` (the RLS write-side `check`), `driver-memory`'s reference matcher, and `@objectstack/objectql`'s `having` and per-aggregation `filter`. In `having`, a `count` or `sum` holding `0` is not empty.
+  
+  **Refused, never guessed** (`INVALID_FILTER` / 400): `$empty` on a field whose declaration the driver does not hold (a table built outside its registration, a builtin column such as `id`, a field with no `type`, or `translateFilter` / `RemoteTransport` used standalone without a declaration), a multi-value field on a SQL dialect the driver does not model, and a flag that is not a boolean. `driver-memory`'s analytics (cube) face refuses `$empty` as an operator it cannot compile, as it does `$null`.
+  
+  New optional API: `translateFilter(where, temporalKind?, valueShape?)` in `@objectstack/driver-mongodb` takes a declared-value-shape resolver (type `ValueShapeResolver`), and `buildAggregationPipeline` a `valueShape` option; `RemoteTransport.setDeclaredValueShapeResolver` in `@objectstack/driver-turso`, which `TursoDriver` wires. `@objectstack/spec`'s shared `FILTER_LOGIC_CASES` table gains seven `$empty` cases: a backend that runs it answers `$empty` or goes red, and its harness must declare the fixture's columns.
+  
+  `$empty` stays staged: it is not in `FILTER_OPERATORS`, so the engine's front door still refuses it until the flip card adds it, and the view operators `is_empty` / `is_not_empty` still lower to `$null`.
+- 0da638c: fix(analytics)!: every analytics face lowers the closed `dateRange` preset vocabulary to one window and refuses the rest with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` (#16322)
+  
+  <!-- adr-0087: not-required (already-registered analytics-time-dimension-date-range-vocabulary-closed) the driver half of #16041 implements the migration that card registered; the accept set narrowed at the contract there, and the prescription an author needs is that entry's, unchanged -->
+  
+  **BREAKING** for an in-process caller that reaches an analytics face PAST the
+  schema door with a string the closed vocabulary does not contain: it used to be
+  answered, and is now refused. Shipped as `minor` under the repo's launch-window
+  convention. The driver half of #16041, whose spec change closed
+  `AnalyticsQuery.timeDimensions[].dateRange`'s string arm to the thirteen
+  dashboard preset names; every value affected here was already refused at
+  `POST /analytics/query` and `/analytics/sql` when that landed.
+  
+  ## What was wrong
+  
+  #16041 closed the contract; the faces behind it never aligned, so the defect it
+  abolished simply moved onto the newly-blessed vocabulary. Measured on the built
+  `driver-memory` dist over five probe rows (2020, 2026-08-31, 2026-09-05, now,
+  2099):
+  
+  | input | before | after |
+  |:--|--:|--:|
+  | `today` | 1/5 | 1/5 |
+  | the other twelve declared presets | **5/5 — 2020 and 2099 included** | a real window each |
+  | `'not a range at all'`, `'Last 7 Days'` | 5/5 | `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` |
+  
+  `driver-memory` recognised exactly `today`: every snake_case preset missed its
+  `startsWith('last ')` branch and fell to a `[range, range]` pseudo-window whose
+  two bounds were the preset's own NAME, which matched every `Date`-typed row
+  under BSON cross-type ordering. Both `service-analytics` SQL strategies lowered
+  the same names — and unrecognised strings, and `today` — to the point window
+  `created_at >= 'last_30_days' AND created_at <= 'last_30_days'`, whose answer is
+  whatever the dialect decides a vocabulary word compares as. So a dashboard
+  asking for one month got all of history on one backend and a nonsense
+  comparison on the other, at HTTP 200 on both.
+  
+  ## What it does now
+  
+  - **One lowering, in `@objectstack/core`.** `resolveAnalyticsDateRangePreset` /
+    `resolveAnalyticsDateRangeString` resolve every declared preset to
+    `{ start, end, endExclusive }`. The window is a pair of `{date-macro}` tokens
+    handed to the existing macro resolver, so `dateRange: 'this_month'` and a
+    `{month_start}` filter token cannot answer differently, and the anchoring on
+    `AnalyticsQuery.timezone` (#16042) plus the one-calendar arithmetic (#15825)
+    come from that resolver rather than from each face.
+  - **One refusal.** `analyticsDateRangeUnrecognizedError` stamps the ADR-0112
+    envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` with the spec's own
+    `analyticsDateRangeRefusalMessage` wording — the same sentence the schema door
+    answers with. `driver-memory`, both SQL strategies and the draft-preview evaluator call
+    it, so "memory and SQL refuse identically" is one function rather than an
+    agreement.
+  - **The upper bound keeps #16179's separation.** A window a face RESOLVED is
+    compared exclusively (`$lt` / `<`) for the ten calendar presets and
+    inclusively for the three rolling `last_N_days`, whose bound is NOW; an
+    explicit `[a, b]` a CALLER wrote is untouched and keeps `$lte`.
+  - The fifteen `driver-memory` date-range pins #16041 retired are reinstated in
+    preset form (DST cells re-measured under calendar semantics, not re-spelled),
+    and one cross-face conformance fixture holds all FOUR faces to the same
+    windows and the same refusal.
+  - **The draft-preview evaluator is the fourth face**, and it is in that fixture
+    for the same reason the other three are. `preview-evaluator.ts` (ADR-0037 P3 —
+    the Live Canvas preview over a pending seed draft) carried the identical
+    `[range, range]` fallback, so a valid `last_30_days` selected NOTHING there,
+    silently, while the published chart beside it answered a real window — across
+    a publish boundary the preview exists to make continuous, since publish
+    materialises the same seed.
+  
+  ## FROM → TO
+  
+  Unchanged from #16041's — the spelling that is refused here is the spelling that
+  was already refused at the door.
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `dateRange: 'Last 7 days'` / `'last 7 days'` | `dateRange: 'last_7_days'` |
+  | `dateRange: 'last 3 months'` | `dateRange: 'last_90_days'`, or an explicit `['{90_days_ago}', '{today}']` |
+  | `dateRange: '2026-01-20'` (the SQL single-day dialect) | `dateRange: ['2026-01-20', '2026-01-20']` |
+  | `dateRange: ['2026-01-01', '2026-01-31']` | unchanged |
+  
+  The `@objectstack/spec` entry is a `PROVENANCE_WAIVERS` row only: the refusal's
+  code stays registered under `@objectstack/runtime` (the door that names the wire
+  vocabulary), and the waiver records that the shared constructor spelling it
+  lives one package over.
+- f03f6c7: fix(driver-memory)!: an analytics time dimension buckets by its declared `granularity`, and refuses a sub-day one instead of ignoring it (#16178)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. `packages/spec` is untouched: `TimeUpdateInterval` still declares all eight intervals, `AnalyticsQuery.timeDimensions[].granularity` keeps its name, its type and its optionality, and every analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is one BACKEND's accept set at request time: `driver-memory`'s analytics face refuses the three sub-day granularities it cannot label, where it previously accepted them and produced an ungrouped answer. The remedy is a coarser granularity in the request itself, which is data a caller holds rather than an authored artifact with a stored representation; the spec-side narrowing of `TimeUpdateInterval` is filed separately as issue #17296, a `domain:spec` question under ADR-0049, and is deliberately not performed here. The other two packages add exports and relocate an implementation, both additive. -->
+  
+  **BREAKING** in three senses, all on `driver-memory`'s analytics face, landing in
+  the launch window as `minor` under the lockstep convention this cluster's
+  siblings already use:
+  
+  - an accepted request now answers **differently**: a time dimension carrying a
+    `granularity` folds its rows into calendar buckets instead of returning one
+    group per distinct timestamp. Every affected answer was wrong before;
+  - a **trend query answers rows where it used to answer one total**: a
+    `granularity` on a member `dimensions` does not also list is now a group
+    column of its own, so `{measures, timeDimensions: [{dimension, granularity}]}`
+    — the canonical trend shape — comes back one row per bucket, carrying the
+    member and a `fields` entry for it, instead of a single ungrouped total with
+    no such column;
+  - an accepted request is now **refused**: `granularity: 'second' | 'minute' |
+    'hour'` answers `NOT_IMPLEMENTED` / 501 instead of being silently dropped.
+  
+  ## What was wrong
+  
+  `AnalyticsQuery.timeDimensions[].granularity` is declared by the spec and a cube
+  dimension enumerates the granularities it offers (`granularities: ['day']`).
+  `memory-analytics.ts` read neither. The `$group` stage keyed on the raw field
+  path, so a time dimension bucketed **one group per distinct timestamp** — one bar
+  per row in a "new accounts by month" chart, which is the symptom #3588
+  catalogued and repaired for `service-analytics`.
+  
+  Measured through the public entry against the built package, two rows on one UTC
+  calendar day (`2026-09-06T01:00:00Z` and `2026-09-06T23:00:00Z`) under
+  `granularity: 'day'`:
+  
+  | | before | after |
+  |:--|--:|--:|
+  | `granularity: 'day'` | **2 groups**, keyed on the raw instants | 1 group, `2026-09-06` |
+  | no granularity (control) | 2 groups | 2 groups, unchanged |
+  | `granularity: 'hour'` | **2 groups**, silently | `NOT_IMPLEMENTED` / 501 |
+  | same, but with no `dimensions` | **`{count: 2}`** — one total, no time column, and no `fields` entry naming it | `{'events.createdAt': '2026-09-06', count: 2}`, `fields` naming both |
+  | `granularity: 'fortnight'` past the schema door | — | `INVALID_QUERY` / 400 |
+  
+  The emitted pipeline was byte-identical across all three, which is the whole
+  finding: the request was accepted, no warning was emitted, and the key was inert.
+  
+  ## What it does now
+  
+  - **One forward labeller, in `@objectstack/core`.** `bucketDateKey(value,
+    granularity, timezone)` sits beside the inverse `bucketKeyToCalendarRange` and
+    the `calendarPartsInTzOrUtc` primitive it builds on, and it is now the only
+    statement of the rule. `BUCKET_GRANULARITIES` and `isBucketGranularity` name
+    the five granularities that HAVE a canonical key, so a face that must refuse
+    the other three quotes the accepted set instead of hand-listing it.
+  - **`@objectstack/objectql`'s `bucketDateValue` is a delegate**, export name and
+    signature unchanged, answers unchanged — pinned across granularity, timezone
+    and input form rather than asserted. A driver that pushes the bucket down into
+    SQL and this in-memory path must label one instant identically or a drill-down
+    breaks at the seam, and that is now one function rather than an agreement
+    between two.
+  - **A granular time dimension is a group column, listed or not.** `dimensions`
+    no longer decides alone what `$group` keys on: every `timeDimensions` entry
+    carrying a `granularity` is grouped, projected and named in `fields`, deduped
+    against `dimensions` on the resolved member so two spellings of one member
+    stay one column. This is the rule the SQL/ObjectQL face already records
+    (`projectedDimensions`, #4033/#5688) — one set feeding grouping, row mapping
+    and field metadata, because rows carrying a bucket under a `fields` list that
+    never mentions it is a trend chart with no x-axis. ⛔ An entry carrying only a
+    `dateRange` is a predicate and is still **not** projected.
+  - **`driver-memory` folds by granularity before its `$group`.** The pipeline is
+    cut at that stage: the `$match` half still runs in the driver, the bucket keys
+    are written onto the selected rows, and the grouping half runs over those. The
+    key travels under a synthetic field rather than overwriting the row's own, so a
+    member that is both a group key and a measure's aggregand still ranks instants
+    in `max()` while grouping on the label.
+  - **The output vocabulary is the published one** — `2026`, `2026-Q3`, `2026-09`,
+    `2026-09-06`, `2026-W36`. The week label is `YYYY-Www`, never the Monday's
+    `YYYY-MM-DD`: `DriverCapabilitiesSchema.queryDateGranularity` calls this an
+    output contract, and a second spelling is what breaks a drill-down across a
+    backend seam.
+  - **Bucketing honours `AnalyticsQuery.timezone`** — the same reference zone
+    #16042 threaded through the `dateRange` window resolver, so the window that
+    selects the rows and the bucket that folds them agree on where a calendar day
+    starts. The same two rows answer one group in UTC, two in `America/New_York`
+    and two in `Asia/Tokyo`. An absent zone buckets in UTC, the resolver's default.
+  
+    ⚠️ That agreement is about the PRESET arm of `dateRange`, which the resolver
+    reads in the reference zone. An explicit `[start, end]` array is the caller's
+    own **instant** window and keeps its published reading (#16179), while the
+    bucket beside it is always a **calendar** label (ADR-0053) — so an array
+    window and a bucket can still disagree about where a day starts. That
+    combination is legitimate and is not refused; it is stated here rather than
+    left to be discovered.
+  - **`second` / `minute` / `hour` are refused at compile**, in the ADR-0112
+    envelope this driver's other capability gaps speak (`NOT_IMPLEMENTED` / 501,
+    the class `refusePerAggregationFilter` uses for the same reason: the query is
+    spelled correctly, the spec declares the value, and it is this backend that
+    compiles nothing for it). The canonical key vocabulary defines no label for a
+    sub-day bucket, so there is no string another backend's pushed-down SQL would
+    agree with. Passing it through unbucketed is this card's own defect wearing a
+    new name.
+  - **An undeclared granularity is a 400, not a 501.** A 501 says "this backend
+    cannot", which is only honest about a value the contract declares.
+    `TimeUpdateInterval` is checked first, so a spelling it never declared —
+    reachable past the schema door, where `POST /analytics/dataset/query` types
+    `selection.timeDimensions` without Zod-parsing them — answers `INVALID_QUERY`
+    / 400 rather than a 501 asserting the spec declared it. The same separation
+    the `dateRange` half of this face already draws (#16322 / #16041).
+  
+  ## If a caller is refused
+  
+  A stored widget or a request asking for a sub-day granularity was never bucketed
+  by this backend — it received one group per distinct timestamp under an ordinary
+  200. Nothing that worked stops working. Ask for `day` or coarser and the answer
+  is a real bucket; keep the raw timestamps deliberately by dropping the key, which
+  is the behaviour that key used to produce by accident.
+- 555a89c: fix(driver-memory): refuse a call the engine tenant-scoped, instead of silently answering with every organization's rows (#16589)
+  
+  **BREAKING** for a `driver-memory` deployment that holds more than one organization's rows: an operation the engine tenant-scoped now refuses loudly instead of answering. Shipped as `minor` under the launch-window convention, the same grading the driver's `update()`/`upsert()` type-surface narrowing used.
+  
+  Two predicates decided "is this object tenant-scoped", and they disagreed on the default case. The engine scopes an object **unless** it opts out (`buildDriverOptions`: `execCtx?.tenantId !== undefined && !isTenancyDisabled(objectSchema) && !isFederated`), while this driver's boot guard refused only an explicit opt-**in** (`declaresTenantScope`: `tenancy.enabled === true`). An object that **omits the `tenancy` block entirely** — the common case — therefore fell between them: the engine scoped it, the guard never saw it, the deployment posture really was `single` so the posture check passed, and the driver then discarded the scope and returned every organization's rows. A SQL driver refuses the same read.
+  
+  This driver still implements **no row-level tenant isolation**, and deliberately does not gain any: it declines to answer rather than answering correctly. `assertCallNotTenantScoped` is a third seam beside the two boot seams, and it judges the scope the engine actually handed over (`DriverOptions.tenantId` / `tenantIds`) rather than re-deriving the engine's predicate from object metadata — a driver that re-derived it would drift from the engine the first time that reasoning changed, and drift here is silent exposure. It runs first in every driver door that accepts a `DriverOptions`, so a refusal leaves the store exactly as it found it.
+  
+  **⚠️ Every isolation measurement previously taken on the memory driver is void and must be re-taken.** A suite asserting "tenant A cannot see tenant B's rows" passed here trivially — not because isolation worked, but because both tenants' rows came back to every caller and the assertion was written against a single tenant's fixture. An app that proved out its isolation model on this driver measured nothing.
+  
+  What is unaffected, and why: an object declaring `tenancy: { enabled: false }` is never scoped by the engine (ADR-0066), so the driver never sees a scope for it and serves it unchanged; a caller with no organization context is never scoped either, which is the ordinary dev, example-app and single-organization path. Only a call that actually arrives carrying a tenant scope is refused. A deployment that needs organization-scoped reads in development uses `@objectstack/driver-sql`, whose `:memory:` connection is the closest in-process replacement; a deployment whose data genuinely is platform-global can say so with the ADR-0066 posture, which stops the engine scoping it at all.
+  
+  The refusal reuses the existing `MemoryMultiTenantUnsupportedError` and its `MEMORY_MULTI_TENANT_UNSUPPORTED` code rather than introducing a second error family: the cause is identical, so a host that already recognises the boot refusal recognises this one with no new code and no second code to learn.
+  
+  Also corrects `declaresTenantScope`'s docstring, which closed on a false sentence — "every object in a single-tenant deployment omits the block". A `single` posture constrains the **wall**, not the number of organizations: a `single`-posture run was measured holding 13 `sys_organization` rows, with each row carrying whichever `organization_id` it was written with. The sentence is recorded as superseded rather than deleted, because it is what justified the predicate being an opt-in test.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: no Zod schema, no spec declaration, no stored representation and no published export changes shape, so `objectstack migrate meta` has nothing to rewrite. The change is a runtime refusal inside one driver, reached through a deployment's choice of driver rather than through authored metadata, and it is delivered to the operator by the refusal itself — which names the isolating driver and the ADR-0066 posture in its own message, at the moment the unsupported call is made. -->
+- b90aff8: fix(driver-memory): a scalar comparand against a stored ARRAY is read as membership on both filter faces, so a filter written to narrow stops returning rows it never selected (#16838)
+  
+  `memory-matcher.ts`'s equality arm ended in `value == condition`. Loose `==` converts a stored ARRAY to a primitive — `['a','b']` becomes the string `"a,b"` — so this package's reference matcher and its live query path (`InMemoryDriver.find`, through mingo) answered the same filter two different ways, in both directions at once:
+  
+  | filter | stored value | reference matcher, before | live query path |
+  |---|---|---|---|
+  | `{ tags: 'a' }` | `['a','b']` | no row | the row |
+  | `{ tags: 'a,b' }` | `['a','b']` | the row | no row |
+  | `{ tags: 'a' }` | `['a']` | the row | the row |
+  
+  The second row is the sharper one: a **false positive**, a filter written to narrow returning a row it should not, which on a read scope is a permission concern rather than a degraded filter. The first is fail-open in the other direction and just as silent — `if (!rows.length)` cannot tell "genuinely none" from "the predicate asked the wrong question".
+  
+  **What changes.** A stored array is now read as its elements, and each is asked the question the arm asks of a scalar: the answer for a row storing an array is the OR of the answers for the rows storing its elements. That is MongoDB's array semantics and therefore mingo's, so the reference face converges on the path this package's users actually run rather than on a third reading nobody wrote. One level only — a nested array is not descended into, matching mingo. `$eq` and `$ne` take the same equality as the implicit spelling, so `$ne` stays the exact complement.
+  
+  **What does not change.** An array in the **comparand** position is still refused (`INVALID_FILTER` / 400) by the shape gate every face of this package runs; this is the VALUE side, which that door does not judge. The live query path is untouched — it already answered membership — so a caller who only ever used `find()` sees no difference. Callers who compared results against the reference matcher, or who ran it directly as a driver double, will see a stored array select on membership instead of on its joined string.
+- 0f38ab0: fix(driver-memory,driver-sql): an explicit `tenancy.enabled: false` opt-out is sticky, so a partial `syncSchema` re-registration no longer flips a platform-global object's UNIQUE partition (#16729)
+  
+  ## What was wrong
+  
+  `InMemoryDriver.syncSchema` recomputed its uniqueness constraints from whatever
+  schema THAT call happened to carry. A second registration without a `tenancy`
+  block — the `{ name, fields }` shape — fell through to the implicit
+  `organization_id` heuristic, so a `unique` field moved from **one row per
+  install** (`scopeField: null`, which is what `tenancy.enabled: false` declares)
+  to **one row per organization**. A duplicate the declaration refuses then
+  landed. Measured at the driver door on `origin/main` `d61139f1ba`:
+  
+  | sequence | second `key: 'K'`, different organization |
+  |:--|:--|
+  | register with `tenancy.enabled: false` | `REFUSED` — `UNIQUE_VIOLATION` / 409 |
+  | …then re-register with `{ name, fields }` | **`LANDED`** |
+  
+  `SqlDriver` running the same sequence refuses in **both** cases: it has kept a
+  sticky `tenantOptOutByTable` since #3249. `driver-memory` had mirrored the inner
+  `computeTenantField` and not the wrapper that consults the record, so "mirrors
+  `computeTenantField` arm for arm" stayed literally true while the pair diverged.
+  
+  It is silent in both directions — nothing logs the flip, and the refusal names
+  the field, never the partition. That is the declared-vs-enforced shape Prime
+  Directive #10 forbids, reached by a state change rather than by a missing check.
+  
+  ## What it does now
+  
+  - **`@objectstack/driver-memory`** gains `computeAndRecordTenantField`, the
+    sticky resolver, and the `TenantOptOutRecord` type for the per-instance record
+    a driver owns. `InMemoryDriver` holds one and resolves through it, handing
+    BOTH declaration surfaces — field-level `unique` and declared `indexes[]` —
+    the same resolved column. `uniqueConstraintsFromFields` and
+    `uniqueConstraintsFromDeclaredIndexes` accept that column as an optional
+    second argument; called with one argument they answer exactly as before.
+    `tenantFieldOf` is unchanged and still a pure function of its argument.
+  - **`@objectstack/driver-sql`**: the shard leaf resolved its tenant column with
+    the BARE `computeTenantField`, so a `rotateShards` sweep carrying no `tenancy`
+    block gave a shard an organization key part the base table's index does not
+    have — one object, two partitions, decided by which physical table a row
+    landed in. It now resolves through the record, keyed by the base table.
+  - **`@objectstack/objectql`**: `LifecycleObjectLike` declares `tenancy`. The
+    Archiver hands that object straight to `cold.syncSchema`, and the published
+    type refused the key while the driver below read it — so an author writing a
+    fresh literal was pushed into producing exactly the partial re-registration
+    above. Same correction #16711 made where the shard leaf narrowed the key off
+    the object it was handed.
+  
+  The record is deliberately narrow. Only the explicit OPT-OUT is sticky: a
+  declared `tenancy.tenantField` is not recorded, matching `SqlDriver`. An object
+  that never declared the opt-out never enters the record, so a genuinely
+  org-scoped object keeps its `organization_id` partition across a partial
+  re-registration — an implementation answering `null` more often would not be
+  stickier, it would be tenant isolation switched off. A carried `tenancy` block
+  stays authoritative in both directions and CLEARS a recorded opt-out.
+  
+  `@objectstack/driver-memory` is `minor` for the two new public-entry exports.
+  The behaviour repairs themselves are `patch`: each restores an implementation to
+  the `tenancy.enabled: false` contract (`isTenancyDisabled`, ADR-0066) it was
+  already declaring, rather than replacing one legal published answer with
+  another. The `objectql` entry is a published type WIDENING — a key the interface
+  refused is now accepted, and nothing that compiled before stops compiling.
+- 9c44eed: fix(spec)!: `TimeUpdateInterval` retires its three sub-day intervals and derives its members from `DateGranularity` (#17296)
+  
+  <!-- adr-0087: registered time-update-interval-sub-day-retired, cube-sub-day-granularities-removed -->
+  
+  ## ADR-0087 disposition
+  
+  `second`, `minute` and `hour` leave a published closed enum that reaches TWO authored sites: an analytics request body's `timeDimensions[].granularity`, and an analytics cube dimension's `granularities[]`, which is stored metadata (`defineCube()` / `defineStack({ analyticsCubes })`). The stored half is rewritten by the D2 conversion `cube-sub-day-granularities-removed`, which strips the retired members from `analyticsCubes[].dimensions.<dim>.granularities` and drops the key entirely when nothing coarser remains (an empty list would read as "offers none", the absent key as "offers all"). The semantic entry `time-update-interval-sub-day-retired` carries the half no transform can decide: a dimension that offered ONLY sub-day intervals needs an author to say what it actually serves. `day`, `week`, `month`, `quarter` and `year` are untouched and parse byte-identically.
+  
+  **BREAKING** for anyone authoring or sending `granularity: 'second'`,
+  `'minute'` or `'hour'`, and for anyone importing the `TimeUpdateInterval`
+  TYPE. Landing in the
+  launch window as `minor` under the lockstep convention this cluster's siblings
+  already use.
+  
+  ## What was wrong
+  
+  `TimeUpdateInterval` declared **eight** intervals. The rest of the contract
+  never carried three of them, and this is the measurement rather than the
+  argument:
+  
+  | layer | declares |
+  |:---|:---|
+  | `TimeUpdateInterval` (`data/analytics.zod.ts`) | **8** — the five below plus `second`, `minute`, `hour` |
+  | `DateGranularity` (`data/query.zod.ts`) — what a `groupBy` entry and every driver bucket expression are typed by | 5 |
+  | `@objectstack/core`'s `BUCKET_GRANULARITIES` — the canonical bucket-KEY output contract a drill-down crosses | 5 |
+  | `driver-mongodb`'s `MONGODB_DATE_GRANULARITIES` | 5 |
+  
+  `DriverCapabilitiesSchema.supports.queryDateGranularity` — the one mechanism a
+  backend has for saying which granularities it buckets natively — is a
+  `z.record(DateGranularity, boolean)`. Measured: `{ day, week, month, quarter,
+  year }` parses; the same record plus `hour` raises `unrecognized_keys: ["hour"]`.
+  **No driver could advertise sub-day bucketing even if it had one.** That is what
+  makes this a retirement rather than a capability gap: a declared value one
+  backend cannot serve is a gap and the contract has a place to say so, but a
+  declared value *no* backend can even claim has no counterpart anywhere in the
+  contract that carries it.
+  
+  Driven against the built packages, two rows fourteen hours apart on one UTC
+  calendar day, before this change:
+  
+  | face | `granularity: 'hour'` | `granularity: 'day'` (control) |
+  |:---|:---|:---|
+  | `driver-memory` analytics | `NOT_IMPLEMENTED` / 501 | 1 group, `2026-09-06` |
+  | `driver-mongodb` bucket builder | `NOT_IMPLEMENTED` / 501 | `$dateToString` `%Y-%m-%d` |
+  | engine in-memory aggregation — the fallback every SQL/ObjectQL analytics query carrying a granularity lands on, since `NativeSQLStrategy` declines on a granularity | **200, 2 groups keyed on the RAW instant** | 1 group, `2026-09-06` |
+  
+  Two honest refusals and one silently wrong answer. No third behaviour, and no
+  backend that bucketed it.
+  
+  ## What changed
+  
+  - `TimeUpdateInterval` is now `z.enum(DateGranularity.options, …)` — the members
+    come from the single source instead of a second literal list that disagreed
+    with it by three members for as long as both existed.
+  - A refusal message splits two populations that are not the same mistake: a
+    **retired** sub-day name gets the retirement and the `os migrate meta --from
+    17` line; anything else gets the vocabulary. `driver-memory`'s own analytics
+    door carries the same split.
+  - `driver-memory`'s `NOT_IMPLEMENTED` / 501 answer for these three is **not
+    silenced** — the declaration it announced is gone, so the class moves to the
+    400 the retirement makes correct. The 501 arm stays, and a pin measures that
+    its population is now empty (`TimeUpdateInterval.options` equals
+    `BUCKET_GRANULARITIES`), so the day one of the two is widened alone it lights
+    up again instead of a freshly declared value being called undeclared.
+  
+  ## What this does NOT decide
+  
+  Sub-day analytics bucketing as a **capability**. Offering it means widening
+  `DateGranularity`, the `queryDateGranularity` record, the canonical bucket-key
+  vocabulary and every driver's bucket expression together — new capability,
+  decided as such, rather than a name that parses in one enum and resolves
+  nowhere.
+
+### Patch Changes
+
+- e7ff9c2: `dateRange`'s array arm has ONE arity everywhere: a two-element window, or the ADR-0112 refusal (#17596)
+  
+  The shared conformance kit
+  (`analyticsDateRangeConformanceFindings`) had exactly one array case — a
+  two-element window — so the ARITY of the array arm was governed nowhere and
+  every analytics face was free to invent a meaning for `dateRange:
+  ['2026-01-01']`. Four faces in one package had invented three (#17124), and a
+  fifth — `driver-memory`'s cube face — had invented a fourth.
+  
+  **The kit** now exports `ANALYTICS_DATE_RANGE_NOT_A_WINDOW` and holds every
+  registered face to the rule the `service-analytics` faces already carry: an
+  array that is not two non-empty string bounds is refused with
+  `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400. No new rule was invented for it, and
+  the existing two-element window case is untouched — it is this case's control,
+  so "refuse every array" cannot pass.
+  
+  **`driver-memory`** now answers that refusal instead of dropping the window.
+  MEASURED end to end over four rows spanning 2020…2099: `['2026-01-01']`, `[]`
+  and `['2026-01-01', '2026-01-31', '2026-02-01']` each emitted a pipeline
+  byte-identical to one with **no `dateRange` at all** — every row selected, the
+  "plot all of history" failure #3650 was filed about — and `[null, null]`
+  compared instants against the string `'null'` and selected none.
+  
+  **Levels.** `@objectstack/core` is `minor`: it gains a new exported symbol on
+  its index (`ANALYTICS_DATE_RANGE_NOT_A_WINDOW`), and a purely additive widening
+  of a published package's public surface takes at least `minor` whatever the
+  commit type says. `@objectstack/driver-memory` is `patch`: its public surface is
+  byte-unchanged — no new export, no new accepted key or value. Its behaviour does
+  change, from selecting every row to refusing with `400
+  ANALYTICS_DATE_RANGE_UNRECOGNIZED`, and that is a `patch` because the old
+  behaviour was a defect and never a contract: the spec's own refusal wording
+  already said an explicit window is the two-element array, and the #16322
+  migration table already told authors to write a single day as two bounds. A
+  release that stops answering a shape the contract never admitted is a fix, not a
+  feature — and the shapes it now refuses had no correct answer to lose.
+  
+  **If you wrote a one-element array**, write both bounds: `['2026-01-01']`
+  becomes `['2026-01-01', '2026-01-01']`, which selects exactly that day on every
+  face and did so before this change too. The refusal names the shape that
+  arrived, the two-element contract and that spelling.
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- e5cf27d: fix(objectql,core): a per-aggregation `filter` and `having` on `engine.aggregate` read a temporal comparand by the column's storage rule, the rule `where` already applies — one function, `temporalStorageForm`, now exported by `@objectstack/core` and shared by both drivers (#20176)
+  
+  A per-aggregation `filter` (`aggregations[i].filter`) and `having` are evaluated by the engine itself, over the rows (or aggregated rows) a driver returns. Both compared a temporal comparand exactly as written, while the same condition as a `where` is put into the column's storage form by the driver first. So they counted differently. Measured through `engine.aggregate` and through `POST /data/:object/query`, on `driver-memory` and `driver-sql`, over six rows:
+  
+  | in `aggregations[i].filter` (or `having`) | before | now, and the `where` twin |
+  |:--|:--|:--|
+  | an ISO instant on a `date` field, `{ placed_on: { $gte: '2026-02-01T00:00:00.000Z' } }` | 1 | 3 |
+  | the same instant under `$eq` | 0 | 2 |
+  | a bare day as the upper bound of a `datetime`, `{ opened_at: { $lte: '2026-02-01' } }`, or as a `$between` max | 2 | 3 |
+  | an epoch-millisecond bound on a `datetime` | 0 | 3 |
+  | a `Date` carrying a time of day on a `date` field, `$gte` / `$lt` / `$eq` (in-process only) | 1 / 5 / 0 | 3 / 3 / 2 |
+  | a `Date` on a `time` field (in-process only) | 0 | 3 |
+  | `having` on `max` of a `date` field with an ISO-instant bound | kept one group | keeps the two groups whose day is on or after it |
+  
+  The same holds for `$ne`, `$in` / `$nin` members, `$between` endpoints, implicit equality, an offset instant (`'…T18:00:00+08:00'`), an epoch-millisecond string, a zone-naive `'2026-02-01T10:00'`, and a short wall clock (`'11:00'`) or an ISO instant on a `time` field. On a `having` column, the class comes from the query, as the `addDays` rule already reads it: `min` / `max` take the class of the field they read, a `groupBy` projection takes its field's, and a `day` date bucket is a `date`.
+  
+  What the rule does, now in one place:
+  
+  - A comparand, and the row's value, are put into the column's storage form: canonical UTC ISO text for `datetime`, `YYYY-MM-DD` for `date`, and `HH:MM:SS` (`.fff` only when non-zero) for `time`.
+  - A bare `YYYY-MM-DD` used as the upper bound of a `datetime` (`$lte`, a `$between` max) means that whole day, as it does in a `where` (ADR-0053 D-D). On a `date` or `time` column it is not widened.
+  - A value the rule cannot read is compared as written, and so is every non-temporal column, presence tests (`$exists`, `$null`), the text operators and a `{ $field }` reference.
+  - An object whose declared fields the engine cannot see keeps the previous comparison.
+  
+  `@objectstack/core` exports the rule as `temporalStorageForm(value, kind)`, `kind` being `'datetime' | 'date' | 'time'`. `driver-sql` (`canonicalUtcDatetime`, `toDateOnly`, `canonicalTimeOfDay`) and `driver-memory` (`coerceTemporalValue`) each carried a copy of it; both now call it. The copies agreed on every shape measured when they were lifted, so the lift itself changes no `where`, write or read answer of either driver (#20203, in the same release, then reads an epoch-millisecond number on a `date` field as its UTC calendar day). MySQL still binds a `datetime` in its own literal spelling.
+  
+  `@objectstack/objectql`'s `applyInMemoryAggregation(rows, ast, timezone?, fields?)` takes the object's declared field map as an optional fourth argument, and a per-aggregation `filter` reads a temporal comparand by the rule only when it is given. Called without it, the function answers as before.
+  
+  Not changed, measured identical before and after on both drivers: every `where` answer, every refusal a per-aggregation `filter` or `having` gives, and every per-aggregation `filter` and `having` cell whose column is not temporal.
+- 615c468: fix(core): an epoch-millisecond number compared against a `date` field is read as the UTC calendar day of its instant, by every driver and at every position that compares it (#20203)
+  
+  Clause-②: no — no key, export or operator moves, and no comparand that was accepted is now refused: a number was already an accepted comparand on every `date` position, and its answer moves to the storage rule's reading.
+  
+  `temporalStorageForm(value, 'date')` in `@objectstack/core` returned a finite number unchanged, so each face compared it by its own type rules and they disagreed. Over six rows, with `1769940000000` (2026-02-01T10:00:00.000Z) against a `date` field:
+  
+  | face | `$gt` | `$lt` | `$eq` | `$in` (with a Jan 10 member) | `$between` (from Jan 2) |
+  |:--|:--|:--|:--|:--|:--|
+  | `where` on `driver-memory` | 0 | 0 | 0 | 0 | 0 |
+  | `where` on `driver-sql`, SQLite | 6 | 0 | 0 | 0 | 0 |
+  | `where` on `driver-sql`, PostgreSQL | `DATABASE_ERROR`, a 500 at REST | the same | the same | the same | the same |
+  | a per-aggregation `filter` on `engine.aggregate` | 0 | 0 | 0 | 0 | 6 |
+  | **now, on every face above** | **1** | **3** | **2** | **3** | **5** |
+  
+  The same holds through `engine.find` and `POST /data/:object/query`, and for `$gte`, `$lte`, `$ne`, `$nin` and implicit equality. PostgreSQL's server refused the bound number itself (`22008`, date/time field value out of range), on an empty table too. `having` over `max` of a `date` field kept no group for `$gt`, `$eq` or `$in`; it now keeps the groups whose day compares.
+  
+  A finite number is now read as the `datetime` rule already reads it, as epoch milliseconds. It takes the UTC calendar day of that instant: the day `new Date(value)` names, through the same conversion a `Date` takes. So a number and its `Date` always answer alike. A time of day is dropped, never rounded, a negative number is a day before 1970, and a fraction truncates toward zero as the `Date` constructor does. `driver-sql` (`toDateOnly`, `temporalFilterValue`), `driver-memory` (`coerceTemporalValue`) and the engine's per-aggregation `filter` and `having` all call this rule, so they now agree.
+  
+  The rule is shared by the drivers' write and read paths too:
+  
+  - `create()` / `update()` on either driver, given a number for a `date` field, stores its UTC day. Before, `driver-memory` and SQLite stored the number, and PostgreSQL refused the statement. The engine and REST write doors refuse a number on a `date` field before a driver sees it (`VALIDATION_FAILED`), as before.
+  - A number already stored in a SQLite `date` column is read back as its UTC day by `find()`, a `groupBy` key and `distinct()`. Only a direct driver write could have put one there.
+  
+  Not changed, measured identical before and after: `NaN`, ±Infinity, a number outside the `Date` range (past ±8.64e15), a bigint, an epoch-millisecond string, every `Date` and every string on a `date` field (#20240, in the same release, then pads a `Date`'s or a number's year 0..999 to four digits and refuses one whose year falls outside 0..9999, a number past the `Date` range included; #20264, in the same release, narrows that to 0001..9999, so year 0 is refused rather than padded), and every `datetime` and `time` reading. `driver-mongodb` keeps its own copy of the `date` rule and is not changed here.
+- 89f87f2: fix(core,objectql)!: a number or `Date` compared against a `date` field spells its year with four digits, and one whose UTC year falls outside 0..9999 is refused `INVALID_FILTER` / 400, as its ISO string already was (#20240)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a query-time refusal of a comparand VALUE on a `date` field: no authorable key, spelling or stored shape moves, `packages/spec` is untouched, and a stored row keeps the form it has. What is refused is a number or `Date` whose day has no `YYYY-MM-DD` form, and which in-range day the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a comparand value (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a filter on a `date` field accepts. A number or `Date` whose UTC calendar day falls in a year below 0 or above 9999 used to answer 200 with the wrong rows, or a 500 on PostgreSQL; it now answers `INVALID_FILTER` / 400. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  `temporalStorageForm(value, 'date')` in `@objectstack/core` spelled the year of a `Date` or an epoch-millisecond number unpadded: `999-06-15`, `10000-01-01`, `-1-01-01`. The ISO string and the bare day of the same instant spelled `0999-06-15`, and as text an unpadded year sorts as no day does. Measured through `engine.find` / `engine.aggregate` and `POST /data/:object/query` (the two doors agree), on a `date` field holding six 2026 days and 0999-06-15, `$gt` / `$lt` / `$eq`:
+  
+  | position | comparand | before: memory · SQLite · PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|
+  | `where` | a number (or, in-process, a `Date`) for 0999-06-15 | 0/7/0 · 0/7/0 · 6/0/1 | 6/0/1 |
+  | per-aggregation `filter` | the same | 0/7/0 on all three | 6/0/1 |
+  | `having` on `max(date)` | the same | no group / every group / no group | the three 2026 groups / none / the 0999 group |
+  | `where` | a number (or `Date`) for 10000-01-01 | 6/1/0 · 6/1/0 · 0/7/0 | `INVALID_FILTER` / 400 |
+  | `where` | a number (or `Date`) for -1-01-01 | 7/0/0 · 7/0/0 · `DATABASE_ERROR` (500) | `INVALID_FILTER` / 400 |
+  | per-aggregation `filter` | either of those two | 6/1/0 and 7/0/0 on all three | `INVALID_FILTER` / 400 |
+  | `where`, per-aggregation `filter` | the ISO string of either | `INVALID_FILTER` / 400 | unchanged |
+  
+  What changes:
+  
+  - The rule pads a year from 0 to 999 to four digits, for a `Date` and a number alike, so a number, its `Date` and its ISO string spell one day. `driver-sql` (`toDateOnly`, `temporalFilterValue`), `driver-memory` (`coerceTemporalValue`) and the engine's per-aggregation `filter` and `having` all call it.
+  - `isUninterpretableTemporalComparand('date', value)` is now also true for a finite number or a valid `Date` whose UTC year is below 0 or above 9999, a finite number past the `Date` range (±8.64e15) included. The engine's temporal-comparand door refuses such a comparand on `where` for every verb (`find`, `findOne`, `count`, `aggregate`, `update`, `delete`), in both the object and the array spelling, and in a per-aggregation `filter`, before any driver read. `IObjectQLEngine.judgeFilter` runs the same door.
+  - The write path: `create()` / `update()` on `driver-memory` or SQLite, given a year-0..999 number or `Date` for a `date` field, now stores `0999-06-15` where it stored `999-06-15`; `engine.insert` of such a `Date` does the same. PostgreSQL and MySQL already stored a three-digit year's day, but not a shorter one: under its default `DateStyle` (`ISO, MDY`) PostgreSQL stored the unpadded `9-03-04` as 2004-09-03 and refused `99-03-04` (`22008`), and MySQL 8.0 stored `99-03-04` as 1999-03-04. All three dialects now store the day. A year outside 0..9999 keeps the spelling it had on the write and read paths; no ordered form is invented for it.
+  
+  **Who is affected.** A caller that compares a `date` field with an epoch-millisecond number or a `Date` in a year below 0 or above 9999. No writer that stores or queries such a day has been measured; the reach is the public query door.
+  
+  **Fix.** Compare against a `YYYY-MM-DD` day, or a number or `Date` whose UTC calendar day falls in a four-digit year.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL through the engine and REST: every `datetime` and `time` cell, the same numbers included (#20264, in the same release, then narrows the range to 0001..9999 on `date` and `datetime` alike: year 0 is refused too, and so is a `datetime` number, `Date` or string outside it, and the padding covers 0001..0999); every string comparand on a `date` field; every number and `Date` in the years 1000 to 9999; `NaN`, ±Infinity and an Invalid Date, which name no year and are not judged; and every read-path presentation on those three. On MySQL, measured at the driver door, a stored year from 100 to 999 now reads back padded (`0999-06-15`, where it read `999-06-15`); a stored year below 100 read back a century late (`0009-03-04` as `1909-03-04`, mysql2's `Date.UTC` reading of a `DATE`), which this change does not touch and #20280, in the same release, corrects by reading a MySQL `DATE` as its text. `having` reaches the same door in the same release (#20263), so a number or `Date` outside 0..9999 is refused there too. `service-analytics`' raw-SQL decline reads a time dimension by the `datetime` rule, so its answer does not move. `driver-mongodb` keeps its own copy of the `date` rule and is not changed here.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [6d2571f]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [a9fb83e]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [172b4cf]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [fe677ae]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [437bb0d]
+- Updated dependencies [49144fc]
+- Updated dependencies [e2c4e12]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [e5cf27d]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [615c468]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [89f87f2]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [3062e50]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [8255a51]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [f6ceddc]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [6e3462d]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

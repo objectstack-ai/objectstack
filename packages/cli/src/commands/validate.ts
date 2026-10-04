@@ -10,9 +10,11 @@ import {
   lintUnknownAuthoringKeys,
   lintUnknownStackKeys,
   formatUnknownAuthoringKey,
+  stackConversionsOf,
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
+import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 // [#18677] The per-package half of the author-time rule run, shared with
@@ -58,6 +60,14 @@ import {
   formatPermissionSetNameCollisions,
 } from '../utils/permission-set-name-collisions.js';
 import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
+// [#20331] The boot registrar's divergent view-container `name` refusal, walked
+// over the parsed stack the way the load path registers it. The verdict is
+// `@objectstack/objectql`'s; see the module header.
+import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// A field `picklist` that names no picklist the stack declares — refused, or
+// reported when the declaring package depends on packages outside the stack.
+// Walked the way the load path registers, like the refusal above.
+import { judgePicklistReferences, printPicklistReferenceNotices } from '../utils/picklist-references.js';
 
 export default class Validate extends Command {
   static override description =
@@ -160,6 +170,13 @@ export default class Validate extends Command {
     // of a project without a manifest is unchanged on both faces. `os compile`
     // computes the identical record, so the residue pin keeps holding.
     let jsxGateNotices: ReturnType<typeof resolveJsxGateManifest>['notices'] = [];
+    // The `info` records of a field `picklist` reference that resolves nowhere
+    // in the stack while the declaring package depends on packages outside it
+    // (step 2d). Same class as the notice above — reports, never refuses, and
+    // is NOT in the `warnings` list `--strict` reads: the reference may be
+    // right, and `--strict` failing on it would refuse a correct stack. `os
+    // compile` computes the identical records, so the residue pin keeps holding.
+    let picklistReferenceNotices: ReturnType<typeof judgePicklistReferences>['notices'] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -178,8 +195,10 @@ export default class Validate extends Command {
       ...permissionSetCollisionWarnings,
       // [#20113] APPENDED for the same reason, one member later again.
       ...jsxGateNotices,
+      // APPENDED for the same reason, one member later again.
+      ...picklistReferenceNotices,
     ];
-    // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
+    // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
     // notices were computed at step 2 (below) and reached the terminal SUCCESS
     // payload alone, so all five failure exits dropped a list already in hand.
@@ -188,7 +207,10 @@ export default class Validate extends Command {
     // the same `const` array the `onConversionNotice` sink pushes into, moved
     // above the `try` only so the catch-all exit can read it. `normalizeStackInput`
     // still runs at exactly step 2, so a run that throws in `loadConfig` — above
-    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there.
+    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there,
+    // unless what it threw is a stack producer's refusal: that carries the
+    // conversions the producer applied before refusing, which the run HAS
+    // already computed, and the catch-all folds them (#20583).
     //
     // ⛔ NOT FOLDED INTO `warningsSoFar()`, in either direction. The two fields
     // are separate on the success payload by an explicit decision recorded at
@@ -200,15 +222,38 @@ export default class Validate extends Command {
     // authority to settle, so the shape is mirrored, not merged.
     //
     // No `conversionsSoFar()` wrapper: `warningsSoFar()` exists because five
-    // producers had to be concatenated in ONE stated order, and this list has
-    // exactly one producer. Reading the binding directly already is the "a list
-    // cannot drift from itself" idiom the wrapper was built to buy.
+    // producers had to be concatenated in ONE stated order. This list has three
+    // fillers, and each pushes into this ONE array in the order the run reaches
+    // it — step 1b folds the record the stack producer left on the default
+    // export (`loaded.stackConversions`), step 2's own pass appends what it
+    // converts on the merged stack, and the catch-all folds the record a
+    // producer's REFUSAL carries when the load threw one (so on that run the
+    // other two never ran) — so reading the binding directly already is the
+    // "a list cannot drift from itself" idiom the wrapper was built to buy.
     const conversionNotices: ConversionNotice[] = [];
 
     try {
       // 1. Load configuration
       if (!flags.json) printStep('Loading configuration...');
-      const { config, absolutePath, duration, namedExports } = await loadConfig(args.config);
+      const loaded = await loadConfig(args.config);
+      const { config, absolutePath, duration, namedExports } = loaded;
+      // 1a. [#20367 ruling B] One authoring shape: refuse a default export no
+      //     stack producer built, BEFORE any other judgement — the `STACK_*`
+      //     cross-field refusals run inside `defineStack` only, so an unbuilt
+      //     export would otherwise pass this door unjudged. Throws into the
+      //     catch-all below (`--json`: `error` + `code`, exit 1), the same
+      //     envelope a `defineStack` refusal raised at load reaches.
+      refuseUnbuiltStack(loaded);
+      // 1b. The ADR-0087 D2 conversions the PRODUCER applied. `defineStack`
+      //     converts at load (either mode), so the stack this door received is
+      //     already canonical and step 2's pass below has nothing of it left to
+      //     convert: without this fold `conversions` read `[]` and `--strict`
+      //     passed on every `defineStack` config carrying a retiring spelling.
+      //     Read by `loadConfig` off the default export before its named-export
+      //     merge (`stackConversionsOf`, beside the provenance mark). ⛔ Folded,
+      //     never recomputed: a second conversion pass here would disagree with
+      //     what was loaded. After 1a, so a refused export reports none.
+      conversionNotices.push(...loaded.stackConversions);
 
       if (!flags.json) {
         printKV('Config', absolutePath);
@@ -219,7 +264,9 @@ export default class Validate extends Command {
       //    The ADR-0087 D2 conversion layer runs here (inside normalizeStackInput);
       //    surface each applied conversion as a non-blocking deprecation notice so
       //    the author knows the source still carries an old-shape key that will
-      //    retire from the load path in a future major.
+      //    retire from the load path in a future major. What it can still find
+      //    after step 1b is what the producer never saw: a key `loadConfig`
+      //    merged onto the stack from a NAMED export of the config module.
       if (!flags.json) printStep('Validating against ObjectStack Protocol...');
       // The sink is declared above the `try` (see its note there); the CALL that
       // fills it stays right here, at the step that owns it.
@@ -303,8 +350,8 @@ export default class Validate extends Command {
             // called the strongest instance: the hoist exists so the finding
             // SURVIVES a schema error, and this payload discarded it anyway.
             warnings: warningsSoFar(),
-            // [#12125] Filled by `normalizeStackInput` two statements above this
-            // exit — the tightest instance of this card, and the one it measured.
+            // [commit 79cf692b0] Filled by `normalizeStackInput` two statements above this
+            // exit — the tightest instance of that defect, and the one the commit measured.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -325,6 +372,94 @@ export default class Validate extends Command {
         )) {
           console.log(chalk.dim(line));
         }
+        this.exit(1);
+      }
+
+      // 2c. [#20331] The boot registrar's divergent view-container `name`
+      //     refusal, judged here by the SAME function
+      //     `ObjectQL.registerMetadataCollections` throws the answer of
+      //     (`viewContainerNameRefusal`, `@objectstack/objectql`). This door
+      //     used to pass `{ name: 'order_line', object: 'my_app_order_line',
+      //     list: {…} }` at exit 0 while `os serve` refused the same stack at
+      //     boot — the silent-validator shape, on the command whose whole job
+      //     is to say what the runtime will accept.
+      //
+      //     ⛔ One judge, not a second rule: not an `@objectstack/lint`
+      //     registry member and not a re-spelling of the check. The helper
+      //     owns only the WALK (which `views:` entries boot registers, under
+      //     which package id); the verdict and its words are the runtime's,
+      //     so the author reads here exactly what the server would print.
+      //
+      //     Right after the parse, ahead of the rule table: this is the
+      //     runtime's own accept set, the same class as the schema, and
+      //     nothing below it is worth reading about a stack the server will
+      //     not load. `os build` runs the same call at its step 3a (#20393);
+      //     `test/validate-build-gate-parity.test.ts` holds both doors to it.
+      const containerNameRefusals = findViewContainerNameRefusals(result.data as Record<string, unknown>);
+      if (containerNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: containerNameRefusals,
+            // [#12047] Every exit carries the lists the run has computed so
+            // far — here the pre-parse ones only, and the conversion notices
+            // `normalizeStackInput` filled at step 2.
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = containerNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} view container${n > 1 ? 's' : ''})`);
+        printBulletList(
+          containerNameRefusals.map((r) => r.message),
+          { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 2d. A field `picklist`, or a `picklistExtensions` entry's `extend`, that
+      //     names no picklist the stack declares is REFUSED, naming the field
+      //     (or the extension) and the list. `FieldSchema` and
+      //     `PicklistExtensionSchema` judge the name's spelling only, so a
+      //     misspelt reference parsed, passed this door at exit 0 and reached
+      //     the runtime as a choice with nothing to choose — the silence a NAMED
+      //     list exists to remove.
+      //
+      //     The walk is the load path's (see `utils/picklist-references.ts`):
+      //     each `packages[]` body's fields and extensions, or the top level's
+      //     when there is no `packages[]`, resolved against every picklist the
+      //     stack declares.
+      //     A reference that resolves nowhere is refused only when the
+      //     declaring package depends on no package outside the stack; when it
+      //     does, the list may live there, and this command cannot read it — so
+      //     that case is an `info` notice, printed here and carried in
+      //     `warningsSoFar()`, never gating.
+      //
+      //     Right after the parse, ahead of the rule table, for the reason
+      //     step 2c gives. `os build` runs the same call at its step 3a-bis.
+      const picklistJudgement = judgePicklistReferences(result.data as Record<string, unknown>);
+      picklistReferenceNotices = [...picklistJudgement.notices];
+      if (!flags.json) printPicklistReferenceNotices(picklistReferenceNotices);
+      if (picklistJudgement.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: picklistJudgement.refusals,
+            // Every exit carries the lists the run has computed so far — the
+            // pre-parse ones and the notices above.
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = picklistJudgement.refusals.length;
+        console.log('');
+        printError(`A picklist reference names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 
@@ -372,7 +507,10 @@ export default class Validate extends Command {
       //    this to a failure under `--strict` would break every such project.
       //    A project manifest that exists but cannot be used is REFUSED
       //    instead (thrown, already reported on stderr; the catch-all exits 1).
-      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
+      //    [#20166] The project's manifest is the one beside the config this
+      //    run was given — the directory the capability preflight below reads
+      //    too — never the invoker's working directory.
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>, dirname(absolutePath));
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const parsedUnion = authoringRuleUnionStack(result.data as Record<string, unknown>);
@@ -405,7 +543,7 @@ export default class Validate extends Command {
             // the pre-parse `unknownKeyWarnings` — computed long before this
             // gate — and keeps the member ORDER identical to every other exit.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
+            // [commit 79cf692b0] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -548,7 +686,7 @@ export default class Validate extends Command {
         );
       }
 
-      if (!flags.json) printStep('Checking capability providers (#3366)...');
+      if (!flags.json) printStep('Checking that every required capability has a provider installable in this edition...');
       const capProviderPreflight = preflightRequiredCapabilities({
         requires: Array.isArray((config as { requires?: unknown[] }).requires)
           ? ((config as { requires?: unknown[] }).requires as unknown[])
@@ -569,7 +707,7 @@ export default class Validate extends Command {
             // `warnings` beside the two lists computed before this gate. The
             // two classes being separate is the whole point of the split.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
+            // [commit 79cf692b0] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -607,7 +745,7 @@ export default class Validate extends Command {
             // capability hints, and the pre-parse key findings were all in
             // hand and none of them reached the payload.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
+            // [commit 79cf692b0] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -736,9 +874,9 @@ export default class Validate extends Command {
             // `manifest.engines.protocol` in #13860, and the published key
             // name lagged one release behind it. A key spelled `specVersion*`
             // invites the inference that `manifest.specVersion` is writable;
-            // `ManifestSchema` is not `.strict()` and drops unknown keys with
-            // nothing said (#14192), so acting on that inference produces a
-            // manifest that looks fine and whose line never took effect. The
+            // `ManifestSchema` was not `.strict()` and dropped unknown keys with
+            // nothing said until commit 4d0d9445a, so acting on that inference produced a
+            // manifest that looked fine and whose line never took effect. The
             // rename is one stroke, no alias, no dual-key window; its value
             // shape is unchanged.
             protocolVersionGap: protocolGap,
@@ -828,6 +966,19 @@ export default class Validate extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
+        // [#20583] The ADR-0087 D2 conversions a stack PRODUCER applied before
+        // it REFUSED — step 1b's fold, for the run whose load threw. A refusing
+        // `defineStack` / `composeStacks` returns no stack, so step 1b never
+        // ran; the producer stamps what it had applied on the ADR-0112 refusal
+        // it throws instead, and `stackConversionsOf` reads it off the caught
+        // error — `[]` for any other throw (a plain `Error`, this command's own
+        // refusals). ⛔ Folded, never recomputed: no second conversion pass
+        // over the authored source, no reading of the producer's stderr line
+        // (warn-once per process, so it can be missing). Cannot double-count:
+        // this command calls no producer itself, so only the config module's
+        // load can raise a stamped refusal, and a throwing load precedes both
+        // other fillers of this list.
+        conversionNotices.push(...stackConversionsOf(error));
         await emitJson({
           valid: false,
           error: error.message,
@@ -838,8 +989,10 @@ export default class Validate extends Command {
           // is a FILE, say, which makes `readdirSync` raise ENOTDIR) carries
           // the three lists already in hand.
           warnings: warningsSoFar(),
-          // [#12125] Same reading, one field over: `[]` for a throw at load —
-          // step 2 had not run — and the notices in hand for any later throw.
+          // [commit 79cf692b0] Same reading, one field over: `[]` for a throw at load —
+          // step 2 had not run — except a producer's refusal, which carries the
+          // conversions it applied (folded just above); the notices in hand for
+          // any later throw.
           conversions: conversionNotices,
           duration: timer.elapsed(),
         });

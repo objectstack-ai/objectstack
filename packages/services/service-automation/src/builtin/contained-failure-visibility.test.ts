@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #14456 — the visibility half of the ruled containment contract (#13681).
+// #14456 — the visibility half of the ruled containment contract (commit 18d816a50).
 //
 // `loop { body: [ try_catch { try, catch } ] }` is the containment spelling for
 // a per-iteration failure that must not end the sweep (maintainer ruling
 // 2026-08-31, branch B; there is deliberately no `loop.config.onIterationError`
 // key). Containment already worked. What did not exist was any way to SEE what
-// it contained: the measurement these tests reproduce (#13681) found a run that
+// it contained: the measurement behind commit 18d816a50, reproduced here, found a run that
 // lost one row out of five reporting
 //
 //     status=completed selected=5 acted=9 skipped=0
@@ -144,7 +144,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                                     try: {
                                         nodes: [
                                             { id: 'flag', type: 'flag', label: 'Flag' },
-                                            { id: 'notify', type: 'notify', label: 'Notify' },
+                                            { id: 'notify', type: 'notify', label: 'Notify', config: { title: 'Notice', recipients: ['user_1'] } },
                                         ],
                                         edges: [{ id: 't1', source: 'flag', target: 'notify' }],
                                     },
@@ -256,7 +256,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 {
                     id: 'guard', type: 'try_catch', label: 'Guarded',
                     config: {
-                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify' }], edges: [] },
+                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify', config: { title: 'Notice', recipients: ['user_1'] } }], edges: [] },
                         catch: { nodes: [{ id: 'seen', type: 'capture', label: 'Seen' }], edges: [] },
                     },
                 },
@@ -287,7 +287,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 {
                     id: 'guard', type: 'try_catch', label: 'Guarded',
                     config: {
-                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify' }], edges: [] },
+                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify', config: { title: 'Notice', recipients: ['user_1'] } }], edges: [] },
                         catch: { nodes: [{ id: 'seen', type: 'capture', label: 'Seen' }], edges: [] },
                     },
                 },

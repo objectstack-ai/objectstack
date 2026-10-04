@@ -53,6 +53,13 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so every analytics boot below also registers an `auth` slot in the shape
+// `resolveExecutionContext` reads, answering a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 // Each test re-executes the dispatcher's module graph (see `boot` below), which
 // the default 5s budget does not cover on a shared box — measured: the FIRST
 // test paid 5s+ and timed out while the rest ran in ~1.4s each off vitest's
@@ -141,6 +148,7 @@ const REQ = { body: {}, query: {}, headers: {}, params: {} };
 
 /** The analytics door, which throws and therefore answers an UNDECLARED 500. */
 const throwingAnalytics = (message: string) => ({
+    auth: SIGNED_IN_AUTH,
     analytics: {
         query: async () => { throw new Error(message); },
         getMeta: async () => ({ cubes: [] }),

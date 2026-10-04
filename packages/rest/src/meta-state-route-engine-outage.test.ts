@@ -7,7 +7,7 @@
  *
  * ## The defect this file refuses
  *
- * ⚠️ CORRECTED [#18546] — the superseded sentence kept so the change is legible
+ * ⚠️ CORRECTED [commit 58f60e37e] — the superseded sentence kept so the change is legible
  * rather than lost. This file opened with *"`objectQLProvider` has two consumers
  * in `rest-server.ts`"*, and #14251's phase-1 census table counted the same two.
  * There are **THREE**, and the third was already on the tree both readings were
@@ -73,7 +73,7 @@
  *   | no provider wired at all                  | 404 NOT_FOUND ⭐ PIN        |
  *   | provider RESOLVES `undefined` (absence)   | 404 NOT_FOUND ⭐ PIN        |
  *   | provider REJECTS (wired, failed to build) | 503 SERVICE_UNAVAILABLE ⭐  |
- *   | provider THROWS SYNCHRONOUSLY (#13280)    | 503 SERVICE_UNAVAILABLE    |
+ *   | provider THROWS SYNCHRONOUSLY (commit add6a1b1c) | 503 SERVICE_UNAVAILABLE    |
  *
  * ⭐ The NEGATIVE CONTROL (§3) is the half that keeps this a restoration rather
  * than a behaviour change: on a HEALTHY engine, an object that genuinely does
@@ -258,7 +258,7 @@ const providerRejecting = async () => { throw new Error('driver handshake failed
  * The same fault from a host that wired a NON-`async` provider. The seam's
  * declared type cannot prevent this and `RestServer`'s constructor is the
  * public wiring point; it throws before any promise exists, so a `.catch`
- * attached to the returned promise never sees it (#13280).
+ * attached to the returned promise never sees it (commit add6a1b1c).
  */
 const providerSyncThrowing = (() => { throw new Error('driver handshake failed'); }) as any;
 
@@ -406,7 +406,7 @@ describe('[#15405] §3 a healthy engine is untouched — the negative control', 
 //    transcribed beside it.
 // ---------------------------------------------------------------------------
 
-// ⚠️ [#18546] Title corrected from "the two consumers of the `objectQLProvider`
+// ⚠️ [commit 58f60e37e] Title corrected from "the two consumers of the `objectQLProvider`
 //    slot now agree": what this section measures is THIS consumer agreeing with
 //    the `computeExecCtx` sibling, and there is a third (`POST /batch`) that
 //    agrees with neither. The agreement pinned here is the pair it drives.

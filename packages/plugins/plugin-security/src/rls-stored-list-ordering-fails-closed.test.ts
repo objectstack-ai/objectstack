@@ -36,6 +36,18 @@
  * The controls — the same predicate over a record holding one scalar, `null`,
  * and a `Date`; and equality against a stored list (stage 2a) — answer exactly
  * as before. Ground truth is read past every scope.
+ *
+ * [#21254] On a column the object DECLARES JSON-stored (`tags` and `meta` are
+ * `json`, `watchers` a `multiple` lookup) the write check now refuses an
+ * operator the read refuses before any record is read, with the read's
+ * `INVALID_FILTER` / 400 (`rls-check-stored-form.ts`). So on those columns the
+ * ordering is refused whatever the record holds: the list as before, and now
+ * the scalar too (`O1`–`O9`'s scalar cells, which this stage compared). The
+ * write and the `using` read, which the driver refuses on those columns, now
+ * answer alike. This stage's value rule still decides wherever the column is
+ * not declared JSON-stored (`C1`, `C2`), so its `null` control and stage 2a's
+ * equality control sit on the `text` column `status`, where they still reach
+ * the evaluator.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -147,6 +159,8 @@ const envelopeOf = (e: unknown): Envelope => {
 };
 const outcome = (p: Promise<unknown>): Promise<'admitted' | Envelope> =>
   p.then(() => 'admitted' as const, (e: unknown) => envelopeOf(e));
+const verdictWords = (v: 'admitted' | Envelope): string =>
+  v === 'admitted' ? 'is admitted' : `is ${v.code === 'INVALID_FILTER' ? 'refused 400' : 'denied 403'}`;
 
 interface Case {
   id: string;
@@ -155,7 +169,7 @@ interface Case {
   field: string;
   /** A post-image value that is a list or an object — refused. */
   list: unknown;
-  /** The same field holding one value (or none) — compared as before. */
+  /** The same field holding one value (or none) — compared as before, unless the column is declared JSON-stored. */
   scalar: unknown;
   scalarVerdict: 'admitted' | Envelope;
   /** Whether the driver reads this column back as the list it was given (json / multiple). */
@@ -163,15 +177,18 @@ interface Case {
 }
 
 const CASES: Case[] = [
-  { id: 'O1', predicate: "record.tags > 'a'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: 'admitted', readsBackAsList: true },
-  { id: 'O2', predicate: "record.tags < 'z'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: 'admitted', readsBackAsList: true },
-  { id: 'O3', predicate: "record.tags >= 'a'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: 'admitted', readsBackAsList: true },
-  { id: 'O4', predicate: "record.tags <= 'z'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: 'admitted', readsBackAsList: true },
-  { id: 'O5', predicate: "record.tags > 'n'", field: 'tags', list: ['a', 'z'], scalar: 'm', scalarVerdict: DENIED, readsBackAsList: true },
-  { id: 'O6', predicate: "record.meta < 'a'", field: 'meta', list: { a: 1 }, scalar: 'm', scalarVerdict: DENIED, readsBackAsList: true },
-  { id: 'O7', predicate: "record.meta > 'a'", field: 'meta', list: { a: 1 }, scalar: 'm', scalarVerdict: 'admitted', readsBackAsList: true },
-  { id: 'O8', predicate: "record.watchers > 'a'", field: 'watchers', list: ['p1'], scalar: null, scalarVerdict: DENIED, readsBackAsList: true },
-  { id: 'O9', predicate: "record.watchers < 'p2'", field: 'watchers', list: ['p1'], scalar: null, scalarVerdict: DENIED, readsBackAsList: true },
+  // [#21254] Each scalar cell on a column declared JSON-stored is refused by the
+  // declaration, as the read is; before, it was compared (O1–O4, O7 admitted,
+  // O5, O6, O8, O9 denied 403).
+  { id: 'O1', predicate: "record.tags > 'a'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O2', predicate: "record.tags < 'z'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O3', predicate: "record.tags >= 'a'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O4', predicate: "record.tags <= 'z'", field: 'tags', list: ['m'], scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O5', predicate: "record.tags > 'n'", field: 'tags', list: ['a', 'z'], scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O6', predicate: "record.meta < 'a'", field: 'meta', list: { a: 1 }, scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O7', predicate: "record.meta > 'a'", field: 'meta', list: { a: 1 }, scalar: 'm', scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O8', predicate: "record.watchers > 'a'", field: 'watchers', list: ['p1'], scalar: null, scalarVerdict: INVALID, readsBackAsList: true },
+  { id: 'O9', predicate: "record.watchers < 'p2'", field: 'watchers', list: ['p1'], scalar: null, scalarVerdict: INVALID, readsBackAsList: true },
   { id: 'C1', predicate: "record.status > 'a'", field: 'status', list: ['m'], scalar: 'm', scalarVerdict: 'admitted', readsBackAsList: false },
   { id: 'C2', predicate: 'record.amount > 10', field: 'amount', list: [500], scalar: 500, scalarVerdict: 'admitted', readsBackAsList: false },
 ];
@@ -192,7 +209,7 @@ const READ: Record<string, 'driver refuses' | string[]> = {
 for (const [driverName, makeDriver] of DRIVERS) {
   describe(`[#19886 stage 2e] ${driverName}: an ordering check over a field holding a list or an object fails closed`, () => {
     for (const c of CASES) {
-      it(`${c.id} \`${c.predicate}\` — check insert: the list-holding write is refused 400 and nothing is stored; the scalar control ${c.scalarVerdict === 'admitted' ? 'is admitted' : 'is denied 403'}`, async () => {
+      it(`${c.id} \`${c.predicate}\` — check insert: the list-holding write is refused 400 and nothing is stored; the scalar control ${verdictWords(c.scalarVerdict)}`, async () => {
         const w1 = await boot(makeDriver, 'check', c.predicate);
         expect(await outcome(w1.engine.insert(OBJ, { id: 'ins_list', status: 's', [c.field]: c.list }, { context: w1.caller } as never)))
           .toEqual(INVALID);
@@ -240,8 +257,8 @@ for (const [driverName, makeDriver] of DRIVERS) {
 
   describe(`[#19886 stage 2e] ${driverName}: the controls answer exactly as before`, () => {
     it('null in the ordered field is no value — compared, denied 403, not refused', async () => {
-      const w = await boot(makeDriver, 'check', "record.tags > 'a'");
-      expect(await outcome(w.engine.insert(OBJ, { id: 'ins_null', status: 's', tags: null }, { context: w.caller } as never)))
+      const w = await boot(makeDriver, 'check', "record.status > 'a'");
+      expect(await outcome(w.engine.insert(OBJ, { id: 'ins_null', status: null }, { context: w.caller } as never)))
         .toEqual(DENIED);
       expect(await w.stored()).toEqual([]);
     });
@@ -256,13 +273,13 @@ for (const [driverName, makeDriver] of DRIVERS) {
       expect(await w2.stored()).toEqual([]);
     });
 
-    it("C3 `record.tags == 'm'` — equality against a stored list is untouched (stage 2a): the list is denied 403, the scalar admitted", async () => {
-      const w1 = await boot(makeDriver, 'check', "record.tags == 'm'");
-      expect(await outcome(w1.engine.insert(OBJ, { id: 'ins_list', status: 's', tags: ['m'] }, { context: w1.caller } as never)))
+    it("C3 `record.status == 'm'` — equality against a stored list is untouched (stage 2a): the list is denied 403, the scalar admitted", async () => {
+      const w1 = await boot(makeDriver, 'check', "record.status == 'm'");
+      expect(await outcome(w1.engine.insert(OBJ, { id: 'ins_list', status: ['m'] }, { context: w1.caller } as never)))
         .toEqual(DENIED);
       expect(await w1.stored()).toEqual([]);
-      const w2 = await boot(makeDriver, 'check', "record.tags == 'm'");
-      expect(await outcome(w2.engine.insert(OBJ, { id: 'ins_scalar', status: 's', tags: 'm' }, { context: w2.caller } as never)))
+      const w2 = await boot(makeDriver, 'check', "record.status == 'm'");
+      expect(await outcome(w2.engine.insert(OBJ, { id: 'ins_scalar', status: 'm' }, { context: w2.caller } as never)))
         .toBe('admitted');
     });
   });

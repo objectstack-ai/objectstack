@@ -28,7 +28,10 @@
  * choke point all three runtime hydration callers share.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
+import { expandViewContainer, isAggregatedViewContainer, ViewSchema } from '@objectstack/spec/ui';
+import { MetadataPlugin } from '@objectstack/metadata';
+import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
@@ -393,5 +396,1778 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
             const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
             expect(list.items).toEqual([]);
         });
+    });
+});
+
+/**
+ * #21334 — a container on ANOTHER package's object must not take any of that
+ * package's names, nor its default.
+ *
+ * The spec names every expanded view `<object>.<key>` (a bare `list` takes
+ * `<object>.default`). A container saved under any other name — in another
+ * package, or in none — for an object a code package ships used to expand
+ * there and REPLACE the packaged views on the object door
+ * (`GET /meta/view?object=`), wearing the shadowed artifact's `_packageId`,
+ * while the by-name read kept the packaged item on an environment-scoped kernel
+ * (and served the shadow too on an unscoped one, through the registry's bare
+ * key). ADR-0005 keys an overlay by its own name and ADR-0126 rules out a silent
+ * override. Triage's ruling takes the arm "expand under the container's own
+ * name"; the seat's answer extends it to every member of the container, and
+ * rules that such a container never declares the object's default.
+ *
+ * The registry double here is the real `SchemaRegistry`'s shape where this card
+ * turns on it: loader entries under `<package>:<name>`, a hydrated row under
+ * the bare name, `getItem`'s bare-slot-first precedence, `getArtifactItem`'s
+ * package-scoped code-artifact lookup, and `getPackagedObjectOwner`. The
+ * packaged views are produced by the spec's own `expandViewContainer`, as the
+ * source registrars produce them. The cold-boot proof over the real showcase
+ * composition, through the REST doors, is
+ * `view-container-cross-package-default.dogfood.test.ts`.
+ */
+describe('#21334 a container on another package\'s object never takes that package\'s names or its default', () => {
+    const SHOWCASE = 'com.example.showcase';
+    const REPAIR = 'com.example.repairassets';
+    const TASK = 'showcase_task';
+    const DEFAULT = `${TASK}.default`;
+    const ORG = 'org_acme';
+    const data = { provider: 'object', object: TASK };
+    const PACKAGED_COLUMNS = ['title', 'project', 'assignee', 'status', 'priority', 'due_date', 'progress']
+        .map((field) => ({ field }));
+    /**
+     * What the showcase ships for `showcase_task`: a `defineView` container with
+     * one member of every kind the expander knows, so every probe below aims at
+     * a name the package really ships.
+     */
+    const packagedTaskViews = {
+        list: { label: 'All Tasks', type: 'grid', data, columns: PACKAGED_COLUMNS },
+        listViews: {
+            in_progress: { label: 'In Progress', type: 'grid', data, columns: PACKAGED_COLUMNS.slice(0, 4) },
+        },
+        form: { type: 'simple', sections: [{ label: 'Main', fields: ['title'] }] },
+        formViews: {
+            edit: { type: 'tabbed', sections: [{ label: 'Edit', fields: ['title', 'status'] }] },
+        },
+    };
+    const PACKAGED = expandViewContainer(TASK, packagedTaskViews).map((vi) => ({ ...(vi as any) }));
+    /** The card's own probe body, verbatim. */
+    const probe = (name: string) => ({ name, object: TASK, list: { type: 'grid', columns: ['title', 'status'] } });
+
+    function faithfulRegistry() {
+        const byType = new Map<string, Map<string, Record<string, unknown>>>();
+        const objects = new Map<string, { packageId: string; ownership: 'own'; definition: Record<string, unknown> }>();
+        const collection = (type: string) => {
+            if (!byType.has(type)) byType.set(type, new Map());
+            return byType.get(type)!;
+        };
+        return {
+            registerItem(type: string, item: Record<string, unknown>, keyField = 'name', packageId?: string) {
+                const name = String(item[keyField]);
+                if (packageId) {
+                    if (item._packageId === undefined) item._packageId = packageId;
+                    if (item._provenance === undefined) item._provenance = 'package';
+                    collection(type).set(`${packageId}:${name}`, item);
+                } else {
+                    collection(type).set(name, item);
+                }
+            },
+            listItems(type: string, packageId?: string) {
+                const all = [...(byType.get(type)?.values() ?? [])];
+                return packageId ? all.filter((it) => it._packageId === packageId) : all;
+            },
+            getItem(type: string, name: string, packageId?: string) {
+                const entries = byType.get(type);
+                if (!entries) return undefined;
+                const direct = entries.get(name);
+                if (direct) return direct;
+                if (packageId) {
+                    const local = entries.get(`${packageId}:${name}`);
+                    if (local) return local;
+                }
+                for (const [key, item] of entries) if (key.endsWith(`:${name}`)) return item;
+                return undefined;
+            },
+            getArtifactItem(type: string, name: string, packageId?: string) {
+                const entries = [...(byType.get(type)?.entries() ?? [])];
+                const scoped = entries.filter(([key, it]) => key.endsWith(`:${name}`) && isCodeArtifactBody(it));
+                const local = packageId ? scoped.find(([, it]) => it._packageId === packageId) : undefined;
+                if (local) return local[1];
+                if (scoped[0]) return scoped[0][1];
+                const bare = byType.get(type)?.get(name);
+                return bare && isCodeArtifactBody(bare) ? bare : undefined;
+            },
+            shipObject(name: string, packageId: string) {
+                objects.set(name, { packageId, ownership: 'own', definition: { name, _packageId: packageId } });
+            },
+            getPackagedObjectOwner: (name: string) => objects.get(name),
+            getObject: (name: string) => objects.get(name)?.definition,
+            registerObject: () => undefined,
+            getPackage: () => undefined,
+            isPackageDisabled: () => false,
+            isObjectPackageDisabled: () => false,
+            applyNavContributions: (app: unknown) => app,
+        };
+    }
+
+    /** The stub engine above, with the showcase's packaged task views in a faithful registry. */
+    function showcaseHarness(environmentId?: string) {
+        const stub = makeStubEngine();
+        const registry = faithfulRegistry();
+        registry.shipObject(TASK, SHOWCASE);
+        registry.registerItem('view', { ...packagedTaskViews, name: TASK }, 'name', SHOWCASE);
+        for (const vi of expandViewContainer(TASK, packagedTaskViews)) {
+            registry.registerItem('view', { ...(vi as any) }, 'name', SHOWCASE);
+        }
+        stub.engine.registry = registry;
+        const protocol = new ObjectStackProtocolImplementation(stub.engine, undefined, environmentId);
+        return { ...stub, registry, protocol };
+    }
+
+    type Protocol = ObjectStackProtocolImplementation;
+    const scoped = (organizationId?: string) => (organizationId ? { organizationId } : {});
+    const objectDoor = async (protocol: Protocol, organizationId?: string) =>
+        switcherMatches(((await protocol.getMetaItems({ type: 'view', ...scoped(organizationId) } as any)) as any).items, TASK);
+    const byNameDoor = async (protocol: Protocol, name: string, organizationId?: string) =>
+        ((await protocol.getMetaItem({ type: 'view', name, ...scoped(organizationId) } as any)) as any).item;
+    const named = (items: any[], name: string) => items.filter((v) => v.name === name);
+    /** The packaged default, as the source registrar registered it. */
+    const expectPackagedDefault = (v: any) => {
+        expect(v?.label).toBe('All Tasks');
+        expect(v?.config?.columns).toEqual(PACKAGED_COLUMNS);
+        expect(v?._packageId).toBe(SHOWCASE);
+        expect(v?.isDefault).toBe(true);
+    };
+    /** (a) Every name the showcase ships answers the packaged view, once, on BOTH doors — the same row. */
+    const expectEveryPackagedNameIntact = async (protocol: Protocol, organizationId?: string) => {
+        const served = await objectDoor(protocol, organizationId);
+        for (const shipped of PACKAGED) {
+            const listed = named(served, shipped.name);
+            expect(listed, `exactly one item answers ${shipped.name} on the object door`).toHaveLength(1);
+            expect({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId })
+                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+            const read = await byNameDoor(protocol, shipped.name, organizationId);
+            expect({ label: read?.label, config: read?.config, _packageId: read?._packageId })
+                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+        }
+    };
+    /** (c) The object's only defaults are the ones its owning package declares. */
+    const expectOnlyPackagedDefaults = (served: any[]) => {
+        for (const viewKind of ['list', 'form']) {
+            expect(
+                served.filter((v) => v.viewKind === viewKind && v.isDefault).map((v) => v.name),
+                `the ${viewKind} default stays the owning package's`,
+            ).toEqual(PACKAGED.filter((v) => v.viewKind === viewKind && v.isDefault).map((v) => v.name));
+        }
+    };
+
+    /**
+     * Every member kind the spec's expander places, derived FROM the expander:
+     * each top-level key of the container schema is offered a single view and a
+     * record of views, and a key that yields an expanded item is a member kind.
+     * A single-view member is enumerated twice — bare, and naming its own key —
+     * when its own schema declares `name` (a `list` does; a `form` does not, so
+     * a named `form` is not authorable). A kind the spec adds later shows up
+     * here, and the enumeration below fails until it is placed.
+     */
+    function memberKindsOfTheExpander(): string[] {
+        const shape = (ViewSchema as unknown as { shape?: Record<string, unknown> }).shape ?? {};
+        const slots = Object.keys(shape);
+        expect(slots.length, 'the container schema\'s own keys are readable').toBeGreaterThan(0);
+        const declaresName = (schema: unknown): boolean => {
+            let s: any = schema;
+            for (let i = 0; i < 6 && s; i++) {
+                if (s.shape) return 'name' in s.shape;
+                s = s._zod?.def?.innerType ?? s._def?.innerType ?? (typeof s.unwrap === 'function' ? s.unwrap() : undefined);
+            }
+            return false;
+        };
+        const view = { type: 'grid', label: 'probe' };
+        const kinds: string[] = [];
+        for (const slot of slots) {
+            if (expandViewContainer('o', { [slot]: { ...view } }).length > 0) {
+                kinds.push(slot);
+                if (declaresName(shape[slot])) kinds.push(`${slot}#named`);
+            } else if (expandViewContainer('o', { [slot]: { k: { ...view } } }).some((vi) => vi.name === 'o.k')) {
+                kinds.push(`${slot}.*`);
+            }
+        }
+        return kinds.sort();
+    }
+
+    const OWN = 'os_qa_probe';
+    const listView = { type: 'grid', columns: ['title', 'status'] };
+    const formView = { type: 'simple', sections: [{ label: 'Probe', fields: ['title'] }] };
+    /**
+     * One case per member kind: a container on `showcase_task` with ONLY that
+     * member, whose key aims at a name the showcase ships, and the one name the
+     * member must be served under instead.
+     */
+    const MEMBER_CASES: Record<string, { member: Record<string, unknown>; authored: unknown; shadows: string; servedAs: string }> = {
+        list: { member: { list: listView }, authored: listView, shadows: DEFAULT, servedAs: `${TASK}.${OWN}` },
+        'list#named': {
+            member: { list: { ...listView, name: 'in_progress' } }, authored: { ...listView, name: 'in_progress' },
+            shadows: `${TASK}.in_progress`, servedAs: `${TASK}.${OWN}.in_progress`,
+        },
+        'listViews.*': {
+            member: { listViews: { in_progress: listView } }, authored: listView,
+            shadows: `${TASK}.in_progress`, servedAs: `${TASK}.${OWN}.in_progress`,
+        },
+        form: { member: { form: formView }, authored: formView, shadows: `${TASK}.form`, servedAs: `${TASK}.${OWN}.form` },
+        'formViews.*': {
+            member: { formViews: { edit: formView } }, authored: formView,
+            shadows: `${TASK}.edit`, servedAs: `${TASK}.${OWN}.edit`,
+        },
+    };
+
+    it('the enumeration covers every member kind the spec\'s expander places, and nothing else', () => {
+        expect(Object.keys(MEMBER_CASES).sort()).toEqual(memberKindsOfTheExpander());
+        // Each probe really aims at a shipped name: without the fix it IS that name.
+        for (const [kind, c] of Object.entries(MEMBER_CASES)) {
+            const names = expandViewContainer(TASK, c.member).map((vi) => vi.name);
+            expect(names, kind).toEqual([c.shadows]);
+            expect(PACKAGED.map((v) => v.name), kind).toContain(c.shadows);
+        }
+    });
+
+    const KERNELS = [
+        ['an environment-scoped kernel (the standalone stack stamps env_local)', 'env_local'],
+        ['an unscoped kernel (write-through hydrates the registry)', undefined],
+    ] as const;
+    const CONTAINERS = [
+        { arm: 'package-scoped (saved into another writable package)', packageId: REPAIR, organizationId: undefined, ownPackage: REPAIR },
+        { arm: 'package-less, environment-wide', packageId: undefined, organizationId: undefined, ownPackage: undefined },
+        { arm: 'package-less, organization-scoped', packageId: undefined, organizationId: ORG, ownPackage: undefined },
+    ] as const;
+    const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) =>
+        protocol.saveMetaItem({
+            type: 'view', name, item,
+            ...(c.packageId ? { packageId: c.packageId } : {}),
+            ...scoped(c.organizationId),
+        } as any);
+
+    for (const [kernel, environmentId] of KERNELS) {
+        describe(`on ${kernel}`, () => {
+            for (const c of CONTAINERS) {
+                for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                    it(`${c.arm}, member ${kind}: no packaged name is replaced on either door, its own name is served with its own package, and it claims no default`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                        // (a)
+                        await expectEveryPackagedNameIntact(protocol, c.organizationId);
+                        // (b)
+                        const served = await objectDoor(protocol, c.organizationId);
+                        const own = served.filter((v) => String(v.name).startsWith(`${TASK}.${OWN}`));
+                        expect(own.map((v) => v.name)).toEqual([m.servedAs]);
+                        expect(own[0].object).toBe(TASK);
+                        expect(own[0]._packageId).toBe(c.ownPackage);
+                        expect(own[0]._provenance, 'never the packaged artifact\'s provenance').not.toBe('package');
+                        expect(own[0]._diagnostics?.valid, 'a qualified ViewItem name the spec accepts').toBe(true);
+                        expect(own[0].config, 'the member as authored, nothing lent left on it').toEqual(m.authored);
+                        // (c)
+                        expect(own[0].isDefault).toBeUndefined();
+                        expectOnlyPackagedDefaults(served);
+                        // The by-name door answers the container's own name with its row.
+                        const row = await byNameDoor(protocol, OWN, c.organizationId);
+                        expect(row?.object).toBe(TASK);
+                    });
+                }
+
+                it(`${c.arm}: the card's probe — the packaged default unchanged on BOTH doors, and the object keeps ONE list default`, async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    await save(protocol, 'os_qa_shadow_probe', probe('os_qa_shadow_probe'), c);
+
+                    const listed = named(await objectDoor(protocol, c.organizationId), DEFAULT);
+                    expect(listed, 'exactly one item answers <object>.default on the object door').toHaveLength(1);
+                    expectPackagedDefault(listed[0]);
+                    const read = await byNameDoor(protocol, DEFAULT, c.organizationId);
+                    expectPackagedDefault(read);
+                    expect({ label: read.label, config: read.config, _packageId: read._packageId })
+                        .toEqual({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId });
+                    const served = await objectDoor(protocol, c.organizationId);
+                    expect(served.filter((v) => v.viewKind === 'list' && v.isDefault).map((v) => v.name)).toEqual([DEFAULT]);
+                    expect(named(served, `${TASK}.os_qa_shadow_probe`)[0]?.config).toEqual(probe('os_qa_shadow_probe').list);
+                });
+            }
+
+            it('CONTROL — a container of the object\'s OWN package still expands to <object>.default, as its default', async () => {
+                const { protocol, rows } = showcaseHarness(environmentId);
+                // A row bound to the package that owns the object (an installed
+                // package's own stored view), written straight to the store.
+                rows.set('own-pkg-row', {
+                    id: 'r_own', type: 'view', name: 'os_qa_same_pkg', organization_id: null,
+                    package_id: SHOWCASE, state: 'active', metadata: JSON.stringify(probe('os_qa_same_pkg')),
+                });
+
+                const listed = named(await objectDoor(protocol), DEFAULT);
+                expect(listed).toHaveLength(1);
+                expect(listed[0].config).toEqual(probe('os_qa_same_pkg').list);
+                expect(listed[0]._packageId).toBe(SHOWCASE);
+                expect(listed[0].isDefault).toBe(true);
+                expect(named(await objectDoor(protocol), `${TASK}.os_qa_same_pkg`)).toEqual([]);
+            });
+
+            it('CONTROL — a package-less overlay OF the package\'s own container keeps expanding to <object>.default', async () => {
+                const { protocol } = showcaseHarness(environmentId);
+                // Name-keyed (ADR-0005): the row IS the overlay of the showcase's
+                // `showcase_task` container, so it stands in that package's slot.
+                const overlay = { name: TASK, list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] } };
+                await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any);
+
+                const listed = named(await objectDoor(protocol), DEFAULT);
+                expect(listed).toHaveLength(1);
+                expect(listed[0].label).toBe('Customized');
+                expect(listed[0]._packageId).toBe(SHOWCASE);
+                expect(listed[0].isDefault).toBe(true);
+                expect((await objectDoor(protocol)).filter((v) => String(v.name).startsWith(`${TASK}.${TASK}`))).toEqual([]);
+            });
+
+            it('CONTROL — the sanctioned override (a write to <object>.default by name) is served on both doors', async () => {
+                const { protocol } = showcaseHarness(environmentId);
+                const override = {
+                    name: DEFAULT, object: TASK, viewKind: 'list', label: 'Overridden',
+                    config: { type: 'grid', data, columns: [{ field: 'title' }] },
+                };
+                await protocol.saveMetaItem({ type: 'view', name: DEFAULT, item: override } as any);
+
+                const listed = named(await objectDoor(protocol), DEFAULT);
+                expect(listed).toHaveLength(1);
+                expect(listed[0].label).toBe('Overridden');
+                expect((await byNameDoor(protocol, DEFAULT)).label).toBe('Overridden');
+            });
+        });
+    }
+
+    it('the bare list keeps the spec\'s in-container de-duplication when a keyed view already takes the container\'s name', async () => {
+        const { protocol } = showcaseHarness('env_local');
+        const container = {
+            name: 'probe_x', object: TASK,
+            list: { type: 'grid', columns: ['title', 'status'] },
+            listViews: { probe_x: { label: 'Keyed', type: 'grid', columns: ['title'] } },
+        };
+        await protocol.saveMetaItem({ type: 'view', name: 'probe_x', item: container, packageId: REPAIR } as any);
+
+        const served = await objectDoor(protocol);
+        expect(named(served, `${TASK}.probe_x.probe_x`)[0]?.label).toBe('Keyed');
+        expect(named(served, `${TASK}.probe_x`)[0]?.config).toEqual(container.list);
+        await expectEveryPackagedNameIntact(protocol);
+    });
+
+    it('a container named after a key the owning package ships keeps its bare list off that name', async () => {
+        const { protocol } = showcaseHarness('env_local');
+        await protocol.saveMetaItem({ type: 'view', name: 'in_progress', item: probe('in_progress'), packageId: REPAIR } as any);
+
+        const served = await objectDoor(protocol);
+        expect(named(served, `${TASK}.in_progress.in_progress`)[0]?.config).toEqual(probe('in_progress').list);
+        expect(named(served, `${TASK}.in_progress.in_progress`)[0]?._packageId).toBe(REPAIR);
+        await expectEveryPackagedNameIntact(protocol);
+    });
+
+    it('a stored container with no name of its own expands nothing on another package\'s object', async () => {
+        const { protocol, rows } = showcaseHarness('env_local');
+        const nameless = { object: TASK, list: { type: 'grid', columns: ['title'] }, listViews: { in_progress: { label: 'Mine', type: 'grid', columns: ['title'] } } };
+        rows.set('nameless-row', {
+            id: 'r_nameless', type: 'view', name: 'os_qa_nameless', organization_id: null,
+            package_id: REPAIR, state: 'active', metadata: JSON.stringify(nameless),
+        });
+
+        const served = await objectDoor(protocol);
+        expect(served.filter((v) => v._packageId === REPAIR)).toEqual([]);
+        await expectEveryPackagedNameIntact(protocol);
+    });
+
+    /**
+     * #21442 — every name the object door lists answers the same row by name,
+     * on both kernels, for every member kind and every container scope.
+     *
+     * The list read expands each stored container it reads into its own answer;
+     * nothing else stores or registers those views on every kernel. Measured on
+     * `origin/main` before this change, with this harness: the by-name read
+     * answered an expanded name only on an unscoped kernel and only for an
+     * environment-wide container (registry hydration), and answered nothing on
+     * `env_local` or for an organization-scoped container. Triage's ruling A:
+     * the by-name read expands the in-scope containers through the function the
+     * list read uses, ⛔ no second expansion rule and ⛔ no kernel-specific
+     * branch. The container's own name stays its stored row — the control.
+     */
+    describe('#21442 a name a stored container expands answers by name what the object door lists', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        const ownNames = (served: any[]) => served.filter((v) => String(v.name).startsWith(`${TASK}.${OWN}`));
+        const layers = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (await protocol.getMetaItemLayered({ type: 'view', name, ...scoped(organizationId) })) as any;
+        const history = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (await protocol.historyMetaItem({ type: 'view', name, ...scoped(organizationId) })).events;
+        const diff = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (protocol as any).diffMetaItem({ type: 'view', name, ...scoped(organizationId) });
+        /** What the registry holds for `view`, by key — reads must leave it as they found it. */
+        const registrySnapshot = (registry: ReturnType<typeof faithfulRegistry>) =>
+            JSON.stringify(registry.listItems('view').map((it) => [it.name, it._packageId ?? null]).sort());
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const c of CONTAINERS) {
+                    for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                        it(`${c.arm}, member ${kind}: every name the object door lists answers that same item by name`, async () => {
+                            const { protocol } = showcaseHarness(environmentId);
+                            await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                            const served = await objectDoor(protocol, c.organizationId);
+                            expect(ownNames(served).map((v) => v.name), 'the expanded name is listed').toEqual([m.servedAs]);
+                            for (const listed of served) {
+                                const read = await byNameDoor(protocol, listed.name, c.organizationId);
+                                expect(withoutDiagnostics(read), `${listed.name} by name`).toEqual(withoutDiagnostics(listed));
+                            }
+                            // CONTROL — the container's own name is still its stored row.
+                            const row = await byNameDoor(protocol, OWN, c.organizationId);
+                            expect(row?.name).toBe(OWN);
+                            expect(row?.object).toBe(TASK);
+                            for (const key of Object.keys(m.member)) expect(row?.[key], `the stored container carries ${key}`).toEqual(m.member[key]);
+                        });
+                    }
+
+                    it(`${c.arm}: the layers name the container and its scope; history and diff resolve to the container's own row`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const member = MEMBER_CASES['listViews.*'];
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...member.member }, c);
+                        const expanded = member.servedAs;
+
+                        const layered = await layers(protocol, expanded, c.organizationId);
+                        // `overlay` is the container's own stored row, as the
+                        // layers read reports a stored row; `overlayScope` the
+                        // scope it was read from.
+                        expect(layered.overlay?.name).toBe(OWN);
+                        expect(layered.overlay?.listViews).toEqual(member.member.listViews);
+                        expect(layered.overlay?._packageId).toBe(c.ownPackage);
+                        expect(layered.overlayScope).toBe(c.organizationId ? 'org' : 'env');
+                        // `effective` is what the by-name read answers.
+                        expect(withoutDiagnostics(layered.effective))
+                            .toEqual(withoutDiagnostics(await byNameDoor(protocol, expanded, c.organizationId)));
+                        // CONTROL — the container's own name reports its own row, unchanged.
+                        const ownLayers = await layers(protocol, OWN, c.organizationId);
+                        expect(ownLayers.overlay?.name).toBe(OWN);
+                        expect(ownLayers.effective?.listViews).toEqual(member.member.listViews);
+
+                        const ownHistory = await history(protocol, OWN, c.organizationId);
+                        expect(ownHistory.length, 'the container has a change log of its own').toBeGreaterThan(0);
+                        const expandedHistory = await history(protocol, expanded, c.organizationId);
+                        expect(expandedHistory, 'the container\'s own log, nothing synthesized').toEqual(ownHistory);
+                        expect(expandedHistory.every((e: any) => e.ref.name === OWN), 'every event names the container').toBe(true);
+
+                        const ownDiff = await diff(protocol, OWN, c.organizationId);
+                        const expandedDiff = await diff(protocol, expanded, c.organizationId);
+                        expect(expandedDiff).toEqual(ownDiff);
+                        expect(expandedDiff.name, 'the answer names the item actually diffed').toBe(OWN);
+                    });
+
+                    it(`${c.arm}: the reads persist and register nothing, and a name nothing expands still answers nothing`, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, c);
+                        const rowsBefore = JSON.stringify([...rows.keys()].sort());
+                        const registryBefore = registrySnapshot(registry);
+
+                        const expanded = MEMBER_CASES['listViews.*'].servedAs;
+                        await byNameDoor(protocol, expanded, c.organizationId);
+                        await layers(protocol, expanded, c.organizationId);
+                        await history(protocol, expanded, c.organizationId);
+                        await diff(protocol, expanded, c.organizationId);
+                        expect(JSON.stringify([...rows.keys()].sort()), 'no derived row is stored').toBe(rowsBefore);
+                        expect(registrySnapshot(registry), 'no derived item is registered by a read').toBe(registryBefore);
+
+                        const nothing = `${TASK}.${OWN}.not_a_member`;
+                        expect(await byNameDoor(protocol, nothing, c.organizationId)).toBeUndefined();
+                        expect(await history(protocol, nothing, c.organizationId), 'no history for a name never stored').toEqual([]);
+                        const layeredNothing = await layers(protocol, nothing, c.organizationId);
+                        expect([layeredNothing.overlay, layeredNothing.overlayScope, layeredNothing.effective]).toEqual([null, null, null]);
+                    });
+                }
+
+                it('ISOLATION — an organization-scoped container\'s names answer nothing by name for another organization', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    const org = CONTAINERS.find((c) => c.organizationId !== undefined)!;
+                    await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, org);
+                    const expanded = MEMBER_CASES['listViews.*'].servedAs;
+
+                    expect(await byNameDoor(protocol, expanded, ORG)).toBeTruthy();
+                    expect(ownNames(await objectDoor(protocol, 'org_globex'))).toEqual([]);
+                    expect(await byNameDoor(protocol, expanded, 'org_globex')).toBeUndefined();
+                    expect(await byNameDoor(protocol, expanded)).toBeUndefined();
+                });
+
+                for (const organizationId of [undefined, ORG]) {
+                    it(`a tenant overlay of the package's own container (${organizationId ? 'organization-scoped' : 'environment-wide'}): each name it expands answers the overlay's view by name, not the packaged one`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const overlay = {
+                            name: TASK,
+                            list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
+                            listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+                        };
+                        await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay, ...scoped(organizationId) } as any);
+
+                        const served = await objectDoor(protocol, organizationId);
+                        for (const name of [DEFAULT, `${TASK}.in_progress`]) {
+                            const listed = named(served, name);
+                            expect(listed, `${name} is listed once`).toHaveLength(1);
+                            expect(String(listed[0].label)).toMatch(/^Customized/);
+                            const read = await byNameDoor(protocol, name, organizationId);
+                            expect(withoutDiagnostics(read), `${name} by name`).toEqual(withoutDiagnostics(listed[0]));
+                        }
+                        // The layers: the packaged item, the overlay that customizes it, and the result.
+                        const layered = await layers(protocol, DEFAULT, organizationId);
+                        expect(layered.code?.label).toBe('All Tasks');
+                        expect(layered.overlay?.name).toBe(TASK);
+                        expect(layered.overlayScope).toBe(organizationId ? 'org' : 'env');
+                        expect(layered.effective?.label).toBe('Customized');
+                    });
+                }
+            });
+        }
+
+        it('both kernels answer every listed name with the same item', async () => {
+            for (const c of CONTAINERS) {
+                for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                    const answers = [];
+                    for (const [, environmentId] of KERNELS) {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                        answers.push(withoutDiagnostics(await byNameDoor(protocol, m.servedAs, c.organizationId)));
+                    }
+                    expect(answers[0], `${c.arm}, member ${kind}`).toBeTruthy();
+                    expect(answers[1], `${c.arm}, member ${kind}`).toEqual(answers[0]);
+                }
+            }
+        });
+    });
+
+    /**
+     * #21510 — a stored row named exactly like a name a stored container
+     * expands answers that name on BOTH doors.
+     *
+     * Triage's ruling: the stored row wins on both doors. ADR-0005 overlays are
+     * name-keyed, so a row stored under exactly that name is the sanctioned
+     * override for it; an expansion is derived from its container, so it fills
+     * only names that have no row of their own. That is the rule #21442 gave
+     * the by-name read, and the object door's list read adopts it: ⛔ not a
+     * second rule, both doors ask one predicate over the caller's own row
+     * selection.
+     *
+     * Measured on `origin/main` before this change, with this harness: the
+     * object door listed the container's expansion under the row's name
+     * (`FromContainer`) while the by-name read answered the stored row
+     * (`ByNameRow`), on both kernels, in both scopes and in either write
+     * order. The name the same container expands with no row of its own still
+     * answers the expansion on both doors — the control.
+     */
+    describe('#21510 a stored row named exactly like an expansion answers that name on both doors', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        /** The dev's setup: a stored overlay of the showcase's own `showcase_task` container… */
+        const container = {
+            name: TASK,
+            list: { label: 'FromContainer', type: 'grid', data, columns: [{ field: 'title' }] },
+            listViews: {
+                in_progress: { label: 'FromContainer In Progress', type: 'grid', data, columns: [{ field: 'title' }] },
+            },
+        };
+        /** …plus a stored row named exactly like the name its bare `list` expands to. */
+        const row = {
+            name: DEFAULT, object: TASK, viewKind: 'list', label: 'ByNameRow',
+            config: { type: 'grid', data, columns: [{ field: 'title' }, { field: 'status' }] },
+        };
+        /** The control: a name the container expands that has no row of its own. */
+        const ROWLESS = `${TASK}.in_progress`;
+        const saveView = (protocol: Protocol, name: string, item: unknown, organizationId?: string) =>
+            protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId) } as any);
+        /** The two doors answer `name` with one item, and that item is the one `expectItem` names. */
+        const expectBothDoors = async (
+            protocol: Protocol, name: string, organizationId: string | undefined, expectItem: (v: any) => void,
+        ) => {
+            const listed = named(await objectDoor(protocol, organizationId), name);
+            expect(listed, `exactly one item answers ${name} on the object door`).toHaveLength(1);
+            expectItem(listed[0]);
+            const read = await byNameDoor(protocol, name, organizationId);
+            expectItem(read);
+            expect(withoutDiagnostics(read), `${name}: the by-name read answers the item the object door lists`)
+                .toEqual(withoutDiagnostics(listed[0]));
+        };
+        const expectTheRow = (v: any) => {
+            expect(v?.label).toBe('ByNameRow');
+            expect(v?.config).toEqual(row.config);
+        };
+        const expectTheExpansion = (v: any) => {
+            expect(v?.label).toBe('FromContainer In Progress');
+            expect(v?.config?.columns).toEqual([{ field: 'title' }]);
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const order of ['the container first', 'the row first'] as const) {
+                        it(`${scope}, ${order}: the stored row answers its name on both doors; the row-less expanded name answers the expansion`, async () => {
+                            const { protocol, rows } = showcaseHarness(environmentId);
+                            const writes = [
+                                () => saveView(protocol, TASK, container, organizationId),
+                                // The public input: the save door accepts a write by the expanded name.
+                                () => saveView(protocol, DEFAULT, row, organizationId),
+                            ];
+                            for (const write of order === 'the container first' ? writes : [...writes].reverse()) await write();
+                            expect(
+                                [...rows.values()].filter((r) => r.name === DEFAULT && r.organization_id === (organizationId ?? null)),
+                                'the save door stored the row under the expanded name',
+                            ).toHaveLength(1);
+
+                            await expectBothDoors(protocol, DEFAULT, organizationId, expectTheRow);
+                            // The by-name family asks the same predicate: the
+                            // row's name keeps its own change log and its own
+                            // diff, never the container's.
+                            const events = (await protocol.historyMetaItem({ type: 'view', name: DEFAULT, ...scoped(organizationId) })).events;
+                            expect(events.length, 'the row has a change log of its own').toBeGreaterThan(0);
+                            expect(events.every((e: any) => e.ref.name === DEFAULT), 'every event names the row').toBe(true);
+                            expect((await (protocol as any).diffMetaItem({ type: 'view', name: DEFAULT, ...scoped(organizationId) })).name)
+                                .toBe(DEFAULT);
+                            // CONTROL — a row-less name the same container expands.
+                            await expectBothDoors(protocol, ROWLESS, organizationId, expectTheExpansion);
+                            // The contract the ruling keeps (#21334): every name
+                            // the object door lists answers that same item by name.
+                            for (const listed of await objectDoor(protocol, organizationId)) {
+                                const read = await byNameDoor(protocol, listed.name, organizationId);
+                                expect(withoutDiagnostics(read), `${listed.name} by name`).toEqual(withoutDiagnostics(listed));
+                            }
+                        });
+                    }
+                }
+
+                it('the predicate is read over the caller\'s own rows: an organization\'s row wins for that organization only', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    await saveView(protocol, TASK, container);
+                    await saveView(protocol, DEFAULT, row, ORG);
+
+                    // The organization that holds the row: the row, on both doors.
+                    await expectBothDoors(protocol, DEFAULT, ORG, expectTheRow);
+                    // A caller for whom the name has no row of its own: the
+                    // container's expansion, on both doors.
+                    const expectTheDefaultExpansion = (v: any) => {
+                        expect(v?.label).toBe('FromContainer');
+                        expect(v?.config?.columns).toEqual([{ field: 'title' }]);
+                    };
+                    await expectBothDoors(protocol, DEFAULT, undefined, expectTheDefaultExpansion);
+                    await expectBothDoors(protocol, DEFAULT, 'org_globex', expectTheDefaultExpansion);
+                });
+            });
+        }
+    });
+
+    /**
+     * #21511 — an expansion inherits its container's authorship, so the
+     * unscoped kernel answers an expanded view as `env_local` does.
+     *
+     * Registry hydration (an unscoped kernel's environment-wide rows only)
+     * registered each expansion of a stored container under its bare name with
+     * no tenant marker, while the container itself carries one
+     * (`_provenance: 'org'`). Measured on `origin/main` before this change, with
+     * this harness and the card's probe: `getMetaItem(...).resettable` answered
+     * `true` for a package-bound container (`env_local`: `false`), and
+     * `getMetaItemLayered` answered the hydrated expansion as the `code` layer
+     * for a package-bound and a package-less container alike (`env_local`:
+     * `null`). Triage's ruling: each expansion carries its container's marker,
+     * and the save door's acceptance of a write by an expanded name is
+     * unchanged.
+     */
+    describe('#21511 an expanded view of a stored container answers as tenant-authored on both kernels', () => {
+        /** The arms registry hydration registers: environment-wide rows. */
+        const ENV_WIDE = CONTAINERS.filter((c) => c.organizationId === undefined);
+        /** What the two reads tell a caller about an item's code layer and its affordances. */
+        const answer = async (protocol: Protocol, name: string) => {
+            const meta = (await protocol.getMetaItem({ type: 'view', name } as any)) as any;
+            const layered = (await protocol.getMetaItemLayered({ type: 'view', name })) as any;
+            return {
+                resettable: meta.resettable, editable: meta.editable, deletable: meta.deletable, lock: meta.lock,
+                provenance: meta.provenance, packageId: meta.packageId, code: layered.code,
+            };
+        };
+        const kernelName = (environmentId: string | undefined) => environmentId ?? 'unscoped';
+
+        for (const c of ENV_WIDE) {
+            for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                it(`${c.arm}, member ${kind}: the expanded view is not resettable and has no code layer, on both kernels alike`, async () => {
+                    const answers = [];
+                    for (const [, environmentId] of KERNELS) {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                        const a = await answer(protocol, m.servedAs);
+                        expect(a.resettable, `${kernelName(environmentId)}: no package ships it`).toBe(false);
+                        expect(a.code, `${kernelName(environmentId)}: no artifact, so no code layer`).toBeNull();
+                        answers.push(a);
+                    }
+                    expect(answers[1], 'the unscoped kernel answers as env_local does').toEqual(answers[0]);
+                });
+            }
+
+            it(`${c.arm}: on an unscoped kernel each registered expansion carries its container's tenant marker`, async () => {
+                const { protocol, registry } = showcaseHarness(undefined);
+                const m = MEMBER_CASES['listViews.*'];
+                await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                const container = registry.getItem('view', OWN);
+                expect(container?._provenance, 'the container is registered as tenant-authored').toBe('org');
+                const expansions = registry.listItems('view').filter((it) => String(it.name).startsWith(`${TASK}.${OWN}`));
+                expect(expansions.map((it) => it.name), 'hydration registered the expansion').toEqual([m.servedAs]);
+                for (const it of expansions) {
+                    expect(it._provenance, `${it.name} inherits the container's marker`).toBe(container?._provenance);
+                    expect(it._packageId, `${it.name} keeps its container's package`).toBe(c.ownPackage);
+                    expect(isCodeArtifactBody(it), `${it.name} is no code artifact`).toBe(false);
+                }
+            });
+
+            it(`${c.arm}: the save door still accepts a write by an expanded name, alike on both kernels, and that row then answers the name`, async () => {
+                const m = MEMBER_CASES['listViews.*'];
+                const byName = {
+                    name: m.servedAs, object: TASK, viewKind: 'list', label: 'ByName',
+                    config: { type: 'grid', data, columns: [{ field: 'title' }] },
+                };
+                const outcomes = [];
+                for (const [, environmentId] of KERNELS) {
+                    const { protocol, rows } = showcaseHarness(environmentId);
+                    await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                    const saved = (await save(protocol, m.servedAs, byName, c)) as any;
+                    const stored = [...rows.values()]
+                        .filter((r) => r.name === m.servedAs)
+                        .map((r) => ({ package_id: r.package_id, organization_id: r.organization_id, state: r.state }));
+                    expect(stored, `${kernelName(environmentId)}: stored once, in the container's scope`)
+                        .toEqual([{ package_id: c.packageId ?? null, organization_id: null, state: 'active' }]);
+                    expect((await byNameDoor(protocol, m.servedAs))?.label).toBe('ByName');
+                    expect(named(await objectDoor(protocol), m.servedAs).map((v) => v.label)).toEqual(['ByName']);
+                    outcomes.push({ success: saved?.success, stored, ...(await answer(protocol, m.servedAs)) });
+                }
+                expect(outcomes[0].success).toBe(true);
+                expect(outcomes[1], 'the unscoped kernel answers the write as env_local does').toEqual(outcomes[0]);
+            });
+        }
+
+        it('CONTROL — an expansion its own package ships keeps that artifact\'s envelope over the marker (ADR-0010 §3.3): resettable, with the packaged code layer, on both kernels alike', async () => {
+            const overlay = {
+                name: TASK,
+                list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
+                listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+            };
+            const shipped = [DEFAULT, `${TASK}.in_progress`];
+            const answers: Record<string, unknown>[][] = [];
+            for (const [, environmentId] of KERNELS) {
+                const { protocol, registry } = showcaseHarness(environmentId);
+                // A package-less overlay OF the showcase's own container (ADR-0005,
+                // name-keyed): it expands to names the showcase ships, in its slot.
+                await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any);
+                const perKernel = [];
+                for (const name of shipped) {
+                    const a = await answer(protocol, name);
+                    expect(a.resettable, `${kernelName(environmentId)}, ${name}: the showcase ships it`).toBe(true);
+                    expect((a.code as any)?.label, `${kernelName(environmentId)}, ${name}: the packaged code layer`)
+                        .toBe(PACKAGED.find((v) => v.name === name)?.label);
+                    perKernel.push(a);
+                    if (environmentId === undefined) {
+                        const hydrated = registry.listItems('view')
+                            .filter((it) => it.name === name && String(it.label).startsWith('Customized'));
+                        expect(hydrated, `${name}: hydration registered the overlay's expansion`).toHaveLength(1);
+                        expect(
+                            { _provenance: hydrated[0]._provenance, _packageId: hydrated[0]._packageId },
+                            `${name}: the artifact's envelope is merged over the marker, not under it`,
+                        ).toEqual({ _provenance: 'package', _packageId: SHOWCASE });
+                    }
+                }
+                answers.push(perKernel);
+            }
+            expect(answers[1], 'the unscoped kernel answers as env_local does').toEqual(answers[0]);
+        });
+    });
+
+    /**
+     * #21558 — the save door refuses a view container saved under a name its
+     * own expansion produces.
+     *
+     * Measured on `origin/main` before this change, with this harness: the
+     * card's save, `{ name: 'showcase_task.default', object: 'showcase_task',
+     * list }` under `showcase_task.default`, was accepted on both kernels; the
+     * object door then listed nothing under that name (the container is the
+     * name's own row, so #21510's predicate keeps its expansion out, and a
+     * container is never enumerated) while the by-name read answered the raw
+     * container — no door answered a view item for the name. Triage's ruling:
+     * refuse it at the write door with a named error and a prescription (save
+     * the container under its object's name, or a view item under the
+     * expanded name); ⛔ no second own-row test in the readers.
+     *
+     * The refusal asks the readers' own expansion, so every member kind is
+     * covered as the expander places it. The two controls are the ruling's: a
+     * container under its object's name saves and expands as before, and a
+     * view item under an expanded name saves, as the sanctioned override.
+     */
+    describe('#21558 the save door refuses a view container saved under a name its own expansion produces', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        const saveIn = (
+            protocol: Protocol, name: string, item: unknown, organizationId?: string, mode?: 'draft' | 'publish',
+        ) => protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId), ...(mode ? { mode } : {}) } as any);
+        const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
+        /**
+         * The minimum a rejection pin asserts — the ADR-0112 envelope — plus the subjects it names.
+         * [#21639] Every name below is also a name the showcase SHIPS, and the family's one
+         * predicate names that other owner: the shipping package, and the object its view is on.
+         */
+        const expectRefused = (error: any, saveName: string) => {
+            expect(error).toBeInstanceOf(Error);
+            expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+            expect(error.message, 'the refusal names the save name').toContain(`'${saveName}'`);
+            expect(error.message, 'the refusal names the object its view is on').toContain(`'${TASK}'`);
+            expect(error.message, 'the refusal names the other owner, the shipping package').toContain(`the package '${SHOWCASE}' ships`);
+        };
+        /** The doors answer `name` with the one item `expectItem` names, and the same item on both. */
+        const expectBothDoors = async (
+            protocol: Protocol, name: string, organizationId: string | undefined, expectItem: (v: any) => void,
+        ) => {
+            const listed = named(await objectDoor(protocol, organizationId), name);
+            expect(listed, `exactly one item answers ${name} on the object door`).toHaveLength(1);
+            expectItem(listed[0]);
+            const read = await byNameDoor(protocol, name, organizationId);
+            expectItem(read);
+            expect(withoutDiagnostics(read), `${name}: the by-name read answers the item the object door lists`)
+                .toEqual(withoutDiagnostics(listed[0]));
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                        it(`${scope}, member ${kind}: a container saved under ${m.shadows}, a name its own expansion produces, is refused VALIDATION_ERROR / 400; nothing is stored or registered`, async () => {
+                            const { protocol, rows, registry } = showcaseHarness(environmentId);
+                            const body = { name: m.shadows, object: TASK, ...m.member };
+                            expect(expandViewContainer(TASK, body).map((vi) => vi.name), 'the save name is its own expansion\'s')
+                                .toEqual([m.shadows]);
+
+                            expectRefused(await refusalOf(saveIn(protocol, m.shadows, body, organizationId)), m.shadows);
+                            expect([...rows.values()].filter((r) => r.type === 'view'), 'no row is stored').toEqual([]);
+                            expect(
+                                registry.listItems('view').filter((it) => isAggregatedViewContainer(it) && it.name === m.shadows),
+                                'no container is registered under the name',
+                            ).toEqual([]);
+                            // The doors answer exactly what they answered before the save.
+                            await expectEveryPackagedNameIntact(protocol, organizationId);
+                        });
+                    }
+
+                    it(`${scope}: the card's save is refused as a draft too, and no draft is stored`, async () => {
+                        const { protocol, rows } = showcaseHarness(environmentId);
+                        const body = { name: DEFAULT, object: TASK, list: { label: 'SelfNamed', type: 'grid', columns: [{ field: 'title' }] } };
+                        expectRefused(await refusalOf(saveIn(protocol, DEFAULT, body, organizationId, 'draft')), DEFAULT);
+                        expect([...rows.values()].filter((r) => r.type === 'view'), 'no draft row is stored').toEqual([]);
+                    });
+
+                    it(`${scope}: a container saved under its object's name saves and expands as before`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const overlay = {
+                            name: TASK,
+                            list: { label: 'Overlay', type: 'grid', data, columns: [{ field: 'title' }] },
+                            listViews: { in_progress: { label: 'Overlay In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+                        };
+                        const saved = (await saveIn(protocol, TASK, overlay, organizationId)) as any;
+                        expect(saved?.success).toBe(true);
+                        await expectBothDoors(protocol, DEFAULT, organizationId, (v) => expect(v?.label).toBe('Overlay'));
+                        await expectBothDoors(protocol, `${TASK}.in_progress`, organizationId, (v) => expect(v?.label).toBe('Overlay In Progress'));
+                    });
+
+                    it(`${scope}: a view item saved under an expanded name saves, as that name's sanctioned override`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const item = {
+                            name: DEFAULT, object: TASK, viewKind: 'list', label: 'ByNameRow',
+                            config: { type: 'grid', data, columns: [{ field: 'title' }, { field: 'status' }] },
+                        };
+                        const saved = (await saveIn(protocol, DEFAULT, item, organizationId)) as any;
+                        expect(saved?.success).toBe(true);
+                        await expectBothDoors(protocol, DEFAULT, organizationId, (v) => expect(v?.label).toBe('ByNameRow'));
+                    });
+                }
+            });
+        }
+    });
+
+    /**
+     * #21620 — the save door refuses a view container saved under a name that
+     * ANOTHER stored container of the same object expands to.
+     *
+     * Measured on `origin/main` before this change, in-process on both
+     * kernels: with `{ name: 'crm_lead', object: 'crm_lead', list, listViews:
+     * { pipeline } }` stored, a second container `{ object: 'crm_lead', list }`
+     * saved as `crm_lead.pipeline` was accepted. It became that name's own
+     * row, so the first container's expansion no longer filled the name: the
+     * object door listed nothing under it and the by-name read answered the
+     * raw second container. #21558's check does not fire, because the second
+     * container's OWN expansion is `crm_lead.default`.
+     *
+     * Triage's ruling made a broader check (a container named only after its
+     * object) conditional on a census, with this narrower one as the
+     * fallback. The census hit — this door keeps a container saved under a
+     * name other than its object (the #13407 block above, #21412's P2 and
+     * P2b below, this block's own #21334 cases) — so only the name another
+     * stored container of the same object expands to is refused.
+     *
+     * The ruling's three pins, on both kernels and both scopes: the measured
+     * save is refused (every member kind the first container can expand the
+     * name from, the card's own pair, draft mode, a body with no `name`, a
+     * `form`-only body, and a sibling on another package's object); a
+     * container under its object's name saves and expands as before; a view
+     * item under an expanded name still saves. One more control is the
+     * census's: a container under a name of its own, not its object's and not
+     * a sibling's expansion, still saves.
+     *
+     * [#21639] Since generalised: the family's one predicate drops "of the
+     * same object" and adds the shapes this check left open (that block,
+     * below). Every pin here keeps its envelope and its intent.
+     */
+    describe('#21620 the save door refuses a container saved under a name another stored container of the same object expands to', () => {
+        const LEAD = 'crm_lead';
+        const leadData = { provider: 'object', object: LEAD };
+        const leadList = (label: string) => ({ label, type: 'grid', data: leadData, columns: [{ field: 'name' }] });
+        const leadForm = { type: 'simple', sections: [{ label: 'Main', fields: ['name'] }] };
+        /** The card's second container: a bare `list`, bound to the same object (its own expansion is `crm_lead.default`). */
+        const second = (name?: string) => ({ ...(name ? { name } : {}), object: LEAD, list: leadList('Other') });
+        /**
+         * A second container whose own expansion (`crm_lead.other`) is never a
+         * name a first container below expands, so the refusal it meets is
+         * this check's and not #21558's.
+         */
+        const secondKeyed = (name: string) => ({ name, object: LEAD, listViews: { other: leadList('Other') } });
+        /**
+         * One first container per member kind, each on the runtime-authored
+         * object the card measured: the name it expands is the second
+         * container's save name.
+         */
+        const FIRST_CASES: Record<string, Record<string, unknown>> = {
+            list: { list: leadList('First Default') },
+            'list#named': { list: { ...leadList('First Named'), name: 'hot' } },
+            'listViews.*': { listViews: { pipeline: leadList('First Pipeline') } },
+            form: { form: leadForm },
+            'formViews.*': { formViews: { edit: leadForm } },
+        };
+        const FIRST = 'lead_first_views';
+
+        const saveIn = (
+            protocol: Protocol, name: string, item: unknown, organizationId?: string, mode?: 'draft' | 'publish',
+        ) => protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId), ...(mode ? { mode } : {}) } as any);
+        const saved = async (write: Promise<unknown>) => expect(((await write) as any)?.success).toBe(true);
+        const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
+        const leadDoor = async (protocol: Protocol, organizationId?: string) =>
+            switcherMatches(((await protocol.getMetaItems({ type: 'view', ...scoped(organizationId) } as any)) as any).items, LEAD);
+        /** The ADR-0112 envelope, and the two subjects the refusal names. */
+        const expectRefused = (error: any, saveName: string, sibling: string) => {
+            expect(error).toBeInstanceOf(Error);
+            expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+            expect(error.message, 'the refusal names the save name').toContain(`'${saveName}'`);
+            expect(error.message, 'the refusal names the container that expands it').toContain(`'${sibling}'`);
+        };
+        /** Nothing of the refused save reached the store or the registry. */
+        const expectNothingWritten = (
+            rows: Map<string, Row>, registry: ReturnType<typeof faithfulRegistry>, storedNames: string[], refused: string,
+        ) => {
+            expect([...rows.values()].filter((r) => r.type === 'view').map((r) => [r.name, r.state]), 'no row and no draft is stored')
+                .toEqual(storedNames.map((n) => [n, 'active']));
+            expect(
+                registry.listItems('view').filter((it) => isAggregatedViewContainer(it) && it.name === refused),
+                'no container is registered under the refused name',
+            ).toEqual([]);
+        };
+        /** `name` answers one view item on BOTH doors — the same item — carrying `label`. */
+        const expectServed = async (protocol: Protocol, name: string, organizationId: string | undefined, label: unknown) => {
+            const listed = named(await leadDoor(protocol, organizationId), name);
+            expect(listed, `exactly one item answers ${name} on the object door`).toHaveLength(1);
+            expect(listed[0]?.label).toBe(label);
+            const read = await byNameDoor(protocol, name, organizationId);
+            expect(isAggregatedViewContainer(read), `${name} by name is a view item, not a raw container`).toBe(false);
+            expect({ name: read?.name, viewKind: read?.viewKind, object: read?.object, config: read?.config })
+                .toEqual({ name, viewKind: listed[0].viewKind, object: LEAD, config: listed[0].config });
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+
+                    for (const [kind, member] of Object.entries(FIRST_CASES)) {
+                        it(`${scope}, the first container's member ${kind}: a second container saved under the name it expands is refused VALIDATION_ERROR / 400; nothing is stored or registered, and the first container's view still answers on both doors`, async () => {
+                            const { protocol, rows, registry } = showcaseHarness(environmentId);
+                            const firstBody = { name: FIRST, object: LEAD, ...member };
+                            const [firstView] = expandViewContainer(LEAD, firstBody) as any[];
+                            expect(expandViewContainer(LEAD, firstBody), 'the first container expands one name').toHaveLength(1);
+                            const name = String(firstView.name);
+                            await saved(saveIn(protocol, FIRST, firstBody, organizationId));
+
+                            expectRefused(await refusalOf(saveIn(protocol, name, secondKeyed(name), organizationId)), name, FIRST);
+                            expectNothingWritten(rows, registry, [FIRST], name);
+                            await expectServed(protocol, name, organizationId, firstView.label);
+                        });
+                    }
+
+                    it(`${scope}: the card's save — '${LEAD}' stored with listViews.pipeline, then a second container saved as ${LEAD}.pipeline — is refused in publish and draft mode, with or without a body \`name\``, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        const first = { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } };
+                        await saved(saveIn(protocol, LEAD, first, organizationId));
+
+                        const PIPELINE = `${LEAD}.pipeline`;
+                        expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), organizationId)), PIPELINE, LEAD);
+                        // A body with no `name` is judged under the name the door stamps on it.
+                        expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(), organizationId)), PIPELINE, LEAD);
+                        expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), organizationId, 'draft')), PIPELINE, LEAD);
+                        expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                        await expectServed(protocol, PIPELINE, organizationId, 'Lead Pipeline');
+                        await expectServed(protocol, `${LEAD}.default`, organizationId, 'All Leads');
+                    });
+
+                    it(`${scope}: a \`form\`-only second container is refused by this check, before the identity stamp could turn it into a malformed view item`, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, formViews: { edit: leadForm } }, organizationId));
+                        const EDIT = `${LEAD}.edit`;
+                        expectRefused(
+                            await refusalOf(saveIn(protocol, EDIT, { name: EDIT, object: LEAD, form: leadForm }, organizationId)), EDIT, LEAD,
+                        );
+                        expectNothingWritten(rows, registry, [LEAD], EDIT);
+                    });
+
+                    it(`${scope}: a sibling on ANOTHER package's object is judged where the readers place its names — a container saved under its own-name expansion is refused`, async () => {
+                        const { protocol, rows } = showcaseHarness(environmentId);
+                        const first = { name: OWN, object: TASK, listViews: { in_progress: { ...listView, label: 'Own In Progress' } } };
+                        await saved(protocol.saveMetaItem({ type: 'view', name: OWN, item: first, packageId: REPAIR } as any));
+                        const UNDER = `${TASK}.${OWN}.in_progress`;
+                        expect(named(await objectDoor(protocol, organizationId), UNDER), 'the sibling serves its own-name expansion').toHaveLength(1);
+
+                        const body = { name: UNDER, object: TASK, list: listView };
+                        expectRefused(await refusalOf(saveIn(protocol, UNDER, body, organizationId)), UNDER, OWN);
+                        expect([...rows.values()].filter((r) => r.type === 'view').map((r) => r.name)).toEqual([OWN]);
+                        expect(named(await objectDoor(protocol, organizationId), UNDER)).toHaveLength(1);
+                        await expectEveryPackagedNameIntact(protocol, organizationId);
+                    });
+
+                    it(`${scope}: CONTROL — a container under its object's name saves and expands as before, beside a sibling, and re-saves`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, 'lead_hot_views', { name: 'lead_hot_views', object: LEAD, listViews: { hot: leadList('Hot Leads') } }, organizationId));
+                        const own = { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } };
+                        await saved(saveIn(protocol, LEAD, own, organizationId));
+                        // Its own row is the row a re-save replaces, never a sibling.
+                        await saved(saveIn(protocol, LEAD, { ...own, list: leadList('All Leads, edited') }, organizationId));
+                        await expectServed(protocol, `${LEAD}.default`, organizationId, 'All Leads, edited');
+                        await expectServed(protocol, `${LEAD}.pipeline`, organizationId, 'Lead Pipeline');
+                        await expectServed(protocol, `${LEAD}.hot`, organizationId, 'Hot Leads');
+                    });
+
+                    it(`${scope}: CONTROL — a view item saved under a sibling's expanded name saves, as that name's sanctioned override`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }, organizationId));
+                        const PIPELINE = `${LEAD}.pipeline`;
+                        const item = { name: PIPELINE, object: LEAD, viewKind: 'list', label: 'ByNameRow', config: { type: 'grid', data: leadData, columns: [{ field: 'name' }] } };
+                        await saved(saveIn(protocol, PIPELINE, item, organizationId));
+                        await expectServed(protocol, PIPELINE, organizationId, 'ByNameRow');
+                    });
+
+                    it(`${scope}: CONTROL (the census) — a container saved under a name of its own, neither its object's nor a sibling's expansion, still saves and serves`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } }, organizationId));
+                        await saved(saveIn(protocol, 'lead_hot_views', { object: LEAD, listViews: { hot: leadList('Hot Leads') } }, organizationId));
+                        await expectServed(protocol, `${LEAD}.hot`, organizationId, 'Hot Leads');
+                        await expectServed(protocol, `${LEAD}.pipeline`, organizationId, 'Lead Pipeline');
+                    });
+                }
+
+                it('the prescription names the sibling container that expands the name and never prescribes a save under it — in the card\'s pair the object\'s own name IS that sibling', async () => {
+                    const { protocol, rows, registry } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    const error = await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE)));
+                    // The envelope, and the sibling named as the container that expands the name.
+                    expectRefused(error, PIPELINE, LEAD);
+                    // A save under the sibling's name would replace its row and drop `pipeline`,
+                    // the view this refusal keeps serving: no arm may name that save. So every
+                    // place the sibling's name appears names it as THE CONTAINER (or as the
+                    // object a view binds to), never as a name to save under.
+                    const leadIns = String(error.message).split(`'${LEAD}'`).slice(0, -1);
+                    expect(leadIns.filter((s) => /container $/.test(s)).length, 'the sibling is named as the container').toBeGreaterThan(0);
+                    expect(
+                        leadIns.filter((s) => !/(container|on) $/.test(s)),
+                        'the sibling\'s (here the object\'s) name is never prescribed as a name to save under',
+                    ).toEqual([]);
+                    expect(error.message).not.toContain(`under '${LEAD}'`);
+                    expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                    await expectServed(protocol, PIPELINE, undefined, 'Lead Pipeline');
+                });
+
+                it('an environment-wide sibling is in an organization caller\'s selection: that caller\'s save under its expanded name is refused', async () => {
+                    const { protocol, rows, registry } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), ORG)), PIPELINE, LEAD);
+                    expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                    await expectServed(protocol, PIPELINE, ORG, 'Lead Pipeline');
+                });
+
+                it('CONTROL — another organization\'s container is not this caller\'s sibling: the save is judged by the caller\'s own selection, as the readers judge', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }, 'org_globex'));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    await saved(saveIn(protocol, PIPELINE, second(PIPELINE), ORG));
+                    // The other organization still gets its own container's view, on both doors.
+                    await expectServed(protocol, PIPELINE, 'org_globex', 'Lead Pipeline');
+                });
+            });
+        }
+    });
+
+    /**
+     * #21639, with #21638 folded in — the family's ONE collision predicate at
+     * the save door, and its enumeration pin (triage's acceptance).
+     *
+     * The rule: a stored view container is refused at save when its save
+     * name, or any name its expansion produces, is a name already served from
+     * elsewhere — another stored container's expansion in the caller's
+     * selection, whatever that container's object, or a view item a package
+     * ships. It replaces #21558's and #21620's one-shape checks; their blocks
+     * above keep their envelopes and their intent.
+     *
+     * Measured on `origin/main` before this change (`7b07749f05`), with this
+     * harness: every REFUSED row below that is not #21558's or #21620's own
+     * shape was accepted, and the doors then served the collision — the
+     * sibling's or the package's view gone, or replaced by the later
+     * container's.
+     *
+     * The table is the acceptance: one row per container shape, each either
+     * REFUSED (the ADR-0112 envelope, and the other owner and the colliding
+     * name named) or ALLOWED (with its reason). A row that is neither fails;
+     * the ruling's shapes and every cell of the predicate (which name × which
+     * owner) must each have a row, so a shape added without a verdict, or a
+     * cell left without a refused row, turns the pin red.
+     */
+    describe('#21639 the save door\'s one collision predicate — the enumeration pin', () => {
+        const LEAD = 'crm_lead';
+        const OTHER_ORG = 'org_globex';
+        const leadData = { provider: 'object', object: LEAD };
+        const leadList = (label: string) => ({ label, type: 'grid', data: leadData, columns: [{ field: 'name' }] });
+        const taskList = (label: string) => ({ label, type: 'grid', data, columns: [{ field: 'title' }] });
+        /** The stored container most rows sit beside: `crm_lead` with a default list and a `pipeline`. */
+        const storedLead = { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } };
+        const KANBAN = `${TASK}.kanban`;
+        /** A view item the showcase ships on its own, outside its `showcase_task` container. */
+        const shippedKanban = {
+            name: KANBAN, object: TASK, viewKind: 'list', label: 'Board',
+            config: { type: 'kanban', data, columns: [{ field: 'title' }] },
+        };
+        function collisionHarness(environmentId?: string) {
+            const harness = showcaseHarness(environmentId);
+            harness.registry.registerItem('view', { ...shippedKanban }, 'name', SHOWCASE);
+            return harness;
+        }
+
+        type Subject = 'its save name' | 'a name its expansion produces';
+        type OwnerKind = 'its own expansion' | 'another stored container' | 'a view item a package ships';
+        type Scope = 'environment-wide' | 'organization-scoped';
+        /** `organizationId`: absent — the caller's own scope; `null` — environment-wide; a string — that organization. */
+        interface Write { name: string; item: unknown; packageId?: string; organizationId?: string | null }
+        interface Served { object: string; name: string; label: string }
+        interface Shape {
+            shape: string;
+            /** The ruling's own name for the shape, where it names one. */
+            ruled?: string;
+            scopes?: readonly Scope[];
+            given?: readonly Write[];
+            save: Write;
+            refused?: { subject: Subject; owner: OwnerKind; ownerName: string; collides: string; stillServed?: Served };
+            allowed?: { because: string; serves: readonly Served[] };
+        }
+
+        const SHAPES: readonly Shape[] = [
+            // ── REFUSED ─────────────────────────────────────────────────────
+            {
+                shape: 'a container saved under a name its own expansion produces',
+                ruled: '#21558\'s own-expansion name',
+                save: { name: `${LEAD}.default`, item: { name: `${LEAD}.default`, object: LEAD, list: leadList('Self') } },
+                refused: { subject: 'its save name', owner: 'its own expansion', ownerName: LEAD, collides: `${LEAD}.default` },
+            },
+            {
+                shape: 'a container saved under a name its own expansion produces, while a stored container holds its object\'s name',
+                given: [{ name: LEAD, item: { name: LEAD, object: LEAD, listViews: { hot: leadList('Hot Leads') } } }],
+                save: { name: `${LEAD}.default`, item: { name: `${LEAD}.default`, object: LEAD, list: leadList('Self') } },
+                refused: {
+                    subject: 'its save name', owner: 'its own expansion', ownerName: LEAD, collides: `${LEAD}.default`,
+                    stillServed: { object: LEAD, name: `${LEAD}.hot`, label: 'Hot Leads' },
+                },
+            },
+            {
+                shape: 'a container of the same object saved under a name a stored container expands',
+                ruled: '#21620\'s sibling expansion of the same object',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Other') } },
+                refused: {
+                    subject: 'its save name', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.pipeline`,
+                    stillServed: { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                },
+            },
+            {
+                shape: 'a container bound to ANOTHER object saved under a name a stored container expands',
+                ruled: '(1)\'s other-object container',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: `${LEAD}.pipeline`, item: { object: 'crm_account', list: { label: 'Accounts', type: 'grid', columns: [{ field: 'name' }] } } },
+                refused: {
+                    subject: 'its save name', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.pipeline`,
+                    stillServed: { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                },
+            },
+            {
+                shape: 'an UNBOUND container saved under a name a stored container expands',
+                ruled: '(1)\'s unbound container',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: `${LEAD}.pipeline`, item: { list: { label: 'Unbound', type: 'grid', columns: [{ field: 'name' }] } } },
+                refused: {
+                    subject: 'its save name', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.pipeline`,
+                    stillServed: { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                },
+            },
+            {
+                shape: 'a second container of one object, under a free name, whose bare list takes <object>.default',
+                ruled: '(2)\'s second container default',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: 'lead_other_views', item: { object: LEAD, list: leadList('Other') } },
+                refused: {
+                    subject: 'a name its expansion produces', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.default`,
+                    stillServed: { object: LEAD, name: `${LEAD}.default`, label: 'All Leads' },
+                },
+            },
+            {
+                shape: 'a container under its object\'s name, saved after a free-named container of that object took <object>.default',
+                given: [{ name: 'lead_other_views', item: { name: 'lead_other_views', object: LEAD, list: leadList('Other') } }],
+                save: { name: LEAD, item: storedLead },
+                refused: {
+                    subject: 'a name its expansion produces', owner: 'another stored container', ownerName: 'lead_other_views', collides: `${LEAD}.default`,
+                    stillServed: { object: LEAD, name: `${LEAD}.default`, label: 'Other' },
+                },
+            },
+            {
+                shape: 'a package-less container saved under the name of a view item a package ships',
+                ruled: '#21638\'s shipped item name',
+                save: { name: `${TASK}.in_progress`, item: { name: `${TASK}.in_progress`, object: TASK, list: listView } },
+                refused: {
+                    subject: 'its save name', owner: 'a view item a package ships', ownerName: SHOWCASE, collides: `${TASK}.in_progress`,
+                    stillServed: { object: TASK, name: `${TASK}.in_progress`, label: 'In Progress' },
+                },
+            },
+            {
+                shape: 'a container in a writable package saved under the name of a view item another package ships',
+                save: { name: DEFAULT, item: { name: DEFAULT, object: TASK, list: listView }, packageId: REPAIR },
+                refused: {
+                    subject: 'its save name', owner: 'a view item a package ships', ownerName: SHOWCASE, collides: DEFAULT,
+                    stillServed: { object: TASK, name: DEFAULT, label: 'All Tasks' },
+                },
+            },
+            {
+                shape: 'an overlay of the package\'s own container whose new member takes the name of a view item the package ships on its own',
+                save: {
+                    name: TASK,
+                    item: { name: TASK, list: taskList('Overlay'), listViews: { in_progress: taskList('Overlay In Progress'), kanban: taskList('Mine') } },
+                },
+                refused: {
+                    subject: 'a name its expansion produces', owner: 'a view item a package ships', ownerName: SHOWCASE, collides: KANBAN,
+                    stillServed: { object: TASK, name: KANBAN, label: 'Board' },
+                },
+            },
+            // ── ALLOWED ─────────────────────────────────────────────────────
+            {
+                shape: 'a view item saved under a name a stored container expands',
+                ruled: 'a view item under an expanded name (allowed)',
+                given: [{ name: LEAD, item: storedLead }],
+                save: {
+                    name: `${LEAD}.pipeline`,
+                    item: { name: `${LEAD}.pipeline`, object: LEAD, viewKind: 'list', label: 'ByNameRow', config: { type: 'grid', data: leadData, columns: [{ field: 'name' }] } },
+                },
+                allowed: {
+                    because: 'a view item is not a container: under an expanded name it is that name\'s sanctioned override (#21510)',
+                    serves: [{ object: LEAD, name: `${LEAD}.pipeline`, label: 'ByNameRow' }, { object: LEAD, name: `${LEAD}.default`, label: 'All Leads' }],
+                },
+            },
+            {
+                shape: 'a view item saved under the name of a view item a package ships',
+                save: {
+                    name: `${TASK}.in_progress`,
+                    item: { name: `${TASK}.in_progress`, object: TASK, viewKind: 'list', label: 'Overridden', config: { type: 'grid', data, columns: [{ field: 'title' }] } },
+                },
+                allowed: {
+                    because: 'a view item is not a container: under a packaged view\'s name it is that view\'s sanctioned override by name',
+                    serves: [{ object: TASK, name: `${TASK}.in_progress`, label: 'Overridden' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
+                },
+            },
+            {
+                shape: 'a container under its object\'s name',
+                ruled: 'a container under its object\'s name (allowed)',
+                save: { name: LEAD, item: storedLead },
+                allowed: {
+                    because: 'the name the container contract gives it (ADR-0017 §3.2), and its expansion takes no name served elsewhere',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'All Leads' }, { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' }],
+                },
+            },
+            {
+                shape: 'a container\'s own re-save',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: LEAD, item: { ...storedLead, list: leadList('All Leads, edited') } },
+                allowed: {
+                    because: 'the row under the save name is the row this save replaces, never its own sibling',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'All Leads, edited' }, { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' }],
+                },
+            },
+            {
+                shape: 'a container under a name of its own beside a sibling of its object, expanding names the sibling does not',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: 'lead_hot_views', item: { object: LEAD, listViews: { hot: leadList('Hot Leads') } } },
+                allowed: {
+                    because: 'the census writers\' shape this door keeps (a container saved under a name other than its object), and its names collide with nothing',
+                    serves: [
+                        { object: LEAD, name: `${LEAD}.hot`, label: 'Hot Leads' },
+                        { object: LEAD, name: `${LEAD}.default`, label: 'All Leads' },
+                        { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                    ],
+                },
+            },
+            {
+                shape: 'an overlay of the package\'s own container, by its own name',
+                save: { name: TASK, item: { name: TASK, list: taskList('Overlay'), listViews: { in_progress: taskList('Overlay In Progress') } } },
+                allowed: {
+                    because: 'ADR-0005 keys an overlay by its own name: the row stands in for the shipped container, and its views for that container\'s',
+                    serves: [
+                        { object: TASK, name: DEFAULT, label: 'Overlay' },
+                        { object: TASK, name: `${TASK}.in_progress`, label: 'Overlay In Progress' },
+                        { object: TASK, name: KANBAN, label: 'Board' },
+                    ],
+                },
+            },
+            {
+                shape: 'a package-less container on another package\'s object, under a name of its own',
+                save: { name: OWN, item: { object: TASK, list: taskList('Probe') } },
+                allowed: {
+                    because: '#21334\'s arm: every name it expands derives from its own name, so none is a name the owning package ships',
+                    serves: [{ object: TASK, name: `${TASK}.${OWN}`, label: 'Probe' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
+                },
+            },
+            {
+                shape: 'a container in a writable package on another package\'s object, under a name of its own',
+                save: { name: OWN, item: { object: TASK, list: taskList('Probe') }, packageId: REPAIR },
+                allowed: {
+                    because: '#21334\'s arm, bound to its own package: its names derive from its own name',
+                    serves: [{ object: TASK, name: `${TASK}.${OWN}`, label: 'Probe' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
+                },
+            },
+            {
+                shape: 'a container saved under the expanded name of ANOTHER organization\'s container',
+                scopes: ['organization-scoped'],
+                given: [{ name: LEAD, item: storedLead, organizationId: OTHER_ORG }],
+                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Mine') } },
+                allowed: {
+                    because: 'the caller\'s selection decides, as it does for the readers: another organization\'s row is not in it',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'Mine' }],
+                },
+            },
+            {
+                shape: 'an environment-wide container saved under the expanded name of an organization\'s container',
+                scopes: ['environment-wide'],
+                given: [{ name: LEAD, item: storedLead, organizationId: ORG }],
+                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Everyone') } },
+                allowed: {
+                    because: 'the caller\'s selection decides: an organization\'s rows are not an environment-wide caller\'s, and reading every organization\'s rows at an environment-wide save would be a cross-tenant read at a write door',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'Everyone' }],
+                },
+            },
+        ];
+
+        /** The ruling's acceptance list, verbatim in substance: each must be a row. */
+        const RULED = [
+            '#21558\'s own-expansion name',
+            '#21620\'s sibling expansion of the same object',
+            '(1)\'s other-object container',
+            '(1)\'s unbound container',
+            '(2)\'s second container default',
+            '#21638\'s shipped item name',
+            'a view item under an expanded name (allowed)',
+            'a container under its object\'s name (allowed)',
+        ] as const;
+        /** Every cell of the predicate: which name collides, with which owner. */
+        const CELLS: ReadonlyArray<readonly [Subject, OwnerKind]> = [
+            ['its save name', 'its own expansion'],
+            ['its save name', 'another stored container'],
+            ['its save name', 'a view item a package ships'],
+            ['a name its expansion produces', 'another stored container'],
+            ['a name its expansion produces', 'a view item a package ships'],
+        ];
+        /** How the refusal names each kind of owner. */
+        const OWNER_NAMED: Record<OwnerKind, (owner: string) => string> = {
+            'its own expansion': (object) => `its own expansion produces (its list view on '${object}')`,
+            'another stored container': (container) => `the stored container '${container}'`,
+            'a view item a package ships': (packageId) => `the package '${packageId}' ships`,
+        };
+
+        it('every row is either REFUSED, naming its owner, or ALLOWED, with its reason — never both, never neither', () => {
+            for (const row of SHAPES) {
+                expect([row.refused !== undefined, row.allowed !== undefined].filter(Boolean), row.shape).toHaveLength(1);
+                if (row.allowed) {
+                    expect(row.allowed.because.trim().length, `${row.shape}: the reason`).toBeGreaterThan(0);
+                    expect(row.allowed.serves.length, `${row.shape}: what it serves`).toBeGreaterThan(0);
+                }
+                if (row.refused) expect(row.refused.ownerName.length, `${row.shape}: the owner`).toBeGreaterThan(0);
+            }
+            expect(new Set(SHAPES.map((row) => row.shape)).size, 'one row per shape').toBe(SHAPES.length);
+        });
+
+        it('the ruling\'s shapes each have exactly one row, and every cell of the predicate has a refused row', () => {
+            expect([...RULED].sort()).toEqual(SHAPES.flatMap((row) => (row.ruled ? [row.ruled] : [])).sort());
+            for (const [subject, owner] of CELLS) {
+                expect(
+                    SHAPES.filter((row) => row.refused?.subject === subject && row.refused.owner === owner).length,
+                    `a refused row for ${subject} × ${owner}`,
+                ).toBeGreaterThan(0);
+            }
+            expect(
+                SHAPES.filter((row) => row.refused).every((row) => CELLS.some(([s, o]) => s === row.refused!.subject && o === row.refused!.owner)),
+                'every refused row sits in a cell of the predicate',
+            ).toBe(true);
+        });
+
+        const writeIn = (protocol: Protocol, write: Write, callerOrganizationId: string | undefined, mode?: 'draft' | 'publish') => {
+            const organizationId = write.organizationId === undefined ? callerOrganizationId : (write.organizationId ?? undefined);
+            return protocol.saveMetaItem({
+                type: 'view', name: write.name, item: write.item,
+                ...(write.packageId ? { packageId: write.packageId } : {}),
+                ...scoped(organizationId),
+                ...(mode ? { mode } : {}),
+            } as any);
+        };
+        const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
+        const viewRowsOf = (rows: Map<string, Row>) =>
+            [...rows.values()].filter((r) => r.type === 'view').map((r) => [r.name, r.organization_id, r.state, r.metadata]).sort();
+        /** `name` answers one view item carrying `label` on BOTH doors. */
+        const expectServed = async (protocol: Protocol, served: Served, organizationId: string | undefined) => {
+            const listed = named(
+                switcherMatches(((await protocol.getMetaItems({ type: 'view', ...scoped(organizationId) } as any)) as any).items, served.object),
+                served.name,
+            );
+            expect(listed.map((v) => v.label), `${served.name} on the object door`).toEqual([served.label]);
+            const read = await byNameDoor(protocol, served.name, organizationId);
+            expect(isAggregatedViewContainer(read), `${served.name} by name is a view item, not a raw container`).toBe(false);
+            expect(read?.label, `${served.name} by name`).toBe(served.label);
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope: Scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const row of SHAPES) {
+                        if (row.scopes && !row.scopes.includes(scope)) continue;
+                        it(`${scope}: ${row.shape} — ${row.refused ? 'REFUSED' : 'ALLOWED'}`, async () => {
+                            const { protocol, rows, registry } = collisionHarness(environmentId);
+                            for (const given of row.given ?? []) {
+                                expect(((await writeIn(protocol, given, organizationId)) as any)?.success, `${given.name} is stored first`).toBe(true);
+                            }
+                            if (row.allowed) {
+                                expect(((await writeIn(protocol, row.save, organizationId)) as any)?.success, 'the save is accepted').toBe(true);
+                                for (const served of row.allowed.serves) await expectServed(protocol, served, organizationId);
+                                return;
+                            }
+                            const refused = row.refused!;
+                            const storedBefore = viewRowsOf(rows);
+                            const registeredBefore = JSON.stringify(registry.listItems('view'));
+                            for (const mode of ['publish', 'draft'] as const) {
+                                const error = await refusalOf(writeIn(protocol, row.save, organizationId, mode));
+                                // The ADR-0112 envelope …
+                                expect(error, `${mode}: the save is refused`).toBeInstanceOf(Error);
+                                expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+                                // … the save name, the colliding name and the other owner …
+                                expect(error.message, 'the refusal names the save name').toContain(`'${row.save.name}'`);
+                                expect(error.message, 'the refusal names the colliding name').toContain(`'${refused.collides}'`);
+                                expect(error.message, 'the refusal names the other owner').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
+                                // … the owner and the prescription both inside the first 500 characters,
+                                // the bound a 4xx message crosses the REST boundary under, tail cut
+                                // (`CLIENT_MESSAGE_MAX`): the explanation is the half that may be lost …
+                                const delivered = String(error.message).slice(0, 500);
+                                expect(delivered, 'the owner survives the wire bound').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
+                                expect(delivered, 'the prescription survives the wire bound')
+                                    .toContain(`a view item (name, object, viewKind and config) under '${refused.collides}'`);
+                                // … and never prescribes a save under a name another stored row
+                                // holds: wherever a stored row's name appears, it is named as THE
+                                // CONTAINER (or as the object a view binds to), never as a name.
+                                for (const given of row.given ?? []) {
+                                    const leadIns = String(error.message).split(`'${given.name}'`).slice(0, -1);
+                                    expect(
+                                        leadIns.filter((leadIn) => !/(container|on) $/.test(leadIn)),
+                                        `'${given.name}', a stored row's name, is never prescribed as a name to save under`,
+                                    ).toEqual([]);
+                                }
+                            }
+                            expect(viewRowsOf(rows), 'no row and no draft is stored').toEqual(storedBefore);
+                            expect(JSON.stringify(registry.listItems('view')), 'nothing is registered').toBe(registeredBefore);
+                            if (refused.stillServed) {
+                                await expectServed(protocol, refused.stillServed, organizationId);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    });
+
+    /**
+     * #21638's attribution half, folded into #21639: a package-less view
+     * container ROW stored under the name of a view ITEM a package ships is
+     * not that item's overlay — a container is not a view — so it belongs to
+     * no package.
+     *
+     * Measured on `origin/main` before this change (`7b07749f05`), with these
+     * rows written straight to the store (the save door refuses the shape
+     * now; these stand for rows stored before it did): `runtimeViewContainerPackage`
+     * read the row's package from the shipped item of the same name, so the
+     * container was judged the shipping package's own and expanded under that
+     * package's names — its bare `list` replaced the packaged
+     * `showcase_task.default` on both doors, wearing the package's
+     * `_packageId`, and a `listViews.edit` member replaced the packaged
+     * `showcase_task.edit`. Read now, each is a package-less container on
+     * another package's object, expanded under its own name (#21334's arm),
+     * with no re-save. The control is the overlay path that DOES take a
+     * package: a package-less row of the package's own container name.
+     */
+    describe('#21638 a package-less container row stored under a shipped view item\'s name belongs to no package', () => {
+        const AT_REST = [
+            {
+                member: 'a bare list', rowName: `${TASK}.in_progress`, body: { object: TASK, list: listView },
+                spared: DEFAULT, servedAs: `${TASK}.${TASK}.in_progress`, authored: listView,
+            },
+            {
+                member: 'listViews.edit', rowName: `${TASK}.in_progress`, body: { object: TASK, listViews: { edit: listView } },
+                spared: `${TASK}.edit`, servedAs: `${TASK}.${TASK}.in_progress.edit`, authored: listView,
+            },
+        ] as const;
+        const storeAtRest = (rows: Map<string, Row>, name: string, body: Record<string, unknown>, organizationId?: string) =>
+            rows.set(`at-rest:${name}:${organizationId ?? 'env'}`, {
+                id: `r_${name}`, type: 'view', name, organization_id: organizationId ?? null,
+                package_id: null, state: 'active', metadata: JSON.stringify({ name, ...body }),
+            });
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const c of AT_REST) {
+                        it(`${scope}, ${c.member} stored at ${c.rowName}: ${c.spared} still answers the packaged view on both doors, and the container's view is served under its own name, with no package and no default`, async () => {
+                            const { protocol, rows } = showcaseHarness(environmentId);
+                            storeAtRest(rows, c.rowName, c.body, organizationId);
+
+                            const shipped = PACKAGED.find((v) => v.name === c.spared)!;
+                            const served = await objectDoor(protocol, organizationId);
+                            const listed = named(served, c.spared);
+                            expect(listed, `exactly one item answers ${c.spared} on the object door`).toHaveLength(1);
+                            expect({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId })
+                                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+                            const read = await byNameDoor(protocol, c.spared, organizationId);
+                            expect({ label: read?.label, config: read?.config, _packageId: read?._packageId })
+                                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+
+                            const own = named(served, c.servedAs);
+                            expect(own, `the container's view answers ${c.servedAs}`).toHaveLength(1);
+                            expect(own[0].config).toEqual(c.authored);
+                            expect(own[0]._packageId, 'the row belongs to no package').toBeUndefined();
+                            expect(own[0]._provenance).not.toBe('package');
+                            expect(own[0].isDefault).toBeUndefined();
+                            expectOnlyPackagedDefaults(served);
+                        });
+                    }
+
+                    it(`${scope}: CONTROL — a package-less row of the package's own container name is that container's overlay and keeps its package`, async () => {
+                        const { protocol, rows } = showcaseHarness(environmentId);
+                        storeAtRest(rows, TASK, { list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] } }, organizationId);
+
+                        const listed = named(await objectDoor(protocol, organizationId), DEFAULT);
+                        expect(listed).toHaveLength(1);
+                        expect(listed[0].label).toBe('Customized');
+                        expect(listed[0]._packageId).toBe(SHOWCASE);
+                        expect(listed[0].isDefault).toBe(true);
+                        expect((await byNameDoor(protocol, DEFAULT, organizationId))?.label).toBe('Customized');
+                    });
+                }
+            });
+        }
+    });
+});
+
+/**
+ * #21558 on an object no code package ships: the refusal follows the readers'
+ * expansion, the expander's de-duplication included, so a container saved
+ * under the de-duplicated name its own expansion gave a member is refused
+ * too, and a container under its object's name still saves.
+ */
+describe('#21558 a container under its own expanded name, on a runtime-authored object', () => {
+    async function saveCrm(name: string, item: unknown) {
+        const harness = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(harness.engine);
+        const error = await protocol.saveMetaItem({ type: 'view', name, item }).then(() => null, (e: any) => e);
+        const viewRows = Array.from(harness.rows.values()).filter((r) => r.type === 'view');
+        return { ...harness, protocol, error, viewRows };
+    }
+    const list = { label: 'All Leads', type: 'grid', columns: [{ field: 'name' }] };
+    const other = { label: 'Other', type: 'grid', columns: [{ field: 'company' }] };
+
+    for (const [saveName, member] of [
+        ['crm_lead.default', { list }],
+        ['crm_lead.pipeline', { listViews: { pipeline: list } }],
+        // `listViews.default` takes `crm_lead.default` first, so the expander
+        // renames the bare `list` to `crm_lead.default_2`.
+        ['crm_lead.default_2', { listViews: { default: list }, list: other }],
+    ] as const) {
+        it(`saved under ${saveName}: refused VALIDATION_ERROR / 400, nothing stored or registered`, async () => {
+            const body = { name: saveName, object: 'crm_lead', ...member };
+            expect(expandViewContainer('crm_lead', body).map((vi) => vi.name), 'the save name is its own expansion\'s')
+                .toContain(saveName);
+            const { error, viewRows, registered } = await saveCrm(saveName, body);
+            expect(error).toBeInstanceOf(Error);
+            expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+            expect(viewRows).toEqual([]);
+            expect(registered.get('view')?.size ?? 0).toBe(0);
+        });
+    }
+
+    it('a container with no `name` is judged under the name the door stamps on it: refused under crm_lead.default', async () => {
+        const { error, viewRows } = await saveCrm('crm_lead.default', { object: 'crm_lead', list });
+        expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(viewRows).toEqual([]);
+    });
+
+    it('CONTROL: the same container under its object\'s name saves, and its expansion fills crm_lead.default', async () => {
+        const { error, protocol } = await saveCrm('crm_lead', { name: 'crm_lead', object: 'crm_lead', list });
+        expect(error).toBeNull();
+        const listed: any = await protocol.getMetaItems({ type: 'view' });
+        expect(switcherMatches(listed.items, 'crm_lead').map((v: any) => [v.name, v.label])).toEqual([['crm_lead.default', 'All Leads']]);
+    });
+});
+
+/**
+ * #21412 — the runtime save door refuses a view container whose own `name`
+ * disagrees with the name it is saved under, through the one judge the source
+ * registrars call (`@objectstack/metadata/view-container-name`).
+ *
+ * Before: the card's probe was ACCEPTED — stored as row `crm_lead` with body
+ * `name` `lead_views`, and registered as `lead_views` (the container, keyed by
+ * `body.name` in `hydrateOverlayIntoRegistry`) plus `crm_lead.default`: one
+ * document answering under a name its row does not have. The two source
+ * registrars refuse the same document.
+ *
+ * The key judged here is the SAVE name, not the binding: this door keeps a
+ * container saved under a name other than its object (the #13407 case above,
+ * #21334's arm), so the body it stamps for such a container must pass when it
+ * is sent back. Shapes as the card's measurement named them (row = save name):
+ * P1 row crm_lead / `name` lead_views; P2 row lead_views / `name` lead_views,
+ * bound to crm_lead; P2b P2 with no `name`; P3 row lead_views / `name`
+ * crm_lead; P4 row crm_lead / `name` lead_views, no other binding.
+ */
+describe('#21412 the save door refuses a container whose own name disagrees with the name it is saved under', () => {
+    const named = (name: string | undefined, body: Record<string, unknown>) =>
+        (name === undefined ? { ...body } : { name, ...body });
+    /** Bound to crm_lead through its own `object`, no `data` on any arm. */
+    const objectBound = { object: 'crm_lead', list: { label: 'All Leads', type: 'grid', columns: [{ field: 'name' }] } };
+    /** No binding but whatever `name` it carries. */
+    const unbound = { list: { label: 'All', type: 'grid', columns: [{ field: 'name' }] } };
+
+    async function save(name: string, item: unknown) {
+        const harness = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(harness.engine);
+        let error: any = null;
+        try {
+            await protocol.saveMetaItem({ type: 'view', name, item });
+        } catch (e) {
+            error = e;
+        }
+        const viewRows = Array.from(harness.rows.values()).filter((r) => r.type === 'view');
+        // The keys the registry holds a CONTAINER under — its expansions carry
+        // `viewKind` and are the container's derived items, not a second key
+        // for the document (seat answer Q4).
+        const containerKeys = Array.from(harness.registered.get('view')?.entries() ?? [])
+            .filter(([, v]) => isAggregatedViewContainer(v))
+            .map(([k]) => k);
+        return { ...harness, protocol, error, viewRows, containerKeys };
+    }
+
+    function expectRefused(outcome: Awaited<ReturnType<typeof save>>) {
+        // The minimum a rejection pin asserts: the ADR-0112 envelope.
+        expect(outcome.error).toBeInstanceOf(Error);
+        expect(outcome.error.code).toBe('VALIDATION_ERROR');
+        expect(outcome.error.status).toBe(400);
+        // ...and the refused document reached nothing.
+        expect(outcome.viewRows).toEqual([]);
+        expect(outcome.registered.get('view')?.size ?? 0).toBe(0);
+    }
+
+    it('P1, the card\'s probe: refused VALIDATION_ERROR / 400, nothing stored, nothing registered', async () => {
+        expectRefused(await save('crm_lead', named('lead_views', leadContainer)));
+    });
+
+    it('P1 is refused THROUGH the judge: the door throws exactly what it returns for that document', async () => {
+        const body = named('lead_views', leadContainer);
+        const { error } = await save('crm_lead', body);
+        expect(error.message).toBe(savedItemNameRefusal('view', body, 'crm_lead', 'save')!.message);
+    });
+
+    it('P1 answers the envelope a source registrar answers for the same document', async () => {
+        const body = named('lead_views', objectBound);
+        const { error: saveDoor } = await save('crm_lead', body);
+        const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } }) as any;
+        const ctx = {
+            logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+            registerService: () => {}, getService: () => undefined, trigger: async () => {},
+        } as any;
+        const registrar = await plugin._parseAndRegisterArtifact(ctx, JSON.parse(JSON.stringify({
+            manifest: { id: 'com.acme.crm', name: 'CRM', version: '1.0.0', type: 'app' },
+            views: [body],
+        })), 'fixture-21412').then(() => null, (e: any) => e);
+        expect(registrar).toBeInstanceOf(Error);
+        expect([saveDoor.code, saveDoor.status]).toEqual([registrar.code, registrar.status]);
+        expect([saveDoor.code, saveDoor.status]).toEqual(['VALIDATION_ERROR', 400]);
+    });
+
+    it('P3: a `name` equal to the binding but not to the row is refused', async () => {
+        expectRefused(await save('lead_views', named('crm_lead', leadContainer)));
+    });
+
+    it('P4: a `name` that is the only binding, but not the row, is refused', async () => {
+        expectRefused(await save('crm_lead', named('lead_views', unbound)));
+    });
+
+    it('P2: a `name` equal to the row passes though the container binds elsewhere — one key, the row\'s', async () => {
+        const outcome = await save('lead_views', named('lead_views', objectBound));
+        expect(outcome.error).toBeNull();
+        expect(outcome.viewRows.map((r) => [r.name, JSON.parse(r.metadata).name])).toEqual([['lead_views', 'lead_views']]);
+        expect(outcome.containerKeys).toEqual(['lead_views']);
+        const list: any = await outcome.protocol.getMetaItems({ type: 'view' });
+        expect(switcherMatches(list.items, 'crm_lead').map((v: any) => v.name)).toEqual(['crm_lead.default']);
+    });
+
+    it('P2b: an absent `name` passes and is stamped with the row name — and the stamped body passes when sent back', async () => {
+        const outcome = await save('lead_views', named(undefined, objectBound));
+        expect(outcome.error).toBeNull();
+        expect(outcome.viewRows.map((r) => JSON.parse(r.metadata).name)).toEqual(['lead_views']);
+        expect(outcome.containerKeys).toEqual(['lead_views']);
+
+        const read: any = await outcome.protocol.getMetaItem({ type: 'view', name: 'lead_views' });
+        expect(read.item.name).toBe('lead_views');
+        const { _diagnostics: _drop, ...sentBack } = read.item;
+        await expect(outcome.protocol.saveMetaItem({ type: 'view', name: 'lead_views', item: sentBack })).resolves.toBeTruthy();
+    });
+
+    it('CONTROL: a `name` equal to the row and the binding passes, under one key', async () => {
+        const outcome = await save('crm_lead', named('crm_lead', leadContainer));
+        expect(outcome.error).toBeNull();
+        expect(outcome.containerKeys).toEqual(['crm_lead']);
     });
 });

@@ -22,7 +22,6 @@ import type {
 } from './types.js';
 import { inputTypeArms } from './input-type.js';
 import { checkDashboardWidgetOptions } from './dashboard-widget-options.js';
-import { checkKanbanQuickAdd } from './kanban-quick-add.js';
 
 /**
  * The protocol's ONE child-list key — `BaseSchema.children` — and therefore the
@@ -60,24 +59,122 @@ export function acceptsChildren(comp: Pick<ManifestComponent, 'inputs'>): boolea
 }
 
 /**
- * Base props every node may carry (mirrors BaseSchema) — never "unknown prop".
+ * Where a base prop is legal without a declaration (objectui#11044).
+ *
+ *  - `'every-node'` — on every node, and a registration's own input of the
+ *    same name is not consulted: {@link validateTree} skips the key before the
+ *    declared-input lookup.
+ *  - `'where-undeclared'` — on a type whose registration declares NO input of
+ *    that name. Where one does, the declared input wins, its `type-mismatch`
+ *    check included, and the generated JSX types take the declared type too.
+ */
+export type SduiBasePropScope = 'every-node' | 'where-undeclared';
+
+/** One entry of {@link SDUI_BASE_PROPS}. */
+export interface SduiBaseProp {
+  /** The `BaseSchema` member (`@object-ui/types`). */
+  readonly name: string;
+  readonly scope: SduiBasePropScope;
+  /**
+   * The attribute's type in the generated JSX surface (`SduiBaseProps` in
+   * `sdui-intrinsics.d.ts`), or `null` for the one key that is no attribute:
+   * `type`, which the tag name carries (`parse.ts` refuses a `type` attribute).
+   */
+  readonly tsType: string | null;
+}
+
+/**
+ * The base props: the `BaseSchema` members this tier accepts on a node without
+ * a registration declaring them. ONE list, read by BOTH of its consumers —
+ * {@link validateTree}'s `unknown-prop` branch and `generateDts`'s
+ * `SduiBaseProps` (objectui#11044). Before this list the two were separate
+ * hand-kept copies and had drifted: the validator accepted `bind` and `hidden`
+ * (objectui#11008) while the generated types still refused both.
+ *
+ * `bind` and `hidden` are `'every-node'` (objectui#11008). `BaseSchema` declares
+ * both for every node and no registration declares either as an input, so
+ * before they joined, the undeclared-key branch below answered every authored
+ * one with `unknown-prop` — "has no prop" about a key the protocol declares,
+ * on the nodes that honour it: `hidden` is read for every node by
+ * `SchemaRenderer`'s hide chain, and `bind` by every renderer that calls
+ * `useDataScope` (`list`, `tree-view`, the `object-*` widgets). The
+ * declaration outranks the implementation, so the parser's view is the
+ * declared type's, not a per-registration subset. The cost is accepted and
+ * named: a `bind` on a node that does not read it — `data-table`
+ * (objectui#6575) — draws nothing here either, and its render-time console
+ * warning is the one signal left.
+ *
+ * `visibleWhen`, `hiddenOn` and `testId` are `'every-node'` for the same reason
+ * (objectui#11044): no registration declares any of them, `SchemaRenderer`'s
+ * hide chain reads the first two for every node, and it strips `testId` and
+ * re-emits it as `data-testid`. `visibleWhen` is the canonical ADR-0089
+ * predicate; before it joined, the deprecated `visibleOn` was silent while it
+ * drew `unknown-prop`.
+ *
+ * The `'where-undeclared'` members (objectui#11044, triage ruling) are the
+ * `BaseSchema` members some registrations DECLARE as typed inputs — the input
+ * family's `placeholder`, `label`, `name`, … . Skipping them the way the
+ * `'every-node'` members are skipped would silence those registrations'
+ * `type-mismatch`, so they are base props only where the type declares no
+ * input of that name. ⛔ Never move one to `'every-node'` to accept a key: that
+ * silences a declared type check.
+ *
+ * Held over the live registry by `base-props-one-list-11044.test.tsx` in
+ * `@object-ui/components` — every member a `BaseSchema` member, and `body` the
+ * one member left out.
+ *
+ * ⛔ `body` is NOT here and must not be added. It was `BaseSchema`'s second
+ * child-list spelling until objectui#6771 retired it; teaching this list the
+ * key was the option that ruling refused, because it would have blessed a
+ * second permanent spelling of one concept. `./body-dialect.ts` answers it by
+ * name instead.
+ *
+ * LOCKSTEP: the list, its scopes and the two Sets below are the port of
+ * objectui's `SDUI_BASE_PROPS` (objectui#11008, #11044, pin `db11afd4967c`).
+ * Both consumers are ported too: {@link validateTree} and `codegen.ts`'s
+ * `SduiBaseProps`. The list is exported for `codegen.ts` only; `index.ts` does
+ * not re-export it.
  *
  * `children` IS here: the key is legal on every node, so it never draws
  * `unknown-prop` and its declared `slot` input is never type-checked. Whether
  * a given component RENDERS it is the containment question below, answered by
  * {@link acceptsChildren} from the declared input.
  */
-const BASE_PROPS = new Set([
-  'type',
-  'id',
-  'className',
-  'style',
-  'visible',
-  'visibleOn',
-  'disabled',
-  'disabledOn',
-  CHILD_LIST_KEY,
-]);
+export const SDUI_BASE_PROPS: readonly SduiBaseProp[] = Object.freeze([
+  { name: 'type', scope: 'every-node', tsType: null },
+  { name: 'id', scope: 'every-node', tsType: 'string' },
+  { name: 'className', scope: 'every-node', tsType: 'string' },
+  { name: 'style', scope: 'every-node', tsType: 'Record<string, unknown>' },
+  { name: 'visible', scope: 'every-node', tsType: 'boolean' },
+  { name: 'visibleWhen', scope: 'every-node', tsType: 'string' },
+  { name: 'visibleOn', scope: 'every-node', tsType: 'string' },
+  { name: 'hidden', scope: 'every-node', tsType: 'boolean' },
+  { name: 'hiddenOn', scope: 'every-node', tsType: 'string' },
+  { name: 'disabled', scope: 'every-node', tsType: 'boolean' },
+  { name: 'disabledOn', scope: 'every-node', tsType: 'string' },
+  { name: 'bind', scope: 'every-node', tsType: 'string' },
+  { name: 'testId', scope: 'every-node', tsType: 'string' },
+  { name: CHILD_LIST_KEY, scope: 'every-node', tsType: 'unknown' },
+  { name: 'name', scope: 'where-undeclared', tsType: 'string' },
+  { name: 'label', scope: 'where-undeclared', tsType: 'string | Record<string, string>' },
+  { name: 'description', scope: 'where-undeclared', tsType: 'string | Record<string, string>' },
+  { name: 'placeholder', scope: 'where-undeclared', tsType: 'string' },
+  { name: 'data', scope: 'where-undeclared', tsType: 'unknown' },
+  {
+    name: 'ariaLabel',
+    scope: 'where-undeclared',
+    tsType: 'string | { key: string; defaultValue?: string; params?: Record<string, unknown> }',
+  },
+] satisfies SduiBaseProp[]);
+
+const basePropNames = (scope: SduiBasePropScope): Set<string> =>
+  new Set(SDUI_BASE_PROPS.filter((prop) => prop.scope === scope).map((prop) => prop.name));
+
+/** The `'every-node'` members of {@link SDUI_BASE_PROPS}: never "unknown prop". */
+const BASE_PROPS = basePropNames('every-node');
+
+/** The `'where-undeclared'` members of {@link SDUI_BASE_PROPS}. */
+const WHERE_UNDECLARED_BASE_PROPS = basePropNames('where-undeclared');
 
 const isExpr = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && '$expr' in (v as Record<string, unknown>);
@@ -116,26 +213,10 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
       // each provided prop
       for (const [key, value] of Object.entries(node)) {
         if (BASE_PROPS.has(key)) continue;
-        // The `object-kanban` Quick Add pair (objectui#8285): a key
-        // `@objectstack/spec` still publishes and the renderer cannot honour,
-        // because the control is gated on a RUNTIME SLOT no parsed page can
-        // write. It REPLACES whatever the rules below would say about the key —
-        // `unknown-prop` today, and a coarse type check if the key were ever
-        // declared — because two diagnostics for one mistake is what
-        // `checkMemberTypes` already refuses (objectui#8067), and because
-        // "has no prop quickAdd" is FALSE against the published contract. Asked
-        // AHEAD of the declaration lookup on purpose: the claim is about the
-        // render path, so declaring the key must not silently disarm it.
-        // Interim, by the ruling — the spec's refusal by name replaces it.
-        //
-        // LOCKSTEP: this call site and the module behind it are the port of
-        // objectui's copy. The two copies must agree on the accepted grammar
-        // AND on diagnostic codes — change this only together with objectui.
-        const quickAdd = checkKanbanQuickAdd(node.type, key, value);
-        if (quickAdd) {
-          diagnostics.push(quickAdd);
-          continue;
-        }
+        // A declaration outranks a `'where-undeclared'` base prop
+        // (objectui#11044): skipped only when this type declares no input of
+        // that name, so a declared one keeps its type check below.
+        if (WHERE_UNDECLARED_BASE_PROPS.has(key) && !byName.has(key)) continue;
         const input = byName.get(key);
         if (!input) {
           diagnostics.push({
@@ -250,7 +331,13 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
  * down over the member kind `of` declares). The two copies must agree on the accepted
  * grammar AND on diagnostic codes/severities — if they drift, the save gate
  * and the renderer speak different dialects. Change these functions only
- * together with the objectui copy. */
+ * together with the objectui copy.
+ *
+ * Known lead: this copy grades every `type-mismatch` and `member-type-mismatch`
+ * `error` (a literal's coarse type is certain; see `checkType`). objectui's
+ * copy, `packages/sdui-parser/src/validate.ts` at the `.objectui-sha` pin,
+ * still grades them `error` only when an `enum` arm is present. Codes and
+ * messages agree; the severity differs until objectui ports the same rule. */
 
 /** The values an `enum` arm admits, flattened from either declaration form. */
 const enumValues = (input: ManifestInput): unknown[] =>
@@ -336,10 +423,14 @@ function memberEntries(value: unknown): Array<[string, unknown]> | null {
  * made once, and N copies of it is the noise this repo treats as the thing that
  * trains authors to dismiss real reports.
  *
- * Severity mirrors `checkType`'s rule for the same reason — `error` when an
- * `enum` arm is present, because a closed list is the one fact this layer can
- * be certain about; `warning` otherwise, since the coarse kind is a KIND claim
- * and `os validate` / `os build` remain the judge of values.
+ * Severity mirrors `checkType`'s rule for the same reason, and is therefore
+ * always `error`. Every member reaching this function belongs to a container
+ * the parser materialized WHOLE: `interpretBrace` either reads the entire
+ * braced value as a literal or keeps the entire value as one `{ $expr }`
+ * marker (`["a", foo]` is one marker, never an array holding one), and a
+ * marker never gets here. So a member is a literal too, its coarse kind is
+ * final at compile time, and a member no declared arm accepts is as certain a
+ * mismatch as a prop no arm accepts.
  */
 function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Diagnostic | null {
   const arms = inputTypeArms(input.of);
@@ -352,7 +443,7 @@ function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Di
   if (offenders.length === 0) return null;
   const expectation = arms.map((arm) => armExpectation(arm, input)).join(' or ');
   return {
-    severity: arms.includes('enum') ? 'error' : 'warning',
+    severity: 'error',
     code: 'member-type-mismatch',
     message: `<${tag}> prop "${input.name}" expected every member to be ${expectation}` +
       ` — ${offenders.map(([position]) => `[${position}]`).join(', ')} ` +
@@ -373,16 +464,29 @@ function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Di
  * as legal, it does not turn the check off. Two properties of the reporting are
  * deliberate:
  *
- *  - A single-arm input produces the byte-identical diagnostic it always did,
- *    `invalid-enum` included. This change adds a form; it does not restate the
- *    old one.
- *  - A multi-arm input produces ONE diagnostic naming every arm, at the
- *    STRICTEST arm's severity — `error` when an `enum` arm is present, because
- *    an enum's closed list is the one fact this layer can be certain about, and
- *    a value outside it should not become dismissible merely because a second
- *    arm was added next to it. Its code is `type-mismatch` (not `invalid-enum`)
- *    since the reported fact is "fits none of the declared arms", and the
- *    message carries the allowed values so the author still sees the list.
+ *  - A single-arm input produces the code and message it always did, and a
+ *    single `enum` arm's `invalid-enum` is byte-identical, severity included.
+ *    The union form adds a form; it does not restate the old one.
+ *  - A multi-arm input produces ONE diagnostic naming every arm. Its code is
+ *    `type-mismatch` (not `invalid-enum`) since the reported fact is "fits
+ *    none of the declared arms", and the message carries the allowed values so
+ *    the author still sees the list.
+ *
+ * Every `type-mismatch` is an `error`, because this layer reports only what it
+ * can be certain about, and there are two certain facts here:
+ *
+ *  1. An `enum` arm's closed list. A value outside it should not become
+ *     dismissible merely because a second arm was added next to it.
+ *  2. A LITERAL's coarse type. Only literals reach this function: a braced
+ *     value the parser could not materialize is the deferred `{ $expr }`
+ *     marker, which `validateTree` diverts to `inert-expression` (a warning)
+ *     before calling here. A quoted attribute is a string, a bare attribute is
+ *     `true`, and a materialized brace is exactly the literal written. So
+ *     `aggregate="count"` against an input declared `object` is final at
+ *     compile time: no expression stands between the source and the renderer,
+ *     and the tile that reads `aggregate.function` receives a string and
+ *     draws nothing. A warning there let `os build` stay green on a page that
+ *     renders nothing.
  */
 function checkType(tag: string, input: ManifestInput, value: unknown): Diagnostic | null {
   const arms = inputTypeArms(input.type);
@@ -399,7 +503,7 @@ function checkType(tag: string, input: ManifestInput, value: unknown): Diagnosti
   }
 
   return {
-    severity: arms.includes('enum') ? 'error' : 'warning',
+    severity: 'error',
     code: 'type-mismatch',
     message: `<${tag}> prop "${input.name}" expected ${arms
       .map((arm) => armExpectation(arm, input))

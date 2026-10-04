@@ -396,7 +396,7 @@ type MemoryEngineHandles = {
  * green suite into no suite at all on exactly the write this pass performs.
  *
  * It DECLARES `IDataEngine` so `check:engine-double-contract` can see that pin
- * and ratchet it (#11626's declaration route). The double spells one engine
+ * and ratchet it (commit a6eca9223's declaration route). The double spells one engine
  * sibling (`find`), which is below the inference threshold, so before the
  * declaration the `assertEngineUpdateDispatch` call above was real protection
  * that no ledger row named — drop it tomorrow and nothing reddens. The

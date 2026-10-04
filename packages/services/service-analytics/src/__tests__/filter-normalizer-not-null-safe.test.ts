@@ -47,9 +47,11 @@
  * Measured, not reasoned: the fixture is row-for-row `driver-sql`'s
  * `sql-driver-not-null-safe.test.ts`, and every id set below is the answer that
  * file, `formula/src/matches-filter-not-null-safe.test.ts`,
- * `driver-memory/src/memory-matcher-not-null-safe.test.ts` and this package's
- * own `read-scope-not-null-safe.test.ts` assert for the same filter. Moving an
- * expectation here re-opens the divergence #5146 closed.
+ * `driver-memory/src/memory-driver-document-not.test.ts` (which holds the cells
+ * of `memory-matcher-not-null-safe.test.ts`, deleted with the reference matcher
+ * in commit `8fec76a2b`) and this package's own `read-scope-not-null-safe.test.ts`
+ * assert for the same filter. Moving an expectation here re-opens the divergence
+ * #5146 closed.
  *
  * `sql.js` (pure WASM) is the engine, for the reason spelled out at the top of
  * `native-sql-filter-logic-conformance.test.ts`: a native binding is loadable
@@ -73,7 +75,7 @@ import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contract
 
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 
 /**
@@ -94,14 +96,14 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: Object.fromEntries(
     ['id', 'stage', 'owner', 'amount'].map((n) => [
       n,
-      { name: n, label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
+      { label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
     ]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */
@@ -322,6 +324,11 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
   describe('a NULL column does not satisfy the negated condition', () => {
     it('the guard rides the LEAF, so the emitted SQL negates a TOTAL predicate', async () => {
       const { sql } = await sqlFor({ $not: { stage: 'won' } });
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering totalises
+      // the `$not` operand (`{ stage: { $null: false } }` beside the leaf), and
+      // it is the guard's one source: this face's own copy, which guarded the
+      // leaf a second time, is deleted. Asserted as emitted, for this file's
+      // reason.
       expect(sql).toBe(
         'SELECT id AS "id", COUNT(*) AS "total" FROM "deal" ' +
         'WHERE NOT ((stage IS NOT NULL AND stage = $1)) GROUP BY id',
@@ -354,16 +361,15 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // filter excludes. `{$not: {$ne: 'won'}}` means "stage IS won".
       expect(await ids({ $not: { stage: { $ne: 'won' } } })).toEqual(['1']);
       expect(await ids({ $not: { stage: { $nin: ['won'] } } })).toEqual(['1']);
-      // [#5298] The guard now appears TWICE: `nullSafeNegationOperand`'s
-      // `allowNull` arm wraps the field spec, and `fieldLeaves` wraps the `$ne`
-      // leaf itself because the operator is NULL-safe everywhere now, not only
-      // under a `$not`. `X OR (X OR Y)` ≡ `X OR Y`, so the predicate is the one
-      // this case has always asserted — the two id sets above are the guarantee,
-      // and they are unchanged. Asserted as it is actually emitted rather than
-      // trimmed to the prettier form: a pin that describes SQL the compiler does
-      // not produce is how the next reader learns to distrust this file.
+      // [ADR-0053 D-D1, amended — #5930 step 4] The guard appears ONCE: the
+      // shared lowering's `allowNull` escape on the `$not` operand. This face's
+      // two copies of it (the `$not`-operand rewrite and the #5298 leaf wrap,
+      // which made it three) are deleted; the two id sets above are the
+      // guarantee, and they are unchanged. Asserted as it is actually emitted:
+      // a pin that describes SQL the compiler does not produce is how the next
+      // reader learns to distrust this file.
       const { sql } = await sqlFor({ $not: { stage: { $ne: 'won' } } });
-      expect(sql).toContain('NOT ((stage IS NULL OR (stage IS NULL OR stage != $1)))');
+      expect(sql).toContain('NOT ((stage IS NULL OR stage != $1))');
     });
 
     it('`$not` of an ordering comparison returns the NULL rows', async () => {
@@ -435,14 +441,24 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
     });
 
     it('a guarded relation traversal guards the DOTTED member, not its alias', async () => {
-      // `{account: {region: 'NA'}}` flattens to the member `account.region` (the
-      // normalizer's own dotted-key flattening), so the guard has to flatten the
-      // same way: guarding `account` would test the relation, not the column the
-      // leaf reads. Asserted on the generated SQL only — `region` is not a column
-      // of this fixture, which is the point: both halves resolve to ONE member.
-      const { sql } = await sqlFor({ $not: { account: { region: 'NA' } } });
+      // The cube member `account.region` — a traversal through the cube's
+      // join — so the guard lands on the member the leaf reads: guarding
+      // `account` would test the relation, not the column. Asserted on the
+      // generated SQL only — `region` is not a column of this fixture, which is
+      // the point: both halves resolve to ONE member.
+      const { sql } = await sqlFor({ $not: { 'account.region': 'NA' } });
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's guard,
+      // its one source, lands on the dotted member — never on `account` itself.
       expect(sql).toContain('NOT (("account"."region" IS NOT NULL AND "account"."region" = $1))');
       expect(sql).not.toContain('"deal"."account" IS NOT NULL');
+      expect(sql).not.toMatch(/(^|[^."])account IS NOT NULL/);
+      // [#20887] REPLACED spelling. This case wrote the NESTED form
+      // (`{ account: { region: 'NA' } }`), which this compiler used to flatten
+      // to the same member. The nested form is now the engine's — the related
+      // object read as the caller, capped — and `NativeSQLStrategy.canHandle`
+      // declines a query carrying it; reaching this compiler anyway is a
+      // routing fault, refused bare.
+      await expect(sqlFor({ $not: { account: { region: 'NA' } } })).rejects.toThrowError(/reached the SQL compiler/);
     });
   });
 
@@ -489,6 +505,9 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // Not a dialect equivalent (`IS DISTINCT FROM` / `<=>`): `NOT LIKE` has no
       // such form, so the family would have needed two shapes. The cost-list
       // measurement (#5298 §2/§3) found the query plans identical either way.
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's NULL
+      // escape is the expansion's one source: this face's own copy, which
+      // wrapped the leaf a second time, is deleted. The same rows.
       expect((await sqlFor({ stage: { $ne: 'won' } })).sql)
         .toContain('WHERE (stage IS NULL OR stage != $1)');
       expect((await sqlFor({ stage: { $nin: ['won'] } })).sql)
@@ -511,8 +530,8 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
 
     it('positive comparisons take NO guard — the polarity table decides, not a name list', async () => {
       // A blanket null escape would hand back the rows these filters exclude.
-      // `$eq` / `$in` / `$contains` are the family `nullValueSatisfiesOperator`
-      // answers `false` for, and they compile byte-identically to before.
+      // `$eq` / `$in` / `$contains` are the family the shared lowering's
+      // `nullValueSatisfiesOperator` answers `false` for, and they compile byte-identically to before.
       expect((await sqlFor({ stage: { $eq: 'won' } })).sql).toContain('WHERE stage = $1');
       expect((await sqlFor({ stage: { $in: ['won'] } })).sql).toContain('WHERE stage IN ($1)');
       expect((await sqlFor({ stage: { $contains: 'wo' } })).sql)
@@ -524,7 +543,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
     it('the operators that are already TOTAL are not wrapped either', async () => {
       // `$ne: null` compiles to `set` (`IS NOT NULL`), which is two-valued by
       // construction — wrapping it would turn "stage has a value" into a
-      // tautology. `operatorIsNullTotal` is what keeps the two apart, and it
+      // tautology. The shared lowering's `operatorIsNullTotal` is what keeps the two apart, and it
       // reads the COMPARAND, which is why a hard-coded list of three operator
       // NAMES would have been wrong here as well as duplicated.
       expect((await sqlFor({ stage: { $ne: null } })).sql).toContain('WHERE stage IS NOT NULL');
@@ -580,21 +599,25 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // The guard travels as one more conjunct inside the `$not`, so any driver
       // behind the engine — NULL-safe or not — admits the same rows. Rendering it
       // only in the SQL strategy would have made the answer depend on the driver.
-      expect(JSON.stringify(lastEngineFilter)).toContain('$ne');
-      expect(JSON.stringify(lastEngineFilter)).toContain('$not');
+      // [#20918] It travels in the engine's own spelling, `{ $null: false }`.
+      // [ADR-0053 D-D1, amended — #5930 step 4] Once, from the shared lowering:
+      // the conjunct sits beside the leaf in the `$not` operand.
+      expect(lastEngineFilter).toEqual({ $and: [{ $not: { stage: { $null: false }, $and: [{ stage: 'won' }] } }] });
     });
 
-    it('DOUBLE-guarding is idempotent — the stand-in engine guards again', async () => {
-      // `compileScopedFilterToSql` runs its OWN `nullSafeNegationOperand` over
-      // the condition this path already guarded, so the executed SQL carries the
-      // guard twice. `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the
-      // same predicate as the single-guarded form: redundant, not wrong. That is
-      // the trade the module header names — one extra conjunct for portability.
+    it('a second lowering of the guarded condition adds no guard — the stand-in engine lowers again', async () => {
+      // [ADR-0053 D-D1, amended — #5930 step 4] `compileScopedFilterToSql` runs
+      // the shared lowering at its entry over the condition this path already
+      // guarded. The lowering is idempotent — it reads the `{ stage: { $null:
+      // false } }` conjunct beside the leaf as the guard it would write — so the
+      // executed SQL carries the guard ONCE. Until #5930 step 4 that compiler
+      // also ran its own copy of the rewrite, which guarded the leaf a second
+      // time: redundant, not wrong, and deleted with the copy.
       const { sql } = compileScopedFilterToSql(
         lastEngineFilter as FilterCondition,
         'deal',
       );
-      expect(sql.match(/IS NOT NULL/g)?.length).toBeGreaterThanOrEqual(2);
+      expect(sql.match(/IS NOT NULL/g)?.length).toBe(1);
       expect(run(`SELECT "id" FROM "deal" AS "deal" WHERE ${sql}`, ['won'])).toEqual(['2', '3', '4']);
     });
 
@@ -723,8 +746,10 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       await expect(ids({ stage: {} })).rejects.toThrowError(/zero operators/);
       await expect(ids({ $or: [{ stage: {} }, { owner: 'u1' }] })).rejects.toThrowError(/zero operators/);
       await expect(ids({ $not: { stage: {} } })).rejects.toThrowError(/zero operators/);
-      // A nested relation is NOT this shape and still flattens.
-      const { sql } = await sqlFor({ account: { region: 'NA' } });
+      // A relation traversal is NOT this shape: the dotted cube member still
+      // compiles. [#20887] (The nested spelling of it is the engine's now, and
+      // never reaches this compiler — see the guarded-traversal case above.)
+      const { sql } = await sqlFor({ 'account.region': 'NA' });
       expect(sql).toContain('"account"."region" = $1');
     });
 
@@ -835,16 +860,16 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // The emitter, without a database in the way: `notSet` / `set` with EMPTY
       // `values`, which is what makes every compiler of this tree — both
       // strategies AND the display-SQL echo — answer alike without a third arm.
-      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: null } } })).toEqual({
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: null } } }, NO_DATETIME_COLUMNS)).toEqual({
         kind: 'leaf', member: 'stage', operator: 'notSet', values: [],
       });
-      expect(normalizeAnalyticsFilterTree({ where: { stage: { $ne: null } } })).toEqual({
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $ne: null } } }, NO_DATETIME_COLUMNS)).toEqual({
         kind: 'leaf', member: 'stage', operator: 'set', values: [],
       });
-      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: null } } }))
-        .toEqual(normalizeAnalyticsFilterTree({ where: { stage: null } }));
-      expect(normalizeAnalyticsFilterTree({ where: { stage: { $ne: null } } }))
-        .toEqual(normalizeAnalyticsFilterTree({ where: { stage: { $null: false } } }));
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: null } } }, NO_DATETIME_COLUMNS))
+        .toEqual(normalizeAnalyticsFilterTree({ where: { stage: null } }, NO_DATETIME_COLUMNS));
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $ne: null } } }, NO_DATETIME_COLUMNS))
+        .toEqual(normalizeAnalyticsFilterTree({ where: { stage: { $null: false } } }, NO_DATETIME_COLUMNS));
     });
 
     it('an EMPTY STRING comparand is still a value comparison — the fix does not over-reach', async () => {
@@ -854,7 +879,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       const { sql, params } = await sqlFor({ stage: { $eq: '' } });
       expect(sql).toContain('WHERE stage = $1');
       expect(params).toEqual(['']);
-      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: '' } } })).toEqual({
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: '' } } }, NO_DATETIME_COLUMNS)).toEqual({
         kind: 'leaf', member: 'stage', operator: 'equals', values: [''],
       });
       // And a non-null comparand of the same operators is still a VALUE
@@ -867,13 +892,15 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
 
     it('the ObjectQL path hands the engine a null predicate, not `\'\'`', async () => {
       expect(await engineIds({ stage: { $eq: null } })).toEqual(['3', '4']);
-      // `convertFilter` maps `notSet` to a bare `null` — `{stage: null}`, the
-      // spelling every driver reads as IS NULL. It used to receive
-      // `{stage: ''}` (via `coerceFilterValueForObjectQL('')`), i.e. the empty
-      // string compared against stored `null` — never a match on any driver.
-      expect(lastEngineFilter).toEqual({ stage: null });
+      // `convertFilter` maps `notSet` to `{ $null: true }` and `set` to
+      // `{ $null: false }`, the engine's own null predicates (#20918; they were
+      // the bare `null` and `{ $ne: null }`, which `driver-sql` refuses over a
+      // JSON column). It used to receive `{stage: ''}` (via
+      // `coerceFilterValueForObjectQL('')`), i.e. the empty string compared
+      // against stored `null` — never a match on any driver.
+      expect(lastEngineFilter).toEqual({ stage: { $null: true } });
       expect(await engineIds({ stage: { $ne: null } })).toEqual(['1', '2']);
-      expect(lastEngineFilter).toEqual({ stage: { $ne: null } });
+      expect(lastEngineFilter).toEqual({ stage: { $null: false } });
     });
 
     it('the echoed display SQL renders the predicate it executes', async () => {

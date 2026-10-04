@@ -23,7 +23,7 @@
  * ## What the defect did
  *
  * The tuple is an ARRAY, so it satisfied both the old `Array.isArray(result)`
- * branch and `isResultSet` — no false 503, and #10965's guard was never at
+ * branch and `isResultSet` — no false 503, and commit ab47f6974's guard was never at
  * fault. `normalizeRows` simply returned the 2-element tuple, so:
  *
  *   - `get()`  read `rows[0]` — the row ARRAY, not a row. `row.manifest` was
@@ -193,7 +193,7 @@ describe('#11062 the tuple test cannot swallow a bare row array', () => {
 
 describe('#11062 empty results remain "no rows", never a refusal', () => {
   /**
-   * The half that stops this being a rename (#10965's leg, re-asserted for the
+   * The half that stops this being a rename (commit ab47f6974's leg, re-asserted for the
    * shape this card adds): an empty result set in ANY spelling is still a
    * result set, so it answers "not installed" / "nothing installed" rather than
    * raising the seam refusal.

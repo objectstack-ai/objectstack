@@ -4,7 +4,7 @@
  * #5543 — compile-time pin for the shape `registerObject` accepts.
  *
  * Both doors (`ObjectQL.registerObject` and `SchemaRegistry.registerObject`)
- * are annotated `ServiceObject`. Since ADR-0122 phase 2 (#6083) that bare spec
+ * are annotated `ServiceObject`. Since ADR-0122 phase 2 (commit 53068c130) that bare spec
  * alias means the **authored** (`z.input`) shape — defaulted keys optional,
  * pre-transform — which is what the registry actually receives: `registerObject`
  * runs no `parse`, so nothing on that path materializes a `.default(...)`.

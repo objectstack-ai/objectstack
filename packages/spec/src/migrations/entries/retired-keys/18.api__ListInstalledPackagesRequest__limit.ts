@@ -31,6 +31,6 @@
 // is HTTP-only — nobody authors a `ListInstalledPackagesRequest` and nothing
 // persists one. The prescription reaches consumers as the D3 semantic entry
 // `packages-list-pagination-retired` plus this tombstone, the disposition
-// `api/ListNotificationsRequest:cursor` (#6361) already took for the same
+// `api/ListNotificationsRequest:cursor` (commit 90bbf2510) already took for the same
 // shape one route over.
 export const entry = 'api/ListInstalledPackagesRequest:limit';

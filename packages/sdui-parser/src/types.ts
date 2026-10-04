@@ -172,6 +172,23 @@ export interface ManifestComponent {
    * ⛔ Not "accepts children" — this tier's containment check does not read it.
    */
   isContainer?: boolean;
+  /**
+   * The authoring tier this entry belongs to (objectui#10735).
+   *
+   * Absent = the curated PUBLIC tier (ADR-0080 §4), the JSON-surface
+   * AI-authoring vocabulary. `'html'` = one of the intrinsic HTML elements a
+   * `kind:'html'` page may author (ADR-0081 §2), declared by the registry's
+   * `HTML_TIER_INTRINSICS` roster and carried here so the ONE flat `components`
+   * map can serve both of its readers: a whitelist reader (`compile`, the
+   * objectstack gate) takes every key and needs no change; a reader that means
+   * the curated vocabulary — the `kind:'react'` scope, the block list, a census
+   * of curated blocks — filters this key out.
+   *
+   * ⛔ Not the registration's `tier` copied through. `manifestFromConfigs`
+   * writes exactly `'html'` or nothing, so every entry published before this
+   * key existed serialises byte-identically.
+   */
+  tier?: 'html';
 }
 
 export interface Manifest {

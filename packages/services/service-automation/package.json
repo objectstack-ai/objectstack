@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-automation",
-  "version": "17.4.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "Automation Service for ObjectStack — implements IAutomationService with plugin-based DAG flow execution engine",
   "type": "module",
@@ -28,6 +28,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
@@ -40,8 +41,8 @@
     "@objectstack/refd-timer-testkit": "workspace:*",
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
-    "@types/node": "^26.2.0",
-    "tsx": "^4.23.12",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

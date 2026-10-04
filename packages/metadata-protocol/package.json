@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-protocol",
-  "version": "17.4.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "ObjectStack metadata management protocol: sys_metadata CRUD, draft/publish, locks, package ownership, diagnostics (ADR-0076).",
   "type": "module",
@@ -43,15 +43,16 @@
     "@objectstack/lint": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "zod": "^4.6.1"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "@types/pg": "^8.15.6",
-    "mysql2": "^3.23.3",
-    "pg": "^8.22.0",
+    "mysql2": "^3.24.4",
+    "pg": "^8.23.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

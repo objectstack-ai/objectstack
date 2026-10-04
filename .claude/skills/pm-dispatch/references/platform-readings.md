@@ -32,15 +32,15 @@
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
 - 注册按克隆(`pnpm install` 的 prepare),服务端一个驱动都不跑 ⇒ 两侧答的不是同一个问题。
 - 驱动接手的路径上 exit 0 只说内容判断被推迟,⛔ 不是无冲突:它对内容什么都没说。
-- ⇒ 对照复现的是被测条件不只是命令:冲突证明从无驱动裸克隆 `clone --bare --shared` 探。
+- ⇒ 冲突证明探无驱动裸克隆,配方与读法见 `scripts/pm/os-regen-merge.sh`:exit 1 无树 id = 缺对象
 - ⛔ 永不用 `-c merge.os-regen.driver=` 覆盖:驱动不是被关掉而是跑失败,路由路径全报冲突。
 - 入队决策点才整对象 `get` 一次;挂了 flip 定点到点读,⛔ 不又查又等。
 - 状态核验用最小字段(search/list 加 `fields`)或等事件。
 - 聚合读数(`blocked`/`dirty`)只作阴性筛查再定位;放行按名定向读单条 job,⛔ 不拉全表。
 - 按名定位失败才拉全表;订阅来的 `check_suite.completed` 是唤醒不是放行读数。
-- 转 draft 不是可靠的踢队手段:两向相反读数并存,处置按最坏走。
-- 本仓转 draft 同时掉 auto-merge 与队列成员资格,不自动恢复,转正后重挂;姊妹仓曾保位照合。
-- 补救:转 draft 与卸载 auto-merge 都做 —— 本仓卸载 auto-merge 单独不踢队。
+- 转 draft 不是可靠的踢队手段:本仓与姊妹仓均见已入队转 draft 仍保位照合,处置按最坏走。
+- 本仓转 draft 同秒掉 auto-merge 仅见于未入队时,转正后重挂;已入队者 2026-08-08、09-29 照合。
+- 补救:转 draft 与卸载 auto-merge 都做,本仓卸载单独不踢队;两手齐做亦未见踢队(08-08、09-28)。
 - 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。

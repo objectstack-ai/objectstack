@@ -38,14 +38,14 @@ export class LiteKernel extends ObjectKernelBase {
      * A plugin object the DECLARED plugin contract refuses is refused here,
      * with `PLUGIN_CONTRACT_VIOLATION` — the same check, the same envelope,
      * that `ObjectKernel.use()` runs through `PluginLoader` (`plugin-contract.ts`
-     * is the one statement both kernels call; #16721, maintainer ruling
+     * is the one statement both kernels call; commit 51ae73123 landed maintainer ruling
      * 2026-09-08, option A under #9864's precedent that the kernels converge).
      *
      * This method used to write the object straight into the registry, so the
      * same plugin was accepted by this kernel and refused by `ObjectKernel` —
      * and `AGENTS.md` names THIS kernel for tests, so a plugin could be green
      * in vitest and refused at production boot. Measured before converging
-     * (#16721 step 1): of 813 `LiteKernel.use()` calls reachable in this
+     * (step 1, before commit 51ae73123): of 813 `LiteKernel.use()` calls reachable in this
      * repository's suites, 807 were accepted by the schema unchanged and the
      * six refusals came from three test-local fixture objects, none of them
      * product code.
@@ -69,7 +69,7 @@ export class LiteKernel extends ObjectKernelBase {
     use(plugin: Plugin): this {
         this.validateIdle();
 
-        // Same check, same envelope, as `ObjectKernel.use()` (#16721).
+        // Same check, same envelope, as `ObjectKernel.use()` (commit 51ae73123).
         assertPluginContract(plugin);
 
         registerPluginByName(this.plugins, plugin, this.logger);

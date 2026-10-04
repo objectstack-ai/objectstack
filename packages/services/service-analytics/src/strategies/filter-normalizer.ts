@@ -31,9 +31,9 @@
  *     `$contains` `$notContains` `$startsWith` `$endsWith`;
  *   - value-DEPENDENT, so resolved explicitly rather than through the map —
  *     `$null` and `$exists`, whose meaning flips with their boolean;
- *   - lowered — `$between`, which becomes its two bounds so each strategy's
- *     existing upper-bound handling applies the calendar-day whole-day rule
- *     (see the note at the lowering);
+ *   - lowered — `$between`, which becomes its two bounds; the calendar-day
+ *     whole-day rule on its maximum is the shared lowering's (see the note at
+ *     the `$between` arm of {@link fieldLeaves});
  *   - structural — `$and` / `$or` / `$not`, carried as tree nodes;
  *   - anything else THROWS. An operator outside the vocabulary is a caller
  *     error, and a loud one beats a silently widened read — the call
@@ -74,59 +74,25 @@
  * see the note inside {@link buildNode}'s combinator branch for the history
  * and the reasoning the ruling adopted.
  *
- * # `$not` is NULL-safe (#5146)
+ * # `$not` and the negative-polarity operators are NULL-safe (#5146, #5298)
  *
  * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
- * drops every row whose `col` is NULL — while `driver-memory`, `formula` and
- * (since #5296) `driver-sql` return those rows. One widget filter, two row sets,
- * chosen by whichever backend answered. #5146 ruled the JS answer canonical, and
- * {@link nullSafeNegationOperand} applies the same leaf-wise totalisation
- * `sql-driver.ts` and `read-scope-sql.ts` apply.
+ * or `col <> ?` drops every row whose `col` is NULL, while `driver-memory`,
+ * `formula` and `driver-sql` return those rows. #5146 ruled the JS answer
+ * canonical for `$not`; #5298 ruled it for `$ne` / `$nin` / `$notContains`.
  *
- * The rewrite lives HERE rather than in `native-sql-strategy` on purpose: at
- * this layer the guard is STRUCTURE (one more `{col: {$null: false}}` conjunct),
- * not a SQL trick, so it survives `filterNodeToCondition` handing the tree to
- * the ObjectQL engine and holds on any driver behind it — including one that is
- * not NULL-safe by itself. Guarding only in the SQL strategy would make "what
- * does this widget's `$not` mean" depend on which backend caught it, which is
- * what #5146 spent a round eliminating. The cost is that the engine path can
- * guard twice (this rewrite, then `driver-sql`'s own); that is idempotent —
- * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
- * so it buys portability for one redundant conjunct.
- *
- * # `$ne` / `$nin` / `$notContains` are NULL-safe too (#5298)
- *
- * Same rule, same reason, one ruling later. The operators that carry their OWN
- * negation had the defect #5146 fixed for `$not`: a bare `col <> ?` is UNKNOWN
- * for a NULL column and the `WHERE` drops the row, while the JS backends return
- * it. Measured on this package's own fixture before the fix (#5977), for
- * `{stage: {$ne: 'won'}}` over rows whose `stage` is NULL:
- *
- *   | path                                   | was       | now (= JS family) |
- *   |----------------------------------------|-----------|-------------------|
- *   | `NativeSQLStrategy` (raw SQL)          | `2`       | `2,3,4`           |
- *   | `ObjectQLStrategy` display SQL echo    | `2`       | `2,3,4`           |
- *   | `ObjectQLStrategy` → engine condition  | `2,3,4`   | `2,3,4`           |
- *
- * The engine column was already right, and that is the whole argument for
- * fixing it HERE: it was right because `driver-sql` guards for itself (#5962),
- * so the Cube face's answer depended on which compiler downstream caught the
- * leaf — three emitters, two answers. `fieldLeaves` now emits the guard as
- * STRUCTURE, an `or` of `notSet` with the comparison, so all three compile the
- * same predicate and none of them needs to know the rule. That is the same
- * trade the `$not` rewrite above took, including its cost: the engine path
- * guards twice, which is idempotent (`c IS NULL OR (c IS NULL OR c <> v)`).
- *
- * Which operators get the guard is NOT a new list — it is
- * {@link nullValueSatisfiesOperator} and {@link operatorIsNullTotal}, the same
- * pair `nullGuardForFieldSpec` consults for the `$not` rewrite, asked about one
- * operator instead of a whole field spec. A leaf is guarded exactly when a NULL
- * value SATISFIES the operator and the compiled leaf is not already total, which
- * is that pair's `allowNull` verdict. Hard-coding the three names would have put
- * a second polarity table in this file, free to drift from the first — and the
- * `$eq`/`$ne` arms of the existing one already turn on the COMPARAND (`$ne:
- * null` compiles to `set`, which is total and must never be widened), so a name
- * list would have been wrong as well as duplicated.
+ * [ADR-0053 D-D1, amended — #5930 step 4] The ONE source of both rules is the
+ * shared lowering, `lowerFilterCondition` (`@objectstack/spec/data`, its rule
+ * 3), which {@link normalizeAnalyticsFilterTree} runs before {@link buildNode}
+ * reads the condition. It lays each guard on as STRUCTURE: a `{ col: { $null:
+ * false } }` conjunct beside a leaf of a `$not` operand that no missing value
+ * satisfies, and the escape `{ $or: [{ col: { $null: true } }, { col: spec }] }`
+ * around a leaf that a missing value does satisfy. As structure, the guard
+ * survives `filterNodeToCondition` handing the tree to the ObjectQL engine, and
+ * every compiler of the tree reads one predicate. This module kept its own copy
+ * of both rules (a `$not`-operand rewrite and a per-leaf wrap, with their
+ * polarity tables) until this face's deletion card. It restates neither now, so
+ * a ruling on what a missing value satisfies is made in one place.
  *
  * # A `null` COMPARAND is a null predicate, not a value (#5332)
  *
@@ -142,10 +108,11 @@
  *
  * The pair is not merely similar to `{$null: true|false}` — `driver-mongodb`
  * TRANSLATES `$null` into it — so {@link fieldLeaves} now emits the same
- * `notSet` / `set` leaves for all three spellings, and the #5146 guard table
- * moved in the same commit (see {@link nullValueSatisfiesOperator}); a guard that
- * still described the old emitter would have negated an always-false conjunction
- * and answered `{$not: {stage: {$eq: null}}}` with every row.
+ * `notSet` / `set` leaves for all three spellings. The #5146 guard table moved
+ * in the same commit (it is the shared lowering's now, which reads a `null`
+ * comparand of `$eq` / `$ne` as already total); a guard that still described the
+ * old emitter would have negated an always-false conjunction and answered
+ * `{$not: {stage: {$eq: null}}}` with every row.
  *
  * # A comparand keeps its own TYPE — there is no round trip any more (#5526)
  *
@@ -329,8 +296,9 @@
  * cause (a dropped `$`) into a predicate on a non-existent member `amount.gte`,
  * turning a diagnosable mistake into a harder one.
  *
- * ⛔ What does not move: a wrapper that is ALL non-`$` keys keeps flattening to
- * the dotted member (`{d: {nested: 'x'}}` → `d.nested`); a wrapper that is ALL
+ * ⛔ What does not move: a wrapper that is ALL non-`$` keys is a nested-relation
+ * condition (since #20887 carried as written for the engine to answer, where it
+ * used to flatten to the dotted member `d.nested`); a wrapper that is ALL
  * `$`-operators compiles exactly as before; `$null` / `$exists` flag semantics
  * (#5526 / #5332 / #5347) and {@link comparand} are untouched. The sibling door
  * `read-scope-sql.ts` already fails closed on this exact shape
@@ -415,10 +383,40 @@
  * node is built, in this door's envelope and with the message kept. `true` and
  * `false` lower exactly as before.
  *
+ * # `$empty` lowers to a leaf its consumers answer by the DECLARED type (#20445)
+ *
+ * The spec declares `$empty: boolean` with the ruled per-type 「is empty」 table
+ * as its meaning (#20311) — text-like: null or `''`; multi-value: null or `[]`;
+ * every other type: null only; `false` the complement — and ruling A on
+ * #20399 gives each compile surface an arm through the one expansion,
+ * `expandEmptyOperator(fieldDef)`. This door used to pass it through
+ * {@link lowerAnalyticsWhere} and then refuse it in {@link fieldLeaves} as an
+ * unsupported operator (`INVALID_FILTER` / 400).
+ *
+ * It now lowers to a valueless `empty` / `notEmpty` leaf, and each consumer of
+ * the tree answers the leaf where the field's declaration is known:
+ * `NativeSQLStrategy.buildFilterClause` and the `ObjectQLStrategy` echo expand
+ * the host's declared value shape through the spec and compile the row with
+ * `empty-operator-sql.ts` (refusing, in this door's envelope, when the host
+ * cannot name the field's declaration or a list-valued field meets the
+ * `'unknown'` dialect); `ObjectQLStrategy.convertFilter` hands `{ $empty }`
+ * to the engine, whose arm is the engine lane's. A non-boolean flag is
+ * refused by {@link assertBooleanNullFlags} with the two null flags. The leaf
+ * is TOTAL on every consumer, so the `$not` rewrite adds no guard to it.
+ *
+ * [#20446] The operator is in `FILTER_OPERATORS`, and the view operators
+ * `is_empty` / `is_not_empty` lower to it (through `parseFilterAST`, the
+ * array door), so a host that wires no `sourceFieldMeta` refuses a stored
+ * 「is empty」 rule here where the old `$null` lowering compiled `IS NULL`. The
+ * draft preview does not evaluate `$empty` — it refuses it with its other
+ * unevaluated operators (`preview-evaluator.ts`).
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
- * the in-memory matcher, `formula` and `read-scope-sql` are already held to,
+ * `driver-memory`'s query path (its in-memory reference matcher, which ran the
+ * table too, was retired by commit `8fec76a2b`), `formula` and `read-scope-sql`
+ * are already held to,
  * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
  * deliberately does not carry (NULL handling, boolean identities),
  * `filter-array-lowering.test.ts` for the array door (#5334),
@@ -448,9 +446,14 @@ import {
   textComparandRefusalReason,
   VALID_AST_OPERATORS,
 } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
+// on what this door admitted, before any face reads the condition — see
+// {@link normalizeAnalyticsFilterTree} (F10) and the draft preview (F11).
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
+import type { StrategyContext } from '@objectstack/spec/contracts';
+import type { DatasetScopedStrategyContext } from './types.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
-  CROSS_FIELD_COMPARISON_OPERATORS,
   fieldReferenceBetweenBoundMessage,
   isBindableComparand,
   isFieldReference,
@@ -618,7 +621,19 @@ export type NormalizedFilterNode =
   | { kind: 'const'; value: boolean }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
-  | { kind: 'not'; child: NormalizedFilterNode };
+  | { kind: 'not'; child: NormalizedFilterNode }
+  /**
+   * [#20887] A NESTED-RELATION condition — `{ owner: { region: 'NA' } }`, a
+   * plain object with no `$` key beneath a field — carried AS WRITTEN for the
+   * engine to answer. The engine serves it in `where` by reading the related
+   * object as the caller, capped (#20802's ruling), and refuses it at an
+   * aggregation's own `filter`; this package holds no second copy of either
+   * rule. So the one compiler of this node is the engine hand-off
+   * (`ObjectQLStrategy`): `NativeSQLStrategy.canHandle` declines every query
+   * that would give it one ({@link findNestedRelationCondition}), and the
+   * native compiler and the display-SQL renderer refuse it.
+   */
+  | { kind: 'relation'; member: string; condition: Record<string, unknown> };
 
 /**
  * The SQL boolean constants the compilers of this tree emit for a `const` node.
@@ -690,6 +705,9 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  * comparand position before this function runs (the #7872 ruling). From the
  * `where` door this gate now answers only what that face steps around — an
  * ARRAY and a `{ $field }` reference, as a list member or a LIKE comparand.
+ * [#21448] An ARRAY as a LIKE comparand is the shared comparand-SHAPE face's
+ * since, refused before this one as a list at a scalar operator; from the
+ * door, this gate's LIKE arm answers a `{ $field }` reference alone.
  *
  * ⚠️ [#7598, maintainer ruling 2026-08-12 Q1 = B] A THIRD arm briefly lived
  * here — a `{$field}` reference in the comparand of the six scalar comparison
@@ -728,7 +746,9 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
     // An array reaches this door as `values[0]` — i.e. every member after the
     // first is silently DROPPED — while `read-scope-sql` and `driver-sql`
     // stringify the whole array. That split is why an array is refused and not
-    // merely stringified consistently.
+    // merely stringified consistently. [#21448] From the `where` door the
+    // shared comparand-shape face refuses that list first (a list at a scalar
+    // operator), so this arm is `fieldLeaves`' invariant for it.
     if (!isRenderableTextComparand(value)) {
       throw invalidFilterError(`[analytics] ${unrenderableTextComparandMessage(opKey, field, value)}`);
     }
@@ -845,14 +865,16 @@ function undefinedComparandError(field: string, path: string): Error {
     `whose value is undefined cannot be told apart from an ABSENT key — yet the two mean OPPOSITE ` +
     `things (a predicate versus no constraint at all), so there is no reading of it that is not a ` +
     `guess. It used to compile, two ways: in a FIELD position the key was dropped outright, so a ` +
-    `single-key where ran with no filter at all and the chart was drawn over every row (#3650's ` +
-    `widening, which this module refuses everywhere else); in an OPERATOR or list position it ` +
-    `became a comparison against null, which is UNKNOWN for every row and charts nothing. ` +
+    `single-key where ran with no filter at all and the chart was drawn over every row (a dropped ` +
+    `predicate WIDENS the query, which this module refuses everywhere else); in an OPERATOR or ` +
+    `list position it became a comparison against null, which is UNKNOWN for every row and charts ` +
+    `nothing. ` +
     `Write null if the null predicate was meant ({ "${field}": null } or { "${field}": { "$null": true } }), ` +
     `or omit the key entirely when the value is genuinely absent — an omitted key is the same "no ` +
     `constraint" without the ambiguity. The producer to fix is whoever BUILT this where: undefined ` +
     `cannot cross JSON, so it is in-process code spreading a possibly-absent value into a filter ` +
-    `object (#6050 ruling B, pushed down to this door by #6386).`,
+    `object. An undefined comparand is refused rather than read as null, on the SQL drivers and on ` +
+    `this door alike.`,
   );
 }
 
@@ -863,11 +885,12 @@ function undefinedComparandError(field: string, path: string): Error {
  * The positions are enumerated rather than swept, because "comparand" is a
  * POSITION and not a type:
  *
- *   - the DIRECT comparand — `{d: undefined}`, the implicit `=`. Reached for a
- *     nested relation too, because {@link fieldLeaves} recurses into one with the
- *     DOTTED member name, so `{profile: {verified: undefined}}` is refused as
- *     `"profile.verified"` — the member the leaf would have carried, not the
- *     relation. (`read-scope-sql`'s twin has no such case: it refuses nested
+ *   - the DIRECT comparand — `{d: undefined}`, the implicit `=`. [#20887] Not
+ *     inside a nested relation any more: {@link fieldLeaves} no longer recurses
+ *     into one, it carries it as written for the engine, and an `undefined`
+ *     inside it (`{profile: {verified: undefined}}`) is refused before that by
+ *     the shared comparand-TYPE face, which {@link mapWhereFieldEntries}
+ *     descends into the relation for. (`read-scope-sql`'s twin refuses nested
  *     relations outright.)
  *   - [#19888] ⛔ NOT a member of a bare array — `{d: [1, undefined]}`. That
  *     position used to be swept here, because the bare array was read as an
@@ -890,8 +913,11 @@ function undefinedComparandError(field: string, path: string): Error {
  * operator's comparand, each `$in` / `$nin` member — in its own sentence and at
  * its own path (the #7872 ruling). This gate's sentence is reached only where
  * that face steps around: a member of an ARRAY comparand outside the list
- * operators (`{d: {$contains: ['a', undefined]}}`) and the comparand of an
- * operator outside the vocabulary (`{d: {$wat: undefined}}`). It stays as
+ * operators and the comparand of an operator outside the vocabulary
+ * (`{d: {$wat: undefined}}`). [#21448] The array arm is reached only under an
+ * operator outside the vocabulary (`{d: {$wat: ['a', undefined]}}`): the
+ * shared comparand-shape face refuses a list at every declared scalar
+ * operator first. It stays as
  * {@link fieldLeaves}' invariant, the same stance {@link assertCompilableComparand}
  * takes, and `where-type-face-refusal.test.ts` pins those two positions.
  *
@@ -918,33 +944,33 @@ function undefinedComparandError(field: string, path: string): Error {
  * gate covers all three consumers of the tree at once — the same argument
  * {@link assertCompilableComparand} makes one function below.
  *
- * That places it DOWNSTREAM of {@link nullSafeNegationOperand}, and for row three
- * of the header's table that choice is the whole question: a gate on the far side
- * of the #5146 rewrite refuses, while a rewrite that could swallow the leaf first
- * would leave a CHANGED SHAPE for the gate to bless. Measured rather than
- * assumed, because the same trap cost PR #6390 a lap on the sibling door — and
- * the reasoning there does NOT transfer, since the two modules' polarity tables
- * are spelled differently (that one is uniformly `=== null`; this one mixes
- * `=== null` for `$eq`/`$ne` with IDENTITY reads for `$null`/`$exists`). What the
- * measurement shows here is that the rewrite never drops a leaf: every guard
- * disposition — `requireValue` pushes `{k: {$null: false}}, {k: spec}`,
- * `allowNull` pushes `{$or: [{k: {$null: true}}, {k: spec}]}`, `none` writes
- * `out[k] = spec` — carries `spec` through by reference, so the author's
- * `undefined` always reaches this gate and always throws. Pinned in
+ * That places it DOWNSTREAM of the #5146 rewrite, and for row three of the
+ * header's table that choice is the whole question: a gate on the far side of
+ * the rewrite refuses, while a rewrite that could swallow the leaf first would
+ * leave a CHANGED SHAPE for the gate to bless. [#5930 step 4] The rewrite is the
+ * shared lowering's rule 3 now (`lowerFilterCondition`, run by
+ * {@link normalizeAnalyticsFilterTree} before {@link buildNode}), and it never
+ * drops a leaf either: every guard disposition — `requireValue` adds
+ * `{k: {$null: false}}` beside `{k: spec}`, `allowNull` writes
+ * `{$or: [{k: {$null: true}}, {k: spec}]}`, a total spec is left in place —
+ * carries `spec` through by reference, so the author's `undefined` always
+ * reaches this gate and always throws. Pinned in
  * `filter-normalizer-undefined-comparand.test.ts` as its own block: one case per
- * rewrite path that can carry a SWEPT comparand (`requireValue`, `allowNull`, and
- * the nested-relation recursion), plus the measured reason there is no third —
- * `none` needs every operator to satisfy {@link operatorIsNullTotal}, which is
- * false for an `undefined` comparand on every operator this gate sweeps, so the
- * only field specs that reach it holding one are the `$null` / `$exists` flags it
- * deliberately does not sweep.
+ * rewrite path that can carry a SWEPT comparand (`requireValue`, `allowNull`,
+ * and the nested-relation recursion). A spec is left unguarded only when every
+ * operator in it is already total for a missing value, which no operator this
+ * gate sweeps is when its comparand is `undefined`; the `$null` / `$exists`
+ * flags it deliberately does not sweep are the only specs that reach it that
+ * way.
  */
 function assertDefinedComparands(field: string, spec: unknown): void {
   const root = `"${field}"`;
   if (spec === undefined) throw undefinedComparandError(field, root);
   if (!isFilterObject(spec)) return;
   for (const [op, opValue] of Object.entries(spec)) {
-    if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
+    // [#20445] `$empty` is the third declared-boolean flag: skipped for the
+    // reason the null flags are, and refused by the same boolean-domain gate.
+    if (!op.startsWith('$') || NULL_FLAG_OPERATORS.has(op)) continue;
     const opPath = `${root}.${op}`;
     if (opValue === undefined) throw undefinedComparandError(field, opPath);
     if (!Array.isArray(opValue)) continue;
@@ -970,8 +996,8 @@ function assertDefinedComparands(field: string, spec: unknown): void {
  *     `{amount: {gte: 10, $lte: 20}}` — repaired by the prefixed spelling
  *     (`"gte" → "$gte"`);
  *   - a NESTED-RELATION member that strayed into an operator wrapper —
- *     repaired by giving it a wrapper of its own (`{ "d": { "nested": … } }`
- *     compiles to the member `d.nested`), ANDed with the operator constraint
+ *     repaired by giving it a wrapper of its own (`{ "d": { "nested": … } }`,
+ *     a condition on the related record), ANDed with the operator constraint
  *     explicitly, since one JSON object cannot spell the same field key twice.
  *
  * Option B — flattening the sibling as a nested path beside the operators —
@@ -991,13 +1017,13 @@ function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: stri
     `guess. If an operator missing its "$" was meant — the usual authoring slip — spell it with the ` +
     `prefix: ${rewrites}, as in { "${field}": { "$${example}": ... } }. If a nested-relation member ` +
     `was meant, give it a wrapper of its OWN with no $ siblings — { "${field}": { "${example}": ... } } ` +
-    `compiles to the member "${field}.${example}" — and AND it with the operator constraint ` +
+    `is a condition on the related record's own "${example}" — and AND it with the operator constraint ` +
     `explicitly: { "$and": [{ "${field}": { "$op": ... } }, { "${field}": { "${example}": ... } }] }. ` +
     `This shape used to compile by silently DROPPING every non-$ sibling, and a dropped conjunct ` +
     `does not narrow the query, it WIDENS it: the chart included rows the author excluded, with ` +
-    `nothing to read (#3650's failure mode, which this module refuses everywhere else). The sibling ` +
-    `door in this package (read-scope-sql.ts) already fails closed on this exact shape — one shape, ` +
-    `one answer (#6444).`,
+    `nothing to read — the failure mode this module refuses everywhere else. The sibling ` +
+    `door in this package (read-scope-sql.ts) already fails closed on this exact shape, so both ` +
+    `doors refuse it: one shape, one answer.`,
   );
 }
 
@@ -1009,16 +1035,15 @@ function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: stri
  * `opKeys` only and returns, and the nested-relation flatten sits after that
  * early return — so with even one `$` key present, every non-`$` sibling was
  * simply never visited. Dropping a conjunct WIDENS (#3650), and inside a `$not`
- * it did worse than widen by one conjunct: {@link nullGuardForFieldSpec} judged
- * the wrapper while the sibling still existed (a non-`$` key never satisfies
- * {@link operatorIsNullTotal}, so the disposition was `requireValue` or
- * `allowNull`, never `none`), the sibling then vanished here, and for a
- * null-predicate operator the surviving guard was CONTRADICTORY —
+ * it did worse than widen by one conjunct: the #5146 rewrite judged the wrapper
+ * while the sibling still existed (a non-`$` key is never total for a missing
+ * value, so the wrapper was always guarded), the sibling then vanished here,
+ * and for a null-predicate operator the surviving guard was CONTRADICTORY —
  * `{$not: {d: {$null: true, nested: 'x'}}}` compiled to `NOT(d set AND d
- * notSet)`, which is TRUE for every row. That same never-`none` fact is what
- * guarantees the #5146 rewrite carries a mixed wrapper to this gate by
- * reference instead of swallowing it — pinned in
- * `filter-normalizer-mixed-wrapper.test.ts`'s rewrite block.
+ * notSet)`, which is TRUE for every row. That same always-guarded fact is what
+ * guarantees the rewrite (the shared lowering's rule 3 since #5930 step 4)
+ * carries a mixed wrapper to this gate by reference instead of swallowing it —
+ * pinned in `filter-normalizer-mixed-wrapper.test.ts`'s rewrite block.
  *
  * ## Ordering against the neighbouring gates
  *
@@ -1054,6 +1079,11 @@ function assertUnmixedFieldWrapper(field: string, wrapper: Record<string, unknow
  * `{ $gte, $lte }` depends on.
  */
 function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
+  // [#20887] A nested-relation condition the shared lowering was kept away from
+  // ({@link shieldNestedRelations}): the relation node, carrying it as written.
+  const shielded = isFilterObject(raw) ? NESTED_RELATION_SENTINELS.get(raw) : undefined;
+  if (shielded) return [{ kind: 'relation', member: key, condition: shielded }];
+
   // [#6386] `undefined` in a comparand position, refused before any leaf exists.
   // First statement of the only leaf producer, so no consumer of the tree can be
   // handed one — see {@link assertDefinedComparands} for the position list and
@@ -1083,8 +1113,9 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     if (Object.keys(wrapper).length === 0) {
       throw invalidFilterError(
         `[analytics] "${key}" carries a field constraint with zero operators ({}). ` +
-        `Refusing rather than reading it as "every row" or "no row" — #5240 ruled this ` +
-        `shape refused on every backend.`,
+        `Refusing rather than reading it as "every row" or "no row": neither reading is the ` +
+        `author's intent (a filter that recorded a field and never its operator), so this shape ` +
+        `is refused on every backend.`,
       );
     }
     // [#6444] A wrapper mixing $-operator keys with non-$ siblings is refused
@@ -1097,13 +1128,18 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     if (opKeys.length > 0) {
       for (const opKey of opKeys) {
         // `$between [min, max]` LOWERS to its two bounds rather than getting a
-        // `between` operator of its own. Both strategies already carry the
-        // calendar-day whole-day rule on their upper bound — NativeSQLStrategy
-        // compiles a bare-day `lte` half-open (#3777), ObjectQLStrategy hands
-        // `$lte` to the driver, which does the same — so a range's max
-        // inherits that rule by construction instead of needing a second
-        // implementation to keep in step. (The preview evaluator's `$between`
-        // gap was closed the same way, sharing its `$lte` helper.)
+        // `between` operator of its own: `gte` its minimum and `lte` its
+        // maximum, inclusive at both ends, as written.
+        //
+        // [ADR-0053 D-D1, amended — #5930 step 4] The whole-day rule is not
+        // applied here, and no compiler downstream applies it to the `lte`
+        // this produces: it is the shared lowering's (rule 1 splits a
+        // `$between` on a `datetime` column, or on one whose type the reader
+        // cannot name, and rule 2 widens its bare-day maximum), which
+        // {@link normalizeAnalyticsFilterTree} runs before this function. A
+        // `$between` that reaches this arm is on a column the reader declares
+        // something else (`date`, `time`, text, a number), so the split here is
+        // structural only — the comparison the typed drivers run for it.
         //
         // Before this, `$between` was simply absent from the operator map and
         // fell to the `continue` below: the predicate VANISHED from the WHERE
@@ -1155,6 +1191,24 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         if (opKey === '$null' || opKey === '$exists') {
           const isNull = opKey === '$null' ? wrapper[opKey] === true : wrapper[opKey] === false;
           leaf(isNull ? 'notSet' : 'set', []);
+          continue;
+        }
+
+        // [#20445] `$empty` lowers to its own two leaves, `empty` / `notEmpty`,
+        // valueless like `notSet` / `set` — NOT to them, and not to any tree
+        // of the existing leaves: what counts as empty is the field's
+        // DECLARED row of the ruled per-type table (null or `''`, null or
+        // `[]`, null only), this function sees no declaration, and the
+        // multi-value row cannot be spelled in the lowered vocabulary at all
+        // (an empty list is refused as an equality comparand — ruling 乙 on
+        // #19757). Each consumer of the tree resolves the row where it knows
+        // the field: the two SQL compilers through the host's declared value
+        // shape and the spec's `expandEmptyOperator`, the engine path by
+        // handing the operator to the engine. The flag is a boolean here —
+        // `assertBooleanNullFlags` refused anything else — so `=== true` is
+        // the whole choice.
+        if (opKey === '$empty') {
+          leaf(wrapper[opKey] === true ? 'empty' : 'notEmpty', []);
           continue;
         }
 
@@ -1212,7 +1266,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           // driver-memory made the same call for the same reason in #3948.
           throw invalidFilterError(
             `[analytics] Unsupported filter operator "${opKey}" on "${key}". ` +
-            `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, ` +
+            `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, $empty, ` +
             `and the $and/$or/$not combinators. ` +
             `Dropping it would silently widen the query to rows the filter excludes.`,
           );
@@ -1222,28 +1276,28 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // {@link assertCompilableComparand} for why this door and not the three
         // emitters downstream of it.
         assertCompilableComparand(opKey, key, v);
+        // [#21448] Only a LIST operator's array is spread into `values` here.
+        // The shared comparand-shape face refuses a list at every scalar
+        // operator, whatever the column type, and `lowerAnalyticsWhere` hands
+        // it every field entry before any leaf exists — so no scalar leaf is
+        // built from a list, and no compiler's `values[0]` read ever drops one.
         const values = Array.isArray(v) ? v.map(comparand) : [comparand(v)];
-        // [#5298] The operators that carry their own negation are NULL-safe,
-        // here as everywhere else — see the module header's section on it.
-        if (nullValueSatisfiesOperator(opKey, v) && !operatorIsNullTotal(opKey, v)) {
-          out.push({
-            kind: 'or',
-            children: [
-              { kind: 'leaf', member: key, operator: 'notSet', values: [] },
-              { kind: 'leaf', member: key, operator: cubeOp, values },
-            ],
-          });
-          continue;
-        }
+        // [#5298] A negative-polarity operator reaches this line already inside
+        // the NULL escape the shared lowering wrote around it (see the module
+        // header's section on it), so it compiles as written here.
         leaf(cubeOp, values);
       }
       return out;
     }
-    // Nested relation (e.g. {profile: {verified: true}}). Flatten with
-    // dot-prefixed keys so cube field path resolution still works.
-    for (const [nestedKey, nestedVal] of Object.entries(wrapper)) {
-      out.push(...fieldLeaves(`${key}.${nestedKey}`, nestedVal));
-    }
+    // [#20887] A nested-relation condition (`{ profile: { verified: true } }`)
+    // is the ENGINE's form: served in `where` by reading the related object as
+    // the caller, capped (#20802's ruling). It is carried as written for the
+    // engine to answer. ⛔ It is no longer flattened to the dotted member
+    // `profile.verified`: that resolved through a cube join, which applied the
+    // related object's row scope but neither its field permissions nor the cap,
+    // missed a multi-valued relation, and — on a cube with no declared join —
+    // named a table that does not exist.
+    out.push({ kind: 'relation', member: key, condition: wrapper });
     return out;
   }
 
@@ -1351,12 +1405,12 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
           `Dropping it would silently widen the query to rows the filter excludes.`,
         );
       }
-      // NULL-safe negation (#5146): totalise the operand's leaves FIRST, so the
-      // negation can never be UNKNOWN and this path admits the same rows
-      // `driver-memory` / `formula` / `driver-sql` admit. The guard is added as
-      // STRUCTURE here, which is what makes it survive into the ObjectQL engine
-      // path too (see the module header).
-      const inner = buildNode(nullSafeNegationOperand(raw));
+      // NULL-safe negation (#5146): the operand's leaves arrive TOTAL — the
+      // shared lowering guarded each one as structure before this function ran
+      // (see the module header) — so the negation can never be UNKNOWN and
+      // this path admits the rows `driver-memory` / `formula` / `driver-sql`
+      // admit, on the ObjectQL engine path too.
+      const inner = buildNode(raw);
       // `notOf` turns a TRUE operand into FALSE instead of nothing: `{$not: {}}`
       // is the zero-row filter, and emitting nothing for it charted every row.
       children.push(notOf(inner));
@@ -1374,265 +1428,6 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   }
 
   return andOf(children);
-}
-
-// ── [#5146 / #5325] NULL-safe `$not` ─────────────────────────────────────────
-
-/**
- * What one field constraint needs so the leaves it produces are TOTAL — TRUE or
- * FALSE for every row, never UNKNOWN.
- *
- * - `'none'`         — already total (`set` / `notSet`, a boolean constant), or
- *                      a shape this normalizer refuses, which must keep refusing.
- * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
- * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
- */
-type NullGuard = 'none' | 'requireValue' | 'allowNull';
-
-/**
- * Does a NULL column satisfy this one operator, under the semantics the JS
- * backends (`driver-memory`'s `match`, `formula`'s `matchesFilterCondition`)
- * give it? They evaluate a missing value in ordinary two-valued JS — `undefined
- * !== 'won'` is simply `true` — and #5146 ruled that answer canonical.
- *
- * This is `sql-driver.ts`'s and `read-scope-sql.ts`'s table, with the
- * differences that come from THIS module's emitter rather than from a different
- * reading of #5146 — each guard matches its own emitter, which is the invariant,
- * not the literal table:
- *
- *   - `$null` / `$exists` are read by IDENTITY (`=== true` / `=== false`)
- *     because {@link fieldLeaves} reads them that way, where `read-scope-sql`
- *     uses truthiness because its emitter does. Immaterial in practice: both
- *     compile to a null predicate, so they are total either way and never
- *     reach the polarity question. [#20040] And from the `where` door the
- *     flag is always a boolean here: {@link assertBooleanNullFlags} refuses
- *     any other value before the `$not` rewrite that consults this table runs.
- *   - `$between` exists in this vocabulary; it lowers to `gte` + `lte`, two
- *     positive comparisons, so it takes the same default they do.
- *
- * `$eq` / `$ne` DO carry `read-scope-sql`'s `value === null` arms — since #5332,
- * and only since then. While {@link fieldLeaves} stringified a `null` comparand
- * to `''`, these two arms had to describe THAT emitter: `{$eq: null}` was an
- * ordinary value comparison here, the guard said so, and the TSDoc recorded the
- * `''` comparand as a separate defect deliberately left undecided. #5332 decided
- * it — the emitter now compiles the pair to `notSet` / `set` — so the arms moved
- * with it, in the same commit. The invariant is not "copy the sibling table", it
- * is "each guard matches its OWN emitter"; the two tables agreeing again is the
- * consequence of the emitters agreeing, not the reason for the edit.
- *
- * The default is the large positive-comparison family (`$gt` / `$in` /
- * `$contains` / …), every member of which answers `false` for a value that is
- * not there. An operator this module does not support also lands here; it is
- * guarded and then still THROWS from {@link fieldLeaves}, so fail-closed is
- * preserved.
- */
-function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
-  switch (op) {
-    // [#5332] `$eq: null` IS the null predicate — a NULL column satisfies it,
-    // and no other comparand does.
-    case '$eq': return value === null;
-    // Mirror image: `$ne: null` compiles to `set` (`IS NOT NULL`), which a NULL
-    // column FAILS. Any other comparand is the two-valued JS `!==`, which an
-    // absent value passes — the arm this used to be for every comparand.
-    case '$ne': return value !== null;
-    case '$null': return value === true;
-    case '$exists': return value === false;
-    // Negative-polarity set / substring tests hold vacuously for an absent value.
-    case '$nin': return true;
-    // `$notContains` is the one operator where the two JS backends disagree for
-    // a null-valued field (`driver-memory` answers false, `formula` true).
-    // `formula` is followed because `driver-sql` and `read-scope-sql` follow it,
-    // so this module casts no vote on a disagreement that is filed elsewhere.
-    case '$notContains': return true;
-    default: return false;
-  }
-}
-
-/** Is this operator's compiled leaf already total for a NULL column? */
-function operatorIsNullTotal(op: string, value: unknown): boolean {
-  // [#7598, maintainer ruling 2026-08-12] A `{ $field }` comparand on any of the
-  // six scalar comparison operators is TOTAL AT THE BACKEND, so this module must
-  // add no guard of its own — and MEASURED, adding one changes the answer.
-  //
-  // Every other entry in this switch is total because THIS module compiles the
-  // operator into a null predicate. This one is total because of where the leaf
-  // ends up: since the ruling, a `where` carrying a reference is declined by
-  // `NativeSQLStrategy.canHandle` and served on the engine path, where
-  // `driver-sql`'s `applyCrossFieldComparison` emits a predicate written total
-  // across NULLs by construction (it repeats both column expressions for exactly
-  // that reason — see `cross-field-conformance-cases.ts`, whose rows 4-6 carry
-  // every NULL arrangement a pair of columns can be in). `@objectstack/formula`
-  // resolves the reference and then compares in two-valued JS. The two agree,
-  // and the corpus's declared id lists are the third statement of it.
-  //
-  // ## What the guard did before this arm existed — measured on the wasm driver
-  //
-  // The `$ne` arm of {@link nullValueSatisfiesOperator} answers `true` for any
-  // non-null comparand, so a reference took the negative-polarity totalisation
-  // in {@link fieldLeaves} and `{ amount: { $ne: { $field: 'budget' } } }`
-  // lowered to `{$or: [{amount: null}, {amount: {$ne: ref}}]}`. That admitted
-  // fixture row 6 — BOTH columns NULL — where the corpus, both SQL drivers and
-  // the memory evaluator all EXCLUDE it, because row 6 satisfies the inner
-  // `$eq` and `$ne` is its exact complement. Six corpus cases moved: the three
-  // `$ne` class-pair cases, `a column differs from itself on no row`, and the
-  // two `$not`-of-`$eq` cases (which reach the same guard through
-  // {@link nullGuardForFieldSpec}). Widening a `$ne`, on a shape whose producer
-  // is an RLS rule, is the direction that matters.
-  //
-  // The guard is right for a LITERAL comparand and is untouched there: `{amount:
-  // {$ne: 5}}` must still admit a NULL `amount`, which is #5298's ruling and the
-  // JS backends' answer. What differs is only that a reference's NULL semantics
-  // are already decided by the referent, not by the target column alone — so
-  // there is nothing left for a guard to decide.
-  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && isFieldReference(value)) return true;
-  switch (op) {
-    // Compile to `set` / `notSet` — `IS NULL` / `IS NOT NULL`, two-valued by
-    // construction, on every strategy that compiles this tree.
-    case '$null':
-    case '$exists':
-      return true;
-    // [#5332] A `null` comparand makes these null PREDICATES too — `notSet` /
-    // `set`, not comparisons — so they are total by construction and take NO
-    // guard. Left out, `{$not: {stage: {$eq: null}}}` wrapped `stage IS NOT NULL
-    // AND stage IS NULL` (an always-false conjunction) and negated it to EVERY
-    // row, for a filter meaning "stage is not empty".
-    case '$eq':
-    case '$ne':
-      return value === null;
-    // An EMPTY set compiles to a boolean CONSTANT (see `fieldLeaves`), and a
-    // constant is total. Wrapping a guard around it would only add a redundant
-    // conjunct to a predicate whose value is already decided.
-    case '$in':
-    case '$nin':
-      return Array.isArray(value) && value.length === 0;
-    default:
-      return false;
-  }
-}
-
-/**
- * The guard one field constraint needs. A constraint is the AND of its
- * operators, so it is total when every operator is, and a NULL column satisfies
- * it only when it satisfies all of them.
- */
-function nullGuardForFieldSpec(spec: unknown): NullGuard {
-  // `{field: null}` compiles to `notSet` (`IS NULL`) — already total.
-  if (spec === null) return 'none';
-  // [#19888] No bare-array arm: a list in the equality slot is refused by
-  // `assertNoListInEqualitySlot` before this rewrite runs.
-  // A scalar / Date is an implicit `=`; a NULL column fails it.
-  if (typeof spec !== 'object' || spec instanceof Date) return 'requireValue';
-  const entries = Object.entries(spec as Record<string, unknown>);
-  // `{field: {}}` is REFUSED by `fieldLeaves` (#5240). Passing it through
-  // unrewritten is what keeps that refusal reachable — a guard wrapped around it
-  // would only change which message the caller sees.
-  if (entries.length === 0) return 'none';
-  let total = true;
-  let nullSatisfies = true;
-  for (const [op, value] of entries) {
-    if (!operatorIsNullTotal(op, value)) total = false;
-    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
-  }
-  if (total) return 'none';
-  return nullSatisfies ? 'allowNull' : 'requireValue';
-}
-
-/**
- * Guard one `field: spec` entry, writing either the untouched entry into `out`
- * or its guarded form into `guarded`.
- *
- * A nested relation spec (`{account: {region: 'NA'}}`) is flattened with the
- * dotted key {@link fieldLeaves} would have produced, so the guard lands on the
- * SAME member as the leaf it protects — guarding `account` when the leaf reads
- * `account.region` would test a column that does not exist.
- */
-function guardFieldEntry(
-  key: string,
-  spec: unknown,
-  out: Record<string, unknown>,
-  guarded: unknown[],
-): void {
-  if (
-    isFilterObject(spec) &&
-    Object.keys(spec).length > 0 &&
-    !Object.keys(spec).some((k) => k.startsWith('$'))
-  ) {
-    for (const [nested, value] of Object.entries(spec)) {
-      guardFieldEntry(`${key}.${nested}`, value, out, guarded);
-    }
-    return;
-  }
-
-  const guard = nullGuardForFieldSpec(spec);
-  if (guard === 'none') {
-    out[key] = spec;
-  } else if (guard === 'requireValue') {
-    // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
-    guarded.push({ [key]: { $null: false } }, { [key]: spec });
-  } else {
-    // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the AND
-    // this node's keys form.
-    guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: spec }] });
-  }
-}
-
-/**
- * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
- * predicate — which is what makes `NOT (…)` mean here what it means in
- * `driver-memory`, `formula` and (since #5296) `driver-sql`.
- *
- * # Why the guard rides the LEAF, not the `NOT`
- *
- * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
- * NULL` are the same predicate. They stop being the same as soon as the operand
- * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
- * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
- * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
- * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
- * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
- *
- * # Why polarity is per operator
- *
- * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
- * `{$not: {a: {$ne: 5}}}` means "a is 5", and both JS backends exclude a NULL
- * row from it. Adding an unconditional null escape there would hand back exactly
- * the rows the filter excludes. So each leaf is guarded in the direction its own
- * operator answers, per {@link nullValueSatisfiesOperator}.
- *
- * # Why it is a REWRITE of the condition, not of the tree
- *
- * The output is still a `FilterCondition`, so `buildNode` compiles it with no
- * new cases and — the point of doing it here rather than in the SQL strategy —
- * the guard reaches the ObjectQL engine as structure too. Running only inside a
- * `$not` keeps every other comparison's shape untouched, and a NESTED `$not` is
- * left alone on purpose: its own branch totalises its operand, and
- * `NOT <total>` is itself total, so recursing would stack a redundant guard on
- * the same column.
- */
-function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const guarded: unknown[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
-      // A non-object element is passed through so `buildNode` still refuses it
-      // with its own message.
-      out[key] = value.map((element) => (isFilterObject(element) ? nullSafeNegationOperand(element) : element));
-      continue;
-    }
-    if (key.startsWith('$')) {
-      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
-      // whatever this module does with them today — the rewrite rules on NULL,
-      // not on the operator vocabulary, and an unknown one must still throw.
-      out[key] = value;
-      continue;
-    }
-    guardFieldEntry(key, value, out, guarded);
-  }
-  if (guarded.length > 0) {
-    const existing = Array.isArray(out.$and) ? out.$and : [];
-    out.$and = [...existing, ...guarded];
-  }
-  return out;
 }
 
 // ── [#5334] The FilterArray door ─────────────────────────────────────────────
@@ -1655,7 +1450,8 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
     `A filter array is a comparison [field, operator, value], a logical node ` +
     `["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY sugar (spec ` +
     `'FilterArray'), lowered to a FilterCondition by @objectstack/spec parseFilterAST() at ` +
-    `every door, this one included (#5158/#5334). This value cannot be lowered, and an ` +
+    `every door, this one included, so it means the same rows whichever door it enters. This ` +
+    `value cannot be lowered, and an ` +
     `unapplied filter would have charted the UNFILTERED dataset. Recognised operators: ` +
     `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
     `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
@@ -1689,6 +1485,63 @@ function isNestedRelationSpec(spec: unknown): spec is Record<string, unknown> {
 }
 
 /**
+ * [#20887] A nested-relation CONDITION: a {@link isNestedRelationSpec} that
+ * names at least one field. The empty object `{}` is not one — it keeps
+ * #5240's zero-operator refusal in {@link fieldLeaves}, the answer the engine
+ * gives it too (a condition naming no field of the related object).
+ */
+function isNestedRelationCondition(spec: unknown): spec is Record<string, unknown> {
+  return isNestedRelationSpec(spec) && Object.keys(spec).length > 0;
+}
+
+/**
+ * [#20887] The first nested-relation condition in a `FilterCondition` —
+ * `{ owner: { region: 'NA' } }` beneath a field, at any depth of `$and` /
+ * `$or` / `$not` — with the field and the key path it sits at, or `null`.
+ *
+ * The form is the ENGINE's: it serves it in `where` by reading the related
+ * object AS THE CALLER, with the related object's row scope and field
+ * permissions, and refuses a match past its cap (#20802's ruling, lowered at
+ * the #5930 seam). A compiler in this package that emits SQL itself cannot
+ * enforce that — it would need the caller's field permissions and a read of the
+ * related object, which is a second copy of the rule. So this is the ROUTING
+ * detector: `NativeSQLStrategy.canHandle` declines a query in which any
+ * producer it would compile carries the form, and the query goes to the
+ * engine path — the mechanism and the reasoning of the #7598 cross-field
+ * decline (maintainer ruling 2026-08-12, Q1 = B), for the same reason: the
+ * rule lives in one place.
+ *
+ * Reads the traversal the shared comparand faces read (`$and` / `$or` arrays,
+ * `$not`, field entries); any other `$` key is not a field. Never throws — a
+ * malformed shape is the normalizer's to refuse, in its own words.
+ */
+export function findNestedRelationCondition(
+  node: unknown,
+  path = 'where',
+): { field: string; path: string } | null {
+  if (!isFilterObject(node)) return null;
+  for (const [key, spec] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(spec)) continue;
+      for (const [index, child] of spec.entries()) {
+        const hit = findNestedRelationCondition(child, `${here}[${index}]`);
+        if (hit) return hit;
+      }
+      continue;
+    }
+    if (key === '$not') {
+      const hit = findNestedRelationCondition(spec, here);
+      if (hit) return hit;
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (isNestedRelationCondition(spec)) return { field: key, path: here };
+  }
+  return null;
+}
+
+/**
  * [#20010, copy-on-write since #20035] Visit every FIELD ENTRY of an
  * object-form `where` — `{ key: spec }` with the `path` of the node that holds
  * it — the way the shared comparand faces walk a condition, plus one step the
@@ -1702,9 +1555,10 @@ function isNestedRelationSpec(spec: unknown): spec is Record<string, unknown> {
  * The extra step: a NESTED-RELATION object (`{ acct: { region: … } }`, see
  * {@link isNestedRelationSpec}) is descended, where the faces leave one alone
  * because a driver reads it as a deep-equality comparand or another object's
- * condition. This compiler reads it as neither: {@link fieldLeaves} flattens it
- * to the dotted member `acct.region`, so its entries are comparisons in their
- * own right. The entry is visited as `{ region: … }` at path `where.acct`,
+ * condition. Its entries ARE comparisons in their own right — on the related
+ * object's fields, which the engine judges with these same faces when it reads
+ * that object for the condition (#20887: the condition reaches the engine as
+ * written) — so this door judges them first, in its own envelope. The entry is visited as `{ region: … }` at path `where.acct`,
  * which is how the #19888 gate has named that position since it landed, and
  * which the type face renders `where.acct.region` — the path the dotted
  * spelling `{ 'acct.region': … }` gets.
@@ -1809,9 +1663,9 @@ function forEachWhereFieldEntry(
  *
  * One step past the face: a NESTED-RELATION object (`{ acct: { region: [...] } }`,
  * no `$` key) is descended. The face leaves one alone, because to a driver it
- * is a deep-equality comparand or another object's condition. Here it is
- * neither: {@link fieldLeaves} flattens it to the dotted member `acct.region`,
- * whose implicit-equality slot is the one the list sits in.
+ * is a deep-equality comparand or another object's condition. Here it is the
+ * latter, a condition on the related object's own `region`, whose
+ * implicit-equality slot is the one the list sits in.
  *
  * It runs before every gate {@link buildNode} reaches, so a list is diagnosed
  * as the list and not by one of its members (`{ f: [1, undefined] }`), the
@@ -1886,8 +1740,8 @@ function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
  * one-entry node with the same path seed, `where`: the face then reports
  * exactly the path and field it reports on the whole condition, so the object
  * spelling gets the `FilterArray` spelling's refusal byte for byte. A nested
- * relation's entries are handed over too, since this compiler flattens them to
- * the dotted member.
+ * relation's entries are handed over too: they are comparisons on the related
+ * object's fields.
  *
  * Refusals this door already gave in its own words now give the face's, the
  * same words the `FilterArray` spelling gets: a `$between` that is not a
@@ -1897,9 +1751,12 @@ function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
  *
  * ⛔ Not moved:
  *
- * - `$ne` with a list. The face does not judge it yet; #19886's stage 2 puts
- *   that refusal on the face, and this gate carries it the day it does, with no
- *   change here.
+ * - `$ne` with a list. The face did not judge it yet; #19886's stage 2 put
+ *   that refusal on the face, and this gate carried it the day it did, with no
+ *   change here. [#21448] The same held for a list at every other scalar
+ *   operator (`$gt`, the text operators, the flags): the face's arm for it
+ *   reached this door with no change here, so the lowering refuses the list
+ *   before any leaf, and no scalar leaf is built from one.
  * - `$in: []` / `$nin: []`, every scalar ordering comparand, a `{ $field }` in
  *   an ordering slot, and `null` in the equality slot (`{ f: null }`,
  *   `$eq: null`, `$ne: null`, the null predicate) all compile as before.
@@ -1928,8 +1785,8 @@ function assertWhereComparandShapes(node: unknown, path = 'where'): void {
  * reports exactly the path it reports on the whole condition and the object
  * spelling gets the `FilterArray` spelling's refusal byte for byte. A nested
  * relation's entries are handed over too ({@link mapWhereFieldEntries}): the
- * face leaves such an object alone as filter STRUCTURE, and this compiler
- * flattens it to dotted members whose comparands are literals like any other.
+ * face leaves such an object alone as filter STRUCTURE, and its comparands are
+ * literals on the related object's fields like any other.
  */
 function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
   return mapWhereFieldEntries(node, path, (key, spec, at) =>
@@ -1939,8 +1796,24 @@ function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
 
 // ── [#20040] The null flags' boolean DOMAIN, on every spelling that carries one ──
 
-/** The two flags `FieldOperatorsSchema` declares `z.boolean()`. */
-const NULL_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists']);
+/**
+ * The flags `FieldOperatorsSchema` declares `z.boolean()`, each with what its
+ * `true` / `false` asks for (the refusal's prescription): the two null flags
+ * and [#20445] the `$empty` operator, which joins the gate with its arm. One
+ * table, so a flag cannot be gated without a prescription or described
+ * without being gated.
+ */
+const FLAG_MEANINGS = {
+  $null: ['has no value', 'has a value'],
+  $exists: ['has a value', 'has no value'],
+  $empty: ['is empty by its declared type', 'is not empty'],
+} as const satisfies Record<string, readonly [string, string]>;
+type BooleanFlagOperator = keyof typeof FLAG_MEANINGS;
+const NULL_FLAG_OPERATORS: ReadonlySet<string> = new Set(Object.keys(FLAG_MEANINGS));
+
+function isBooleanFlagOperator(op: string): op is BooleanFlagOperator {
+  return NULL_FLAG_OPERATORS.has(op);
+}
 
 /** What arrived where a flag's boolean belongs, for the refusal below. */
 function describeFlagComparand(value: unknown): string {
@@ -1993,15 +1866,15 @@ function describeFlagComparand(value: unknown): string {
  * condition reads one way wherever it is refused; the rest names what THIS
  * door used to do. The message carries no tracker number (a runtime string).
  */
-function nonBooleanFlagError(op: string, field: string, path: string, value: unknown): Error {
-  const [whenTrue, whenFalse] = op === '$null' ? ['has no value', 'has a value'] : ['has a value', 'has no value'];
+function nonBooleanFlagError(op: BooleanFlagOperator, field: string, path: string, value: unknown): Error {
+  const [whenTrue, whenFalse] = FLAG_MEANINGS[op];
   return invalidFilterError(
     `[analytics] Operator "${op}" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFlagComparand(value)} at ${path}. @objectstack/spec FieldOperatorsSchema ` +
       `declares ${op} as a boolean, and a non-boolean is refused rather than coerced because the ` +
       `backends read one in OPPOSITE directions — one as IS NULL, another as IS NOT NULL. This ` +
-      `analytics filter used to read every non-boolean as IS NOT NULL, so the string "true" and the ` +
-      `string "false" asked for the same rows. Write the boolean itself: "${op}": true matches rows ` +
+      `analytics filter used to read every non-boolean $null / $exists as IS NOT NULL, so the string ` +
+      `"true" and the string "false" asked for the same rows. Write the boolean itself: "${op}": true matches rows ` +
       `whose "${field}" ${whenTrue}, "${op}": false rows whose "${field}" ${whenFalse}. The filter was ` +
       `NOT applied.`,
   );
@@ -2019,10 +1892,10 @@ function nonBooleanFlagError(op: string, field: string, path: string, value: unk
  *
  * ## Why before any lowering, and not at the identity read in `fieldLeaves`
  *
- * Two readers see the flag before that read does. {@link nullSafeNegationOperand}
- * classifies every field spec under a `$not` through
- * {@link nullValueSatisfiesOperator} and {@link operatorIsNullTotal}, both of
- * which read the flag, and the draft preview evaluates the condition
+ * Two readers see the flag before that read does. The shared lowering
+ * (`lowerFilterCondition`, run by {@link normalizeAnalyticsFilterTree} before
+ * {@link buildNode}) classifies every field spec under a `$not` by its NULL
+ * polarity, which reads the flag, and the draft preview evaluates the condition
  * {@link normalizeWhereComparands} returns without ever reaching `fieldLeaves`.
  * A gate here answers all of them, and the preview then refuses this cell in
  * the published door's words. `read-scope-sql.ts` placed its twin at its one
@@ -2054,7 +1927,7 @@ function assertBooleanNullFlags(node: unknown, path = 'where'): void {
   forEachWhereFieldEntry(node, path, (key, spec, at) => {
     if (!isFilterObject(spec)) return;
     for (const [op, value] of Object.entries(spec)) {
-      if (!NULL_FLAG_OPERATORS.has(op) || typeof value === 'boolean') continue;
+      if (!isBooleanFlagOperator(op) || typeof value === 'boolean') continue;
       throw nonBooleanFlagError(op, key, `${at}.${key}.${op}`, value);
     }
   });
@@ -2120,7 +1993,10 @@ function assertBooleanNullFlags(node: unknown, path = 'where'): void {
  * positions the face does not judge: an array or a `{ $field }` reference as a
  * list member or a LIKE comparand (#5234 / #7598 wording), and an `undefined`
  * inside an array comparand or under an operator outside the vocabulary
- * (#6386 wording).
+ * (#6386 wording). [#21448] Less one position: an ARRAY at a scalar operator —
+ * a LIKE comparand included — is the shape face's refusal now, so an array
+ * comparand reaches those gates only as a list member or under an operator
+ * outside the vocabulary.
  *
  * ## Binary is reconciled, not kept as a local extra
  *
@@ -2190,7 +2066,8 @@ export function lowerAnalyticsWhere(
       throw invalidFilterError(
         `[analytics] filter array ${JSON.stringify(where)} passed isFilterAST() but ` +
         `parseFilterAST() lowered it to ${JSON.stringify(condition)}. Refusing rather than ` +
-        `charting the dataset unfiltered (#5158/#5334).`,
+        `charting the dataset unfiltered: a filter array is lowered at every door or refused, ` +
+        `never dropped.`,
       );
     }
     return condition as Record<string, unknown>;
@@ -2279,13 +2156,203 @@ export function conjunctFieldKeys(condition: Record<string, unknown>): string[] 
  * metadata meaning one thing: the same `where` on a plain `find()` already
  * lowers at the engine door (#5329), so refusing it here would have forked the
  * product by which face read the metadata.
+ *
+ * ## The shared lowering (ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3)
+ *
+ * This is the analytics `where` door's seam for F10, the amendment's item 2:
+ * the condition {@link lowerAnalyticsWhere} admitted — after both shared
+ * comparand faces, on either spelling — is lowered by `lowerFilterCondition`
+ * before {@link buildNode} reads it, so every compiler of the tree (the native
+ * SQL, the `/analytics/sql` echo, and the ObjectQL hand-off to the engine)
+ * reads one lowered condition. Filter tokens resolve upstream of every path
+ * that reaches here, so the lowering meets a resolved date macro (item 3).
+ *
+ * `lowering` is the caller's column-type reader (item 7), and it is REQUIRED,
+ * so no compile site can reach the tree without deciding it: a strategy passes
+ * the member's declared type through its context's `declaredFieldType` hook
+ * ({@link declaredDatetimeLowering}, which also states how that strategy reads
+ * a column the hook cannot name), and a position that only collects members
+ * passes {@link NO_DATETIME_COLUMNS}. {@link lowerAnalyticsWhere}
+ * itself stays un-lowered: its other readers ask about the AUTHORED condition
+ * (the keys an ad-hoc cube is minted from, the routing detectors), not about
+ * the predicate that runs.
+ *
+ * Every member reader downstream (`collectFilterLeaves`, `assertWhereFields`)
+ * reads this same lowered tree, so "the member the gate saw" stays "the column
+ * that reached SQL" — the lowering's NULL guards name the member they guard.
  */
 export function normalizeAnalyticsFilterTree(
   query: { where?: unknown } | unknown,
+  lowering: FilterLoweringOptions,
 ): NormalizedFilterNode | null {
   const condition = lowerAnalyticsWhere(query);
   if (!condition) return null;
-  return buildNode(condition);
+  return buildNode(lowerFilterCondition(shieldNestedRelations(condition), lowering));
+}
+
+/**
+ * [#20887] The nested-relation conditions a `where` carries, held OUT of the
+ * shared lowering: each stands in the lowered condition as a sentinel spec
+ * registered here, and {@link fieldLeaves} turns the sentinel back into the
+ * `relation` node carrying the author's condition, as written.
+ *
+ * Why the lowering must not read the condition itself: it is not a door, and it
+ * reads every field key as a column of THIS object. Under a `$not` it would
+ * guard the relation column (`{ owners: { $null: false } }`) before anything
+ * knows which related ids match — a guard the engine adds itself, over the
+ * `$in` / `$contains` it lowers the condition to, and one this package's engine
+ * hand-off spells `$ne: null`, which the SQL driver refuses over a multi-valued
+ * relation's JSON column (measured: `{ $not: { owners: { region: 'NA' } } }`
+ * answered `INVALID_FILTER` where the engine answers its rows). And the
+ * condition's own comparands belong to the related object, whose declared
+ * types the engine reads when it lowers them.
+ *
+ * The sentinel is `{ $exists: true }`, a fresh object per condition: TOTAL for
+ * a row with no value, so the lowering neither guards nor rewrites it and hands
+ * it on by reference, and it names no column as required (only an exact
+ * `{ $null: false }` does). Copy-on-write, like the lowering: a condition with
+ * no nested relation comes back as the same object.
+ */
+const NESTED_RELATION_SENTINELS = new WeakMap<object, Record<string, unknown>>();
+
+function shieldNestedRelations(node: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  const replace = (key: string, value: unknown): void => {
+    out ??= { ...node };
+    out[key] = value;
+  };
+  for (const [key, spec] of Object.entries(node)) {
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(spec)) continue;
+      let copy: unknown[] | undefined;
+      spec.forEach((child, index) => {
+        if (!isFilterObject(child)) return;
+        const shielded = shieldNestedRelations(child);
+        if (shielded !== child) {
+          copy ??= [...spec];
+          copy[index] = shielded;
+        }
+      });
+      if (copy) replace(key, copy);
+      continue;
+    }
+    if (key === '$not') {
+      if (!isFilterObject(spec)) continue;
+      const shielded = shieldNestedRelations(spec);
+      if (shielded !== spec) replace(key, shielded);
+      continue;
+    }
+    if (key.startsWith('$') || !isNestedRelationCondition(spec)) continue;
+    const sentinel = { $exists: true };
+    NESTED_RELATION_SENTINELS.set(sentinel, spec);
+    replace(key, sentinel);
+  }
+  return out ?? node;
+}
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's reader for a
+ * position that need not, or must not, rewrite a bound: no member is a
+ * `datetime` column, so the whole-day rule and the `$between` split rewrite
+ * nothing and every bound reaches its face as written; the NULL-polarity guards
+ * apply all the same (they do not depend on the type).
+ *
+ * Two kinds of position use it. A reader that collects MEMBERS rather than
+ * compiling (`assertWhereFields`, the cross-object envelope check): the two
+ * type-scoped rules never change which member a leaf names. And the draft
+ * preview, which evaluates drafted rows and is handed no declared type; its own
+ * bound copy (`lteBound`) keeps the whole-day rule until its deletion lands.
+ *
+ * [#5930 step 4] ⛔ Not a strategy whose host cannot name a column's type: see
+ * {@link declaredDatetimeLowering}'s `undeclared` argument.
+ */
+export const NO_DATETIME_COLUMNS: FilterLoweringOptions = Object.freeze({
+  isDatetimeColumn: () => false,
+});
+
+/**
+ * Item 7's type-blind reading: the lowering is handed no reader, so its two
+ * type-scoped rules apply to every column.
+ */
+const TYPE_BLIND: FilterLoweringOptions = Object.freeze({});
+
+/**
+ * How a strategy's lowering reads a column whose declared type its host cannot
+ * name (no `declaredFieldType` hook, or a hook answering no type for it).
+ *
+ * - `'type-blind'` — ADR-0053 D-D1 item 7's reading for a seam that cannot read
+ *   the declaration: the whole-day rule and the `$between` split apply to that
+ *   column (sound on `Field.date` text, where `< next-day` orders exactly as
+ *   `<= day`). For a face that is the LAST seam before its statement runs,
+ *   where nothing downstream reads the declaration.
+ * - `'as-written'` — leave that column's bounds as written, for a face whose
+ *   filter is handed to a seam that does read the declaration: the ObjectQL
+ *   engine's `where` seam, which lowers it again with the object's own field
+ *   map (and itself applies item 7's type-blind reading to an object with no
+ *   field map).
+ */
+export type UndeclaredColumnReading = 'type-blind' | 'as-written';
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 steps 3 and 4] A strategy's column-type reader
+ * for the shared lowering (item 7): a `where` member is a `datetime` column when
+ * the host's declared-type hook says the column it binds against is one —
+ * `type === 'datetime'`, the test `SqlDriver` indexes `datetimeFields` by and
+ * the engine seam reads. `target` resolves a member to its (object, column)
+ * exactly as the strategy's own compile path resolves it, so the question is
+ * asked of the column the predicate will read.
+ *
+ * The hook is the context's optional `declaredFieldType` — the one
+ * `nonTextColumnResolver` asks; the production composition answers it from the
+ * engine's registry (`AnalyticsServiceConfig.sourceFieldMeta`). A column the
+ * hook declares is read by its declaration. A column it cannot name (no hook,
+ * or no type for that column) is read as `undeclared` says
+ * ({@link UndeclaredColumnReading}), so each strategy states which seam owns the
+ * column's type rather than inheriting one silent default.
+ *
+ * This reader is the whole of the whole-day rule on the strategies' `where`,
+ * measure-filter, dataset-scope and `dateRange` positions: no strategy keeps a
+ * whole-day copy of its own since #5930 step 4.
+ */
+export function declaredDatetimeLowering(
+  ctx: StrategyContext,
+  target: (member: string) => { object: string; field: string },
+  undeclared: UndeclaredColumnReading,
+): FilterLoweringOptions {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (typeof declared !== 'function') return undeclared === 'type-blind' ? TYPE_BLIND : NO_DATETIME_COLUMNS;
+  return {
+    isDatetimeColumn: (member) => {
+      const { object, field } = target(member);
+      const type = declared.call(ctx, object, field);
+      if (typeof type !== 'string' || type === '') return undeclared === 'type-blind';
+      return type === 'datetime';
+    },
+  };
+}
+
+/**
+ * [ADR-0053 D-D1 item 8, amended — #5930 step 4] A `timeDimensions[].dateRange`
+ * window as the tree the strategies compile: the `{ $gte, $lte }` pair (or the
+ * `{ $gte, $lt }` pair of a resolved preset that stops before its end) on the
+ * window's member, through the same shared lowering, with the same reader, as
+ * the strategy's `where`.
+ *
+ * So an explicit window's bare-day end takes the whole-day rule exactly where
+ * a `where` bound on the same member would — on a `datetime` column, or one
+ * whose type the reader cannot name — and nowhere else, and on the last
+ * supported day the end is dropped. A resolved preset's ends are instants,
+ * which the lowering never widens. The window's own door (the preset
+ * vocabulary, `explicitDateRangeWindow`) has already judged the bounds, so the
+ * `where` door's comparand faces do not run here: this changes what a window
+ * means on no input it accepts.
+ */
+export function normalizeDateRangeWindow(
+  member: string,
+  bounds: Record<string, unknown>,
+  lowering: FilterLoweringOptions,
+): NormalizedFilterNode | null {
+  return buildNode(lowerFilterCondition({ [member]: bounds }, lowering));
 }
 
 /**
@@ -2301,6 +2368,10 @@ export function collectFilterLeaves(
 ): NormalizedAnalyticsFilter[] {
   if (!node) return [];
   if (node.kind === 'leaf') return [{ member: node.member, operator: node.operator, values: node.values }];
+  // [#20887] A nested-relation condition constrains the relation FIELD of the
+  // queried object — the member it names here. The related object's fields in
+  // it are the engine's to judge, as the caller, when it reads that object.
+  if (node.kind === 'relation') return [{ member: node.member, operator: 'relation', values: [] }];
   // A boolean constant names no member — it constrains rows, not columns — so
   // it contributes nothing to the cross-object envelope check.
   if (node.kind === 'const') return [];

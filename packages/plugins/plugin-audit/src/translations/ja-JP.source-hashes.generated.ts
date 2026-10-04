@@ -5,7 +5,7 @@
  *
  * Each entry is the digest of the SOURCE REVISION that this locale's leaf at
  * that path is still a byte copy of — provenance for the generated half of the
- * bundles (#11671, maintainer ruling #12069 Option A, extending #8765 Option B).
+ * bundles (commit 09b4f4e4e): a leaf whose digest no longer matches its source is stale and serves the source text instead.
  *
  * An entry exists only while the leaf IS such a copy. Re-translate the leaf in
  * `<locale>.objects.generated.ts` and the next extract drops its entry by
@@ -18,6 +18,6 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_activity.fields.type.help": "bc8b10c89aacd494",
+  "objects.sys_activity.fields.type.help": "5d8df777db464241",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
 };

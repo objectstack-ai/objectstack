@@ -1,11 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { StateMachineSchema } from '../automation/state-machine.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { strictObject } from '../shared/strict-object';
 
 /**
@@ -48,28 +48,77 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
  * the chain (it rewrites historical SOURCES and imports nothing from here).
  */
 
+// ── Retired structured-output members (ADR-0049 enforce-or-remove) ──────────
+//
+// Ruling record 5945617233 (letter A, #21277) retired the four members the one
+// runtime that executes agents, cloud's AI service, refuses before an agent's
+// first turn (`AI_AGENT_STRUCTURED_OUTPUT_UNSUPPORTED`): the `regex`, `grammar`
+// and `xml` formats and the `coerce_types` step. Each is a VALUE-level
+// retirement (`enumWithRetiredValues`, shared/retired-key.ts): the member left
+// its enum, so `tsc` refuses it, and the parse answers it with the
+// prescription below instead of zod's anonymous enum message. The ADR-0087
+// conversion `agent-structured-output-refused-members-removed`
+// (conversions/registry.ts) lists the mechanical edit for existing sources and
+// replays it over stored rows. Module-private and written with `//`, never
+// `/** */`: prose an enum's error map consumes, not documented surface — an
+// export with no reader is a published surface the next narrowing must keep.
+const JSON_ONLY_FORMAT_FIX =
+  'Structured output is JSON-only. At `agent.structuredOutput.format`, use `json_schema` with a JSON '
+  + 'Schema in `schema`, or `json_object` — or delete the `structuredOutput` block if the agent needs '
+  + 'no output contract; at `agent.structuredOutput.fallbackFormat`, name one of those two or delete '
+  + 'the key. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const STRUCTURED_OUTPUT_FORMAT_RETIRED = {
+  regex:
+    '`regex` was removed from `StructuredOutputFormat` in @objectstack/spec 17.7.0 (ADR-0049 '
+    + 'enforce-or-remove) — no key ever carried the pattern a `regex` answer would be checked '
+    + 'against, and the cloud AI runtime refuses an agent that declares it before its first turn. '
+    + JSON_ONLY_FORMAT_FIX,
+  grammar:
+    '`grammar` was removed from `StructuredOutputFormat` in @objectstack/spec 17.7.0 (ADR-0049 '
+    + 'enforce-or-remove) — no key ever carried the grammar a `grammar` answer would be checked '
+    + 'against, and the cloud AI runtime refuses an agent that declares it before its first turn. '
+    + JSON_ONLY_FORMAT_FIX,
+  xml:
+    '`xml` was removed from `StructuredOutputFormat` in @objectstack/spec 17.7.0 (ADR-0049 '
+    + 'enforce-or-remove) — the cloud AI runtime checks a final answer only as JSON, and refuses an '
+    + 'agent that declares `xml` before its first turn. '
+    + JSON_ONLY_FORMAT_FIX,
+} as const;
+
+const COERCE_TYPES_RETIRED =
+  '`coerce_types` was removed from `TransformPipelineStep` in @objectstack/spec 17.7.0 (ADR-0049 '
+  + 'enforce-or-remove) — there is no coercion engine, and the cloud AI runtime refuses an agent '
+  + 'whose `agent.structuredOutput.transformPipeline` lists it before its first turn. Delete the '
+  + 'step and declare the exact types in `schema`, so the answer is validated as the model wrote '
+  + 'it; `trim`, `parse_json` and `validate` are unchanged. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 /**
  * Structured Output Format
- * Defines the expected output format for agent responses
+ *
+ * The format an agent's final answer is checked against: JSON only
+ * (`json_object` or `json_schema`). The `regex`, `grammar` and `xml` members
+ * were retired (ADR-0049) — the runtime refused all three — and are answered
+ * at parse with their prescription.
  */
-export const StructuredOutputFormatSchema = lazySchema(() => z.enum([
-  'json_object',
-  'json_schema',
-  'regex',
-  'grammar',
-  'xml',
-]).describe('Output format for structured agent responses'));
+export const StructuredOutputFormatSchema = lazySchema(() => enumWithRetiredValues(
+  ['json_object', 'json_schema'],
+  STRUCTURED_OUTPUT_FORMAT_RETIRED,
+).describe('Output format for structured agent responses (JSON only)'));
 
 /**
  * Transform Pipeline Step
- * Post-processing steps applied to structured output
+ *
+ * Post-processing steps applied to structured output. The `coerce_types` step
+ * was retired (ADR-0049) — no coercion engine existed and the runtime refused
+ * it — and is answered at parse with its prescription.
  */
-export const TransformPipelineStepSchema = lazySchema(() => z.enum([
-  'trim',
-  'parse_json',
-  'validate',
-  'coerce_types',
-]).describe('Post-processing step for structured output'));
+export const TransformPipelineStepSchema = lazySchema(() => enumWithRetiredValues(
+  ['trim', 'parse_json', 'validate'],
+  { coerce_types: COERCE_TYPES_RETIRED },
+).describe('Post-processing step for structured output'));
 
 /**
  * Structured Output Configuration
@@ -90,8 +139,19 @@ export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
   /** Output format type */
   format: StructuredOutputFormatSchema.describe('Expected output format'),
 
-  /** JSON Schema definition for output validation */
-  schema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema definition for output'),
+  /**
+   * JSON Schema definition for output validation. The cloud AI runtime
+   * compiles it, and its schema reader refuses an untyped subschema that
+   * carries a type-scoped keyword (`properties`, `items`, `pattern`,
+   * `minimum`, …). The slot refuses the same schemas here, at the subschema's
+   * path, through the one factory `action.ai.outputSchema` shares
+   * (`shared/ai-json-schema-slot.ts`).
+   */
+  schema: aiJsonSchemaSlot('structuredOutput.schema').optional().describe(
+    'JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword '
+    + '(properties, items, pattern, minimum, …) is refused at its path, because the AI runtime\'s '
+    + 'schema reader does not check it; declare its "type".',
+  ),
 
   /** Whether to enforce exact schema compliance */
   strict: z.boolean().default(false).describe('Enforce exact schema compliance'),
@@ -102,8 +162,13 @@ export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
   /** Maximum retry attempts */
   maxRetries: z.number().int().min(0).default(3).describe('Maximum retries on validation failure'),
 
-  /** Fallback format if primary format fails */
-  fallbackFormat: StructuredOutputFormatSchema.optional().describe('Fallback format if primary format fails'),
+  /**
+   * Fallback format. The cloud AI runtime checks the last answer against it
+   * once the primary format's retries are spent.
+   */
+  fallbackFormat: StructuredOutputFormatSchema.optional().describe(
+    "Fallback format: once the primary format's retries are spent, the last answer is checked against this format instead",
+  ),
 
   /** Post-processing pipeline steps */
   transformPipeline: z.array(TransformPipelineStepSchema).optional().describe('Post-processing steps applied to output'),
@@ -114,6 +179,84 @@ export type TransformPipelineStep = z.input<typeof TransformPipelineStepSchema>;
 export type StructuredOutputConfig = z.input<typeof StructuredOutputConfigSchema>;
 /** Post-parse shape of {@link StructuredOutputConfig} — defaults applied, transforms run (ADR-0122). */
 export type StructuredOutputConfigParsed = z.infer<typeof StructuredOutputConfigSchema>;
+
+// ── The agent memory contract (ADR-0049 enforce-or-remove) ──────────────────
+//
+// Ruling record 5950198150 (letter A′, #20274): the `agent.memory` contract
+// states exactly what the runtime honours. The one runtime that executes
+// agents, cloud's AI service, enforces long-term memory from `enabled`,
+// `maxEntries` and `reflectionInterval`, and refused before an agent's first
+// turn (`AI_AGENT_MEMORY_UNSUPPORTED`) the declarations this spec still
+// accepted: an enabled `longTerm` missing either number, a `reflectionInterval`
+// without an enabled `longTerm`, and a `store` other than its own database
+// store — `vector`, the old default, included. Authoring now refuses the same
+// declarations, by name, with these prescriptions. Module-private and written
+// with `//`, never `/** */`: prose the schema's refusals consume, not
+// documented surface.
+const LONG_TERM_STORE_RETIRED =
+  '`agent.memory.longTerm.store` was removed in @objectstack/spec 17.7.0 (ADR-0049 '
+  + 'enforce-or-remove) — the memory store is platform infrastructure, not agent metadata: the '
+  + 'cloud AI runtime keeps long-term memory notes in its own database store, and refused the '
+  + '`vector` store (the old default) and `redis` before an agent\'s first turn. Delete the key; '
+  + 'long-term memory is configured by `enabled`, `maxEntries` and '
+  + '`agent.memory.reflectionInterval`, and where the notes are kept is the platform\'s choice. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const LONG_TERM_STORE_SPELLING_RETIRED =
+  'there is no storage-backend key on long-term memory — where the notes are kept is the '
+  + 'platform\'s choice, not agent metadata (`agent.memory.longTerm.store` was removed in '
+  + '@objectstack/spec 17.7.0, ADR-0049 enforce-or-remove). Delete the key.';
+
+const MAX_ENTRIES_REQUIRED =
+  '`agent.memory.longTerm.maxEntries` is required when `agent.memory.longTerm.enabled` is '
+  + 'true — it is how many distilled notes are kept for each user (the newest are recalled before '
+  + 'the first round, and older ones are evicted), and the spec declares no default for it. Declare '
+  + 'it as an integer of at least 1, or delete `longTerm` and `reflectionInterval` if the agent '
+  + 'needs no long-term memory.';
+
+const REFLECTION_INTERVAL_REQUIRED =
+  '`agent.memory.reflectionInterval` is required when `agent.memory.longTerm.enabled` is true — '
+  + 'it is how many delivered interactions pass between reflections, and a reflection is what '
+  + 'writes a note to long-term memory, so without it nothing is ever remembered; the spec '
+  + 'declares no default for it. Declare it as an integer of at least 1, or delete `longTerm` if '
+  + 'the agent needs no long-term memory.';
+
+const REFLECTION_INTERVAL_WITHOUT_LONG_TERM =
+  '`agent.memory.reflectionInterval` requires `agent.memory.longTerm.enabled: true` — a '
+  + 'reflection writes a note to long-term memory, and this agent has none enabled, so the '
+  + 'interval would do nothing. Enable long-term memory (`longTerm: { enabled: true, maxEntries: N }`) '
+  + 'or delete `reflectionInterval`.';
+
+/**
+ * The three refusals of the agent memory contract, each a `custom` issue at
+ * the path of the key it names (the house refinement shape —
+ * `ai/skill.zod.ts`'s `checkSkillTriggerConditionValueShape`).
+ *
+ * A refinement on `memory`, not on `longTerm`, because `reflectionInterval` is
+ * `longTerm`'s sibling. No default is declared for either number: the runtime
+ * adds none, and a spec default would be a number with no measured basis that
+ * a later release could only remove by breaking it. It runs only on a body the
+ * shape already accepted — an unknown key, a wrong type or the `store`
+ * tombstone aborts first — so an author meets one complaint at a time.
+ */
+function checkAgentMemoryContract(
+  memory: { longTerm?: { enabled?: boolean; maxEntries?: number }; reflectionInterval?: number },
+  ctx: z.RefinementCtx,
+): void {
+  const enabled = memory.longTerm?.enabled === true;
+  if (enabled) {
+    if (memory.longTerm?.maxEntries === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['longTerm', 'maxEntries'], message: MAX_ENTRIES_REQUIRED });
+    }
+    if (memory.reflectionInterval === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['reflectionInterval'], message: REFLECTION_INTERVAL_REQUIRED });
+    }
+    return;
+  }
+  if (memory.reflectionInterval !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['reflectionInterval'], message: REFLECTION_INTERVAL_WITHOUT_LONG_TERM });
+  }
+}
 
 /**
  * AI Agent Schema
@@ -194,7 +337,37 @@ export const AgentSchema = lazySchema(() => strictObject({
   /** Cognition */
   instructions: z.string().describe('System Prompt / Prime Directives'),
   model: AIModelConfigSchema.optional(),
-  lifecycle: StateMachineSchema.optional().describe('[EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet.'),
+
+  /**
+   * [REMOVED — #21320] The agent conversation state machine. ADR-0049
+   * enforce-or-remove, ruled D (retire) on objectstack-ai/cloud#2569: it was
+   * parsed and never read — no runtime in this repository or in cloud moved an
+   * agent through a declared state or refused an undeclared transition, and
+   * every enforcement design measured there was a subset statechart
+   * interpreter beside Flow, the two-engine shape ADR-0020 already rejected.
+   * What it reached for is served elsewhere: a phase of a conversation is a
+   * skill with its own `instructions` and `tools`, selected by
+   * `triggerConditions` (ADR-0064); multi-step process orchestration is a Flow
+   * (ADR-0019); a record's status transitions are the `state_machine`
+   * validation rule (ADR-0020).
+   *
+   * Tombstoned rather than deleted, for the two channels `retiredKey()` gives
+   * (`shared/retired-key.ts`): `tsc` refuses the key (its input type is
+   * `never`), and the parse answers with the prescription rather than a bare
+   * unrecognized-key error. This was the last authorable door to the XState
+   * `StateMachineSchema` (`automation/state-machine.zod.ts`), which left with
+   * it. The ADR-0087 conversion `agent-lifecycle-removed` deletes the key from
+   * stored rows and existing sources.
+   */
+  lifecycle: retiredKey(
+    '`agent.lifecycle` was removed in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — '
+    + 'no runtime ever read it: no agent moved through a declared state and no transition was '
+    + 'ever refused. Delete the key. A phase of a conversation is a skill with its own '
+    + '`instructions` and `tools`, selected by its `triggerConditions` (ADR-0064); multi-step '
+    + 'process orchestration is a Flow (ADR-0019); a record\'s status transitions are a '
+    + '`state_machine` validation rule on the object (ADR-0020). '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /**
    * ADR-0063 §1 / ADR-0064 — the product surface this agent IS. The kernel
@@ -313,28 +486,70 @@ export const AgentSchema = lazySchema(() => strictObject({
     // cloud#339). It declared a working-memory window that NOTHING in the
     // runtime consumed — a config that lies. Cross-turn grounding is done by
     // tools reading live state, and the context budget is governed elsewhere
-    // (the per-request token guardrail), not by this field. `longTerm` /
-    // `reflectionInterval` are kept as forward-looking, off-by-default config.
+    // (the per-request token guardrail), not by this field.
+    //
+    // `longTerm` / `reflectionInterval` are ENFORCED, by the cloud AI runtime
+    // (its `compileAgentMemory` reader, #20274): the newest `maxEntries`
+    // distilled notes for the user and agent are recalled before the first
+    // round, every `reflectionInterval` delivered interactions one reflection
+    // writes a note, and notes beyond `maxEntries` are evicted. The contract
+    // states exactly that and nothing more (ADR-0049, ruling record
+    // 5950198150, letter A′): both numbers are REQUIRED once `longTerm.enabled`
+    // is true, with no default declared — see `checkAgentMemoryContract` — and
+    // the storage backend is not agent metadata: `longTerm.store` is
+    // tombstoned below.
 
-    /** Long-term (persistent) memory configuration */
+    /** Long-term memory: distilled notes kept per user and agent. */
     longTerm: strictObject({
       surface: 'this long-term memory configuration',
       history: AGENT_HISTORY,
-      aliases: { backend: 'store', storage: 'store', provider: 'store', limit: 'maxEntries', maxItems: 'maxEntries', active: 'enabled' },
+      aliases: { limit: 'maxEntries', maxItems: 'maxEntries', active: 'enabled' },
+      // `backend` / `storage` / `provider` used to be aliases steering onto
+      // `store`. An alias may not target a tombstone (an author told to write
+      // the key guaranteed to be refused next), so the three spellings carry
+      // the same answer as the tombstone instead.
+      guidance: {
+        backend: LONG_TERM_STORE_SPELLING_RETIRED,
+        storage: LONG_TERM_STORE_SPELLING_RETIRED,
+        provider: LONG_TERM_STORE_SPELLING_RETIRED,
+      },
     }, {
-      /** Whether long-term memory is enabled */
-      enabled: z.boolean().default(false).describe('Enable long-term memory persistence'),
+      /** Whether long-term memory is enabled. When true, `maxEntries` and `memory.reflectionInterval` are required. */
+      enabled: z.boolean().default(false).describe(
+        'Enable long-term memory. When true, maxEntries and memory.reflectionInterval are required',
+      ),
 
-      /** Storage backend for long-term memory */
-      store: z.enum(['vector', 'database', 'redis']).default('vector').describe('Long-term memory storage backend'),
+      /**
+       * REMOVED — the storage backend. The memory store is platform
+       * infrastructure, not agent metadata: the cloud AI runtime keeps the
+       * notes in its own database store and refused the `vector` default and
+       * `redis` before an agent's first turn. The ADR-0087 conversion
+       * `agent-memory-long-term-store-removed` deletes the key from existing
+       * sources and stored rows.
+       */
+      store: retiredKey(LONG_TERM_STORE_RETIRED),
 
-      /** Maximum number of persisted memory entries */
-      maxEntries: z.number().int().min(1).optional().describe('Max entries in long-term memory'),
-    }).optional().describe('Long-term / persistent memory'),
+      /**
+       * How many distilled notes are kept and recalled for each user: the
+       * newest `maxEntries` are recalled before the first round, and notes
+       * beyond it are evicted. Required when `enabled` is true.
+       */
+      maxEntries: z.number().int().min(1).optional().describe(
+        'How many distilled notes are kept per user: the newest N are recalled before the first round, and notes beyond N are evicted. Required when enabled is true',
+      ),
+    }).optional().describe('Long-term memory: distilled notes kept per user and agent and recalled before each conversation'),
 
-    /** Reflection interval — how often the agent reflects on past actions */
-    reflectionInterval: z.number().int().min(1).optional().describe('Reflect every N interactions to improve behavior'),
-  }).optional().describe('[EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet.'),
+    /**
+     * How many delivered interactions pass between reflections. Each
+     * reflection writes one distilled note to long-term memory. Required when
+     * `longTerm.enabled` is true, and refused without it.
+     */
+    reflectionInterval: z.number().int().min(1).optional().describe(
+      'Reflect every N delivered interactions: each reflection writes one distilled note to long-term memory. Required when longTerm.enabled is true, and refused without it',
+    ),
+  }).superRefine(checkAgentMemoryContract).optional().describe(
+    'Agent memory (long-term notes recalled before each conversation and written by periodic reflection), enforced by the cloud AI runtime; the open framework edition does not run agents.',
+  ),
 
   /** Guardrails */
   guardrails: strictObject({
@@ -362,12 +577,18 @@ export const AgentSchema = lazySchema(() => strictObject({
     /** Maximum wall-clock time per invocation in seconds */
     maxExecutionTimeSec: z.number().int().min(1).optional().describe('Max execution time in seconds'),
 
-    /** Topics or actions the agent must avoid */
-    blockedTopics: z.array(z.string()).optional().describe('Forbidden topics or action names'),
-  }).optional().describe('[EXPERIMENTAL — not enforced] Safety guardrails for the agent. Parsed but not enforced — real limits come from the quota service.'),
+    /**
+     * Topics or actions the agent must avoid. The cloud AI runtime matches each
+     * entry exactly and case-sensitively against the tool name, against
+     * `action_` plus the action type, and against the tool category.
+     */
+    blockedTopics: z.array(z.string()).optional().describe(
+      'Forbidden topics or action names: each entry is an exact, case-sensitive match on the tool name, on `action_` plus the action type, or on the tool category',
+    ),
+  }).optional().describe('Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents.'),
 
   /** Structured Output */
-  structuredOutput: StructuredOutputConfigSchema.optional().describe('[EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet.'),
+  structuredOutput: StructuredOutputConfigSchema.optional().describe('Structured output contract for the agent\'s final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents.'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here; the loader translates it

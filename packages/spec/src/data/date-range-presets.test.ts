@@ -70,7 +70,7 @@ describe('date-range preset vocabulary (#4614, re-homed by #8793)', () => {
     expect(message).toContain('{30_days_ago}');   // the spelling that works
     expect(message).toContain('2026-01-15');      // the ISO alternative
     // Attributable from the error alone by the customer-resolvable sentence —
-    // never by a tracker id (#13156's strip).
+    // never by a tracker id (commit fd289be45's strip).
     expect(message).toContain('Refused at authoring time so the error surfaces where the filter is written.');
     expect(message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
     // A calendar preset prescribes its window pair.
@@ -92,7 +92,7 @@ describe('date-range preset vocabulary (#4614, re-homed by #8793)', () => {
  * pin then asks whether `DATE_RANGE_PRESET_MACRO_WINDOWS` joins them, which is
  * the only question it exists to answer — and the question a membership check
  * over the token vocabulary cannot reach, because both a right and a wrong end
- * token are perfectly good members (#17014).
+ * token are perfectly good members (commit 80aef8032).
  */
 const REFERENCE_DAY = '2026-07-15'; // a Wednesday, mid-week / mid-month / mid-quarter
 
@@ -157,8 +157,10 @@ const midnightUtc = (day: string): number => Date.parse(`${day}T00:00:00.000Z`);
  */
 function prescribedDayCount(startDay: string, endDay: string): number {
   const exclusiveEnd = nextUtcCalendarDay(endDay);
-  expect(exclusiveEnd, `${endDay} must be a real calendar day`).not.toBeNull();
-  return (midnightUtc(exclusiveEnd!) - midnightUtc(startDay)) / DAY_MS;
+  // A day: never `null`, and never `UNBOUNDED_ABOVE` — no preset ends on
+  // 9999-12-31, the one day without a next day (#20600).
+  expect(typeof exclusiveEnd, `${endDay} must be a real calendar day before the last one`).toBe('string');
+  return (midnightUtc(exclusiveEnd as string) - midnightUtc(startDay)) / DAY_MS;
 }
 
 describe('the prescribed window covers exactly the days the preset names (#17014)', () => {

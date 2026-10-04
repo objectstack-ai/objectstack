@@ -432,7 +432,7 @@ async function seedGlobalSecret(
   key: string,
   plaintext: string,
 ) {
-  const handle = await cryptoProvider.encrypt(plaintext, { namespace: 'secretsns', key });
+  const handle = await cryptoProvider.encrypt(plaintext, { scope: 'settings', namespace: 'secretsns', key });
   secretRows.set(handle.id, {
     id: handle.id,
     namespace: 'secretsns',

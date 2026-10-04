@@ -41,6 +41,11 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysJwks, SysMember, SysUser, SysVerification } from '@objectstack/platform-objects/identity';
 import { SecurityPlugin } from './security-plugin.js';
+import { SysPosition } from './objects/sys-position.object.js';
+import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { SysPermissionSet } from './objects/sys-permission-set.object.js';
+import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 
 const CREDENTIAL_OBJECTS = ['sys_verification', 'sys_jwks'] as const;
 type CredentialObject = (typeof CREDENTIAL_OBJECTS)[number];
@@ -105,6 +110,15 @@ async function boot(shape: Shape): Promise<ObjectQL> {
     objects: SCHEMAS,
   } as never);
   await engine.syncSchemas();
+  // [#21516] The authz resolver reads these on every grant resolution; in a
+  // deployment the auth and security plugins register them. This harness
+  // composes neither, so the ones its app does not declare are registered
+  // here, AFTER the DDL above, and stay unprovisioned: the resolver reads a
+  // missing table and answers "no grants", exactly as it did when the engine
+  // still handed an unregistered name to the driver (which it now refuses).
+  for (const o of [SysUser, SysMember, SysPosition, SysUserPosition, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
+  }
 
   const services: Record<string, unknown> = {
     ...(shape.posture === 'isolated' ? { 'org-scoping': { name: 'com.objectstack.org-scoping' } } : {}),
@@ -258,25 +272,51 @@ describe.each(SHAPES)('private credential tables — $label', (shape) => {
     }
   });
 
+  // [#21197] The credential COLUMNS of both objects are declared `internal: true`
+  // (`sys_verification.identifier` / `.value`, `sys_jwks.private_key`): the
+  // generic read path omits them for every caller, system context included, and
+  // the only door back is the engine's privileged accessor (`resolveInternalField`)
+  // — the one plugin-auth's adapter re-attach calls. So the two controls below
+  // prove ROW reach by the row's id, assert that the generic read carries no
+  // credential column, and prove the VALUE through that accessor.
   it('CONTROL: the platform admin reads every row of both tables, list and by-id', async () => {
     expect(await credentialTables(engine, PLATFORM_ADMIN)).toEqual(EVERY_ROW());
-    const row = await engine.findOne('sys_verification', {
+    const row = (await engine.findOne('sys_verification', {
       where: { id: verificationId(PEOPLE.otherOrg) },
       context: PLATFORM_ADMIN,
-    } as never);
-    expect((row as { value?: string } | null)?.value).toBe(`token-${PEOPLE.otherOrg}`);
+    } as never)) as Record<string, unknown> | null;
+    expect(row?.id).toBe(verificationId(PEOPLE.otherOrg));
+    // The row is reached; the credential is not served on the generic path.
+    expect(row).not.toHaveProperty('value');
+    expect(row).not.toHaveProperty('identifier');
   });
 
   it('CONTROL: better-auth’s adapter context (system) reads every row, by identifier and by id', async () => {
     expect(await credentialTables(engine, BETTER_AUTH_ADAPTER)).toEqual(EVERY_ROW());
     // The adapter keys verification lookups on `identifier` (better-auth's
-    // `findByIdentifier`); a signing-key read is by `id`.
+    // `findByIdentifier`); a signing-key read is by `id`. Filtering on an
+    // `internal` column is untouched by the declaration, so the lookup still
+    // FINDS exactly the member's row.
     const byIdentifier = (await engine.find('sys_verification', {
       where: { identifier: emailOf(PEOPLE.member) },
       context: BETTER_AUTH_ADAPTER,
-    } as never)) as Array<{ value: string }>;
-    expect(byIdentifier.map((r) => r.value)).toEqual([`token-${PEOPLE.member}`]);
-    const key = await engine.findOne('sys_jwks', { where: { id: JWKS_IDS[1] }, context: BETTER_AUTH_ADAPTER } as never);
-    expect((key as { id?: string } | null)?.id).toBe(JWKS_IDS[1]);
+    } as never)) as Array<Record<string, unknown>>;
+    expect(byIdentifier.map((r) => r.id)).toEqual([verificationId(PEOPLE.member)]);
+    for (const r of byIdentifier) expect(r).not.toHaveProperty('value');
+    // …and the value comes back through the path the product reads it by.
+    const values = await engine.resolveInternalField(
+      'sys_verification',
+      byIdentifier.map((r) => String(r.id)),
+      'value',
+    );
+    expect(byIdentifier.map((r) => values.get(String(r.id)))).toEqual([`token-${PEOPLE.member}`]);
+
+    const key = (await engine.findOne('sys_jwks', { where: { id: JWKS_IDS[1] }, context: BETTER_AUTH_ADAPTER } as never)) as
+      | Record<string, unknown>
+      | null;
+    expect(key?.id).toBe(JWKS_IDS[1]);
+    expect(key).not.toHaveProperty('private_key');
+    const keyMaterial = await engine.resolveInternalField('sys_jwks', [JWKS_IDS[1]], 'private_key');
+    expect(keyMaterial.get(JWKS_IDS[1])).toBe(fixtureRows().sys_jwks[1].private_key);
   });
 });

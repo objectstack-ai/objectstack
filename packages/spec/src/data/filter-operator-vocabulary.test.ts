@@ -58,6 +58,13 @@ const declaredKeys = () => Object.keys(FieldOperatorsSchema.shape).sort();
  * its refusal into a DROPPED predicate (measured for `$icontains` in #5701 —
  * `match()` returned `true` for a non-matching record). Cleared by giving the
  * remaining faces arms in one PR, the #6520 direction.
+ *
+ * `$empty` (#20311) was staged here too (the maintainer's amendment, record
+ * 5868169573: 「照 $like 先例分阶段」) until every compile face had its arm
+ * (#20444, #20445). #20446 cleared it — the first operator to leave this list
+ * — by adding it to `FILTER_OPERATORS` and flipping the `is_empty` /
+ * `is_not_empty` lowering to it in one commit, after measuring that no face
+ * drops it.
  */
 const STAGED_AHEAD_OF_BACKENDS = ['$ilike', '$like'];
 
@@ -76,8 +83,9 @@ describe('the declaration surface and the enforcement surface', () => {
         + 'so declaring ahead of the arms is the correct staging. To stage one: declare it in '
         + 'FieldOperatorsSchema, add it to the array THIS assertion compares against, and note on '
         + 'FILTER_OPERATORS which issue implements it. To clear one: implement it on EVERY face '
-        + 'in ONE PR — spec word list, driver-memory (query path, reference matcher, analytics '
-        + 'face), driver-mongodb, service-analytics (3 compilers), objectql `having`, formula — '
+        + 'in ONE PR — spec word list, driver-memory (query path, analytics face), driver-sql, '
+        + 'driver-turso (remote transport), driver-mongodb, service-analytics (3 compilers), '
+        + 'objectql `having`, formula — '
         + 'then empty this list. #6520 is the worked example of the clearing direction.',
     ).toEqual(STAGED_AHEAD_OF_BACKENDS);
   });

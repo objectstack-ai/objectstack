@@ -9,11 +9,11 @@
  *
  * [#6858 / ADR-0094 D5-R] `makeProtocol` models ADR-0005's TIER GATE, which
  * this suite used to be blind to: `permission` is `allowOrgOverride: false`
- * since #6483 (PR #6608), so a metadata write whose (type, name) is backed by
+ * since commit ee58392e1, so a metadata write whose (type, name) is backed by
  * a code ARTIFACT is refused 403 `NOT_OVERRIDABLE`, while an artifact-free
- * name rides `allowRuntimeCreate: true` and still lands. PR #6608 recorded the
- * blind spot in its own body — "its own suite stubs `saveMetaItem`, so this
- * file is where that behaviour is actually pinned against the real gate" —
+ * name rides `allowRuntimeCreate: true` and still lands. Commit ee58392e1 records the
+ * blind spot in its own message: this suite stubs `saveMetaItem`, so the real
+ * gate is pinned elsewhere (dogfood cases and a dedicated 403 suite) —
  * which is exactly why four cases here kept asserting the RETIRED overlay
  * direction and stayed green: the stub could not refuse. They are triaged
  * below, each one individually.
@@ -367,7 +367,7 @@ describe('upsertEnvPermissionSet (ADR-0094 — record is a pure projection)', ()
     // package-owned row, this function projects the facets and preserves the
     // provenance. What D5-R retired is the CLAIM about where that body comes
     // from — an env overlay of a packaged set is no longer a supported
-    // customization channel (#6483 / PR #6608); see the D5-R lifecycle block
+    // customization channel (commit ee58392e1); see the D5-R lifecycle block
     // below for the refusal this projector now sits behind.
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg"]' });
@@ -481,7 +481,7 @@ describe('registerPermissionSetProjection', () => {
 //    RETIRED; what survives is the `allowRuntimeCreate` tier) ───────────────
 
 /** Seed an env-scope overlay row directly — a LEGACY overlay, authored before
- *  the #6483 rollback closed the write door. `saveMetaItem` can no longer mint
+ *  commit ee58392e1's rollback closed the write door. `saveMetaItem` can no longer mint
  *  one for an artifact-backed name, but `supportsOverlay: true` is unchanged,
  *  so rows that already exist still merge overlay-wins at read time. */
 const seedLegacyOverlay = (ql: any, name: string, body: any) => {
@@ -494,8 +494,8 @@ const seedLegacyOverlay = (ql: any, name: string, body: any) => {
 describe('package-owned set customization lifecycle (ADR-0094 D5-R)', () => {
   it('an env-scope save on an ARTIFACT-BACKED package name is REFUSED (403 NOT_OVERRIDABLE) — no overlay, record untouched', async () => {
     // Was: "a Studio env-scope save on a PACKAGE name customizes the record
-    // and keeps provenance" — the 2026-07-14 direction. #6483 rolled
-    // `permission` back to `allowOrgOverride: false` and #6609 ruling A
+    // and keeps provenance" — the 2026-07-14 direction. Commit ee58392e1 rolled
+    // `permission` back to `allowOrgOverride: false` and ADR-0094 D5-R's ruling A
     // accepted the tightening, so the write this case used to assert is the
     // write production now refuses. Rejection-class: the ENVELOPE is the
     // claim (`code` AND `status`), because a bare "it threw" would stay green
@@ -518,7 +518,7 @@ describe('package-owned set customization lifecycle (ADR-0094 D5-R)', () => {
   });
 
   it('a package row MATERIALIZED through the metadata door is still customizable — the surviving allowRuntimeCreate tier', async () => {
-    // The boundary #6608 measured UNAFFECTED, and the reason D5-R names a
+    // The boundary commit ee58392e1 measured UNAFFECTED, and the reason D5-R names a
     // surviving NEIGHBOUR rather than a re-route: this row is
     // `managed_by:'package'` like the one above, but its DEFINITION lives in
     // `sys_metadata` (authored + published through the metadata door,
@@ -539,7 +539,7 @@ describe('package-owned set customization lifecycle (ADR-0094 D5-R)', () => {
   });
 
   it('a LEGACY overlay (authored before the rollback) still projects, and deleting it still RESETS to the declaration', async () => {
-    // `supportsOverlay: true` was not touched by #6483 — only the WRITE flag
+    // `supportsOverlay: true` was not touched by commit ee58392e1 — only the WRITE flag
     // was. A row that already exists keeps merging overlay-wins, so the
     // reset invariant still has to hold for it. Seeded directly because the
     // write door that used to mint it is closed.
@@ -762,7 +762,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
   it('UPDATE of an ARTIFACT-BACKED set surfaces the producer\'s 403 to the caller (write point :794 — left to 403 loudly)', async () => {
     // Was: "UPDATE of a PACKAGE-OWNED set becomes an env overlay" — the
     // retired D5 direction. This is the ONE of the four production write
-    // points that the #6483 rollback actually closes, and the card's design
+    // points that commit ee58392e1's rollback actually closes, and the card's design
     // question was what to do with it. Decision (ADR-0094 D5-R): leave it to
     // the producer. The middleware still TRANSLATES the write; the protocol's
     // ADR-0005 tier gate refuses it; the middleware neither pre-empts the
@@ -1289,7 +1289,7 @@ describe('reconcilePermissionSetProjection', () => {
     // on `ProjectionLogger` (#9754), so no TS caller can build the sink above
     // without saying `as unknown as` out loud.
     //
-    // ⚠️ Not pinned here with `@ts-expect-error`, and [#13176] moved the reason
+    // ⚠️ Not pinned here with `@ts-expect-error`, and [commit a68c61267] moved the reason
     // out from under that sentence. It used to be that this package's tsconfig
     // excluded `**/*.test.ts` (it carried a TEST_DEBT ledger entry in
     // scripts/check-type-check-coverage.mjs), so no tsc program compiled this

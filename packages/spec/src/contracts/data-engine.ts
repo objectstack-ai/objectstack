@@ -20,9 +20,11 @@ import type { IntrospectedSchema } from './schema-diff-service.js';
  * are LEGALLY stripped from the payload before the driver write — static
  * `readonly` (#2948), a TRUE `readonlyWhen` predicate (#3042), an
  * implicitly-readonly runtime-owned type (#5503; `RUNTIME_OWNED_FIELD_TYPES`,
- * today `autonumber` — the one strip that also runs on INSERT), or the
+ * today `autonumber` — the one strip that also runs on INSERT), the
  * primary-key strip of a payload `id` the update dispatch has ruled is not an
- * identifier (#6437). The write still succeeds; the listener exists so callers
+ * identifier (#6437), or the `computed` strip of a `formula` value, which no
+ * driver has a column for (#20805; every write path, every context). The write
+ * still succeeds; the listener exists so callers
  * that report per-field success (e.g. a flow's `update_record` step) can
  * surface a warning instead of a silent success (#3356's masked stage
  * write-backs).
@@ -77,14 +79,15 @@ export interface WriteObservabilityOptions {
    * learns WHICH fields would go — but their result is discarded.
    *
    * It covers every drop `onFieldsDropped` reports — coverage DERIVED from the
-   * reported set, never an enumeration frozen at #5126. Today that is all three
+   * reported set, never an enumeration frozen at #5126. Today that is all four
    * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
    * only runs for non-system callers), a TRUE `readonlyWhen` predicate (#3042,
    * which runs for every API-BOUNDARY caller, `isSystem` included — but judges
    * only the keys the caller supplied at engine entry, so a value a
-   * `beforeUpdate` hook derived or overwrote is never stripped, #9107), and the
+   * `beforeUpdate` hook derived or overwrote is never stripped, #9107), the
    * `primary_key`
-   * strip (#6437) — plus, since #5503, the implicitly-readonly runtime-owned
+   * strip (#6437), and the `computed` strip of a `formula` value (#20805, every
+   * context, `isSystem` included) — plus, since #5503, the implicitly-readonly runtime-owned
    * strip, which reports under the same `'readonly'` arm rather than adding one
    * (see the INSERT section below). Covering only the static arm would leave a
    * trusted caller — the very caller this option exists for, one that already

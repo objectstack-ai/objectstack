@@ -19,9 +19,10 @@
     // specifier through the dependency's `exports` map — `dist/index.d.ts`, a
     // BUILD ARTIFACT — so this package's typecheck would render a verdict
     // about the last `pnpm build` rather than about the producer's source in
-    // the checkout (`check:type-source-resolution` refuses exactly that; its
-    // header states why the dangerous case is a typecheck that PASSES). ONE
-    // rule for the bare name only: this package imports no
+    // the checkout (`check:type-source-resolution` refused exactly that — the
+    // dangerous case being a typecheck that PASSES against a stale `dist` —
+    // until it was retired on 2026-09-18, #18373; no gate checks this rule
+    // now). ONE rule for the bare name only: this package imports no
     // `@objectstack/types/*` subpath, and a `paths` target that matches
     // nothing on disk would silently fall back to node resolution (see the
     // rest package's block for the measured traps).

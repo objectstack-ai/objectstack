@@ -4,7 +4,7 @@
  * #17634 — an HTTP ack proves OWNERSHIP of the claim it completes, not just
  * that a row id exists: a late ack from a claim the visibility-timeout reap
  * took back must not overwrite the live re-claim on `sys_http_delivery`. The
- * notification outbox closed the same shape in #11859; this file pins the HTTP
+ * notification outbox closed the same shape in commit d9cf78eaa; this file pins the HTTP
  * outbox against the same sequence.
  *
  * ## The reachable sequence this file replays — for real

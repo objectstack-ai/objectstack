@@ -52,6 +52,8 @@ import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 // assert the same observable answer on both surfaces, which is what proves the
 // de-duplication did not move the behaviour.
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
+// [#21197] The one dereference of an `internal` column — see the probe below.
+import { readInternalColumn } from '@objectstack/objectql/core';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -90,7 +92,7 @@ export async function handleShareLinksRequest(
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
     const m = method.toUpperCase();
     const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
-    // [#6551 / #6206 / #6430] The dispatcher's ALREADY-COMPLETE envelope,
+    // [#6551 / commit 8e13ca876 / #6430] The dispatcher's ALREADY-COMPLETE envelope,
     // passed through WHOLE to every adjudicating service call below.
     //
     // `createLink` / `listLinks` / `revokeLink` are ENFORCEMENT paths — the
@@ -105,7 +107,7 @@ export async function handleShareLinksRequest(
     // two-field `{ userId, tenantId }` — structural subtyping keeps that
     // compiling, so the narrowing was invisible to tsc and every
     // `group`-posture caller was refused links on records they read fine
-    // elsewhere (the #6206 defect, on the dispatcher face). The routes' own
+    // elsewhere (the defect commit 8e13ca876 fixed, on the dispatcher face). The routes' own
     // 401 gate below reads only `ec?.userId` — an authentication decision
     // needs no authorization envelope.
     const ec = context.executionContext;
@@ -202,7 +204,18 @@ export async function handleShareLinksRequest(
                     if (!isPublicSharingEnabled(schema)) return invalidOrExpired();
                 }
                 const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
-                if (live && row.password_hash) {
+                // [#21197] `sys_share_link.password_hash` is `internal: true`, so the
+                // probe row above comes back WITHOUT it; read off the row, every
+                // protected link would answer the unknown-token shape and the
+                // password prompt would never appear. Recovered through objectql's
+                // one dereference (the same rule plugin-sharing's route twin uses):
+                // stripped-versus-unset by the registered declaration, and
+                // FAIL-CLOSED — a strip it cannot undo throws into the catch below,
+                // never reads as "no password".
+                const [passwordHash] = live && engine
+                    ? await readInternalColumn(engine, 'sys_share_link', [row], 'password_hash')
+                    : [null];
+                if (live && passwordHash) {
                     return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
                         providedPassword ? 'Incorrect password' : 'This link requires a password');
                 }

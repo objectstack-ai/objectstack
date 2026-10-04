@@ -44,14 +44,20 @@
  *    (`audience-posture.ts`, "The invitation carve-out") is admitted under
  *    every posture in `AUDIENCE_POSTURES`. No door needs widening. ⚠️ But the
  *    carve-out is an ADMISSION verdict and NOT a verification bypass, so the
- *    third bullet below applies to the INVITED login too: only under the
- *    default `invite_only` posture is the recovery mail-transport-free, and on
- *    `open`/`email_domain` the invited login is created and then refused
- *    `EMAIL_NOT_VERIFIED` — which also SILENCES this report, the very
- *    transition the second bullet warns about, delivered by the primary
- *    remedy. The message therefore scopes the no-mail-transport rider and
- *    tells the operator to close the posture first; ⛔ never re-state that
- *    rider for EVERY posture. Pinned across the whole posture vocabulary, with
+ *    INVITED login meets the same email-verification rule as any sign-up
+ *    (`resolveEmailVerificationRequirement`, the one resolver the wiring and
+ *    `getPublicConfig()` both read): always on under `email_domain`; on under
+ *    `open` unless the DEPLOYMENT declared it off (#20389 — a `false` stored
+ *    only through the settings console is refused there); and the declared
+ *    value, off by default, under `invite_only`. Wherever it is on, the
+ *    invited login is created and then refused `EMAIL_NOT_VERIFIED` — which
+ *    also SILENCES this report, the very transition the second bullet warns
+ *    about, delivered by the primary remedy. The message therefore states that
+ *    rule once, scopes the no-mail-transport rider to the default
+ *    `invite_only` posture, and tells the operator to close the posture first;
+ *    ⛔ never re-state that rider for EVERY posture, and ⛔ never state the
+ *    forcing for every non-`invite_only` posture either — `open` honours a
+ *    deployment's opt-out. Pinned across the whole posture vocabulary, with
  *    the un-invited `invite_only` refusal as its control, and the scope itself
  *    pinned beside it.
  *  - **A hand-written credential row blinds this very check.**
@@ -76,9 +82,10 @@
  *    For a NEW address, widening does create the account, and then
  *    `audiencePermitsSelfRegistration(posture)` drives `createAuthInstance()`
  *    to wire `requireEmailVerification: true` (mirrored by
- *    `getPublicConfig()`), so that login is refused `EMAIL_NOT_VERIFIED` at
- *    first sign-in — no login at all on a deployment with no mail transport,
- *    which is the shape a locked-out self-hosted install usually is.
+ *    `getPublicConfig()`) unless an `open` deployment declared it off itself
+ *    (#20389), so that login is refused `EMAIL_NOT_VERIFIED` at first
+ *    sign-in — no login at all on a deployment with no mail transport, which
+ *    is the shape a locked-out self-hosted install usually is.
  *
  * The message deliberately does NOT describe what a SEEDED person's own
  * re-registration answers: that response is #15587's surface and is being
@@ -99,7 +106,7 @@
  * line — ① the consequence, concretely, including that the system will keep
  * looking healthy, and ② the fix — and the message carries both.
  *
- * The #13398-class ruling caps this, and is satisfied rather than dodged:
+ * The sink ruling (commit e238c79f0) caps this, and is satisfied rather than dodged:
  * what it forbids is GROWING `error?` onto a published sink that lacks it.
  * {@link BootDiagnosticLogger} declares `error?` AND a required `warn` from
  * birth and nothing is widened — in particular the neighbouring
@@ -110,7 +117,7 @@
  *
  * ## Why `kernel:ready`, and why it shares the neighbour's hook
  *
- * Same hook site as the [#11640] walled-owner verification-path reporter, and
+ * Same hook site as the [commit bf8d129b5] walled-owner verification-path reporter, and
  * for a stronger reason than symmetry: both questions are answered from ONE
  * bounded human-population page read, performed here
  * ({@link probeHumanUsersPresence}) and handed to
@@ -188,6 +195,38 @@
  * When the gate suppresses the report the shape is still recorded — at `debug`,
  * under the same grep token, naming which configuration answered for it — so
  * "why is this deployment quiet" has an answer in the log and not only here.
+ *
+ * ## [#20861] A path the HOST owns, which the login page does not show
+ *
+ * The three facts above are read off `getPublicConfig()` — what the login page
+ * is told — plus one store row behind the SSO flag. A sign-in path that is
+ * deliberately NOT on the login page is invisible to all three. Measured on the
+ * card: a hosted kernel whose owner hid the platform sign-in button wires no
+ * `oidcProviders`, yet that owner still enters through the host's own handoff
+ * route, which mints the session without writing a `sys_account` row — and
+ * every kernel rebuild logged this report at `error` while the owner signed in
+ * normally.
+ *
+ * So there is a FOURTH fact, `hostSignInHandoff`, and it is the one the gate
+ * does not derive: the host that constructs the plugin STATES it
+ * (`AuthPluginOptions.hostSignInHandoff`), because the host is the one party
+ * that knows it mounted such a route. Three things it deliberately is not:
+ *
+ *   - ⛔ **an inference** — not from an environment's name, not from a control
+ *     plane's "platform SSO enabled" flag, not from the absence of rows. Each
+ *     would silence a deployment on a guess about wiring nobody stated;
+ *   - ⛔ **a login-page provider** — declaring it registers nothing and moves
+ *     no field `getPublicConfig()` returns, so the public config keeps telling
+ *     the truth about what the login page offers. Re-registering a hidden
+ *     provider just to satisfy this gate would make it lie;
+ *   - ⛔ **a remedy** — the `error` text does not name it, and must not: the
+ *     operator of a locked-out self-hosted deployment reads that line, and a
+ *     one-word switch that makes it go quiet is the one "fix" that turns a loud
+ *     dead end into a silent one. A host with no handoff route never sets it,
+ *     and the report stays loud there.
+ *
+ * Only a literal `true` declares it; any other value reads as NOT declared,
+ * which is the loud direction.
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -356,6 +395,13 @@ export interface SignInPathWiring {
   socialSignIn: boolean;
   /** Enterprise SSO is wired AND at least one `sys_sso_provider` row exists. */
   enterpriseSso: boolean;
+  /**
+   * [#20861] The HOST declared a sign-in handoff route of its own
+   * (`AuthPluginOptions.hostSignInHandoff`): a path no login-page provider
+   * shows, which mints a session without a `sys_account` row. The one member
+   * that is STATED rather than derived — see the module doc.
+   */
+  hostSignInHandoff: boolean;
 }
 
 /**
@@ -369,31 +415,44 @@ export interface SignInPathConfigView {
 }
 
 /**
+ * [#20861] The subset of `AuthPluginOptions` this gate reads — what the HOST
+ * declared, as opposed to {@link SignInPathConfigView}, what the login page is
+ * told. Structural for the same reason: the plugin hands its own options
+ * straight over, and nothing here depends on the rest of them.
+ */
+export interface SignInPathHostView {
+  hostSignInHandoff?: boolean;
+}
+
+/**
  * [#15074] Resolve the wiring facts for a boot, paying for the provider probe
  * only when the answer can change what is reported.
  *
  * Two short-circuits, both deliberate: a boot that is not in the dead-end shape
  * cannot report whatever the wiring says, and a deployment that already has a
- * delegated path proven from config needs no store read to confirm a second
- * one. Every other boot pays exactly one bounded row read, and only when
- * enterprise SSO is switched on.
+ * delegated path — proven from config, or [#20861] declared by the host — needs
+ * no store read to confirm a second one. Every other boot pays exactly one
+ * bounded row read, and only when enterprise SSO is switched on.
  */
 export async function probeSignInPathWiring(
   facts: SignInReachabilityFacts,
   config: SignInPathConfigView | undefined,
   engine: BootProbeEngine | undefined,
+  host?: SignInPathHostView,
 ): Promise<SignInPathWiring> {
   const ssoOnlyMode = config?.features?.ssoEnforced === true;
   const socialSignIn = (config?.socialProviders?.length ?? 0) > 0;
+  const hostSignInHandoff = host?.hostSignInHandoff === true;
   const needsProviderProbe =
     config?.features?.sso === true &&
     !ssoOnlyMode &&
     !socialSignIn &&
+    !hostSignInHandoff &&
     isNoSignInAccountShape(facts);
   const enterpriseSso = needsProviderProbe
     ? (await probeSsoProvidersPresence(engine)) === 'present'
     : false;
-  return { ssoOnlyMode, socialSignIn, enterpriseSso };
+  return { ssoOnlyMode, socialSignIn, enterpriseSso, hostSignInHandoff };
 }
 
 /**
@@ -424,6 +483,13 @@ export function resolveDelegatedSignInPath(wiring?: SignInPathWiring): string | 
       'registered, so a human signs in through it without holding a credential row here'
     );
   }
+  if (wiring.hostSignInHandoff) {
+    return (
+      'the host running this deployment declared a sign-in handoff route of its own ' +
+      '(hostSignInHandoff), so its humans enter through that route, not through a login-page ' +
+      `provider, and hold no '${SystemObjectName.ACCOUNT}' row`
+    );
+  }
   return null;
 }
 
@@ -448,6 +514,8 @@ export function resolveDelegatedSignInPath(wiring?: SignInPathWiring): string | 
  *     accounts" is its healthy resting state and not a dead end. Omitting
  *     `wiring` answers as if nothing were configured, which keeps every
  *     pre-#15074 caller (and the self-hosted deployment they describe) loud.
+ *     [#20861] A host-declared handoff route is one such path, the one the
+ *     host states rather than the config shows.
  */
 export function resolveNoSignInAccountReport(
   facts: SignInReachabilityFacts,
@@ -473,12 +541,18 @@ export function resolveNoSignInAccountReport(
     'lowercases the address it searches for, so a mixed-case row is never found), then have that ' +
     'person register through the ordinary sign-up endpoint. The invitation carve-out admits that ' +
     'ONE creation under EVERY audience posture, so no door needs widening — but it is an ADMISSION ' +
-    "verdict, not a verification bypass: under the default 'invite_only' posture no mail transport " +
-    "is needed either, whereas an 'open' or 'email_domain' posture forces email verification on the " +
-    "INVITED login too (see (b)), so close the posture back to 'invite_only' BEFORE that person " +
-    "registers. On the 'single' tenancy posture that account holder is then promoted to platform " +
-    'admin. Afterwards, re-run the provisioning job that seeded these people so it seeds their ' +
-    'logins too. TWO THINGS THAT LOOK LIKE REMEDIES AND ARE NOT: (a) HAND-WRITING A CREDENTIAL ' +
+    'verdict, not a verification bypass: the INVITED login meets the same email-verification rule as ' +
+    "any sign-up. Under 'email_domain' verification is always ON; under 'open' it is ON unless the " +
+    'DEPLOYMENT has itself declared it off (emailAndPassword.requireEmailVerification: false, or ' +
+    'OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false — a false stored only through the settings console is ' +
+    "refused there); under the default 'invite_only' posture it follows that same declaration and is " +
+    'OFF by default, so no mail transport is needed either. Wherever it is ON, the invited login is ' +
+    'refused EMAIL_NOT_VERIFIED at its first sign-in until a mail transport delivers the link, so on a ' +
+    "deployment without one, close the posture back to 'invite_only' BEFORE that person registers " +
+    "and leave verification at its default OFF. On the 'single' tenancy posture that account holder " +
+    'is then promoted to platform admin. Afterwards, re-run the provisioning job that seeded these ' +
+    'people so it seeds their logins too. TWO THINGS THAT LOOK LIKE REMEDIES AND ARE NOT: (a) ' +
+    'HAND-WRITING A CREDENTIAL ' +
     `ROW — a '${SystemObjectName.ACCOUNT}' row's 'password' column must carry a secret in the ` +
     "platform's own hash format, so a plaintext password authenticates nothing — a 401 or a 500 " +
     'depending on the row shape, never a session — and ' +
@@ -487,16 +561,16 @@ export function resolveNoSignInAccountReport(
     'OPENING THE AUDIENCE POSTURE — which cannot recover an EXISTING person at all: ' +
     'self-registration is a user-CREATION path, so it cannot hand a login to somebody whose ' +
     `'${SystemObjectName.USER}' row already exists, and NO posture changes that. Widening only ever ` +
-    "admits a NEW address — and then every posture other than 'invite_only' ('open', " +
-    "'email_domain') FORCES email verification ON, so that login is refused EMAIL_NOT_VERIFIED at " +
-    'its first sign-in until a mail transport delivers the link, and a locked-out self-hosted ' +
-    'install usually has none. Nothing here happens by itself.'
+    'admits a NEW address — and that login meets the same verification rule stated above, so wherever ' +
+    'it is ON that login is refused EMAIL_NOT_VERIFIED at its first sign-in until a mail transport ' +
+    'delivers the link, and a locked-out self-hosted install usually has none. Nothing here happens ' +
+    'by itself.'
   );
 }
 
 /**
  * The `error` channel this report needs, with the `warn` fallback the
- * #13398-class ruling requires of a sink that may not declare `error`.
+ * published-sink ruling (commit e238c79f0) requires of a sink that may not declare `error`.
  *
  * `warn` is REQUIRED and `error` is optional, which is the #9754 shape
  * (`check:optional-error-sink`): the fallback channel a durability report

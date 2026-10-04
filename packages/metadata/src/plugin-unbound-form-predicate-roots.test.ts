@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveInstalledSpecVersion } from '@objectstack/metadata-core';
+import { ALL_CONVERSIONS } from '@objectstack/spec';
 import { MetadataPlugin } from './plugin.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,21 @@ function fakeCtx() {
 
 function newPlugin(): any {
     return new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } });
+}
+
+/**
+ * The first `x.y.z` past both the installed spec's label and every retired
+ * entry's `retiredAfter` — the floor of an artifact authored against the
+ * surface this runtime actually enforces, which no window opens for.
+ */
+function currentSurfaceFloor(): string {
+    const installed = resolveInstalledSpecVersion();
+    if (!installed) return '';
+    const triples = [installed, ...ALL_CONVERSIONS.flatMap((c) => (c.retiredFromLoadPath === true ? [c.retiredAfter] : []))]
+        .map((v) => v.split('.').slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    const [major, minor, patch] = triples[triples.length - 1]!;
+    return `${major}.${minor}.${patch + 1}`;
 }
 
 /** Just the notices this feature emits — never the #12772 conversion summaries. */
@@ -75,7 +91,7 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         // …and the fixture also carries the SILENT controls: a `record.`-rooted
         // predicate whose string literal contains identifier-shaped text, a
         // FIELD-level `current_user` predicate (which resolves there since
-        // objectui#6010 — and, since objectui#6110 + #6111, resolves at SECTION
+        // objectui#6010 — and, since objectui#6110 + objectui#6111, resolves at SECTION
         // level too — so it must never be flagged), and a second view that is
         // entirely healthy.
         expect(leadFields.at(-2).visibleWhen.source).toBe('record.note != "status unqualified"');
@@ -137,7 +153,12 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         // declaring the current floor gets zero notices even carrying the very
         // same bare-root predicates. Derived from the installed spec rather than
         // hardcoded, so the pin cannot rot into vacuity on the next spec bump.
-        const current = resolveInstalledSpecVersion();
+        //
+        // "Current" is past BOTH the package label and every retirement the
+        // registry enforces (#20390): while `main` carries retirements its label
+        // has not moved past, `^<label>` is an artifact built BY the last
+        // release, and the per-entry half of the window rightly reads it as old.
+        const current = currentSurfaceFloor();
         expect(current, 'spec version must resolve for this pin to mean anything').toBeTruthy();
 
         const fixture = loadFixture();
@@ -199,11 +220,11 @@ describe('artifact door — unbound form-predicate roots are announced to the op
     });
 
     it('says NOTHING about a SECTION-level current_user predicate either', async () => {
-        // ⚠️ INVERTED IN PLACE (#13072). This case read "DOES flag the same
+        // ⚠️ INVERTED IN PLACE (commit 200d255e7). This case read "DOES flag the same
         // root at section level, and prints the section vocabulary there", and
         // asserted one warning quoting `bound roots on a form SECTION:
         // 'record', 'previous', 'parent', 'data'`. That vocabulary was derived
-        // from the section contract sentence #12914 replaced: objectui#6110
+        // from the section contract sentence commit f887e5249 replaced: objectui#6110
         // threads the host shell's predicate scope into `isSectionVisible`
         // where it used to pass `undefined`, and objectui#6111 evaluates the
         // authored section `visibleWhen` on the `section-divider` pseudo-field

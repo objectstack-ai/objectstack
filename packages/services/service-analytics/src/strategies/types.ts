@@ -15,7 +15,7 @@ export type {
   AnalyticsDriverCapabilities,
 } from '@objectstack/spec/contracts';
 
-import type { FilterCondition } from '@objectstack/spec/data';
+import type { FilterCondition, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
 
 /**
@@ -71,6 +71,37 @@ export interface DatasetScope {
 export interface DatasetScopedStrategyContext extends StrategyContext {
   getDatasetScope?(cubeName: string): DatasetScope | undefined;
   /**
+   * [#20933] Every object whose read scope `getReadScope` answers for this
+   * query — `AnalyticsService.queryObjects`, the one set the object-level
+   * admission read: the base object, every join the cube declares, and every
+   * object a member reaches through a relationship path.
+   *
+   * For a strategy that must look at the scopes BEFORE it compiles, so it reads
+   * them over the set the door scoped instead of re-deriving which objects the
+   * query reads. `undefined` when the context carries no read scope at all.
+   * Declared HERE rather than on the spec's {@link StrategyContext} for the
+   * reason `getDatasetScope` is: nothing about it is an authorable surface.
+   */
+  readScopedObjects?: readonly string[];
+  /**
+   * [#20986] The object `field` on `objectName` DECLARES as its target — a
+   * relationship field's `reference` — or `undefined` when the host cannot
+   * answer (no resolver wired, a field it does not know, a field that names
+   * no target).
+   *
+   * Tier 2 of the one hop resolver (`hop-object.ts`), which every strategy
+   * reads to name the object a relationship-path hop with no declared join
+   * reaches: the table it joins, the read scope it applies to that join, the
+   * object it reads the related value from. `AnalyticsService` hands its
+   * strategies the SAME function its field gate and its admitted and scoped
+   * set resolve hops with, so the object a strategy joins is the object the
+   * door admitted. Declared HERE rather than on the spec's
+   * {@link StrategyContext} for the reason `getDatasetScope` is: nothing about
+   * it is an authorable surface. Absent, a hop reads the object named after
+   * the relationship — the behaviour a strategy had before it knew the hook.
+   */
+  relationshipReference?(objectName: string, field: string): string | undefined;
+  /**
    * [#14079] The DECLARED type of `field` on `objectName` — `'number'`,
    * `'boolean'`, `'text'`, … — or `undefined` when the host cannot answer (no
    * data engine wired, an object or field it does not know).
@@ -88,6 +119,22 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * hook keeps the behaviour it had — "cannot answer, do not block".
    */
   declaredFieldType?(objectName: string, field: string): string | undefined;
+  /**
+   * [#20445] The DECLARED value shape of `field` on `objectName` — its type
+   * and, for a multi-capable type, `multiple` — or `undefined` when the host
+   * cannot answer (no data engine wired, an object or field it does not know).
+   *
+   * The question the `$empty` operator turns on: what counts as empty is the
+   * field's row of the ruled per-type table, which `expandEmptyOperator`
+   * (`@objectstack/spec/data`) reads off exactly this shape, and the type
+   * alone cannot answer it (a `lookup` is null-only, a `lookup` with
+   * `multiple: true` is list-valued). Answered from the same
+   * `AnalyticsServiceConfig.sourceFieldMeta` hook `declaredFieldType` reads.
+   * Unlike that hook's text-operator rule, a compiler that gets no answer
+   * REFUSES the operator rather than keeping an older behaviour: there is no
+   * declaration-free SQL for it (`empty-operator-sql.ts` says why).
+   */
+  declaredValueShape?(objectName: string, field: string): ValueShapeFieldDef | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `objectName` —
    * `'sqlite'` / `'postgres'` / `'mysql'`, or `undefined` when the host cannot
@@ -114,6 +161,26 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    */
   sqlDialect?(objectName: string): string | undefined;
   /**
+   * [#21441] The date-bucket expression the driver backing `objectName`
+   * groups `field` by at `granularity`, as SQL text in that driver's dialect:
+   * `strftime('%Y-%m', …)` on SQLite, `to_char(…, 'YYYY-MM')` on PostgreSQL
+   * (over `(col)::timestamptz AT TIME ZONE 'UTC'` for a `datetime`, and
+   * `(col)::date::timestamp` for a `date` since #21485). `undefined` when the
+   * host cannot answer: no hook wired, a driver with no bucket expression (a
+   * non-SQL driver), or a SQL client that driver does not model.
+   *
+   * `ObjectQLStrategy.generateSql` prints a date-bucketed dimension in this
+   * expression, so its echo runs on that dialect and answers the face's
+   * bucket keys. The service answers it from
+   * `AnalyticsServiceConfig.dateBucketSql`, which the plugin fills from the
+   * driver that EXECUTES the aggregate: the driver stays the single source of
+   * its bucketing, the posture `sqlDialect` takes. Declared HERE rather than
+   * on the spec's {@link StrategyContext} for the reason `declaredFieldType`
+   * is: nothing about it is an authorable surface, and a strategy that does
+   * not know the hook keeps the behaviour it had.
+   */
+  dateBucketSql?(objectName: string, field: string, granularity: string): string | undefined;
+  /**
    * [#19995] The ENGINE's own `where` admission verdict for `objectName`,
    * `IObjectQLEngine.judgeFilter` (#20157), or `undefined` when the host
    * cannot answer (no data engine wired, an engine without the member, or an
@@ -138,4 +205,25 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * "Cannot answer, do not block".
    */
   judgeFilter?: ReadScopeFilterJudge;
+  /**
+   * [#21080] Does the data engine hold a middleware registered FOR
+   * `objectName` — `IObjectQLEngine.hasObjectMiddleware` — or `undefined` when
+   * the host cannot say (no data engine, or an engine without the member)?
+   *
+   * The engine's object-keyed middlewares include read gates (the comment,
+   * activity and attachment gates, the approval snapshot redaction). They run
+   * on every engine operation, and `NativeSQLStrategy` runs none: it executes
+   * raw SQL through the driver. So that strategy declines a query that reads
+   * an object this answers `true` for, and the engine path serves it with the
+   * caller's context. Unlike the hooks above, an `undefined` answer DECLINES
+   * too: a read gate this strategy cannot see is not a gate it may skip.
+   *
+   * `AnalyticsService` passes through `AnalyticsServiceConfig.hasObjectMiddleware`,
+   * which `AnalyticsServicePlugin` fills from the data engine. Declared HERE
+   * rather than on the spec's {@link StrategyContext} for the reason
+   * `getDatasetScope` is: nothing about it is an authorable surface. A context
+   * built without the hook asks nothing, and the strategy keeps the behaviour
+   * it had.
+   */
+  hasObjectMiddleware?(objectName: string): boolean | undefined;
 }

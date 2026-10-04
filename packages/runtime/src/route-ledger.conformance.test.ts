@@ -38,7 +38,7 @@
  * tracked in #17041; this paragraph states today's coverage, not a plan for
  * tomorrow's. Deliberately no row/domain counts here: a hand-typed number in
  * this prose is exactly the unguarded-count defect this lane spent the same
- * day eliminating elsewhere (#16919, #17039), and nothing in this file would
+ * day eliminating elsewhere (commits 2cd4c548e, edf59e359), and nothing in this file would
  * ever notice it going stale.
  */
 

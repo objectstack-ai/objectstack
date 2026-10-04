@@ -69,10 +69,12 @@ function recordingRecordChangeTrigger() {
  * The protocol's flattened flow view — `getMetaItems({ type: 'flow' })` — served
  * as the `{ items: [...] }` envelope the real protocol returns, so the fix's
  * unwrap path is exercised. No objectql registry, mirroring the empty boot pull.
+ * [#20552] The engine reads it through the EXECUTION face
+ * (`getMetaItemsForExecution`), which carries the stored bodies undecorated.
  */
 function fakeProtocolService(flows: unknown[]) {
     return {
-        async getMetaItems(q: { type: string }) {
+        async getMetaItemsForExecution(q: { type: string }) {
             return { items: q.type === 'flow' ? flows : [] };
         },
     };

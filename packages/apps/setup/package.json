@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/setup",
-  "version": "17.4.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "ObjectStack Setup — the platform administration app, packaged as its own ObjectStack app package (ADR-0048: one app per package).",
   "main": "dist/index.js",
@@ -21,7 +21,7 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

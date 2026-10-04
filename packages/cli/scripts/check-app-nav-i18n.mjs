@@ -109,7 +109,7 @@ const CLI_ROOT = join(HERE, '..');
 
 // ---------------------------------------------------------------------------
 // THE POPULATION — which apps this gate judges, and the criterion that decides
-// it (#17891)
+// it (commit ca9d9d361)
 // ---------------------------------------------------------------------------
 //
 // An app belongs here iff BOTH halves hold. The criterion is what a future
@@ -145,7 +145,7 @@ const CLI_ROOT = join(HERE, '..');
 //
 // `account` satisfied both halves all along and was invisible anyway:
 // `@objectstack/mcp` contributes `nav_connect_agent` into
-// `grp_account_developer` (`connect-ui.ts`, #16746) and #17759 supplied its
+// `grp_account_developer` (`connect-ui.ts`, #16746) and commit c744c0af3 supplied its
 // label in all four locales — while this gate printed a BYTE-IDENTICAL
 // `OK (…)` line before and after that landing, because every site below
 // narrowed to one app name. Widening the three obvious filters is NOT the fix:
@@ -218,7 +218,7 @@ export function contributorsWithNoNavIds(contributions) {
  * contributes into both `setup` and `account`, so a union keeps it passing on
  * its `account` id alone after its `setup` contribution has silently stopped,
  * which is the exact "fewer ids means fewer checks" false green this invariant
- * exists to catch, restated one app wider (#17891). `--self-test` carries that
+ * exists to catch, restated one app wider (commit ca9d9d361). `--self-test` carries that
  * union as a negative control.
  *
  * A declared app with no bucket at all reads as ZERO ids, never as "not
@@ -234,8 +234,8 @@ export function contributionsForApp(contributions, appName) {
 /**
  * The pass line, as a VALUE so `--self-test` can pin it.
  *
- * Per-app counts are not cosmetics. #17891's whole measurement was a DIFF of
- * THIS LINE across #17759's landing, and the finding was that it came back
+ * Per-app counts are not cosmetics. The whole measurement behind commit ca9d9d361 was a DIFF of
+ * THIS LINE across commit c744c0af3's landing, and the finding was that it came back
  * byte-identical because one app's counts were all it carried. A summary that
  * collapses the apps back into one total rebuilds precisely that: a number that
  * moves for reasons the reader cannot attribute, and — worse — one that fails
@@ -256,9 +256,9 @@ export function summaryText(contributorCount, localeCount, perApp) {
  * ⛔ The app is a parameter, never this file's former single constant: the
  * bundles are keyed `apps.<app>.navigation.<id>`, one namespace per app, so
  * `apps.setup.navigation.nav_connect_agent` never answers for the same id under
- * `apps.account.navigation` (#17759). A widened gate whose verdict still said
+ * `apps.account.navigation` (commit c744c0af3). A widened gate whose verdict still said
  * `apps.setup.navigation` would send whoever it fails on to the wrong subtree
- * — a confident diagnosis pointing somewhere innocent (#17891).
+ * — a confident diagnosis pointing somewhere innocent (commit ca9d9d361).
  */
 function renderMissing(appName, locale, missing, declaredBy) {
   const lines = missing.map((id) => {
@@ -286,7 +286,7 @@ function renderMissing(appName, locale, missing, declaredBy) {
 // whose shell nobody registers has no merged navigation for the contributions
 // to merge into, so widening the filters without booting `@objectstack/account`
 // would have reported "the `account` app is not registered at all" instead of
-// judging a single label (#17891).
+// judging a single label (commit ca9d9d361).
 // ---------------------------------------------------------------------------
 
 const CONTRIBUTORS = [
@@ -299,7 +299,7 @@ const CONTRIBUTORS = [
     },
   },
   {
-    // The Account SHELL (#17891). `AccountAppPlugin.start` registers
+    // The Account SHELL (commit ca9d9d361). `AccountAppPlugin.start` registers
     // `ACCOUNT_APP` through the `manifest` service — the same seam every other
     // entry here uses — so the fake `ctx` below already serves it and no
     // credential fixture is needed. Its kernel `dependencies` name
@@ -499,7 +499,7 @@ function selfTest() {
   expect('#5750 verdict names the fallback literal', rendered.includes('HTTP Deliveries'), rendered);
   expect('#5750 verdict names the locale', rendered.includes('zh-CN'), rendered);
 
-  // ── The POPULATION, and the one way widening it goes wrong (#17891) ──
+  // ── The POPULATION, and the one way widening it goes wrong (commit ca9d9d361) ──
   //
   // The gate judges more than one app now. The half that can be widened WRONG
   // is the per-contributor invariant: flattening each contributor's ids into a
@@ -534,7 +534,7 @@ function selfTest() {
 
   // The verdict must name the APP as well as the id: one namespace per app, so
   // `apps.setup.navigation.nav_connect_agent` does not answer for the same id
-  // under `apps.account.navigation` (#17759). A verdict naming only the id
+  // under `apps.account.navigation` (commit c744c0af3). A verdict naming only the id
   // sends the reader to whichever subtree they guessed.
   const renderedAccount = renderMissing(
     'account',
@@ -549,7 +549,7 @@ function selfTest() {
     renderedAccount,
   );
 
-  // The pass line. #17891's whole measurement was a DIFF of this line across a
+  // The pass line. The whole measurement behind commit ca9d9d361 was a DIFF of this line across a
   // landing, and it came back byte-identical because one app's counts were all
   // it carried.
   const summary = summaryText(11, 4, [{ app: 'setup', ids: 54 }, { app: 'account', ids: 12 }]);
@@ -703,7 +703,7 @@ if (process.argv.includes('--self-test')) {
  * into the red while the code beside it was already correct.)
  */
 function checkBuildPrerequisite() {
-  // ONE PROBE PER APP SHELL (#17891). A probe hard-coded to `@objectstack/setup`
+  // ONE PROBE PER APP SHELL (commit ca9d9d361). A probe hard-coded to `@objectstack/setup`
   // answers for one app in a population of two: with Account unbuilt it returns
   // happily, and the missing build arrives eleven lines further down as
   // `COULD NOT BOOT — @objectstack/account`, which is a finding about a plugin

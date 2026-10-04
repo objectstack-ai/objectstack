@@ -6,7 +6,8 @@
  * validate` / `os build` / `os lint`, and their exit statuses — are pinned by
  * `test/jsx-gate-manifest-notice.e2e.test.ts`, which runs NIGHTLY (it spawns
  * the CLI). This file is the per-PR guard, so every rule those faces read is
- * pinned HERE too — the package-carried layout included.
+ * pinned HERE too — the package-carried layout included, and (#20166) the
+ * project directory the manifest is read in: the config's, not the invoker's.
  *
  * ⛔ Anchors, not prose: the notice is found by its `rule` id and asserted on
  * the DATA it must carry (the page count and every place looked), never on the
@@ -14,18 +15,23 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateJsxPages } from '@objectstack/lint';
+import { SDUI_MANIFEST_SERVICE } from '@objectstack/metadata-protocol';
 import {
-  CONSOLE_SDUI_MANIFEST_SPECIFIER,
+  CONSOLE_SDUI_MANIFEST,
   JSX_PARSE_LEVEL_ONLY_RULE,
   PROJECT_SDUI_MANIFEST_FILE,
   SduiManifestRefusalError,
+  consoleSduiManifestPath,
   countJsxGatePages,
   jsxGateStacks,
   printJsxGateNotices,
+  registerDeploymentSduiManifest,
   resolveJsxGateManifest,
   resolveSduiManifest,
   type SduiManifestResolution,
@@ -57,12 +63,16 @@ const PACKAGE_CARRIED: Record<string, Record<string, unknown>> = {
   },
 };
 
+/** The project directory the injected answers below were made for. */
+const PROJECT_DIR = '/proj';
+
 const ABSENT: SduiManifestResolution = {
   status: 'absent',
-  lookedAt: ['/proj/sdui.manifest.json', CONSOLE_SDUI_MANIFEST_SPECIFIER],
+  lookedAt: ['/proj/sdui.manifest.json', CONSOLE_SDUI_MANIFEST],
 };
 const UNUSABLE: SduiManifestResolution = {
   status: 'unusable',
+  source: 'project',
   path: '/proj/sdui.manifest.json',
   reason: 'it is not valid JSON (x)',
 };
@@ -82,13 +92,17 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     expect(r).toEqual({ status: 'resolved', manifest: MANIFEST, path: join(dir, PROJECT_SDUI_MANIFEST_FILE) });
   });
 
-  // Holds in any checkout: `packages/console/dist/` is gitignored and absent
-  // unless the console is built, and today the specifier is not in the
-  // console's `exports` either. Both legs are named, in order.
-  it('absent: names the project path, then the console specifier', () => {
-    expect(resolveSduiManifest(dir)).toEqual({
+  // Hermetic: the console is located from an origin nothing resolves from
+  // (`createRequire` refuses a relative one), so the answer does not depend on
+  // whether this checkout has built the console. ⚠️ An absolute origin in an
+  // empty directory is NOT that: a runner started through pnpm's `.bin` shim
+  // inherits a NODE_PATH carrying the virtual store's hoisted packages, and
+  // `@objectstack/console` resolves from anywhere through it. Both legs are
+  // named, in order; the console-leg block below pins the absolute spelling.
+  it('absent: names the project path, then the console copy', () => {
+    expect(resolveSduiManifest(dir, 'not-an-absolute-origin.mjs')).toEqual({
       status: 'absent',
-      lookedAt: [join(dir, PROJECT_SDUI_MANIFEST_FILE), CONSOLE_SDUI_MANIFEST_SPECIFIER],
+      lookedAt: [join(dir, PROJECT_SDUI_MANIFEST_FILE), CONSOLE_SDUI_MANIFEST],
     });
   });
 
@@ -103,6 +117,7 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     const r = resolveSduiManifest(dir);
     expect(r.status).toBe('unusable');
     if (r.status !== 'unusable') return;
+    expect(r.source).toBe('project');
     expect(r.path).toBe(join(dir, PROJECT_SDUI_MANIFEST_FILE));
     expect(r.reason).toMatch(reason);
   });
@@ -112,6 +127,113 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     const r = resolveSduiManifest(dir);
     expect(r.status).toBe('unusable');
     if (r.status === 'unusable') expect(r.reason).toMatch(/could not be read/);
+  });
+});
+
+/**
+ * The `package.json` of the REAL `@objectstack/console` this package depends
+ * on, resolved the way any installed dependency is — through `node_modules` —
+ * so the layouts below carry the console's actual `exports` map, which is what
+ * decides whether a subpath resolves at all.
+ */
+const REAL_CONSOLE_PACKAGE_JSON = createRequire(import.meta.url).resolve('@objectstack/console/package.json');
+
+/**
+ * An installed-package layout under `root`: `node_modules/@objectstack/console`
+ * carrying the real console `package.json`, plus a `dist/sdui.manifest.json`
+ * with `body` (`null` for a console that ships none, as 17.0.0 to 17.4.0 did).
+ * Returns the origin a CLI installed beside it resolves from.
+ */
+function installConsole(root: string, body: string | null): URL {
+  const pkgDir = join(root, 'node_modules', '@objectstack', 'console');
+  mkdirSync(join(pkgDir, 'dist'), { recursive: true });
+  writeFileSync(join(pkgDir, 'package.json'), readFileSync(REAL_CONSOLE_PACKAGE_JSON, 'utf8'));
+  if (body !== null) writeFileSync(join(pkgDir, 'dist', 'sdui.manifest.json'), body);
+  return pathToFileURL(join(root, 'node_modules', '@objectstack', 'cli', 'dist', 'index.js'));
+}
+
+describe('the console leg — the copy @objectstack/console ships is reached, through its package.json', () => {
+  let root = '';
+  let project = '';
+  beforeEach(() => {
+    // Real path: module resolution answers with one (`/var` is `/private/var` on macOS).
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'os-sdui-console-')));
+    project = join(root, 'project');
+    mkdirSync(project);
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // The production default: from the CLI's OWN location, where its declared
+  // dependency lives. Asking for the file by its own subpath resolves nothing
+  // (the console's `exports` publishes `./package.json` alone), so this reds
+  // the moment the leg goes back to that spelling.
+  it("locates the CLI's own @objectstack/console dependency, whether or not it is built", () => {
+    const path = consoleSduiManifestPath();
+    expect(path).toBeDefined();
+    expect(path!.endsWith(join('dist', 'sdui.manifest.json'))).toBe(true);
+    const owner = JSON.parse(readFileSync(join(dirname(dirname(path!)), 'package.json'), 'utf8'));
+    expect(owner.name).toBe('@objectstack/console');
+  });
+
+  it('resolved: a project with no manifest of its own is checked against the shipped copy', () => {
+    const origin = installConsole(root, JSON.stringify(MANIFEST));
+    expect(resolveSduiManifest(project, origin)).toEqual({
+      status: 'resolved',
+      manifest: MANIFEST,
+      path: join(root, 'node_modules', '@objectstack', 'console', 'dist', 'sdui.manifest.json'),
+    });
+  });
+
+  it("resolved: the project's own manifest is read first", () => {
+    const origin = installConsole(root, JSON.stringify({ components: {} }));
+    writeFileSync(join(project, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+    expect(resolveSduiManifest(project, origin)).toEqual({
+      status: 'resolved',
+      manifest: MANIFEST,
+      path: join(project, PROJECT_SDUI_MANIFEST_FILE),
+    });
+  });
+
+  it('absent: a console that ships no manifest is named by the absolute path looked at', () => {
+    const origin = installConsole(root, null);
+    expect(resolveSduiManifest(project, origin)).toEqual({
+      status: 'absent',
+      lookedAt: [
+        join(project, PROJECT_SDUI_MANIFEST_FILE),
+        join(root, 'node_modules', '@objectstack', 'console', 'dist', 'sdui.manifest.json'),
+      ],
+    });
+  });
+
+  it('unusable: a damaged shipped copy is refused with its own remedy, never read as "not found"', () => {
+    const origin = installConsole(root, '{ "components": [ oops');
+    const r = resolveSduiManifest(project, origin);
+    expect(r).toMatchObject({
+      status: 'unusable',
+      source: 'console',
+      path: join(root, 'node_modules', '@objectstack', 'console', 'dist', 'sdui.manifest.json'),
+    });
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let thrown: unknown;
+      try {
+        resolveJsxGateManifest(HTML_STACK, project, r);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(SduiManifestRefusalError);
+      const e = thrown as SduiManifestRefusalError;
+      expect(e.message).toContain(join('@objectstack', 'console', 'dist', 'sdui.manifest.json'));
+      // The remedy names the package to reinstall, not the file to edit.
+      const remedy = e.hints[e.hints.length - 1];
+      expect(remedy).toContain('@objectstack/console');
+      expect(remedy).not.toContain(PROJECT_SDUI_MANIFEST_FILE);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });
 
@@ -222,13 +344,14 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
   });
 
   it('resolved: arms the gate and says nothing', () => {
-    const r = resolveJsxGateManifest(HTML_STACK, { status: 'resolved', manifest: MANIFEST, path: '/p' });
+    const r = resolveJsxGateManifest(HTML_STACK, PROJECT_DIR, { status: 'resolved', manifest: MANIFEST, path: '/p' });
     expect(r).toEqual({ sduiManifest: MANIFEST, notices: [] });
   });
 
   it('absent with a page to check: parse level, and ONE notice carrying the count and every place looked', () => {
     const r = resolveJsxGateManifest(
       { pages: [...HTML_STACK.pages, { name: 'b', kind: 'jsx', source: '<div />' }] },
+      PROJECT_DIR,
       ABSENT,
     );
     expect(r.sduiManifest).toBeUndefined();
@@ -246,7 +369,7 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
   it.each(Object.entries(PACKAGE_CARRIED))(
     'absent, %s beside package-carried html pages: the notice, counting the package page',
     (_label, stack) => {
-      const r = resolveJsxGateManifest(stack, ABSENT);
+      const r = resolveJsxGateManifest(stack, PROJECT_DIR, ABSENT);
       expect(r.sduiManifest).toBeUndefined();
       expect(r.notices).toHaveLength(1);
       expect(r.notices[0]).toMatchObject({ severity: 'info', rule: JSX_PARSE_LEVEL_ONLY_RULE });
@@ -257,26 +380,30 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
   it.each(Object.entries(PACKAGE_CARRIED))(
     'unusable, %s beside package-carried html pages: refused, not waved through',
     (_label, stack) => {
-      expect(() => resolveJsxGateManifest(stack, UNUSABLE)).toThrow(SduiManifestRefusalError);
+      expect(() => resolveJsxGateManifest(stack, PROJECT_DIR, UNUSABLE)).toThrow(SduiManifestRefusalError);
     },
   );
 
   it('absent with nothing to check: silence is the true answer', () => {
-    expect(resolveJsxGateManifest(NO_PAGES_STACK, ABSENT)).toEqual({ sduiManifest: undefined, notices: [] });
+    expect(resolveJsxGateManifest(NO_PAGES_STACK, PROJECT_DIR, ABSENT)).toEqual({ sduiManifest: undefined, notices: [] });
     expect(
-      resolveJsxGateManifest({ pages: [{ name: 'r', kind: 'react', source: 'export default () => null' }] }, ABSENT),
+      resolveJsxGateManifest(
+        { pages: [{ name: 'r', kind: 'react', source: 'export default () => null' }] },
+        PROJECT_DIR,
+        ABSENT,
+      ),
     ).toEqual({ sduiManifest: undefined, notices: [] });
   });
 
   it('unusable with nothing to check: not read by anything, so not refused', () => {
-    expect(resolveJsxGateManifest(NO_PAGES_STACK, UNUSABLE)).toEqual({ sduiManifest: undefined, notices: [] });
+    expect(resolveJsxGateManifest(NO_PAGES_STACK, PROJECT_DIR, UNUSABLE)).toEqual({ sduiManifest: undefined, notices: [] });
     expect(errSpy).not.toHaveBeenCalled();
   });
 
   it('unusable with a page to check: refused, reported once on stderr, no minted code', () => {
     let thrown: unknown;
     try {
-      resolveJsxGateManifest(HTML_STACK, UNUSABLE);
+      resolveJsxGateManifest(HTML_STACK, PROJECT_DIR, UNUSABLE);
     } catch (e) {
       thrown = e;
     }
@@ -293,18 +420,173 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
   });
 });
 
+/**
+ * [#20166] The project leg is read in the project directory the command hands
+ * over — the config's own — and never in the invoker's working directory. The
+ * invoker's directory is played by a `process.cwd()` spy, so the pin is
+ * hermetic: a foreign directory that carries its OWN manifest is where a
+ * working-directory reading would land, and it must not win.
+ */
+describe('resolveJsxGateManifest — the project directory is the config’s, never the invoker’s cwd', () => {
+  const FOREIGN_MANIFEST = { components: { span: { type: 'span', inputs: [{ name: 'children', type: 'slot' }] } } };
+  let root = '';
+  let project = '';
+  let foreign = '';
+  let cwdSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'os-sdui-project-dir-')));
+    project = join(root, 'project');
+    foreign = join(root, 'foreign');
+    mkdirSync(project);
+    mkdirSync(foreign);
+    writeFileSync(join(foreign, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(FOREIGN_MANIFEST));
+    cwdSpy = vi.spyOn(process, 'cwd');
+  });
+  afterEach(() => {
+    cwdSpy.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('lit control: standing in the foreign directory, the working-directory default reads ITS manifest', () => {
+    cwdSpy.mockReturnValue(foreign);
+    expect(resolveSduiManifest()).toEqual({
+      status: 'resolved',
+      manifest: FOREIGN_MANIFEST,
+      path: join(foreign, PROJECT_SDUI_MANIFEST_FILE),
+    });
+  });
+
+  it('a foreign cwd carrying its own manifest does not win: the manifest beside the config is read', () => {
+    writeFileSync(join(project, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+    cwdSpy.mockReturnValue(foreign);
+    expect(resolveJsxGateManifest(HTML_STACK, project)).toEqual({ sduiManifest: MANIFEST, notices: [] });
+  });
+
+  it('control: standing in the project directory itself, the same answer', () => {
+    writeFileSync(join(project, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+    cwdSpy.mockReturnValue(project);
+    expect(resolveJsxGateManifest(HTML_STACK, project)).toEqual({ sduiManifest: MANIFEST, notices: [] });
+  });
+
+  it('a project with no manifest of its own does not borrow the foreign one', () => {
+    cwdSpy.mockReturnValue(foreign);
+    const r = resolveJsxGateManifest(HTML_STACK, project);
+    // Whatever the console leg answers in this checkout, it is never the
+    // foreign file, and a notice (where one is due) names the project's path.
+    expect(r.sduiManifest).not.toEqual(FOREIGN_MANIFEST);
+    for (const n of r.notices) {
+      expect(n.message).toContain(join(project, PROJECT_SDUI_MANIFEST_FILE));
+      expect(n.message).not.toContain(foreign);
+    }
+  });
+
+  it('a malformed manifest in the foreign cwd refuses nothing: it is not the project’s', () => {
+    writeFileSync(join(project, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+    writeFileSync(join(foreign, PROJECT_SDUI_MANIFEST_FILE), '{ "components": [ oops');
+    cwdSpy.mockReturnValue(foreign);
+    expect(resolveJsxGateManifest(HTML_STACK, project)).toEqual({ sduiManifest: MANIFEST, notices: [] });
+  });
+});
+
+/**
+ * [#20166] The seam the pins above cannot reach: each of the three authoring
+ * commands hands the gate the directory of the config `loadConfig` resolved.
+ * The command-level behaviour — an explicit config path run from a foreign
+ * directory — is pinned by `test/jsx-gate-manifest-notice.e2e.test.ts`, which
+ * runs NIGHTLY; this is its per-PR half.
+ */
+describe('the three authoring commands hand the gate the config’s directory', () => {
+  const COMMANDS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'commands');
+  const CALL = /resolveJsxGateManifest\(/g;
+  // One call, bounded by its `;`: the stack, then `dirname(absolutePath)`.
+  const CONFIG_DIR_CALL = /resolveJsxGateManifest\([^;]*?,\s*(?:path\.)?dirname\(absolutePath\)\s*\);/g;
+
+  it.each(['validate.ts', 'compile.ts', 'lint.ts'])('%s', (file) => {
+    const source = readFileSync(join(COMMANDS_DIR, file), 'utf8');
+    // `absolutePath` is the path `loadConfig` resolved for this run.
+    expect(source).toMatch(/const \{[^}]*\babsolutePath\b[^}]*\} = loaded;/);
+    expect(source).toMatch(/const loaded = await loadConfig\(/);
+    const calls = source.match(CALL) ?? [];
+    expect(calls).toHaveLength(1);
+    expect(source.match(CONFIG_DIR_CALL) ?? []).toHaveLength(calls.length);
+  });
+});
+
 describe('printJsxGateNotices — the text face of `os validate` / `os build`', () => {
   it('prints the rule tag and the hint, and nothing for an empty list', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       printJsxGateNotices([]);
       expect(log).not.toHaveBeenCalled();
-      printJsxGateNotices(resolveJsxGateManifest(HTML_STACK, ABSENT).notices);
+      printJsxGateNotices(resolveJsxGateManifest(HTML_STACK, PROJECT_DIR, ABSENT).notices);
       const out = log.mock.calls.map((c) => String(c[0])).join('\n');
       expect(out).toContain(`[${JSX_PARSE_LEVEL_ONLY_RULE}]`);
       expect(out).toContain('/proj/sdui.manifest.json');
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe('registerDeploymentSduiManifest — `os serve` hands the save door its manifest, or says once why not (#20312)', () => {
+  const PROJECT = '/srv/app';
+
+  it('resolved: registers the manifest itself and prints nothing', () => {
+    const registered: unknown[] = [];
+    const line = registerDeploymentSduiManifest((m) => registered.push(m), PROJECT, {
+      status: 'resolved',
+      manifest: MANIFEST,
+      path: `${PROJECT}/sdui.manifest.json`,
+    });
+    expect(line).toBeUndefined();
+    expect(registered).toEqual([MANIFEST]);
+    expect(registered[0]).toBe(MANIFEST);
+  });
+
+  it('absent: registers nothing, and ONE line naming what is not validated and every place looked', () => {
+    const registered: unknown[] = [];
+    const lookedAt = [`${PROJECT}/sdui.manifest.json`, '/opt/node_modules/@objectstack/console/dist/sdui.manifest.json'];
+    const line = registerDeploymentSduiManifest((m) => registered.push(m), PROJECT, { status: 'absent', lookedAt });
+    expect(registered).toEqual([]);
+    expect(line).toMatch(/^Page source and `requires` not validated at save: /);
+    for (const place of lookedAt) expect(line).toContain(place);
+    expect(line?.split('\n')).toHaveLength(1);
+  });
+
+  it('unusable: registers nothing and names the file and the reason — the boot is not refused', () => {
+    const registered: unknown[] = [];
+    const path = `${PROJECT}/sdui.manifest.json`;
+    const line = registerDeploymentSduiManifest((m) => registered.push(m), PROJECT, {
+      status: 'unusable',
+      source: 'project',
+      path,
+      reason: 'it is not valid JSON (Unexpected token)',
+    });
+    expect(registered).toEqual([]);
+    expect(line).toMatch(/^Page source and `requires` not validated at save: /);
+    expect(line).toContain(path);
+    expect(line).toContain('it is not valid JSON');
+  });
+
+  it('defaults to the resolver over the project directory: a project manifest is what gets registered', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-serve-sdui-'));
+    try {
+      writeFileSync(join(dir, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+      const registered: unknown[] = [];
+      expect(registerDeploymentSduiManifest((m) => registered.push(m), dir)).toBeUndefined();
+      expect(registered).toEqual([MANIFEST]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('`os serve` registers it under the save door\'s key, from the served config\'s directory, once', () => {
+    expect(SDUI_MANIFEST_SERVICE).toBe('sdui-manifest');
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'commands', 'serve.ts'), 'utf8');
+    const calls = source.match(/registerDeploymentSduiManifest\(/g) ?? [];
+    expect(calls).toHaveLength(1);
+    expect(source).toMatch(
+      /registerDeploymentSduiManifest\(\s*\(manifest\) => \{ kernel\.registerService\(SDUI_MANIFEST_SERVICE, manifest\); \},\s*path\.dirname\(absolutePath\),\s*\);/,
+    );
   });
 });

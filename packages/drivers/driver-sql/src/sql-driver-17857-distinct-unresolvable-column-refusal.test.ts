@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#17857 — the #8790 unresolvable-column refusal reaches the LAST
+ * Commit 9ccc4179e — the #8790 unresolvable-column refusal reaches the LAST
  * read door, attributed to the clause the caller's own request names.
  *
  * ## The five-row probe this card was filed from
@@ -25,9 +25,9 @@
  * naming nothing they could act on — and a picklist-populating `distinct()`
  * sits beside the `find()` and `count()` of the same list view.
  *
- * ## What #17639 landed, and why it stopped where it did
+ * ## What commit 7c2c5aedd landed, and why it stopped where it did
  *
- * #17639 gave this door the TERMINAL envelope (`DATABASE_ERROR` / 500 instead
+ * Commit 7c2c5aedd gave this door the TERMINAL envelope (`DATABASE_ERROR` / 500 instead
  * of pg's raw `DatabaseError`) and deliberately left the ATTRIBUTION arm filed,
  * with the reason written at the door: a BLANKET `isUnresolvableColumnError`
  * arm answers *"Filter on 'x' names a column …"*, and this door names columns
@@ -48,7 +48,7 @@
  *    compiled from `filters` and the tenant-scope predicate, both filters, so
  *    #8790's `unresolvableFilterColumnRefusal` applies verbatim;
  * 3. `unresolvableColumnNameOf` answers `null` ⇒ no attribution is supportable,
- *    so the #17639 terminal envelope stands unchanged.
+ *    so commit 7c2c5aedd's terminal envelope stands unchanged.
  *
  * ⭐ Arm 2 is the COMPLEMENT of arm 1, never a search of the `filters` AST for
  * the name — pinned below on `{ $or: [{ nosuchcol: 1 }] }`. `FilterCondition`
@@ -72,9 +72,9 @@
  *
  * ## What this suite deliberately does NOT decide
  *
- * ⛔ Nothing here touches #17590 (whether a `json` column should ANSWER a
+ * ⛔ Nothing here touches the card commit e04a0aff2 closed (whether a `json` column should ANSWER a
  * distinct read). That is a different condition — a column that EXISTS whose
- * type has no equality operator — and it stays on #17639's terminal envelope,
+ * type has no equality operator — and it stays on commit 7c2c5aedd's terminal envelope,
  * whose own pins in `sql-driver-17639-distinct-fault-envelope.test.ts` are
  * unchanged by this card: an error this classifier does not claim still leaves
  * as `DATABASE_ERROR` / 500.
@@ -144,7 +144,7 @@ async function withLog(
 
 /**
  * The disclosure clause, applied to one caller-visible message — the same
- * NEGATIVE-set-plus-positive-anchor shape the #8931, #11455, #11541 and #17639
+ * NEGATIVE-set-plus-positive-anchor shape the #8931, #11455, #11541 and commit 7c2c5aedd
  * suites use, so an emptied message cannot satisfy it trivially.
  */
 function expectNoStatementShape(message: string, object: string, half: string): void {
@@ -251,12 +251,19 @@ describe(`[#17857] driver-sql — distinct() attributes an unresolvable column (
     expect(err.code).not.toBe('DATABASE_ERROR');
   });
 
-  it('arm 1: writes the full dialect text to the SERVER LOG, statement included', async () => {
+  it('arm 1: writes the dialect diagnostic to the SERVER LOG, the statement cut', async () => {
     const { err, logged } = await withLog(driver, () => driver.distinct(TABLE, MISSING_COLUMN));
     expect(err.code).toBe('INVALID_FIELD');
     const line = logged.find((l) => l.includes(MISSING_COLUMN));
     expect(line, 'an operator must still be able to read what the backend said').toBeDefined();
-    expect(String(line), 'the withheld statement is in the log').toMatch(/\bselect\b/i);
+    // [#21385, maintainer ruling 2026-10-02] A redaction, not a deletion, and
+    // since this ruling a cut one: the dialect's diagnostic still reaches the
+    // log for an operator, the statement and its bound values do not (a server
+    // log leaves the data's trust boundary). The cut's marker says one stood
+    // there. The sentinel pins for this line live in
+    // `sql-driver-21385-refusal-log-line-redaction.test.ts`.
+    expect(String(line), 'the withheld statement is cut from the log').not.toMatch(/\bselect\b/i);
+    expect(String(line), 'the cut says a statement stood there').toContain('[statement and bound values redacted]');
     expect(String(line), 'the log line names the envelope it produced').toContain('INVALID_FIELD');
   });
 
@@ -347,7 +354,7 @@ describe(`[#17857] driver-sql — distinct() attributes an unresolvable column (
     ).toEqual(['Design']);
   });
 
-  // ⛔ #17639's terminal is NOT narrowed by this card. A table that was never
+  // ⛔ Commit 7c2c5aedd's terminal is NOT narrowed by this card. A table that was never
   // provisioned is not an unresolvable COLUMN, so nothing here claims it.
   it('CONTROL an unclassified dialect fault still leaves as the #17639 terminal', async () => {
     const err = await caught(() => driver.distinct(MISSING_TABLE, 'title'));

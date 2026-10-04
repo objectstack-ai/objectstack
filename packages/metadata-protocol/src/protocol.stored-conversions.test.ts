@@ -99,7 +99,7 @@ const legacyObjectRow = {
         name: 'crm_invoice',
         label: 'Invoice',
         fields: {
-            status: { type: 'select', label: 'Status' },
+            status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
             amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
         },
     },
@@ -254,6 +254,42 @@ describe('loadMetaFromDb — boot hydration converts, diagnoses, never drops (#3
         expect(res.loaded).toBe(1);
         expect(res.invalid).toBe(1);
         expect(registered.some((r) => r.kind === 'object' && r.body?.name === 'corrupt_thing')).toBe(true);
+    });
+});
+
+// ── the choice door's disposition for a STORED row ─────────────────────────────
+//
+// `FieldSchema` refuses a `select` / `radio` with neither `options` nor
+// `picklist` (ruling record 5910124148). No migration can invent the options an
+// author meant, so a row stored before the door keeps its bytes and is READ AND
+// NAMED: served with `_diagnostics` locating the field, counted `invalid` at
+// boot and still registered. These pins hold that half of the disposition.
+const optionlessChoiceRow = {
+    type: 'object',
+    name: 'crm_ticket',
+    metadata: {
+        name: 'crm_ticket',
+        label: 'Ticket',
+        fields: { status: { type: 'select', label: 'Status' } },
+    },
+};
+
+describe('a stored select with no option source — read and named, never dropped', () => {
+    it('getMetaItem serves the row with _diagnostics naming fields.status.options', async () => {
+        const { engine } = makeStubEngine([optionlessChoiceRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res: any = await protocol.getMetaItem({ type: 'object', name: 'crm_ticket' });
+        expect(res.item.fields.status.type).toBe('select');
+        expect(res.item._diagnostics?.valid).toBe(false);
+        expect(res.item._diagnostics.errors.map((e: { path?: string }) => e.path)).toContain('fields.status.options');
+    });
+
+    it('boot hydration counts it invalid and STILL registers it', async () => {
+        const { engine, registered } = makeStubEngine([optionlessChoiceRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 1, storeUnavailable: false });
+        expect(registered.some((r) => r.kind === 'object' && r.body?.name === 'crm_ticket')).toBe(true);
     });
 });
 

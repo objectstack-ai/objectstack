@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, HttpConfigSchema } from '@objectstack/spec/automation';
 import type { HttpConfigParsed } from '@objectstack/spec/automation';
@@ -8,6 +9,7 @@ import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-credential-projection.js';
 
 /**
  * HTTP built-in node — canonical `http` (ADR-0018 M3).
@@ -32,6 +34,14 @@ import { parseNodeConfig } from './parse-config.js';
  *    path; that descriptor key was retired in #6748 — a suspending HTTP node
  *    would declare `supportsPause: true` plus a `resumeAuthority` and return
  *    `suspend: true`, which is the mechanism the engine actually enforces.)
+ *
+ * `signingSecret` means `X-Objectstack-Signature` on EVERY arm, with ONE scheme
+ * (`@objectstack/core`'s `signHttpBody`): the outbox signs the body it will
+ * POST, and the inline call — including the durable arm's no-outbox fallback —
+ * signs the exact bytes it hands `fetch`, the empty string when there is no
+ * body. An authored `''` sends unsigned on purpose, on every arm; a non-empty
+ * value that renders to nothing at run time refuses the node rather than let
+ * the call leave unsigned.
  */
 
 /** Structural view of `service-messaging`'s HTTP outbox surface (ADR-0018 M3). */
@@ -88,9 +98,41 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 type: 'object',
                 required: ['url'],
                 properties: {
-                    url: { type: 'string', description: 'Target URL' },
+                    // #20590 — `url` and `headers` carry the credential steer, the
+                    // same steer #20654 brings to the `HttpConfigSchema` describes
+                    // in `@objectstack/spec/automation`. This config is stored in
+                    // the flow definition, and every definition read serves it to
+                    // any member who can read flows. Only `signingSecret` is
+                    // withheld (`flow-credential-projection.ts`), so a credential in
+                    // `url` or `headers` is served as authored. Nothing else is
+                    // withheld, because a withheld non-credential breaks the round
+                    // trip; the remedy is to keep the credential out of the
+                    // definition. The route depends on where the credential sits.
+                    // A header or a query-string key is carried by a declarative
+                    // connector's `auth.credentialRef` (`bearer` / `basic` /
+                    // `api-key`, whose `paramName` puts the key in the query). No
+                    // `credentialRef` variant carries a secret in the url PATH, so
+                    // a path-secret webhook is replaced by a token-authenticated
+                    // connector (`@objectstack/connector-slack`'s bot token).
+                    url: {
+                        type: 'string',
+                        description:
+                            'Target URL. Stored in the flow definition, which is served to every member who can read '
+                            + 'flows, so never a secret-bearing URL. A key in the query string: call the upstream with a '
+                            + '`connector_action` on a declarative `rest` connector with `api-key` auth, whose '
+                            + '`paramName` names the parameter and `auth.credentialRef` names the secret. A webhook whose '
+                            + 'path is the secret: call the service through a token-authenticated connector instead, such '
+                            + 'as the `slack` connector with its bot token.',
+                    },
                     method: { type: 'string', description: 'HTTP method (default GET; POST when durable)' },
-                    headers: { type: 'object', description: 'Request headers' },
+                    headers: {
+                        type: 'object',
+                        description:
+                            'Request headers. Stored in the flow definition, which is served to every member who can '
+                            + 'read flows, so never put a credential here (an `Authorization` value, an API key): call an '
+                            + 'authenticated upstream through a `connector_action` on a declarative connector whose '
+                            + '`auth.credentialRef` names the secret.',
+                    },
                     body: { description: 'Request body (JSON-serialised)' },
                     durable: {
                         type: 'boolean',
@@ -102,7 +144,35 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             },
         }),
         async execute(node, variables, context) {
-            const raw = (node.config ?? {}) as Record<string, unknown>;
+            const authored = (node.config ?? {}) as Record<string, unknown>;
+            // [#20790] A signing secret the write-only credential channel holds
+            // is not in the definition: it is read now, at execution, and takes
+            // the place the literal would have had — so everything below (the
+            // template interpolation, the contract parse, the refusal of a value
+            // that renders to nothing) treats it exactly as an authored one. The
+            // channel's row wins where one exists (a packaged flow's literal is
+            // the fallback). A cleared `''` is the author's "unsigned": the
+            // channel is not asked. A held secret that does not come back
+            // refuses the node — it is never sent unsigned.
+            let raw = authored;
+            const flowName = context.flowName;
+            if (
+                typeof flowName === 'string'
+                && authored.signingSecret !== FLOW_CREDENTIAL_CLEARED
+                && engine.holdsFlowCredential(flowName, node.id, HTTP_SIGNING_SECRET_KEY)
+            ) {
+                let held: string | undefined;
+                try {
+                    held = await engine.resolveFlowCredential(flowName, node.id, HTTP_SIGNING_SECRET_KEY);
+                } catch (err) {
+                    return refuseNode(
+                        `http '${node.id}': its signing secret is held by the flow credential store and could not be ` +
+                            `read (${(err as Error)?.message ?? String(err)}), so the request cannot carry ` +
+                            `${HTTP_SIGNATURE_HEADER} and was not sent.`,
+                    );
+                }
+                if (held !== undefined) raw = { ...authored, signingSecret: held };
+            }
             // Parsed AFTER interpolation — unique among the contract-carrying
             // builtins, because this executor reads the interpolated config
             // wholesale, so that is the shape its contract describes: a `{token}`
@@ -121,6 +191,21 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             const body = cfg.body;
             const timeoutMs = cfg.timeoutMs;
             const signingSecret = cfg.signingSecret;
+
+            // A secret the author SET that rendered to nothing — a `{token}`
+            // with no value in this run — cannot sign, and sending anyway is
+            // the one outcome the key exists to prevent: the receiver gets a
+            // request it cannot authenticate while the run reports success.
+            // Only an authored `''` means "unsigned on purpose" (the outbox
+            // reads it the same way). A non-string result never reaches here:
+            // the contract parse above already refused it, naming the key.
+            if (typeof raw.signingSecret === 'string' && raw.signingSecret !== '' && !signingSecret) {
+                return refuseNode(
+                    `http '${node.id}': config.signingSecret is set but resolved to no value in this run, so the ` +
+                        `request cannot carry ${HTTP_SIGNATURE_HEADER} and was not sent. Give the value its template ` +
+                        `reads to the run, or author signingSecret: '' to send unsigned on purpose.`,
+                );
+            }
 
             // ── Durable mode: enqueue onto the messaging HTTP outbox ──────────
             if (durable) {
@@ -208,7 +293,8 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                         return { success: false, error: `http (durable) failed to enqueue: ${(err as Error).message}` };
                     }
                 }
-                // No outbox available — degrade to a best-effort inline call.
+                // No outbox available — degrade to a best-effort inline call,
+                // which signs exactly as the outbox would have.
                 ctx.logger.warn(
                     `[http] node '${node.id}' requested durable delivery but no messaging HTTP outbox is wired; falling back to inline fetch`,
                 );
@@ -222,11 +308,19 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             const reads = /^(GET|HEAD|OPTIONS)$/i.test(method);
             const controller = new AbortController();
             const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+            // The exact bytes this arm sends, and therefore the bytes it signs.
+            // They are this arm's own serialization, not the outbox's
+            // `deliveryBody`; a receiver verifies over what it received, so each
+            // arm signs what it sends. No body is signed as the empty string.
+            const requestBody = body !== undefined && body !== null ? JSON.stringify(body) : undefined;
+            const requestHeaders = signingSecret
+                ? { ...headers, [HTTP_SIGNATURE_HEADER]: signHttpBody(requestBody ?? '', signingSecret) }
+                : headers;
             try {
                 const response = await fetch(url, {
                     method,
-                    headers,
-                    body: body !== undefined && body !== null ? JSON.stringify(body) : undefined,
+                    headers: requestHeaders,
+                    body: requestBody,
                     signal: controller.signal,
                 });
                 const data = await readBody(response);

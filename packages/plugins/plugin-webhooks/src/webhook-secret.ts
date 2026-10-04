@@ -288,7 +288,7 @@ export async function resolveWebhookSecret(
     throw new WebhookSecretUnresolvableError(
       `Webhook "${String(row.name ?? row.id)}" stores an encrypted signing secret, but this data `
         + 'engine does not implement resolveSecretField() — the key cannot be recovered, so the '
-        + 'subscription is dropped rather than delivered unsigned (#7799).',
+        + 'subscription is dropped rather than delivered unsigned.',
     );
   }
   const plain = await resolver.resolveSecretField(object, String(row.id), WEBHOOK_SECRET_FIELD);
@@ -298,7 +298,7 @@ export async function resolveWebhookSecret(
     `Webhook "${String(row.name ?? row.id)}" stores a signing secret in `
       + `${object}.${WEBHOOK_SECRET_FIELD} that resolved to nothing. A value IS stored — the read `
       + 'path returns the engine mask for it — so this is NOT an unsigned webhook, and delivering '
-      + 'it unsigned would strip the receiver of its only proof of origin (#7799, #8542). Causes, '
+      + 'it unsigned would strip the receiver of its only proof of origin. Causes, '
       + 'in the order worth checking: the row was deleted while this refresh was reading it; the '
       + 'column holds something that is not a secret: ref (a hand-edited column, or a dump restored '
       + 'without its sys_secret rows); or the stored value decrypts to an empty string. Fix: re-save '

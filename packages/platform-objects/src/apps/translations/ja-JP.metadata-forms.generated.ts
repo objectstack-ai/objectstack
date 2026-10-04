@@ -64,6 +64,42 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
       },
+      highlightFields: {
+        label: "ハイライト項目",
+        helpText: "このオブジェクトの項目名を重要な順に並べます。1 つしか表示できない場所では先頭の項目が使われます（ADR-0085）。既定の一覧列、カード、子レコードのプレビュー、詳細画面のハイライト帯を決めます。このオブジェクトの項目でない名前は公開時に拒否されます。"
+      },
+      searchableFields: {
+        label: "検索対象項目",
+        helpText: "$search クエリが照合する項目名（ADR-0061）。レコードピッカー、一覧のクイック検索、グローバル検索の既定値で、ビューで絞り込めます。未設定の場合は名前／タイトル項目と短いテキスト項目で検索します。各項目はこのオブジェクトの保存済みの項目を指す必要があり、不明な名前や仮想の formula 項目は公開時に拒否されます。"
+      },
+      fieldGroups: {
+        label: "フィールドグループ",
+        helpText: "このオブジェクトのフィールドを入力フォームとレコード詳細ページでまとめる、順序付きのセクション（ADR-0085）。配列の順序が表示順です。フィールドは自身の group 設定にグループのキーを指定するとそのグループに加わります。どのグループにも属さないフィールドはグループの後に続き、フィールドが 1 つも属さないグループは表示されません。"
+      },
+      "fieldGroups.key": {
+        label: "キー",
+        helpText: "snake_case のマシンキーで、このオブジェクト内で一意です。それ以外はスキーマが拒否します。フィールドはこのキーを指定してグループに加わるため、キーを変更するとそれらのフィールドはどのグループにも属さなくなります。"
+      },
+      "fieldGroups.label": {
+        label: "表示名",
+        helpText: "グループのセクションの見出しテキスト。"
+      },
+      "fieldGroups.icon": {
+        label: "アイコン",
+        helpText: "レコード詳細ページで見出しの横に表示される Lucide アイコン名（例：\"banknote\"）。入力フォームには表示されません。"
+      },
+      "fieldGroups.description": {
+        label: "説明",
+        helpText: "見出しの下に表示されるテキスト。入力フォームとレコード詳細ページに表示されます。"
+      },
+      "fieldGroups.collapse": {
+        label: "折りたたみ",
+        helpText: "セクションを折りたためるかどうか。入力フォームとレコード詳細ページに適用されます。未設定の場合は none です。"
+      },
+      "fieldGroups.visibleWhen": {
+        label: "表示条件",
+        helpText: "レコードに対する CEL 述語（例：record.type == 'invoice'）。TRUE の間だけ、入力フォームに見出しを含むグループ全体が表示されます。"
+      },
       fields: {
         label: "フィールド",
         helpText: "このオブジェクトが保存する列を追加"
@@ -257,9 +293,45 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "検証ルール",
         helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
       },
+      activityMilestones: {
+        label: "アクティビティのマイルストーン",
+        helpText: "フィールドが特定の値に達したときに書き込まれるタイムラインのエントリ（ADR-0052 §5b.2）。更新で監視対象のフィールドがその値に変わると、監査プラグインはフィールド変更のエントリの代わりに、マイルストーンの概要をレコードのアクティビティタイムラインに書き込みます。最初に一致したマイルストーンが使われます。"
+      },
+      "activityMilestones.field": {
+        label: "フィールド",
+        helpText: "監視する、このオブジェクトのフィールド名（例：status）。保存時や公開時には検査されません。このオブジェクトのフィールドではない名前は決して発火しません。"
+      },
+      "activityMilestones.value": {
+        label: "値",
+        helpText: "フィールドが変わるべき保存値で、テキストとして完全一致で比較されます。選択フィールドではラベルではなく選択肢の値を指定します（例：done）。数値または真偽値フィールドのマイルストーンは決して発火しません。"
+      },
+      "activityMilestones.summary": {
+        label: "概要",
+        helpText: "タイムラインのテキスト（例：\"Deal won: {name}\"）。{field_name} トークンは更新後のレコードの値になり、参照・主従・ユーザーフィールドのトークンは参照先レコードのタイトルを表示します。どのフィールドも指さないトークンは空になります。"
+      },
+      "activityMilestones.type": {
+        label: "種類",
+        helpText: "タイムラインのエントリのアクティビティ種別。completed などの組み込みの種別か独自の語で、書いたとおりに保存されます。未設定の場合は updated。"
+      },
       datasource: {
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
+      },
+      indexes: {
+        label: "インデックス",
+        helpText: "このオブジェクトのテーブルのデータベースインデックス。SQL ドライバーはテーブルを同期するとき、テーブルにまだないインデックスを作成します。同期でインデックスが削除されることはありません。"
+      },
+      "indexes.name": {
+        label: "名前",
+        helpText: "物理インデックス名。未設定の場合は、テーブル名と列名から生成されます（例：idx_task_status）。"
+      },
+      "indexes.fields": {
+        label: "フィールド",
+        helpText: "このオブジェクトの列名を、キーの順に指定します（例：status、owner）。保存時には検査されませんが、公開時と os validate では、このオブジェクトのフィールドではない名前が拒否されます。保存される列ではないフィールド（数式など）があると、SQL ドライバーはそのインデックス全体をスキップし、サーバーログにエラーを出します。"
+      },
+      "indexes.unique": {
+        label: "一意",
+        helpText: "一意性のスコープ（ADR-0120）。未設定の場合は一意ではありません。非推奨の裸の true（global を意味します）は選択肢にありません。true を持つインデックスは、スコープを選ぶまでその値を保持します。"
       },
       ownership: {
         label: "所有権モデル",
@@ -269,9 +341,73 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "共有モデル",
         helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。"
       },
+      access: {
+        label: "アクセス設定",
+        helpText: "ワイルドカード付与の方針（ADR-0066 D2）。省略時は public として解決されます。権限セットの '*' オブジェクト付与がこのオブジェクトに及ぶかどうかを決めます。ユーザー間のレコード可視性は sharingModel が決めます。"
+      },
+      "access.default": {
+        label: "既定の公開範囲",
+        helpText: "public: '*' ワイルドカード付与の対象になります。private: オブジェクトごとの明示的な付与が必要で、ワイルドカードの行レベルセキュリティの対象外になります。"
+      },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このオブジェクトにアクセスするために呼び出し元が保持すべき機能（権限セットの systemPermissions）。CRUD 付与に加えてチェックされます（ADR-0066 D3）。リストはすべての操作を制限し、{read, create, update, delete} マップは列挙した操作だけを制限します。省略または空の場合、機能による制限はありません。"
+      },
+      publicSharing: {
+        label: "公開共有",
+        helpText: "共有リンクのポリシー。このオブジェクトのレコードを、持っている人なら誰でも開けるリンクで公開できるかどうかと、その条件を定めます。指定したユーザーやチームと共有する sharingModel とは別物です。未設定またはオフの場合、リンクは作成できず、どのリンクも開けません。"
+      },
+      "publicSharing.enabled": {
+        label: "有効",
+        helpText: "このオブジェクトのレコードに共有リンクを許可します。リンクが開かれるたびに確認されるため、オフにすると既存のリンクはすべて開けなくなり、再びオンにすると再び提供されます。オフ（既定）の場合、ここにある他の設定はいずれも適用されません。"
+      },
+      "publicSharing.allowedAudiences": {
+        label: "許可する対象者",
+        helpText: "新しいリンクで指定できる対象者。それ以外は拒否されます。未設定の場合はリンクのみ。どの対象者でもリンクそのものが必要で、signed in ではさらにサインイン済みのユーザーが、email ではさらに受信者のアドレスがリンクのリストに載っていることが必要です。"
+      },
+      "publicSharing.allowedPermissions": {
+        label: "許可する権限",
+        helpText: "新しいリンクで付与できる権限レベル。それ以外は拒否されます。未設定の場合は閲覧のみ。"
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "最長有効日数",
+        helpText: "新しいリンクが要求できる最も遅い有効期限（今からの日数）。それより遅いものは拒否されます。未設定の場合は 365。有効期限を強制するものではなく、有効期限なしで作成されたリンクは期限切れになりません。"
+      },
+      "publicSharing.redactFields": {
+        label: "秘匿フィールド",
+        helpText: "リンク経由で提供されるすべてのレコードから、対象者に関係なく取り除かれる、このオブジェクトのフィールド名。所有者自身のアクセスには影響しません。このオブジェクトのフィールドではない名前は、公開時に拒否されます。"
+      },
+      "publicSharing.eligibility": {
+        label: "適格条件",
+        helpText: "レコードに対する CEL 述語（例：record.status == 'published'）。TRUE の間だけリンクが作成され、レコードが条件を満たさなくなると既存のリンクは開けなくなります。コンパイルできない、または評価に失敗した述語はリンクを拒否します。"
+      },
       managedBy: {
         label: "ライフサイクル区分",
         helpText: "ライフサイクル区分: platform（ユーザーによる CRUD）、config（管理者が記述）、system-data（プラットフォーム定義のスキーマで、データは管理者／ユーザーが書き込み可）、engine-owned（エンジン所有、ユーザー書き込み不可）、append-only（監査）、better-auth（ID）。UI クライアントはこの値から CRUD の可否を導くため、このオブジェクトのレコードでユーザーに何が提供されるかを決めます。"
+      },
+      userActions: {
+        label: "ユーザー操作",
+        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。"
+      },
+      "userActions.create": {
+        label: "作成",
+        helpText: "「新規」ボタン。オンで表示、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。スコープ内のレコードでボタンを制御するにはソースに記述してください。ツールバーごとに 1 回評価されます（関連リストではホストレコード）。"
+      },
+      "userActions.import": {
+        label: "インポート",
+        helpText: "CSV インポートの入口。オンで表示、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。スコープ内のレコードで入口を制御するにはソースに記述してください。ツールバーごとに 1 回評価されます。"
+      },
+      "userActions.edit": {
+        label: "編集",
+        helpText: "既存レコードの編集（インラインとフォーム）。オンで提供、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各行をその行自身のレコードで制御するにはソースに記述してください。"
+      },
+      "userActions.delete": {
+        label: "削除",
+        helpText: "行削除と一括削除。オンで提供、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各行をその行自身のレコードで制御するにはソースに記述してください。"
+      },
+      "userActions.exportCsv": {
+        label: "CSV エクスポート",
+        helpText: "CSV エクスポートの入口。未設定の場合は表示されます。どの managedBy 区分でも既定でエクスポートが提供されるためです。"
       },
       editMode: {
         label: "編集の開き方",
@@ -444,6 +580,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数桁",
         helpText: "小数部の桁数"
       },
+      useGrouping: {
+        label: "桁区切り",
+        helpText: "表示する値の桁区切り（3 桁ごとの区切り記号）。未設定の場合はレンダラーが決めます。一度も操作していないスイッチは何も書き込まないため、レンダラーが区切る場合でもオフと表示されます。オフ：区切りません（例：年や ID）。オン：常に区切ります。"
+      },
+      currencyConfig: {
+        label: "通貨設定",
+        helpText: "このフィールドの通貨。未設定の場合は dynamic モードです。どちらのモードでも、保存される値は単なる数値です。"
+      },
+      "currencyConfig.currencyMode": {
+        label: "通貨モード",
+        helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。"
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "既定の通貨",
+        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。既定は CNY です。dynamic モードでは参照されません。"
+      },
       step: {
         label: "ステップ値",
         helpText: "スライダーのステップ増分（既定は 1）。レンダラー専用で、書き込み経路はステップから外れた値を拒否しません。"
@@ -451,6 +603,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxSize: {
         label: "最大ファイルサイズ",
         helpText: "許可する最大ファイルサイズ（バイト単位の正の整数）。書き込み時にサーバー側で保存済みのファイルサイズと照合します。サイズが記録されていないファイルは判定対象になりません。"
+      },
+      accept: {
+        label: "許可するファイル形式",
+        helpText: "アップロードを許可する形式。MIME タイプ、type/* ワイルドカード、または .ext 拡張子で指定します（例：image/*、.pdf）。ファイルピッカーに渡され、書き込み時にサーバー側で保存済みのファイルと照合して再チェックされます。未設定の場合はすべての形式を許可します。"
       },
       dimensions: {
         label: "ベクトル次元数",
@@ -518,13 +674,49 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ピッカーの 1 ページ行数",
         helpText: "レコードピッカーのダイアログで 1 ページに表示する行数。正の整数で、既定は 10 です。"
       },
+      lookupColumns: {
+        label: "Lookup の列",
+        helpText: "レコードピッカーの表の列。参照先オブジェクトのフィールド名、または {field, label, width, type} エントリで指定します（例：[\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]）。未設定の場合は参照先オブジェクトから導出されます。"
+      },
+      lookupFilters: {
+        label: "Lookup フィルター",
+        helpText: "ピッカーの候補に適用する基本フィルター。参照先オブジェクトに対する {field, operator, value} ルールで指定し、operator は eq、ne、gt、lt、gte、lte、contains、in、notIn のいずれかです（例：[{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]）。すべてのピッカー画面に適用され、dependsOn のフィルターと AND で結合されます。"
+      },
+      dependsOn: {
+        label: "依存フィールド",
+        helpText: "このフィールドの選択肢が依存する、同じレコード上のフィールド。それぞれに値が入るまでフォームはこのフィールドを保留し、いずれかが変わると再評価します。lookup はこれらで候補を絞り込みます。名前だけを書くと参照先オブジェクトの同名フィールドで絞り込み、{field, param} は別のフィールドを指定します。選択肢型のフィールドでは親フィールド名を列挙し、選択肢ごとのルールは各選択肢の visibleWhen に書きます。"
+      },
       relatedListTitle: {
         label: "関連リストのタイトル",
         helpText: "親レコードの詳細ページに表示される、この関係の関連リストのタイトル。"
       },
+      relatedListColumns: {
+        label: "関連リストの列",
+        helpText: "親レコードの詳細ページに表示される、この関係の関連リストの列。このオブジェクト（子オブジェクト）のフィールド名で指定します（例：name、status）。未設定の場合は子オブジェクトから導出されます。名前のみを指定し、ラベル、セルの型、書式は子オブジェクトのフィールド定義から取られます。"
+      },
       inlineTitle: {
         label: "インライン表のタイトル",
         helpText: "親レコードに埋め込まれるマスター／ディテール表のタイトル。"
+      },
+      inlineColumns: {
+        label: "インライン表の列",
+        helpText: "親レコードのフォームにあるインライン表の列で、表示順に並べます。このフィールドが inlineEdit（ソースに記述）を設定している場合にのみ使われます。未設定の場合はこのオブジェクトの編集可能なフィールドから導出され、6 列を超えた分は最初は表の列選択に収められます。フィールド名だけのエントリは、型・選択肢・ルールをそのフィールドから受け取ります。その他の列のキー（まず type）はソースに記述します。"
+      },
+      "inlineColumns.name": {
+        label: "名前",
+        helpText: "列が表示・編集する、このオブジェクト（子オブジェクト）のフィールド（例：quantity）。保存時や公開時には検査されません。このオブジェクトのフィールドではない名前は、プレーンなテキスト列として表示されます。"
+      },
+      "inlineColumns.label": {
+        label: "ラベル",
+        helpText: "列の見出し。未設定の場合はフィールド自身のラベル。"
+      },
+      "inlineColumns.width": {
+        label: "幅",
+        helpText: "ピクセル単位の固定列幅。未設定の場合はセルの種類に応じた幅になり、テキスト列は伸縮し、数値・日付・選択の列は狭いままです。"
+      },
+      "inlineColumns.defaultHidden": {
+        label: "既定で非表示",
+        helpText: "列を画面に表示せず、最初は表の列選択に収めておきます。ユーザーは表示に切り替えられます。フィールドが必須の列は常に表示されます。"
       },
       inlineAmountField: {
         label: "インライン合計項目",
@@ -566,6 +758,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部 ID",
         helpText: "upsert 操作用の外部 ID としてマーク"
       },
+      storage: {
+        label: "ストレージ制約",
+        helpText: "物理ストレージの制約（ADR-0113）。書き込み契約があえて含めていない DDL を指定します。未設定の場合、制約は要求されません。"
+      },
+      "storage.notNull": {
+        label: "NOT NULL 制約",
+        helpText: "列にデータベースの NOT NULL を付けます。未設定の場合、required でも列は NULL を許容したままで、必須はエンジンが書き込み時に保証します。既存の NULL 行がある状態で宣言すると破壊的なマイグレーションとなり、スキーマドリフトの手順で制御されます（先にバックフィルしてください）。requiredWhen と同時に宣言すると拒否されます。"
+      },
       readonly: {
         label: "読み取り専用",
         helpText: "フォームでフィールドを読み取り専用にする"
@@ -582,9 +782,25 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び替え可能",
         helpText: "このフィールドでリストの並べ替えを許可"
       },
+      visibleWhen: {
+        label: "表示条件",
+        helpText: "レコードに対する CEL 述語（例：record.type == 'invoice'）。TRUE の間だけ、フォームにこのフィールドが表示されます。"
+      },
+      readonlyWhen: {
+        label: "読み取り専用条件",
+        helpText: "レコードに対する CEL 述語（例：record.status == 'paid'）。TRUE の間はフィールドが読み取り専用になり、サーバー側で強制されます。ロック中のフィールドへの更新による変更は破棄され、保存済みの値が保持されます。レコード自身の列だけを読み、参照フィールドを経由した読み取りは objectstack validate が拒否します。"
+      },
+      requiredWhen: {
+        label: "必須条件",
+        helpText: "レコードに対する CEL 述語。TRUE の間はフィールドが必須となり、サーバー側で状態遷移のゲートとして強制されます。書き込み前のレコードが条件を満たしていて、書き込みで値が欠けるとき、その書き込みは拒否されます。そのため、もともと値が欠けている行は無関係な編集を引き続き通過します。すべての書き込みで満たすべきルールには validations の script ルールを使ってください。storage.notNull と同時に宣言すると拒否されます。"
+      },
       maskingRule: {
         label: "マスキングルール",
         helpText: "部分マスキング:プリセット('phone'、'id_card'、'bank_account'、'email'、'name')または {\"keepHead\": n, \"keepTail\": m}。フィールドの requiredPermissions を持たない呼び出し元にはマスク値が表示されます"
+      },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このフィールドを読み取りまたは編集するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D3）。持たない場合、読み取り時に値がマスクされ（maskingRule があれば部分マスク）、編集は拒否されます。空または未設定の場合、機能による制限はありません。"
       },
       internal: {
         label: "外部に返さない",
@@ -710,6 +926,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   seed: {
     label: "シードデータ",
     description: "公開時に適用されるフィクスチャ／初期化データ"
+  },
+  picklist: {
+    label: "選択リスト",
+    description: "選択フィールドが名前で参照する共有の選択肢リスト"
   },
   mapping: {
     label: "インポートマッピング",
@@ -890,37 +1110,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       userFilters: {
         label: "ユーザーフィルター",
         helpText: "クイックフィルターバー：要素スタイル（dropdown / tabs / toggle）+ 公開フィールドまたはタブプリセット"
-      },
-      tabs: {
-        label: "タブ",
-        helpText: "ビュー内フィルタータブ——各タブが独自のフィルタールールを適用"
-      },
-      "tabs.name": {
-        label: "名前"
-      },
-      "tabs.label": {
-        label: "表示名"
-      },
-      "tabs.icon": {
-        label: "アイコン"
-      },
-      "tabs.view": {
-        label: "リストビュー"
-      },
-      "tabs.filter": {
-        label: "フィルター"
-      },
-      "tabs.order": {
-        label: "表示順"
-      },
-      "tabs.pinned": {
-        label: "固定"
-      },
-      "tabs.isDefault": {
-        label: "既定のタブ"
-      },
-      "tabs.visible": {
-        label: "表示"
       },
       appearance: {
         label: "外観",
@@ -1515,6 +1704,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "宣言的な書き込み",
         helpText: "単一レコードに対する宣言的な項目書き込み。'update' は `patch`（収集された `params` の下にマージされます）を現在のレコードに適用します。実行は呼び出し元の権限のままで、システム権限に昇格しません。したがって呼び出し元の権限・オブジェクトのフック・バリデーションは、ユーザーが編集した場合と同じように動作します。"
       },
+      patch: {
+        label: "固定値（patch）",
+        helpText: "更新が現在のレコードに書き込む固定のフィールド値（例：{\"status\": \"done\"}）。`params` が収集した値の下にマージされるため、同じ名前のパラメーターが優先されます。呼び出し元として書き込まれ、オブジェクトの権限、フック、検証がユーザーの編集と同様に適用されます。"
+      },
       undoable: {
         label: "取り消し可能",
         helpText: "更新が成功した後に「元に戻す」操作を提示します。取り消しが保持するのは、このアクションが書き込むすべての項目の変更前の値、すなわち `params` の下にマージされた `patch` という書き込み一式です。`operation` を宣言していないアクションは書き込み一式を持たないため、保持する対象がありません。"
@@ -1523,6 +1716,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "一括ディスパッチ契約",
         helpText: "このアクションの本体が前提とする一括ディスパッチの契約です。'perRecord' は選択された行ごとに 1 回ずつ、その行の recordId を添えてディスパッチします。'aggregate' は選択全体で 1 回だけディスパッチし、すべての id を params._selectedIds に入れて渡します。省略した場合はレコードごとのディスパッチになります。"
       },
+      description: {
+        label: "説明",
+        helpText: "このアクションのパラメーターダイアログのタイトル下に表示される説明文。パラメーターを収集するアクションでは、確認の問いを confirmText ではなくここに書きます（ダイアログは 2 つではなく 1 つ）。AI エージェントが読む ai.description とは別物です。"
+      },
       confirmText: {
         label: "確認文",
         helpText: "確認メッセージ（例: \"Are you sure?\"）"
@@ -1530,6 +1727,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       successMessage: {
         label: "成功メッセージ",
         helpText: "完了後の成功メッセージ"
+      },
+      errorMessage: {
+        label: "エラーメッセージ",
+        helpText: "アクションが失敗したときに、元のエラーの代わりに表示するエラーメッセージ。"
       },
       refreshAfter: {
         label: "完了後に更新",
@@ -1567,6 +1768,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
       },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このアクションを実行するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D4）。それ以外の呼び出し元はプラットフォームのアクションルートで 403 として拒否され（script、flow、modal アクションと MCP/AI 経路）、ボタンも表示されません。type が api のアクションはエンドポイントを直接呼び出すため、そのエンドポイントで改めてチェックする必要があります。"
+      },
       ai: {
         label: "AI 公開",
         helpText: "AI 公開（オプトイン）: ai.exposed=true を設定し、ai.description（≥40 文字）を記述すると、エージェントから呼び出せるようになります。"
@@ -1582,6 +1787,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       bodyShape: {
         label: "本文構造",
         helpText: "リクエスト body 構造（flat または nested）"
+      },
+      bodyExtra: {
+        label: "追加リクエストボディ（bodyExtra）",
+        helpText: "この api アクションの固定のリクエストボディ項目。最後にマージされるため、収集したパラメーターを上書きします（例：{\"resend\": true}）。ページ変数トークン（二重波括弧で囲んだ page.NAME）はランタイムが解決します。ペイロードは params ではなくここに書きます。"
       }
     }
   },
@@ -1652,7 +1861,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "ブロック",
-        helpText: "複数オブジェクトを結合（joined レポートのみ）"
+        helpText: "データセットにバインドされたサブレポート（joined レポートのみ）"
       },
       "blocks.name": {
         label: "名前"
@@ -1947,7 +2156,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "識別子とコンテンツ型。id は sendTemplate({ template: id, ... }) で参照される。"
+        description: "IEmailService.sendTemplate({ template: name, locale, ... }) が解決するテンプレート識別子。"
       },
       subject: {
         label: "件名",
@@ -2047,7 +2256,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       tab_and_row_level_security: {
         label: "タブと行レベルセキュリティ",
-        description: "タブ表示、RLS ポリシー、述語評価用カスタムコンテキスト変数。"
+        description: "タブ表示と RLS ポリシー。"
       }
     },
     fields: {
@@ -2078,6 +2287,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       systemPermissions: {
         label: "システム権限",
         helpText: "システム機能キーのリスト"
+      },
+      adminScope: {
+        label: "委任管理スコープ",
+        helpText: "委任管理（ADR-0090 D12）: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true、manageAssignments・manageBindings・authorEnvironmentSets の既定値は false です。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
       },
       objects: {
         label: "オブジェクト権限",
@@ -2139,7 +2352,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       capabilities: {
         label: "機能",
-        description: "エージェントが使用できるスキル、ツール、ナレッジソース。"
+        description: "エージェントが使用できるスキルとナレッジソース。"
       },
       access: {
         label: "アクセスとセキュリティ",
@@ -2181,15 +2394,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "計画",
-        helpText: "自律推論設定（strategy, max iterations, replan）"
+        helpText: "自律推論設定: エージェントが停止するまでの最大推論反復回数（1〜100、既定値 10）。"
       },
       memory: {
         label: "メモリ",
-        helpText: "メモリ管理（short-term, long-term, reflection）"
+        helpText: "長期メモリ: ユーザーごとに保持される要約ノート。各会話の前に呼び出され、配信済みのやり取り reflectionInterval 回ごとに 1 回のリフレクションで書き込まれます。長期メモリを有効にする場合、maxEntries と reflectionInterval は必須です。クラウド AI ランタイムが適用します。"
       },
-      lifecycle: {
-        label: "ライフサイクル",
-        helpText: "会話フローを定義するステートマシン"
+      structuredOutput: {
+        label: "構造化出力",
+        helpText: "エージェントの最終回答に対する出力契約: JSON 形式、回答の検証に使う JSON Schema、リトライ、フォールバック形式、変換ステップ。クラウド AI ランタイムが適用します。"
       },
       skills: {
         label: "スキル",

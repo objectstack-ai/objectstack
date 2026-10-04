@@ -25,7 +25,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
  *
  * It was a hand-written interface while the envelope field was undeclared, so
  * the two could have drifted with nothing to catch it — the exact class of
- * defect the closed entry field set (#6216) exists to make unrepresentable.
+ * defect the closed entry field set (commit f586f1a89) exists to make unrepresentable.
  * One declaration, one type.
  */
 export type AuthGate = NonNullable<ExecutionContext['authGate']>;

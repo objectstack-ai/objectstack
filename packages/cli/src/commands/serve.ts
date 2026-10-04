@@ -9,7 +9,10 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
-import { readInternalArtifactPath } from '../utils/internal-artifact-channel.js';
+import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+// The precedence's last rung — whether the cwd config takes part — decided by
+// the SAME predicate the supervisors print their `Config:` row by (#21501).
+import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
 import {
   resolveDriverType,
   resolveStorageDefinition,
@@ -49,7 +52,7 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // only (no plugin class): the capability loop loads `EmailServicePlugin` itself
 // with a bare `import()`, resolved against THIS CLI's own realpath — its
 // bundled copy always wins, never the host app's. Contrast `importConfigPlugin`
-// below, which IS host-anchored: an app-declared package wins there (#10909).
+// below, which IS host-anchored: an app-declared package wins there (per commit 5a90c56d1).
 import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
 // The SMS provider vocabulary, read from the package that materialises the
 // transports, for the same reason and by the same rule as the mail one above
@@ -58,7 +61,7 @@ import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProvi
 // be the second literal #5094 was filed for. Values only (no plugin class): the
 // capability loop dynamic-imports `SmsServicePlugin` itself the same way — a
 // bare `import()` resolved against this CLI's own realpath, so its bundled
-// copy wins, never the host's (#10909).
+// copy wins, never the host's (measured in commit 5a90c56d1).
 import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
 import { createHash } from 'node:crypto';
 import { resolveObjectStackHome } from '@objectstack/runtime';
@@ -871,7 +874,7 @@ export function runtimeStateFileName(environmentId: string, servedAppRoot: strin
  *
  * Each leg keeps its OWN `try` — a boot must not die because a supervision file
  * could not be written or because an IPC channel had already closed, and one
- * leg failing must not cost the other two. Only the ORDER changed (#13193).
+ * leg failing must not cost the other two. Only the ORDER changed (commit faff497fd).
  */
 export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChannels {
   return {
@@ -1042,7 +1045,7 @@ function servedAppRootOrCwd(): string {
  * After: hostRoot is the served app, `declared` is false, and the load goes to
  * `createHostImporter`'s fallback — which is a bare `import()` written in THIS
  * file, because `importFromHost` now hands the helper its own resolution base
- * (`fallbackImport`, #11157; it used to resolve from `@objectstack/types`
+ * (`fallbackImport`, commit a4cb7817f; it used to resolve from `@objectstack/types`
  * instead). Node ESM walks `node_modules` UPWARD from there, so the common
  * shape survives: in a hoisted monorepo whose ROOT
  * manifest declares the package while the served `apps/foo/package.json` does
@@ -1117,12 +1120,12 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  * know where that line is. A function declaration at module scope is hoisted over
  * the ENTIRE module, so "above the definition" is no longer a state this file can
  * be in — every line of `serve.ts`, in any order, reaches the same host-anchored
- * importer (#10769).
+ * importer (commit 3d7deb700).
  *
  * `serve-cluster-host-resolution.test.ts` is the detection backstop: it scans
  * this file for every app-declarable optional load and fails on a bare one.
  *
- * ── What the UNDECLARED leg resolves from, and why it is stated here (#11157) ─
+ * ── What the UNDECLARED leg resolves from, and why it is stated here (commit a4cb7817f) ─
  *
  * `createHostImporter` has two legs. The DECLARED one resolves out of the served
  * app's own `node_modules`, anchored by `hostRoot`. The UNDECLARED one falls back
@@ -1140,7 +1143,7 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  *     chalk                        OK                  MISS
  *     @objectstack/spec            OK                  OK    ← types' one dep
  *
- * #10943 made the base an explicit parameter for exactly that reason, and its
+ * Commit 46d34ab7c made the base an explicit parameter for exactly that reason, and its
  * other two callers (`@objectstack/verify`'s `bootStack`, the `packages/qa/
  * dogfood` enterprise probe) pass theirs. This file was the one that did not, so
  * its undeclared leg resolved from a package it has nothing to do with. That was
@@ -1162,7 +1165,7 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  * `objectstack.config.ts` from, which is the app's own root and NOT necessarily
  * the process CWD (#11185). The default is what makes this helper correct from
  * every line of the file without an author having to know a root exists: the
- * same reason #10769 made it a hoisted declaration rather than a binding.
+ * same reason commit 3d7deb700 made it a hoisted declaration rather than a binding.
  */
 function importFromHost(specifier: string, hostRoot: string = servedAppRootOrCwd()): Promise<any> {
   // Memoised per root so one boot shares a single host `require`, exactly as the
@@ -1170,7 +1173,7 @@ function importFromHost(specifier: string, hostRoot: string = servedAppRootOrCwd
   let importer = hostImporters.get(hostRoot);
   if (!importer) {
     importer = createHostImporter(hostRoot, {
-      // THIS module's own resolver, written HERE (#10943/#11157) — see the
+      // THIS module's own resolver, written HERE (commits 46d34ab7c and a4cb7817f) — see the
       // "what the undeclared leg resolves from" note above for why it has to be
       // a function in the calling module and not a URL string.
       fallbackImport: (fallbackSpecifier) => import(/* webpackIgnore: true */ fallbackSpecifier),
@@ -1444,7 +1447,7 @@ export default class Serve extends Command {
 
   /**
    * Load one `plugins: [...]` entry of the served app's own config that is
-   * written as a STRING (#10908).
+   * written as a STRING (commit 9cc6777d3).
    *
    * This is the most app-owned specifier in the whole file — it is supplied by
    * the app being served, and `plugins: [...]` is THE documented way to extend a
@@ -1456,7 +1459,7 @@ export default class Serve extends Command {
    * distribution layout. Same mechanism as cloud#1013 and #10645, but on the
    * surface users are explicitly told to use.
    *
-   * ── Why this WAS three branches, and why it is now two (#10908 → #11157) ────
+   * ── Why this WAS three branches, and why it is now two (commits 9cc6777d3 → a4cb7817f) ─
    *
    * The three-branch shape existed because handing every specifier to
    * `importFromHost` was MEASURED not to be a superset of a bare `import()` —
@@ -1468,7 +1471,7 @@ export default class Serve extends Command {
    *      module CONTAINING the call — so `'./local-plugin.js'` would resolve
    *      against `@objectstack/types/dist/` instead of this file's directory.
    *      STILL TRUE, and still why the non-package branch below stays here
-   *      rather than being folded into the helper. (#10944 has since RULED on
+   *      rather than being folded into the helper. (Commit e598b1cbc has since landed a RULING on
    *      the relative spelling itself: it is refused above, before any base is
    *      chosen. The remaining non-package spellings — an absolute path, a
    *      `file://` URL, a `node:` builtin — mean the same module from every
@@ -1487,7 +1490,7 @@ export default class Serve extends Command {
    *      — booted, and would have stopped booting. So this method asked the
    *      declaration itself and kept a local `import()` for the undeclared leg.
    *
-   *      ⇒ NO LONGER TRUE. #10943 made the base a parameter and #11157 made
+   *      ⇒ NO LONGER TRUE. Commit 46d34ab7c made the base a parameter and commit a4cb7817f made
    *      `importFromHost` pass it, so the helper's undeclared leg now runs THIS
    *      file's own `import()` — the identical call this method used to make
    *      inline. The workaround's reason is gone, so the workaround is gone with
@@ -1518,7 +1521,7 @@ export default class Serve extends Command {
    * moves where one resolves FROM. The #4719 declaration gate is untouched, and
    * no undeclared package gains a way in that it did not already have.
    *
-   * ── The relative branch is REFUSED, not resolved (#10944) ──────────────────
+   * ── The relative branch is REFUSED, not resolved (commit e598b1cbc) ────────
    *
    * A relative entry is the one spelling that can never mean what its author
    * meant. It is resolved against THIS file's directory — the installed CLI's
@@ -1531,7 +1534,7 @@ export default class Serve extends Command {
    * serves the app WITHOUT the plugin — so the deployment looks healthy and is
    * quietly missing the extension it declared.
    *
-   * Ruled at triage on #10944: refuse it, naming the two spellings that work.
+   * Ruled at triage, landed as commit e598b1cbc: refuse it, naming the two spellings that work.
    * That expands no accepted set — the spelling has never loaded an app's file
    * — and turns a diagnostic about the CLI's internals into an answer the
    * author can act on. Resolving relative entries against the SERVED APP's root
@@ -1563,7 +1566,7 @@ export default class Serve extends Command {
     } catch (importError: any) {
       // The wrapper lives with the load it describes, so the composed
       // user-facing string is testable rather than assembled at the call site
-      // (triage on #10908 requires this text be CHOSEN, not drift).
+      // (the triage commit 9cc6777d3 landed requires this text be CHOSEN, not drift).
       throw new Error(`Failed to import plugin '${pluginSpecifier}': ${importError.message}`);
     }
   }
@@ -2054,7 +2057,7 @@ export default class Serve extends Command {
     // `[StandaloneStack] no compiled artifact …` line is one). That is why the
     // redirection is on the STREAM: `LoggerConfig` has a level but no
     // destination knob, so there is nothing else to point at stderr. Same route
-    // `--json` takes for the same reason (#6217, `utils/json-stdout.ts`).
+    // `--json` takes for the same reason (commit 2b641ddd4, `utils/json-stdout.ts`).
     //
     // The MCP transport is the one writer that must still reach the real
     // stdout, and it holds its own channel to it (`packages/mcp`,
@@ -2369,30 +2372,36 @@ export default class Serve extends Command {
     // the separate `objectstack-ai/cloud` repo, NOT a path in this one — and
     // lifted into the framework so any project can `objectstack start`
     // against just a `dist/objectstack.json`.
-    const configMissing = !configExists;
     let useArtifactFallback = false;
     let useEmptyBoot = false;
+    /**
+     * #21501 — the compiled artifact a CONFIG boot loaded as its app bundle,
+     * as the ready banner displays it; set only when one did. A non-host
+     * config's standalone stack serves its metadata from that bundle, so the
+     * banner's `Artifact:` row names it; a host config (its `plugins` hold
+     * code) boots its own module and the row stays `Config:`.
+     */
+    let configBootBundle: string | undefined;
 
     // ── Artifact-pinned boot (#8368) ─────────────────────────────────
     // `OS_ARTIFACT_URL` names the artifact BY REFERENCE — an https:// URL
     // fetched at boot, or a file:// URL read directly (the volume-mount
     // workflow) — with an optional SRI-style `#sha256=` integrity pin in the
     // fragment. It is resolved here, before anything else looks for an
-    // artifact, and it wins over every local lookup:
+    // artifact, and it wins over every local lookup.
     //
-    //   --artifact  >  OS_ARTIFACT_URL  >  OS_INTERNAL_ARTIFACT_PATH
-    //               >  OS_ARTIFACT_PATH  >  <cwd>/dist/…
-    //
-    // `OS_INTERNAL_ARTIFACT_PATH` is the CLI's private parent-to-child channel:
-    // an `os start` / `os dev` supervisor resolved an artifact through its own
-    // ladder and is handing the answer down. It sits BELOW the reference (a
-    // supervisor that saw OS_ARTIFACT_URL resolves nothing and sends nothing,
-    // and `os dev` sends its answer unconditionally, so the reference has to
-    // keep outranking it) and ABOVE the operator's OS_ARTIFACT_PATH (which the
-    // supervisor no longer overwrites on the way down, so only a higher rung
-    // keeps `--artifact` beating an exported OS_ARTIFACT_PATH the way it does
-    // today). See `utils/internal-artifact-channel.ts` for why the CLI stopped
-    // writing the operator's knob at all.
+    // THE precedence is written once, in `utils/artifact-precedence.ts`; the
+    // supervisors (`os start`, `os dev`) resolve through it and hand their
+    // answer down on `OS_INTERNAL_ARTIFACT_PATH`, the CLI's private
+    // parent-to-child channel. This process reads the channels in this order:
+    // the reference, then the supervisor's answer, then the operator's
+    // OS_ARTIFACT_PATH. The answer sits BELOW the reference only because a
+    // supervisor never sends both (one holding `--artifact`, which outranks the
+    // reference, removes OS_ARTIFACT_URL from this env), and ABOVE the
+    // operator's OS_ARTIFACT_PATH (which the supervisor no longer overwrites on
+    // the way down, so only a higher rung keeps `--artifact` beating an
+    // exported OS_ARTIFACT_PATH). See `utils/internal-artifact-channel.ts` for
+    // why the CLI stopped writing the operator's knob at all.
     //
     // Beating OS_ARTIFACT_PATH is not a nicety, it is the acceptance
     // criterion: the official runtime image sets
@@ -2452,13 +2461,41 @@ export default class Serve extends Command {
       }
     }
 
-    if (configMissing && !pinnedArtifact) {
+    // ── The supervisor's answer outranks a cwd config (#21501) ───────────
+    // Read ONCE; every use below is this value. A cwd `objectstack.config.ts`
+    // is the LOWEST source, so it takes part in this boot only when the
+    // supervisor's answer IS that config's own compiled output (the path
+    // `os dev`, a bare `os start` in a project, and the documented
+    // `os start --artifact ./dist/objectstack.json` all take). Any other answer
+    // boots ALONE, exactly as it boots from a directory with no config.
+    //
+    // MEASURED before this read existed, both legs from a project directory
+    // whose config's `dist/objectstack.json` held a DIFFERENT stack:
+    // `os dev -a X` and `os start --artifact X` printed `Artifact: X` and served
+    // that `dist/objectstack.json` (the config boot's standalone stack read the
+    // conventional path, never the channel), and `os start --artifact X` beside
+    // a config with no `dist/` served the config itself. The same commands
+    // from a directory with no config served X.
+    const supervisorArtifact = readInternalArtifactPath();
+    const configJoins = cwdConfigJoinsBoot({
+      configExists,
+      configPath: absolutePath,
+      artifact: pinnedArtifact ? { kind: 'reference' }
+        : supervisorArtifact
+          // Where the supervisor compiles the cwd config, when it is not the
+          // conventional path (`os dev` under a local OS_ARTIFACT_PATH): the
+          // artifact there is that config's own compiled output too.
+          ? { kind: 'path', path: supervisorArtifact, configCompiledTo: readInternalConfigOutputPath() }
+          : { kind: 'none' },
+    });
+
+    if (!configJoins && !pinnedArtifact) {
       const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
       // A supervising `os start` / `os dev` passes its already-resolved answer
       // as the explicit override — the same position `OS_ARTIFACT_PATH` used to
       // occupy when the supervisor wrote it, so a named-but-missing artifact is
       // still a loud refusal rather than a silent empty boot.
-      const artifactSource = resolveDefaultArtifactPath(readInternalArtifactPath());
+      const artifactSource = resolveDefaultArtifactPath(supervisorArtifact);
       if (!artifactSource) {
         // Quick-start mode: `objectstack start` lets the user boot an
         // empty kernel with no config and no artifact, then install apps
@@ -2510,6 +2547,12 @@ export default class Serve extends Command {
       printDiagnostic(chalk.dim('  No objectstack.config.ts or artifact found — booting empty kernel...'));
     } else if (pinnedArtifact) {
       printDiagnostic(chalk.dim('  Booting from the artifact named by OS_ARTIFACT_URL (default host)...'));
+    } else if (useArtifactFallback && configExists) {
+      // Never "No objectstack.config.ts found" when one is sitting right there:
+      // say it is deliberately not loaded, and why.
+      printDiagnostic(chalk.dim(
+        `  ${relativeConfig} is not loaded — the artifact resolved for this boot outranks it; booting from that artifact (default host)...`,
+      ));
     } else if (useArtifactFallback) {
       printDiagnostic(chalk.dim('  No objectstack.config.ts found — booting from artifact (default host)...'));
     } else {
@@ -2711,10 +2754,7 @@ export default class Serve extends Command {
             // being re-derived from the environment.
             ...(pinnedArtifact
               ? { artifactPath: pinnedArtifact.localPath }
-              : (() => {
-                const internal = readInternalArtifactPath();
-                return internal ? { artifactPath: internal } : {};
-              })()),
+              : supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
           });
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
@@ -2731,8 +2771,30 @@ export default class Serve extends Command {
             // #2229: dev enables the native-better-sqlite3 → wasm → in-memory
             // step-down in the shared datasource factory; prod fails loudly.
             dev: isDev,
+            // #21501: a supervised config boot serves the supervisor's answer
+            // (here always the config's own compiled output — `configJoins`),
+            // handed over explicitly. Left to the standalone stack's own
+            // fallback, an exported OS_ARTIFACT_PATH would outrank
+            // `os start --artifact ./dist/objectstack.json` in this process.
+            ...(supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
           };
           const bootResult = await createStandaloneStack(standaloneInput);
+          // #21501 — did the standalone stack load a compiled artifact as this
+          // app's bundle? Its AppPlugin over the bundle is the proof (it is
+          // pushed only when the bundle loaded, and a non-host config carries
+          // no plugin of its own). If so, the ready banner names THAT file:
+          // the metadata served came from it, not from the config module. The
+          // path is the runtime's own ladder over the same explicit input the
+          // stack was handed — never a copy of it.
+          if (Array.isArray((bootResult as any)?.plugins) && (bootResult as any).plugins.some(isAppPluginLike)) {
+            const { resolveDefaultArtifactPath, redactArtifactUrl } = await import('@objectstack/runtime');
+            const loaded = resolveDefaultArtifactPath(supervisorArtifact);
+            if (loaded) {
+              configBootBundle = /^https?:\/\//i.test(loaded)
+                ? redactArtifactUrl(loaded)
+                : (path.relative(process.cwd(), loaded) || loaded);
+            }
+          }
           // [#4002] Per-key `api` merge — see mergeBootConfig.
           config = mergeBootConfig(originalConfig as any, bootResult as any) as any;
         } else {
@@ -3086,6 +3148,24 @@ export default class Serve extends Command {
       });
       const kernel = runtime.getKernel();
 
+      // ── The deployment's SDUI component manifest (#20312, ADR-0080 §5) ──
+      // Resolved ONCE, beside the served config, through the same resolver the
+      // authoring commands use (the project's own sdui.manifest.json, then the
+      // copy @objectstack/console ships), and registered under the key the save
+      // door reads per publish — where every html page's `source` is compiled
+      // against it and its `requires` stamped and checked. Registered before any
+      // plugin inits, so no plugin can see the kernel without it. No manifest:
+      // nothing is registered, one line says what that costs, and the boot goes on.
+      {
+        const { SDUI_MANIFEST_SERVICE } = await import('@objectstack/metadata-protocol');
+        const { registerDeploymentSduiManifest } = await import('../utils/sdui-manifest.js');
+        const sduiManifestLine = registerDeploymentSduiManifest(
+          (manifest) => { kernel.registerService(SDUI_MANIFEST_SERVICE, manifest); },
+          path.dirname(absolutePath),
+        );
+        if (sduiManifestLine) console.warn(chalk.yellow(`  ⚠ ${sduiManifestLine}`));
+      }
+
       // Load plugins from configuration
       let plugins = config.plugins || [];
 
@@ -3119,14 +3199,15 @@ export default class Serve extends Command {
       //        mysql://, mysql2://              → mysql
       //        libsql://, http(s):// + .turso.  → turso
       //        wasm-sqlite://, *.wasm.db        → sqlite-wasm
-      //        memory://, mingo://              → memory (mingo InMemoryDriver)
+      //        memory://, mingo://              → REFUSED (the retired in-memory engine)
       //        file:, sqlite:, *.db, :memory:   → sqlite (SQLite's own in-memory mode)
       //   3. Default: dev SQLite (native → wasm → in-memory step-down); prod none
       //
       // Kind-resolution and construction live in utils/storage-driver.ts so the
-      // whole dispatch is unit-testable (storage-driver.test.ts). #3276: the
-      // `memory` kind now maps to the mingo InMemoryDriver instead of silently
-      // falling through to the dev SQLite `:memory:` default.
+      // whole dispatch is unit-testable (storage-driver.test.ts). #3276: a
+      // `memory` selection never falls through to the dev SQLite `:memory:`
+      // default in silence — it used to build the mingo InMemoryDriver, and since
+      // the engine's retirement as a boot store it is refused (fatal, below).
       // A DefaultDatasourcePlugin counts as a driver provider (#3826): the
       // standalone stack now DECLARES its `default` datasource and connects it
       // at boot through the datasource connection service, so building a
@@ -3230,8 +3311,11 @@ export default class Serve extends Command {
            // Re-throw so run()'s fatal handler restores output, prints the
            // actionable message, and exits 1 (in dev AND prod). All OTHER driver
            // construction errors keep the prior best-effort silent behavior.
-           //   • UnsupportedDriverError — recognized kind, no usable definition
-           //     (`--database-driver turso` with no URL to connect to).
+           //   • UnsupportedDriverError — a selection with no usable definition
+           //     (`--database-driver turso` with no URL to connect to, an unknown
+           //     spelling, or the retired in-memory engine's spelling). The
+           //     `memory://` / `mingo://` refusal is the same class, raised by
+           //     `resolveDriverType` above this `try` and fatal the same way.
            //   • MissingDriverPackageError (#5602) — the optional driver package for
            //     a `libsql://` selection is not installed. Fatal for the same reason
            //     and with the same remedy shape: the message carries the exact
@@ -3273,7 +3357,7 @@ export default class Serve extends Command {
       // two copies whose comment already said they were the same.
       const configHasMetadata = stackDeclaresMetadata(config);
 
-      // ── Decide the dev-only artifact door BEFORE the wrap (#14397) ────
+      // ── Decide the dev-only artifact door BEFORE the wrap (commit 957f7bb45) ──
       // On a HOST config `os dev` composes TWO writers over ONE stack: the
       // `new AppPlugin(config)` wrap below, over the config MODULE, and the
       // dev-only HMR `MetadataPlugin` further down, over the compiled twin
@@ -3463,7 +3547,7 @@ export default class Serve extends Command {
         // Host-anchored: `packages/cli` does NOT declare @objectstack/service-i18n,
         // so a bare import here resolves against the CLI's own realpath and can
         // only ever find the package by workspace hoisting — the same defect
-        // class that cost cloud#1013 and #10645 (#10769). An app that does not
+        // class that cost cloud#1013 and #10645 (commit 3d7deb700). An app that does not
         // declare it still falls back to the CLI's resolution, so the quiet-skip
         // path below is unchanged.
         //
@@ -3843,6 +3927,32 @@ export default class Serve extends Command {
           trackPlugin('PlatformObjects');
         } catch (err: any) {
           console.warn(chalk.yellow(`  ⚠ PlatformObjectsPlugin auto-inject failed: ${err?.message ?? err}`));
+        }
+      }
+
+      // 5c-bis. [#21498] Auto-register MigrationRecoveryPlugin beside the
+      // journal it reads. PlatformObjectsPlugin registers
+      // `sys_migration_journal` on every served kernel because ADR-0119 D2
+      // requires recovery to be discoverable "with zero host wiring"; this is
+      // the half that discovers. Its `kernel:ready` scan reports every run
+      // that started and never concluded, naming `os migrate resume --run …`,
+      // and its `migration-plans` registry is where a plan's owner hands the
+      // plan over so the scan can say the run IS resumable. On a database with
+      // no interrupted run the scan prints nothing.
+      //
+      // Guarded like the block above: a host config that composes its own
+      // instance keeps it, and the kernel never holds two registries.
+      const hasMigrationRecoveryPlugin = plugins.some(
+        (p: any) => p?.name === 'com.objectstack.migration-recovery'
+          || p?.constructor?.name === 'MigrationRecoveryPlugin'
+      );
+      if (!hasMigrationRecoveryPlugin) {
+        try {
+          const { MigrationRecoveryPlugin } = await import('@objectstack/runtime');
+          await kernel.use(new MigrationRecoveryPlugin());
+          trackPlugin('MigrationRecovery');
+        } catch (err: any) {
+          console.warn(chalk.yellow(`  ⚠ MigrationRecoveryPlugin auto-inject failed: ${err?.message ?? err}`));
         }
       }
 
@@ -4294,7 +4404,7 @@ export default class Serve extends Command {
             if (typeof plugin === 'string') {
               // Host-anchored, NOT a bare `import()`: this specifier comes from
               // the served app's own config, so what the app DECLARES about it is
-              // the contract (#10908). The helper carries the failure wrapper too.
+              // the contract (commit 9cc6777d3). The helper carries the failure wrapper too.
               const imported = await Serve.importConfigPlugin(plugin, hostRoot);
               pluginToLoad = imported.default || imported;
             }
@@ -4372,7 +4482,7 @@ export default class Serve extends Command {
         if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
           throw new Error(
             'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
-            + 'data is always denied (#3963), which would leave the data API unusable.\n'
+            + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
             + 'Fix it one of two ways:\n'
             + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
             + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
@@ -5222,7 +5332,7 @@ export default class Serve extends Command {
       // #8978 — the Config:/Artifact: row must name what actually booted,
       // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
       //
-      // ⭐ A THUNK, not a call (#13193). The banner is one of the three
+      // ⭐ A THUNK, not a call (commit faff497fd). The banner is one of the three
       // bound-port channels, and {@link publishBoundPort} owns the order the
       // three fire in — the state file has to be on disk before anything
       // announces the address that names it. Nothing INSIDE this literal
@@ -5254,7 +5364,7 @@ export default class Serve extends Command {
         // something unparseable; the banner then prints paths with no origin
         // rather than a confident wrong URL.
         externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
-        ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
+        ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact, configBootBundle }),
         isDev,
         pluginCount: loadedPlugins.length,
         pluginNames: loadedPlugins,
@@ -5329,7 +5439,7 @@ export default class Serve extends Command {
       //     parent learns the real port without polling.
       //   • the ready banner, whose `API:` row names the same address.
       //
-      // ⭐ That list is in ORDER, and the order is the whole point (#13193):
+      // ⭐ That list is in ORDER, and the order is the whole point (commit faff497fd):
       // the file is written BEFORE either channel announces the address that
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
@@ -5611,7 +5721,7 @@ export function createUnknownHostnameGuardPlugin(
   body {
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background: #fafafa;
-    color: #111;
+    color: #111111;
     display: grid;
     place-items: center;
     padding: 24px;
@@ -5636,7 +5746,7 @@ export function createUnknownHostnameGuardPlugin(
   .code { font: 600 64px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; letter-spacing: -2px; }
   h1 { font-size: 20px; margin: 16px 0 8px; font-weight: 600; }
   p { margin: 8px 0; }
-  .muted { color: #666; font-size: 14px; }
+  .muted { color: #666666; font-size: 14px; }
   .host {
     display: inline-block;
     margin-top: 16px;
@@ -5645,7 +5755,7 @@ export function createUnknownHostnameGuardPlugin(
     border: 1px solid #e4e4e7;
     border-radius: 6px;
     font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #444;
+    color: #444444;
     word-break: break-all;
   }
   a { color: #2563eb; text-decoration: none; }
@@ -5873,7 +5983,7 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
  *       · a genuinely broken install already gets those three remedies, word
  *         for word, from `unresolvableMessage` in the `cause:` line printed
  *         four lines below — so the bullet was a second copy to drift;
- *       · the #15045 sub-case — a location install this finder cannot tie to
+ *       · the sub-case commit 288fe9c34 reworded — a location install this finder cannot tie to
  *         the declaration — prints a `cause:` that says outright "This is NOT
  *         an install problem … re-running `pnpm install`, un-pruning a deploy
  *         and rebuilding a dist all change nothing here", so the two halves of
@@ -5931,8 +6041,8 @@ export function formatOrganizationsInstallRemedy(
   return `      • add ${pkg} (the multi-org runtime) to THIS APP\n` +
     "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
     '          app, not from the framework it is linked out of. Being merely reachable\n' +
-    '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
-    '          (#4719) — that made this wall depend on how the process was launched.\n' +
+    '          through NODE_PATH / a hoisted workspace store is deliberately not enough:\n' +
+    '          accepting it made this wall depend on how the process was launched.\n' +
     '          NOTE: this runtime is Apache-2.0 and published on the public npm registry\n' +
     '          (ADR-0132), so this bullet is followable on any install — no subscription.\n' +
     '          A commercial deployment resolves the same package name to its own private,\n' +
@@ -6000,7 +6110,7 @@ export function formatOrganizationsMountFatal(
     "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org.\n\n" +
     '    OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will not get past it:\n' +
     '    it covers an ABSENT multi-org runtime the operator accepts doing without, not a\n' +
-    '    present one that declined to mount. (#4818)\n'
+    '    present one that declined to mount.\n'
   );
 }
 
@@ -6857,16 +6967,22 @@ export function describeRegisteredDriver(
  *   → no config was read and there is no safely-redacted display in hand
  *   here (OS_ARTIFACT_PATH may itself be a credentialed URL) — omit the
  *   row rather than name a nonexistent file or risk leaking a secret.
- * - Neither set → the ordinary config-boot path; report `relativeConfig`
- *   exactly as before.
+ * - Neither set → the config-boot path, which names what that boot actually
+ *   loaded as the app (#21501): `configBootBundle` set — a non-host config
+ *   whose standalone stack served a compiled artifact as its bundle — reports
+ *   THAT file as `bundleSource`; otherwise (a host config, whose `plugins` hold
+ *   code and which boots its own module, or a config whose artifact was absent)
+ *   report `relativeConfig`. No row names a file the boot did not load.
  */
 export function resolveBannerConfigRow(opts: {
   relativeConfig: string;
   useArtifactFallback: boolean;
   pinnedArtifact?: { display: string };
-}): { configFile?: string; artifactSource?: string } {
+  configBootBundle?: string;
+}): { configFile?: string; artifactSource?: string; bundleSource?: string } {
   if (opts.pinnedArtifact) return { artifactSource: opts.pinnedArtifact.display };
   if (opts.useArtifactFallback) return {};
+  if (opts.configBootBundle) return { bundleSource: opts.configBootBundle };
   return { configFile: opts.relativeConfig };
 }
 

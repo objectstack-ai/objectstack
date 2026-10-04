@@ -77,7 +77,7 @@ const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
 };
 
 /**
- * `params`' lookup-steering keys, retired in the 17.x line (#10329, ADR-0049).
+ * `params`' lookup-steering keys, retired in the 17.x line (commit 15d58dbf1, ADR-0049).
  *
  * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
  * reference-resolution dialect that the import path never implemented:
@@ -86,8 +86,8 @@ const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  * `import-coerce.ts`, driven by the TARGET FIELD's own metadata — never by
  * these keys. Implementing them was considered and declined (a second
  * reference-resolution dialect on the import path; the code comment in
- * `packages/rest/src/import-mapping.ts` declines it and the #10329 triage
- * ruling confirms), so under ADR-0049 they go.
+ * `packages/rest/src/import-mapping.ts` declines it and the triage ruling
+ * commit 15d58dbf1 landed confirms), so under ADR-0049 they go.
  *
  * `autoCreate` is the one with teeth: it reads as "create the referenced
  * record when nothing matches", and what actually happens — with or without
@@ -147,6 +147,33 @@ const PARAMS_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   create: RETIRED_LOOKUP_AUTO_CREATE,
   createIfMissing: RETIRED_LOOKUP_AUTO_CREATE,
   upsert: RETIRED_LOOKUP_AUTO_CREATE,
+};
+
+/**
+ * Keys an author reaches for on `connectorSource` that the binding
+ * deliberately does not carry — each names where the intent really lives.
+ * The connector-side sync vocabulary (`connector.syncConfig`) was retired
+ * because none of it ran, so its words must land on a prescription here,
+ * never on a "did you mean" that points at a neighbouring key.
+ */
+const CONNECTOR_SOURCE_CADENCE =
+  'a connector pull has no cadence key — schedule it with a `job` (`Job.schedule`); '
+  + 'the connector-side `syncConfig.schedule` was deleted because nothing ever ran it';
+
+const CONNECTOR_SOURCE_NO_POLICY =
+  'version 1 is a one-way pull that writes through this mapping\'s `mode` and `upsertKey` — '
+  + 'there is no delete, conflict or direction policy to set';
+
+const CONNECTOR_SOURCE_GUIDANCE: Readonly<Record<string, string>> = {
+  schedule: CONNECTOR_SOURCE_CADENCE,
+  cron: CONNECTOR_SOURCE_CADENCE,
+  interval: CONNECTOR_SOURCE_CADENCE,
+  deleteMode: CONNECTOR_SOURCE_NO_POLICY,
+  conflictResolution: CONNECTOR_SOURCE_NO_POLICY,
+  direction: CONNECTOR_SOURCE_NO_POLICY,
+  strategy: 'full vs incremental is whether `watermark` is set — there is no strategy switch',
+  credentialRef: 'the connector instance holds the credential (its ADR-0097 `auth`) — a mapping never does',
+  auth: 'the connector instance holds the credential (its ADR-0097 `auth`) — a mapping never does',
 };
 
 /**
@@ -236,7 +263,7 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
       // NOTE: `lookupObject` / `targetObject` / `match` / `matchOn` /
       // `matchField` / `keyField` / `returnField` / `valueField` / `create` /
       // `createIfMissing` / `upsert` were aliases onto the four lookup keys
-      // removed in the 17.x line (#10329). An alias pointing at a key that no
+      // removed in the 17.x line (commit 15d58dbf1). An alias pointing at a key that no
       // longer exists routes the author into a second rejection, so their
       // spellings fall through to the `guidance` prescriptions instead —
       // the 17.0.0 (#4509) treatment, one level down.
@@ -249,7 +276,7 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
     value: z.unknown().optional(),
 
     // `object` / `fromField` / `toField` / `autoCreate` — the `lookup`
-    // transform's steering keys — were removed in the 17.x line (#10329,
+    // transform's steering keys — were removed in the 17.x line (commit 15d58dbf1,
     // ADR-0049); see PARAMS_RETIRED_KEY_GUIDANCE above. The live mechanism:
     // `lookup` copies the cell through and the import pipeline resolves the
     // reference from the target field's own metadata (`import-coerce.ts`),
@@ -315,6 +342,93 @@ export const MappingSchema = lazySchema(() => strictObject({
   /** Upsert Logic */
   mode: z.enum(['insert', 'update', 'upsert']).default('insert'),
   upsertKey: z.array(z.string()).optional().describe('Fields to match for upsert (e.g. email)'),
+
+  /**
+   * Connector source — the pull binding (ADR-0049 ENFORCE route for
+   * connector-attached sync; ADR-0087 moved the definition here from the
+   * retired `connector.syncConfig` / `connector.fieldMappings`).
+   *
+   * A sync is defined on its TARGET, the way the mainstream platforms bind it
+   * (a target table with a field map and a match key, pulled on a cadence):
+   * this mapping already names the object it writes (`targetObject`), its
+   * field map (`fieldMapping`), its write mode and its match key (`mode`,
+   * `upsertKey`). `connectorSource` adds only where the rows come from.
+   * Version 1 is a ONE-WAY PULL, external → local, full or
+   * timestamp-incremental, from a `rest` or `openapi` connector instance whose
+   * credentials are its own ADR-0097 static `auth`. It deliberately carries:
+   *
+   * - **no cadence** — a `job` (`Job.schedule`) drives the pull; the
+   *   2026-09-10 ruling that deleted `syncConfig.schedule` stands;
+   * - **no credential** — the connector instance holds it;
+   * - **no delete or conflict policy** — a pull writes through this mapping's
+   *   `mode` / `upsertKey`, and nothing else is claimed.
+   *
+   * EXECUTED WHEN A JOB PULLS IT: `@objectstack/service-automation`'s
+   * connector sync executor (`pullConnectorSource`, on the `automation`
+   * service's contract) reads every key here and writes through the import
+   * runner, so the liveness ledger grades every key `live`. A `job` whose
+   * `pull` names this mapping (`JobSchema.pull`) drives it on the job's
+   * schedule, as the organization the job declares; the binding alone moves
+   * no rows, which the `.describe()` below says where an author reads it. A
+   * pull makes ONE action call and reads ONE response (see `watermark`).
+   * `sourceFormat` keeps governing the manual import door; a pulled row is
+   * the connector's JSON record.
+   */
+  connectorSource: strictObject({
+    surface: 'this mapping’s connector source',
+    history: MAPPING_HISTORY,
+    aliases: {
+      connectorName: 'connector', connectorId: 'connector',
+      operation: 'action', operationId: 'action', actionKey: 'action',
+      params: 'input', request: 'input', arguments: 'input',
+      itemsPath: 'recordsPath', dataPath: 'recordsPath', resultsPath: 'recordsPath', rowsPath: 'recordsPath',
+      cursor: 'watermark', incremental: 'watermark', since: 'watermark',
+    },
+    guidance: CONNECTOR_SOURCE_GUIDANCE,
+  }, {
+    connector: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe(
+      'Name of the connector instance the rows are pulled from — a `connectors[]` entry whose '
+      + '`provider` is `rest` or `openapi` (version 1)',
+    ),
+    action: z.string().min(1).describe(
+      'Key of the connector action that reads the records: `request` on a `rest` connector, '
+      + 'an operation key on an `openapi` connector',
+    ),
+    input: z.record(z.string(), z.unknown()).optional().describe(
+      'Fixed input passed to the action on every pull (e.g. `{ method: \'GET\', path: \'/contacts\' }` '
+      + 'for `rest`)',
+    ),
+    recordsPath: z.string().min(1).optional().describe(
+      'Dot path, within the action\'s result, to the array of records (e.g. `body.results`); '
+      + 'omitted ⇒ the result\'s `body` is the array',
+    ),
+    watermark: strictObject({
+      surface: 'this connector source’s watermark',
+      history: MAPPING_HISTORY,
+      aliases: {
+        timestampField: 'field', cursorField: 'field', column: 'field',
+        queryParam: 'param', parameter: 'param', sinceParam: 'param',
+      },
+    }, {
+      field: z.string().min(1).describe(
+        'Field of the pulled record holding its last-modified timestamp. The next pull\'s starting '
+        + 'point is read from the TARGET: the highest value stored in the field a `fieldMapping` entry '
+        + 'copies this field onto (transform `none`); a field no entry maps that way is refused at pull time',
+      ),
+      param: z.string().min(1).describe(
+        'Query parameter of the read action that receives that starting point',
+      ),
+    }).optional().describe(
+      'Timestamp-incremental pull; omitted ⇒ every pull reads the full set. Either way a pull makes ONE '
+      + 'action call and reads ONE response: the connector\'s paging is not followed, so a paged endpoint '
+      + 'yields its first page only — and an incremental pull over a newest-first paged endpoint moves its '
+      + 'starting point past the pages it never read',
+    ),
+  }).optional().describe(
+    'Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or '
+    + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it — a `job` whose '
+    + '`pull: { mapping }` names this mapping, on the job\'s schedule; the binding alone moves no rows',
+  ),
 
   // `extractQuery`, `errorPolicy` and `batchSize` were removed in 17.0.0
   // (#4509) — see MAPPING_RETIRED_KEY_GUIDANCE above for what each promised and

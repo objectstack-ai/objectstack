@@ -107,7 +107,7 @@ export type CodeStampShape =
      */
     | 'codehelper'
     /**
-     * [#13233] The SAME code-carrying helper, stamping through an OBJECT
+     * [commit 3800e4293] The SAME code-carrying helper, stamping through an OBJECT
      * LITERAL instead of an assignment: `return { severity, code, message }`
      * (shorthand) or `{ code: errCode }` (longhand).
      *
@@ -187,14 +187,14 @@ export type CodeStampShape =
 export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
 /**
- * [#16649] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
+ * [commit 44c917a47] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
  * before any HTTP boundary exists — the CLI rethrows it and aborts — and until
  * #16404 the ledger ratified that class as not owed a row
  * (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 on "host boot
  * matching is not wire vocabulary"). #16404 deleted the exemption (the ledger
  * is the published face, door or no door), which left the verdict meaning only
  * "a registration this tree still owes" — #16449 discharged nine of those,
- * #16649's first half the remaining fourteen, and the second half widened
+ * commit 613bfbd3d the remaining fourteen, and commit 44c917a47 widened
  * `check-dispatcher-error-vocabulary`'s face refusal from `packages/spec/src/`
  * to every published package's `src/`, which is what makes the verdict
  * unwritable: a row carrying it inside that face is now a
@@ -308,7 +308,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `check:dispatcher-error-vocabulary` refuses any verdict there but
     // `foreign-vocabulary` / `runtime-pinned`. ──
     //
-    // ── [#16649] Fourth cycle, the rest of that class: the fourteen
+    // ── [commit 613bfbd3d] Fourth cycle, the rest of that class: the fourteen
     // `boot-refusal` rows that remained after #16449 — the nine
     // `@objectstack/core` refusals (the three ADR-0130 D4 artifact-package
     // refusals, the four `MigrationJournalRefusal` codes,
@@ -321,7 +321,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (`stale-row`), the reachability each row recorded now carried on its
     // ledger row.
     //
-    // ── [#16649, second half] The class is now closed MECHANICALLY rather than
+    // ── [commit 44c917a47, second half] The class is now closed MECHANICALLY rather than
     // by having been emptied once. `check-dispatcher-error-vocabulary`'s face
     // refusal, which #16449 could only afford over `packages/spec/src/`, covers
     // every published package's `src/` — the whole of this scan's population on
@@ -346,14 +346,15 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why:
             "Three approvals route factories (`decisionRoute`, `flowMoveRoute`, `threadRoute`) spell the " +
             'terminal 500 catch\'s code as a template — `` `APPROVAL_${action.toUpperCase()}_FAILED` `` and ' +
-            'two siblings — so the family, not a literal, is what exists in source. #8885 registered all ' +
-            'nine codes the family produces, and its pin is what keeps that true: it enumerates the ' +
+            'two siblings — so the family, not a literal, is what exists in source. All nine codes the ' +
+            'family produces are registered in the ledger, and this row\'s pin is what keeps that true: it enumerates the ' +
             'registered `POST /approvals/requests/:id/<action>` routes and asserts the code each catch arm ' +
             "would generate parses against ApiErrorSchema's closed union, mirroring the production " +
             "template exactly (single-occurrence `.replace('-', '_')` included). So a tenth action route " +
             'whose generated code nobody registers fails THERE, mechanically. This row records that ' +
-            'division of labour instead of letting the scan imply it checked something it cannot: #9223 ' +
-            'widened the scan enough to SEE the template, and seeing it is what makes the pin an ' +
+            'division of labour instead of letting the scan imply it checked something it cannot: the scan ' +
+            'reports a template-spelled code under its family identity rather than dropping it, so it ' +
+            'SEES the template, and seeing it is what makes the pin an ' +
             'accounted-for half rather than a local habit in one package.',
     },
 
@@ -433,8 +434,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why:
             "better-auth's own `APIError` vocabulary, and it cannot reach this door: `domains/auth.ts` " +
             'catches everything the auth service throws and answers `deps.error(INTERNAL_ERROR_MESSAGE, 500)` ' +
-            '— the message withheld UNCONDITIONALLY and the code status-derived, never `errorFromThrown` ' +
-            '(#5085). better-auth answers its own failures with a `Response` rather than by throwing, and ' +
+            '— the message withheld UNCONDITIONALLY and the code status-derived, never `errorFromThrown`. ' +
+            'better-auth answers its own failures with a `Response` rather than by throwing, and ' +
             'that body is returned untouched as `result`. So the string never lands in an ADR-0112 ' +
             '`error.code`. This is the row that shows why verdicts are DECLARED: it is written exactly ' +
             'like FLOW_FAILED and a documented catch one layer up makes it unreachable.',
@@ -452,7 +453,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             '`remove-member-permission-guard.ts`; only the envelope differs). It cannot reach this door, ' +
             'by the same route the IMPERSONATION_ROTATION_FAILED row documents and re-verified here: ' +
             '`domains/auth.ts` catches everything the auth service throws and answers ' +
-            '`deps.error(INTERNAL_ERROR_MESSAGE, 500)` — unconditionally, never `errorFromThrown` (#5085). ' +
+            '`deps.error(INTERNAL_ERROR_MESSAGE, 500)` — unconditionally, never `errorFromThrown`. ' +
             'So the string never lands in an ADR-0112 `error.code`.',
     },
     // ── [#10352] better-auth's OWN vocabulary, now restamped in-repo ───────
@@ -483,7 +484,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `invisible`: each refusal IS served to the client, in the vendor's flat
     // `{ message, code }` shape. That this endpoint's bodies are the vendor's
     // wire rather than this repo's envelope is not inferred here — it is the
-    // 2026-08-21 maintainer ruling (#10554), carried in `check-route-envelope`
+    // 2026-08-21 maintainer ruling (landed in commit 6abc4df03), carried in `check-route-envelope`
     // as the `vendorWire` entry for this same file.
     //
     // ⛔ `pending-registration` would be FALSE for all four. That verdict says
@@ -516,7 +517,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why:
             'The target-side twin of the row above, from the same better-auth 1.7.1 file ' +
             "(`dist/plugins/admin/error-codes`), likewise read off `plugin.$ERROR_CODES` and raised " +
-            "`APIError.from('FORBIDDEN', cannotImpersonateAdmins)`. #9968 makes it reachable for the " +
+            "`APIError.from('FORBIDDEN', cannotImpersonateAdmins)`. The in-repo re-implementation of the " +
+            "vendor's impersonation handler, which admits an ADR-0068 platform admin, makes it reachable for the " +
             "first time — the vendor gated it on the legacy `user.role` scalar nothing writes post " +
             "ADR-0068 D2, so the vendor's own promise was inert — but reachable in the vendor's wire " +
             "shape under the vendor's spelling, which changes nothing about whose vocabulary it is.",
@@ -592,7 +594,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why:
             'The same ADR-0087 conversion-notice vocabulary as the apply.ts row above, met at a TYPE ' +
             'position: `ArtifactConversionNotice.code` is the literal in a structural mirror of ' +
-            "ConversionNotice, declared so the artifact-ingestion forward-conversion policy (#12772) " +
+            "ConversionNotice, declared so the artifact-ingestion forward-conversion policy — which runs the " +
+            'ADR-0087 conversions over an artifact built by older tooling before its strict parse — ' +
             'keeps the spec ROOT import out of its public declaration surface (the root reference made ' +
             "every downstream type program load the 2MB root twice and pushed a TEST_DEBT re-measure " +
             "over CI's tsc heap ceiling). A literal type stamps nothing at runtime — notices flow to an " +
@@ -674,7 +677,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         why:
             'The ADR-0090 D7 / ADR-0086 D1 refusal: an environment overlay may only TIGHTEN a packaged ' +
             "object's OWD. The token reaches the wire verbatim but NOT in `code` — it rides the wire in " +
-            'TWO fields since #9232 narrowed the flat REST door like every other: the 403 body carries the ' +
+            'TWO fields because the flat REST door narrows like every other door: the 403 body carries the ' +
             'closed member the status derives in `code` (`PERMISSION_DENIED`) and this string, unchanged, ' +
             'in the open `declaredCode` sibling beside it. `packages/rest/src/meta-object-owd-gate.test.ts` ' +
             'drives `PUT /api/v1/meta/object/:name` and asserts BOTH fields on the refusal body. So the ' +
@@ -684,19 +687,22 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'already names: the body parses, and what an unswept producer loses instead is its semantic ' +
             'code, silently demoted off `error.code` until registered. Which is exactly what a ' +
             '`pending-registration` row records, and registering the code is still what ratchets it out. ' +
-            '[#9460] Invisible to BOTH vocabulary gates until now, and not for its casing: the file throws ' +
+            'Invisible to BOTH vocabulary gates until the scan learned the code-carrying helper shape, and not for ' +
+            'its casing: the file throws ' +
             'through a code-carrying helper (`postureError(code, message)`), so the stamp `(err as any).code ' +
             '= code` knows the token `code` but not the value, while the call site knows the value and never ' +
             'writes the token. Every pattern in this gate and in `check:error-code-casing` anchors on that ' +
             'token, so both read the file and both reported nothing. ⚠️ The spelling is LOWERCASE, so ' +
-            'ADR-0112 D1 forbids registering it as spelled — the rename-or-keep-the-#9106-demote call is ' +
-            "the `packages/spec` lane's, tracked as #9460 half (2) and NOT decided here. The row records " +
+            'ADR-0112 D1 forbids registering it as spelled — the call between renaming it and keeping the ' +
+            'demote (the closed member in `code`, this spelling in `declaredCode`) is ' +
+            "the `packages/spec` lane's; until that lane registers a code the standing demote answers " +
+            'this spelling, and the call is NOT decided here. The row records ' +
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
     },
 
-    // ── pending registration [#14921]: a metadata-tree refusal that reaches a
+    // ── pending registration [commit c1d274de7]: a metadata-tree refusal that reaches a
     // ── dispatcher-door read ───────────────────────────────────────────────
-    // Not a widened scan and not a demotion: this producer is NEW. #14921 made
+    // Not a widened scan and not a demotion: this producer is NEW. Commit c1d274de7 made
     // `FilesystemLoader.list()` (and the shared `loadMany()` walk behind it)
     // refuse a metadata name derived from more than one file, where before it
     // reported the name twice and served the first by extension precedence.
@@ -731,7 +737,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + 'that batch\'s input, and the registration is what ratchets it out again.',
     },
 
-    // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
+    // ── [commit 3800e4293] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
     // the object-literal stamp position, and they are one genre from end to
@@ -950,6 +956,19 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'no ledger row can be owed for it (ADR-0112 D6).',
     },
     {
+        code: 'max_precision',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'max_precision\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
         code: 'value_domain',
         file: 'packages/objectql/src/validation/record-validator.ts',
         shape: 'objlithelper',
@@ -994,7 +1013,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // coerceError() — import-coerce.ts
     {
         code: 'invalid_boolean',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1007,7 +1026,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'invalid_date',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1019,8 +1038,22 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'can be owed for it (ADR-0112 D6).',
     },
     {
+        code: 'invalid_time',
+        file: 'packages/core/src/utils/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_time\' is ' +
+            'one of them — a refused `time` cell takes the code the write door gives the same value. It ' +
+            'reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed for ' +
+            'it (ADR-0112 D6).',
+    },
+    {
         code: 'invalid_number',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1033,7 +1066,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'invalid_option',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1046,7 +1079,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'reference_ambiguous',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1059,7 +1092,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'reference_not_found',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1208,7 +1241,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
 ];
 
 /**
- * [#13233] Why a helper's codes cannot be read from source, and whether that
+ * [commit 3800e4293] Why a helper's codes cannot be read from source, and whether that
  * matters. A DIFFERENT question from {@link CodeVerdict}, so a different
  * vocabulary — a site row answers "does this code reach a wire and is it
  * registered", and none of its members can answer "we never learn the value".
@@ -1244,7 +1277,7 @@ export type UnresolvedHelperVerdict =
     | 'restamped-elsewhere';
 
 /**
- * [#13233] A code-carrying helper this scan can SEE but cannot READ: the stamp
+ * [commit 3800e4293] A code-carrying helper this scan can SEE but cannot READ: the stamp
  * resolves to a parameter, and no in-file call site passes a value that reduces
  * to a literal.
  *
@@ -1263,7 +1296,7 @@ export type UnresolvedHelperVerdict =
  * So the helper is classified here instead, with a door, a verdict and its
  * evidence, and the gate reconciles this list in BOTH directions: an entry the
  * scan no longer reports goes stale and REDS, exactly like a site row. ⭐ That
- * is what makes it a widening rather than an exemption — before #13233 none of
+ * is what makes it a widening rather than an exemption — before commit 3800e4293 none of
  * these helpers produced a site OR an unresolved, because no shape reached
  * them; now every one is recorded, evidenced, and ratcheted.
  *

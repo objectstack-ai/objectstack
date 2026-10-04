@@ -24,7 +24,6 @@
  */
 
 import type { Filter } from 'mongodb';
-import { nextUtcCalendarDay } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
 // [#5659] The Filter Protocol's boolean identity reduction, shared with
 // driver-sql, driver-memory and the flow linter and proven against the same
@@ -48,6 +47,17 @@ import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 // [#13524] The declared authorable field vocabulary, IN DECLARATION ORDER —
 // the canonical order `FIELD_OPERATOR_RANK` below reads.
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion — the field's declared row of
+// the ruled 「is empty」 table, asked of the spec per translation.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
+// The JSON-stored population — the declared fields on which `$contains` asks
+// MEMBERSHIP — from the spec's value-shape classes, the same two `driver-sql`'s
+// JSON-column registry and `driver-memory`'s population are built from.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
+// The members a `$contains` comparand names on a JSON-stored field: the one
+// candidate rule every SQL dialect binds (`@objectstack/core`), read here as
+// JSON values instead of as JSON text. See {@link containsMembers}.
+import { jsonMembershipCandidates } from '@objectstack/core';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -303,6 +313,30 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
   }
 
+  // [#20897] `$exists`' comparand is a boolean by the same declaration, and the
+  // ruling that refused `$null`'s third value (#5347-A) was applied to this one
+  // by name (#5369, ruled on #5298). Gated on this walk for `$null`'s
+  // evaluation-order reason, one paragraph up. Before it, the emitter's
+  // `value === true` arm lowered every non-boolean to `$eq: null`, so
+  // `{ stage: { $exists: 'yes' } }` asked MongoDB for the rows with NO value.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$exists') &&
+    typeof value.$exists !== 'boolean'
+  ) {
+    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+  }
+
+  // [#20444] `$empty`'s comparand is a boolean by the same declaration, gated on
+  // this walk for the same evaluation-order reason as `$null` above.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$empty') &&
+    typeof value.$empty !== 'boolean'
+  ) {
+    throw nonBooleanEmptyComparandError(key, value.$empty, `${here}.$empty`);
+  }
+
   // [#6520] `$icontains`' comparand is a NON-EMPTY string, gated on the WALK for
   // the same reason `$null` is one paragraph up: a gate in the emitter fires or
   // not depending on whether a boolean identity settled the enclosing node
@@ -379,7 +413,7 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
     `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
     `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
-    `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+    `and protocol doors before any driver sees it. This driver no longer carries a ` +
     `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
     `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
     `all: write the prefix form ["or", condA, condB].`,
@@ -521,8 +555,192 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NULL (anything but false), this driver and driver-memory's query path ` +
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
-      `the false it was written to mean (#5347).`,
+      `the false it was written to mean.`,
   );
+}
+
+/**
+ * [#20897] `$exists` whose comparand is not a boolean — the twin of
+ * {@link nonBooleanNullComparandError}, under the same ruling (#5347-A,
+ * applied to `$exists` by #5369).
+ *
+ * The words are `driver-sql`'s `nonBooleanExistsComparandError`, verbatim —
+ * one condition, one wording (#5240) — with its "this driver" clause re-aimed
+ * at the backend it names, as the `$null` twin names `driver-sql`. Measured on
+ * `translateFilter` at `origin/main` `f6ccca4a` before the refusal: `'yes'`,
+ * `1`, `0`, `null` and the string `'false'` each translated to
+ * `{ stage: { $eq: null } }` — the no-value rows — because the emitter asked
+ * `value === true` and sent everything else to the other side.
+ */
+function nonBooleanExistsComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
+      `than coerced for the same reason $null is: a non-boolean lands on whichever side ` +
+      `the backend's two-branch conditional happens to default to, and those defaults point in ` +
+      `OPPOSITE directions — driver-sql's \`=== false\` test compiles IS NOT NULL for anything ` +
+      `but false, this driver's \`=== true\` test compiled IS NULL for anything but true. Note ` +
+      `"false" the STRING is truthy, so it lands on the side opposite the false it was written ` +
+      `to mean.`,
+  );
+}
+
+/**
+ * [#20444] `$empty` whose comparand is not a boolean. The leading sentence is
+ * `driver-sql`'s `nonBooleanEmptyComparandError`, verbatim — one condition,
+ * one wording (#5240).
+ */
+function nonBooleanEmptyComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$empty" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+      `empty rows, false for their exact complement.`,
+  );
+}
+
+/**
+ * [#20444] `$empty` aimed at a field whose declaration this translator was not
+ * handed — an object never passed through `syncSchema`, a field its schema
+ * does not name, one declared with no `type`, or a standalone call to
+ * {@link translateFilter} with no {@link ValueShapeResolver}. What counts as
+ * empty is the field's DECLARED row of the ruled table, so there is nothing to
+ * translate without it: refused, never guessed.
+ */
+function undeclaredEmptyOperatorFieldError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$empty" on field "${field}" at ${path} targets a field whose declaration this ` +
+      `driver does not hold (no declared type — the object's schema was never synced, or does not ` +
+      `declare the field). What counts as empty is the field's DECLARED row of the ruled table — ` +
+      `null or '' for a text-like type, null or [] for a multi-value field, null only for every ` +
+      `other type — so the operator is refused rather than guessed. Declare the field, or use ` +
+      `"$null" for "has no value".`,
+  );
+}
+
+/**
+ * [#20444] A field's DECLARED value shape — its `type` and `multiple`, the
+ * slice the spec's `expandEmptyOperator` reads — or `undefined` when the
+ * declaration is not held. `MongoDBDriver` answers it from the declaration
+ * `syncSchema` recorded, the way it answers {@link TemporalFieldKindResolver}.
+ */
+export type ValueShapeResolver = (field: string) => ValueShapeFieldDef | undefined;
+
+/**
+ * Is a field with this DECLARED value shape JSON-stored — the population on
+ * which `$contains` / `$notContains` ask MEMBERSHIP rather than SUBSTRING?
+ *
+ * The contract is `FILTER_OPERATORS`' `$contains` docblock
+ * (`@objectstack/spec`): on a `multiple: true` field or a JSON-stored type,
+ * `$contains: v` asks whether `v` is a member of the stored array; on a scalar
+ * string column it stays the substring test. The question is selected by the
+ * DECLARATION, never by the row, so this reads the shape `MongoDBDriver.syncSchema`
+ * recorded: `STRUCTURED_JSON_TYPES`, or a multi-valued field
+ * (`isMultiValueField`, which covers `MULTI_OPTION_TYPES`) — the two halves
+ * `driver-sql`'s JSON-column registry and `driver-memory`'s population are built
+ * from.
+ *
+ * **No declaration ⇒ `false`.** A field whose declaration this translator was
+ * not handed — an object never synced, a field its schema does not name, a
+ * standalone {@link translateFilter} call with no {@link ValueShapeResolver} —
+ * keeps the substring reading, exactly as `SqlDriver.isJsonColumn` answers for
+ * a table it was never told about.
+ */
+function isJsonStoredShape(shape: ValueShapeFieldDef | undefined): boolean {
+  if (!shape) return false;
+  return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
+}
+
+/**
+ * The stored MEMBERS a `$contains` comparand names on a JSON-stored field.
+ *
+ * The comparand is a STRING by contract, so a member stored as a JSON number or
+ * boolean is named by its TEXT: `'1'` names the string `'1'` OR the number `1`,
+ * `'true'` the string OR `true`, `'null'` the string OR `null`, and `'1.50'`
+ * the number `1.5`. That is `@objectstack/core`'s `jsonMembershipCandidates`,
+ * the one rule every SQL dialect binds, which answers each candidate as JSON
+ * TEXT; parsing it gives the value MongoDB compares a stored element against.
+ * One rule, read in two encodings, so this driver and the SQL family cannot
+ * disagree about WHICH members a comparand names.
+ */
+function containsMembers(value: unknown): unknown[] {
+  return jsonMembershipCandidates(value).map((candidate) => JSON.parse(candidate) as unknown);
+}
+
+/**
+ * The un-negated MEMBERSHIP test `$contains` lowers to on a JSON-stored field:
+ * some element of the stored array IS one of the members the comparand names.
+ *
+ * `$elemMatch` is array-only by construction, so a stored scalar, an object or
+ * `null` has no member — the answer `driver-sql` gives on every dialect (its
+ * constructs are array-only too). The `$not: { $type: 'array' }` clause keeps a
+ * NESTED array out: `$in` reaches through an element that is itself an array,
+ * so `[['u1']]` would otherwise answer `'u1'`, where SQLite compares the
+ * element's JSON text `["u1"]` and does not. `driver-memory` emits the same
+ * document for the same question (`InMemoryDriver.filterContainsTest`), and
+ * mingo is that package's MongoDB-compatible evaluator.
+ *
+ * Before this test existed, `$contains` wrote `$regex` here on every field, and
+ * MongoDB applies a `$regex` to each element of an array value: `'u1'` matched
+ * a stored `['u10']` and `'red'` a stored `['redwood']`, substrings across the
+ * member boundary the contract rules out.
+ */
+function containsMembershipTest(value: unknown): Record<string, unknown> {
+  return { $elemMatch: { $in: containsMembers(value), $not: { $type: 'array' } } };
+}
+
+/**
+ * [#20444] Translate `{ field: { $empty: true | false } }` by the field's
+ * DECLARED row of the ruled 「is empty」 table — ruling B on #20311 (record
+ * 5861435168), spelled as this operator by ruling A on #20399 (record
+ * 5865693155) — through the spec's one expansion, `expandEmptyOperator`:
+ *
+ * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+ * |---|---|---|
+ * | `null_only` | `{ f: { $eq: null } }` | `{ f: { $ne: null } }` |
+ * | `text` | `{ f: { $in: [null, ''] } }` | `{ f: { $nin: [null, ''] } }` |
+ * | `multi_value` | `{ $or: [{ f: { $eq: null } }, { f: { $size: 0 } }] }` | the same pair under `$nor` |
+ *
+ * MongoDB's `null` equality matches a missing field as well as a stored null,
+ * so both readings of "no value" are empty on every row — the answer the
+ * `$null` arm already gives. The empty list is tested with `$size: 0`, never
+ * as an equality comparand (`{ f: [] }` also matches an array HOLDING an empty
+ * array, and ruling 乙 on #19757 keeps `[]` out of the equality slot anyway).
+ *
+ * Emitted as its OWN document, AND-ed beside the field's other operators by
+ * {@link translateCondition}, rather than written into their operator map: the
+ * multi-value row is an OR over two tests no single field operator spells, and
+ * a separate conjunct can never contest a lowered key with a sibling operator
+ * (the {@link assembleLoweredWrites} clobber class). The flag's boolean shape
+ * was settled on the walk; the re-check is the totality floor.
+ */
+function translateEmptyOperator(
+  field: string,
+  flag: unknown,
+  valueShape: ValueShapeResolver | undefined,
+  path: string,
+): Filter<any> {
+  if (typeof flag !== 'boolean') throw nonBooleanEmptyComparandError(field, flag, path);
+  const shape = valueShape?.(field);
+  if (!shape) throw undeclaredEmptyOperatorFieldError(field, path);
+  const expansion = expandEmptyOperator(shape);
+  switch (expansion.arm) {
+    case 'null_only':
+      return { [field]: flag ? { $eq: null } : { $ne: null } };
+    case 'text':
+      return { [field]: flag ? { $in: [null, ''] } : { $nin: [null, ''] } };
+    case 'multi_value': {
+      const branches: Filter<any>[] = [{ [field]: { $eq: null } }, { [field]: { $size: 0 } }];
+      return flag ? { $or: branches } : { $nor: branches };
+    }
+    default: {
+      // A closed union of three rows; a fourth is a spec change this driver
+      // was not taught, and it must fail loudly rather than answer for it.
+      const unknownArm: never = expansion.arm;
+      throw unsupportedFilterError(`No $empty arm for the declared row ${JSON.stringify(unknownArm)}.`);
+    }
+  }
 }
 
 /** [#5376] Is this field spec `{}` — a field constrained by ZERO operators? */
@@ -567,7 +785,7 @@ function emptyFieldConstraintError(field: string, path: string): Error {
       `EVERY row), driver-memory / @objectstack/formula answered "matches nothing", and this ` +
       `driver translated it to { "${field}": {} }, which MongoDB evaluates as "${field} equals the ` +
       `empty document" — a DIFFERENT filter that only looks like "matches nothing" until a ` +
-      `document actually stores an empty object there. #5240.`,
+      `document actually stores an empty object there.`,
   );
 }
 
@@ -609,7 +827,7 @@ function unknownLogicalOperatorError(key: string, path: string): Error {
       `other key is a field name. It is refused rather than written into the query document as a ` +
       `FIELD of that name, which is what this driver used to do — sending it to MongoDB to be ` +
       `evaluated, so $where ran server-side JavaScript and $nor applied a combinator the Filter ` +
-      `Protocol never declared (#5346).`,
+      `Protocol never declared.`,
   );
 }
 
@@ -633,7 +851,7 @@ function malformedBetweenError(field: string, value: unknown, path: string): Err
       `It is refused rather than skipped: a range that compiles to no predicate answers with a ` +
       `row count the author never asked for. This driver dropped both bounds and normalised the ` +
       `field to {}, which MongoDB then evaluates as "equals the empty document" — so the query ` +
-      `ran, reported nothing, and returned rows chosen by a filter nobody wrote (#5346).`,
+      `ran, reported nothing, and returned rows chosen by a filter nobody wrote.`,
   );
 }
 
@@ -698,6 +916,12 @@ function safeShapePreview(value: unknown): string {
 export function translateFilter(
   where: unknown,
   temporalKind?: TemporalFieldKindResolver,
+  // [#20444] The declared value shape of each field, for `$empty`'s declared
+  // row. Omitted, `$empty` is refused — the pure shape translation has no
+  // declaration to read a row from. It also selects the question `$contains` /
+  // `$notContains` ask: membership on a declared JSON-stored field; omitted,
+  // every field keeps the substring reading.
+  valueShape?: ValueShapeResolver,
 ): Filter<any> {
   if (!where) return {};
 
@@ -717,7 +941,7 @@ export function translateFilter(
   if (verdict === 'true') return {};
   if (verdict === 'false') return matchNothing();
 
-  return translateCondition(node, temporalKind, 'filter');
+  return translateCondition(node, temporalKind, 'filter', valueShape);
 }
 
 /**
@@ -738,6 +962,8 @@ function translateCondition(
   // position it refused — the same `filter.$or[0].stage` spelling driver-sql
   // and driver-memory print.
   path = 'filter',
+  // [#20444] See {@link translateFilter}.
+  valueShape?: ValueShapeResolver,
 ): Filter<any> {
   const mongoFilter: Record<string, unknown> = {};
   const andClauses: Filter<any>[] = [];
@@ -763,7 +989,7 @@ function translateCondition(
         const branches = (value as unknown[])
           .map((sub, index) => ({ sub: sub as Record<string, unknown>, index }))
           .filter(({ sub, index }) => reduceFilterNode(sub, `${here}[${index}]`) === 'clause')
-          .map(({ sub, index }) => translateCondition(sub, temporalKind, `${here}[${index}]`));
+          .map(({ sub, index }) => translateCondition(sub, temporalKind, `${here}[${index}]`, valueShape));
         andClauses.push(key === '$and' ? { $and: branches } : { $or: branches });
         break;
       }
@@ -780,6 +1006,7 @@ function translateCondition(
           value as Record<string, unknown>,
           temporalKind,
           `${path}.$not`,
+          valueShape,
         );
         // MongoDB $not applies per-field; for top-level negation use $nor
         andClauses.push({ $nor: [inner] });
@@ -792,15 +1019,25 @@ function translateCondition(
 
         if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
           // Check if this is an operator object (has $ keys)
-          const objValue = value as Record<string, unknown>;
+          let objValue = value as Record<string, unknown>;
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
+          // [#20444] `$empty` becomes a document of its own, AND-ed beside the
+          // field's other operators — see {@link translateEmptyOperator}.
+          if (hasOps && Object.prototype.hasOwnProperty.call(objValue, '$empty')) {
+            const { $empty: flag, ...rest } = objValue;
+            andClauses.push(translateEmptyOperator(key, flag, valueShape, `${path}.${key}.$empty`));
+            if (Object.keys(rest).length === 0) continue;
+            objValue = rest;
+          }
           if (hasOps) {
-            const translated = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
+            const translated = translateFieldOperators(
+              objValue, temporalKind?.(key), key, `${path}.${key}`, valueShape?.(key),
+            );
             // [#13524] Lowered writes whose MongoDB key was already taken by a
             // sibling operator on the same field. Merging one would drop a
             // constraint silently, so each becomes its own `$and` branch — see
             // `assembleLoweredWrites()`. This consumed a single `_presenceAnd`
-            // when the guard covered `$exists` alone (#13195); it is a LIST now
+            // when the guard covered `$exists` alone (commit 9dac1ae01); it is a LIST now
             // because the class has several members and one field constraint
             // can contest more than one key.
             const extraAnd = translated._extraAnd as Record<string, unknown>[] | undefined;
@@ -840,7 +1077,7 @@ function translateCondition(
  * Read straight off the spec's `FILTER_OPERATORS` declaration order rather than
  * hand-copied, so a seventeenth operator is ranked the day it is declared. The
  * rank of `$exists` (last in that list) is what makes this generalisation emit,
- * byte for byte, the documents #13195's guard already emits for the one
+ * byte for byte, the documents commit 9dac1ae01's guard already emits for the one
  * operator it moved. `$like` / `$ilike` are declared but NOT translated by this
  * driver — the `default:` arm refuses them before the assembly runs — so the
  * fallback below is a totality floor, never a live path.
@@ -878,14 +1115,21 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true` |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
- * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
  * | `$regex` | `$contains`, `$startsWith`, `$endsWith`, `$icontains` |
  *
- * Two of those rows had not been named anywhere. `$lte` → `$lt` is a clobber on
- * a bare `YYYY-MM-DD` upper bound. And the `$regex` row is this driver's alone:
+ * [ADR-0053 D-D1 item 5, as amended] The table had a `$lt` row, and `$lte`
+ * wrote `$lt` and `$ne` too: this translator applied the whole-day upper bound
+ * itself (a bare-day `$lte` became `$lt` the next day, the last supported day
+ * `$ne: null`). That rule is applied once at the seams now, and `$lte` and
+ * `$between` write only the keys above. Where the lowering's `$lt` meets an
+ * author's own `$lt` on one column, the lowering emits it as a conjunct of its
+ * own (one operator per conjunct), so both bounds reach this translator and
+ * survive it — `mongodb-operator-key-clobber.test.ts` pins both sides.
+ *
+ * One of those rows had not been named anywhere. The `$regex` row is this driver's alone:
  * `driver-memory` promotes its string family to `$and` branches already
  * (`_multiRegex`), while here `{name: {$startsWith: 'a', $endsWith: 'z'}}`
  * emitted `{name: {$regex: 'z$'}}` and its key-swapped twin `{name: {$regex:
@@ -893,14 +1137,21 @@ interface LoweredWrite {
  * written by `$notContains` and by nothing else, so it is covered here by
  * construction rather than curatively.
  *
+ * On a declared JSON-stored field `$contains` writes `$elemMatch` instead of
+ * `$regex` (its membership test), a key no other operator writes, so it
+ * contests nothing; `$startsWith` / `$endsWith` / `$icontains` still meet on
+ * `$regex` there, by the rule below.
+ *
  * ## The rule, and why it is this one
  *
  * Free key → merge inline (the overwhelmingly common case). Taken key → the
  * write becomes its own `$and` branch on the same field, where both constraints
- * survive. That is exactly the guard #13195 landed for `$exists` alone,
+ * survive. That is exactly the guard commit 9dac1ae01 landed for `$exists` alone,
  * generalised to every writer rather than restated once per operator.
- * `driver-memory`'s reference matcher loops the operators and therefore cannot
- * express this defect at all; it is the oracle both drivers agree with.
+ * `driver-memory`'s reference matcher looped the operators and therefore could
+ * not express this defect at all; it was the oracle both drivers agreed with
+ * until commit `8fec76a2b` retired it, and `driver-memory`'s
+ * `memory-operator-key-clobber.test.ts` keeps its answers as literal row sets.
  *
  * ## Why rank, and not author order
  *
@@ -953,11 +1204,19 @@ function assembleLoweredWrites(writes: readonly LoweredWrite[]): Record<string, 
  * Translate ObjectStack field-level operators into MongoDB operators.
  *
  * `kind` is the declared temporal type of the field these operators apply to,
- * so each comparand lands in the field's storage form (#4047). Order matters
- * and is load-bearing: the calendar-day upper-bound rewrite (#3777/#4042) runs
- * on the STRING first — it is a calendar operation — and only the resulting
- * bound is converted to the storage form. Converting first would leave
- * `nextUtcCalendarDay` a `Date` it correctly refuses to widen.
+ * so each comparand lands in the field's storage form (#4047).
+ *
+ * [ADR-0053 D-D1 items 5 and 6, as amended] Every comparison is translated as
+ * it is handed in. The whole-day upper bound — a bare `YYYY-MM-DD` `$lte` means
+ * "through the whole of that day", and on the last supported day it bounds
+ * nothing — is applied once, by the shared `lowerFilterCondition`
+ * (`@objectstack/spec/data`) at the seams that feed this driver (the engine's
+ * `where`, `aggregations[i].filter` and the RLS compile seam). A seam-fed
+ * filter therefore arrives with `$lt` the next day and no `$between` on a
+ * declared `datetime`, and because the seam widens the calendar string before
+ * this function converts it, the D-E3 order (widen first, convert second)
+ * holds by construction. A caller that reaches this driver without a seam gets
+ * the comparison it wrote.
  */
 function translateFieldOperators(
   ops: Record<string, unknown>,
@@ -970,6 +1229,9 @@ function translateFieldOperators(
   // refused, the way `driver-sql` and `driver-memory` do.
   field = '<field>',
   path = 'filter',
+  // The field's DECLARED value shape, when the caller holds it: it selects the
+  // question `$contains` / `$notContains` ask ({@link isJsonStoredShape}).
+  shape?: ValueShapeFieldDef,
 ): Record<string, unknown> {
   const store = (v: unknown) => coerceTemporalValue(v, kind);
   /**
@@ -977,7 +1239,7 @@ function translateFieldOperators(
    * {@link assembleLoweredWrites} after the loop. Collected rather than
    * assigned because an arm cannot know whether the key it wants is already
    * spoken for by a sibling operator the author wrote LATER — which is the
-   * whole of the defect this replaces. It subsumes #13195's single-operator
+   * whole of the defect this replaces. It subsumes commit 9dac1ae01's single-operator
    * `presence` collection: `$exists` is one writer among the rest now.
    */
   const writes: LoweredWrite[] = [];
@@ -994,12 +1256,13 @@ function translateFieldOperators(
       case '$gt':
       case '$gte':
       case '$lt':
+      case '$lte':
       case '$in':
       case '$nin':
         put(op, store(value));
         break;
 
-      // [#13195] Value-independent — a presence predicate takes a boolean, not
+      // [commit 9dac1ae01] Value-independent — a presence predicate takes a boolean, not
       // a comparand, so it is never coerced. And "present" means the field HAS
       // A VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in
       // PR #5962, ruled onto this driver by the maintainer on 2026-08-30.
@@ -1021,26 +1284,17 @@ function translateFieldOperators(
       // already agreed, is unmoved. Measured on a real mongod 8.2.6 while this
       // cell was pinned.
       case '$exists':
+        // [#20897] The load-bearing copy of this gate is on the walk
+        // (`reduceFilterKey`), for the reason the `$null` arm below gives; this
+        // one keeps the arm's two-way choice total for its own invariant, with
+        // the same constructor and the same path spelling.
+        if (typeof value !== 'boolean') throw nonBooleanExistsComparandError(field, value, `${path}.$exists`);
         // Collected, not assigned: the assembly has to know whether the key
         // this lowers to is already spoken for. [#13524] Since the class was
         // generalised this arm is no longer special — it `put`s like every
         // other writer and the shared rule ranks it.
         put(value === true ? '$ne' : '$eq', null);
         break;
-
-      case '$lte': {
-        // A bare-day upper bound means "through that whole day" (#4042; the
-        // driver-sql twin is #3777): `<= '2026-07-28'` compiles half-open
-        // (`< '2026-07-29'`) so instants on the final day stay in;
-        // order-equivalent to `<=` for plain `YYYY-MM-DD` date values.
-        // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is a
-        // member of the clobber class that no card had named. See
-        // {@link assembleLoweredWrites}.
-        const nextDay = nextUtcCalendarDay(value);
-        if (nextDay != null) put('$lt', store(nextDay));
-        else put('$lte', store(value));
-        break;
-      }
 
       // String operators → $regex
       //
@@ -1060,16 +1314,25 @@ function translateFieldOperators(
       // dropping the flag changes which CASES match, never which characters are
       // metacharacters. The deliberate case-insensitive spelling is
       // `$icontains` below — one operator, one answer, per #5374.
+      //
+      // On a declared JSON-stored field the question is MEMBERSHIP instead
+      // (`FILTER_OPERATORS`' `$contains` docblock): {@link containsMembershipTest}.
+      // A `$regex` there matched per element, so `'u1'` answered a stored
+      // `['u10']`.
       case '$contains':
-        put('$regex', escapeRegex(String(value)));
+        if (isJsonStoredShape(shape)) put('$elemMatch', containsMembershipTest(value).$elemMatch);
+        else put('$regex', escapeRegex(String(value)));
         break;
 
       case '$notContains':
         // The negated twin needs the same treatment in this ONE place: the
         // pattern under `$not` is the same predicate, so a flag left here would
         // have excluded rows the positive form includes — the negation widening
-        // rather than mirroring.
-        put('$not', { $regex: escapeRegex(String(value)) });
+        // rather than mirroring. On a declared JSON-stored field it is the
+        // exact complement of the membership test: `$not` over `$elemMatch`
+        // also admits a row whose field is null, missing or not an array, the
+        // rows with no member (`driver-sql`'s `col IS NULL OR NOT (…)`).
+        put('$not', isJsonStoredShape(shape) ? containsMembershipTest(value) : { $regex: escapeRegex(String(value)) });
         break;
 
       // [#13524] These four all write `$regex`, so before the assembly below
@@ -1105,8 +1368,11 @@ function translateFieldOperators(
         put('$regex', asciiCaseInsensitiveRegexSource(String(value)));
         break;
 
-      // Range operator → $gte + upper bound (half-open on a bare-day max,
-      // inheriting `$lte`'s whole-day rule — #4042)
+      // Range operator → $gte + $lte, both bounds as written. [ADR-0053 D-D1
+      // item 5] A seam-fed `$between` on a declared `datetime` never reaches
+      // this arm: the shared lowering splits it into `$gte` and a whole-day
+      // `$lt` first. On any other column it arrives whole and is inclusive at
+      // both ends.
       //
       // [#5346] The arm used to be this `if` with NO else, so a comparand that
       // was not a two-element array wrote NEITHER bound and the field's operator
@@ -1127,9 +1393,7 @@ function translateFieldOperators(
       case '$between': {
         if (!isBetweenRange(value)) throw malformedBetweenError(field, value, `${path}.$between`);
         put('$gte', store(value[0]));
-        const betweenNextDay = nextUtcCalendarDay(value[1]);
-        if (betweenNextDay != null) put('$lt', store(betweenNextDay));
-        else put('$lte', store(value[1]));
+        put('$lte', store(value[1]));
         break;
       }
 
@@ -1209,11 +1473,10 @@ function translateFieldOperators(
 
   // [#13524] Assemble every lowered write, and do NOT let one clobber another.
   //
-  // #13195 landed this rule for `$exists` alone and said in this spot that the
+  // Commit 9dac1ae01 landed this rule for `$exists` alone and said in this spot that the
   // identical clobber was reachable through `$null` and `$between`. Enumerating
-  // the declared vocabulary instead of the noticed operators found two more on
-  // this face: `$lte` on a bare calendar day (it lowers onto `$lt`), and the
-  // whole `$regex` string family, which `driver-memory` had promoted for years
+  // the declared vocabulary instead of the noticed operators found the whole
+  // `$regex` string family too, which `driver-memory` had promoted for years
   // and this driver never did. See {@link assembleLoweredWrites}.
   return assembleLoweredWrites(writes);
 }

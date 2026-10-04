@@ -2009,20 +2009,72 @@ describe('SettingsService — Phase 3 sys_secret + crypto provider + audit', () 
     expect(auditRows[0].newHash).not.toContain('super-secret-key');
   });
 
+  it('seals and opens under its own scope, settings (ADR-0128 D1)', async () => {
+    const { InMemoryCryptoProvider } = await import('./in-memory-crypto-provider.js');
+    const real = new InMemoryCryptoProvider();
+    const seen: Array<{ verb: string; scope: unknown; namespace: string; key: string }> = [];
+    const recording = {
+      encrypt: async (plain: string, c: Parameters<typeof real.encrypt>[1]) => {
+        seen.push({ verb: 'encrypt', scope: c.scope, namespace: c.namespace, key: c.key });
+        return real.encrypt(plain, c);
+      },
+      decrypt: async (h: Parameters<typeof real.decrypt>[0], c: Parameters<typeof real.decrypt>[1]) => {
+        seen.push({ verb: 'decrypt', scope: c.scope, namespace: c.namespace, key: c.key });
+        return real.decrypt(h, c);
+      },
+      rotateKey: real.rotateKey.bind(real),
+      digest: real.digest.bind(real),
+      keyedDigest: real.keyedDigest.bind(real),
+    };
+    const secretRows = new Map<string, any>();
+    const svc = new SettingsService({
+      env: {},
+      cryptoProvider: recording,
+      secretStore: {
+        async insert(row) { secretRows.set(row.id, row); return { id: row.id }; },
+        async get(id) { return secretRows.get(id) ?? null; },
+        async update(id, patch) { secretRows.set(id, { ...secretRows.get(id), ...patch }); },
+      },
+    });
+    svc.registerManifest(mailSettingsManifest);
+
+    await svc.set('mail', 'api_key', 'super-secret-key', { tenantId: 't1' });
+    const r = await svc.get<string>('mail', 'api_key', { tenantId: 't1' });
+    expect(r.value).toBe('super-secret-key');
+    // Every call — however many reads the service makes — carries this
+    // producer's scope and coordinate.
+    expect(seen.filter((c) => c.verb === 'encrypt')).toHaveLength(1);
+    expect(seen.some((c) => c.verb === 'decrypt')).toBe(true);
+    for (const call of seen) {
+      expect(call).toMatchObject({ scope: 'settings', namespace: 'mail', key: 'api_key' });
+    }
+    // The stored ciphertext records the scoped derivation, and no other
+    // producer's scope opens it at the same (namespace, key).
+    const [secret] = [...secretRows.values()];
+    expect(String(secret.ciphertext).startsWith('v2:')).toBe(true);
+    const handle = {
+      id: secret.id, kmsKeyId: secret.kms_key_id, alg: secret.alg, version: secret.version, ciphertext: secret.ciphertext,
+    };
+    await expect(
+      real.decrypt(handle, { scope: 'object_secret_field', namespace: 'mail', key: 'api_key' }),
+    ).rejects.toThrow();
+    expect(await real.decrypt(handle, { scope: 'settings', namespace: 'mail', key: 'api_key' })).toBe('super-secret-key');
+  });
+
   it('AAD binding rejects ciphertexts swapped across (namespace,key)', async () => {
     const { InMemoryCryptoProvider } = await import('./in-memory-crypto-provider.js');
     const provider = new InMemoryCryptoProvider();
-    const handle = await provider.encrypt('value', { namespace: 'mail', key: 'api_key' });
+    const handle = await provider.encrypt('value', { scope: 'settings', namespace: 'mail', key: 'api_key' });
     // Same handle, wrong context → must throw.
     await expect(
-      provider.decrypt(handle, { namespace: 'mail', key: 'smtp_password' }),
+      provider.decrypt(handle, { scope: 'settings', namespace: 'mail', key: 'smtp_password' }),
     ).rejects.toThrow();
   });
 
   it('rotateKey bumps version while preserving plaintext + handle id', async () => {
     const { InMemoryCryptoProvider } = await import('./in-memory-crypto-provider.js');
     const provider = new InMemoryCryptoProvider();
-    const ctx = { namespace: 'mail', key: 'api_key' };
+    const ctx = { scope: 'settings', namespace: 'mail', key: 'api_key' } as const;
     const h1 = await provider.encrypt('hello', ctx);
     const h2 = await provider.rotateKey(h1, ctx);
     expect(h2.id).toBe(h1.id);

@@ -1,5 +1,6 @@
 ---
-title: Plugin Lifecycle Advanced
+title: Plugin Lifecycle Advanced — Kernel Protocol
+navTitle: Plugin Lifecycle Advanced
 description: "Declares the INPUT contracts of the host-driven lifecycle classes exported by @objectstack/core — PluginHealthMonitor."
 ---
 
@@ -145,7 +146,7 @@ Current health status of the plugin
 | **version** | `string` | ✅ |  |
 | **timestamp** | `string` | ✅ |  |
 | **state** | `Record<string, any>` | ✅ |  |
-| **metadata** | `{ checksum?: string; compressed: boolean; encryption?: string }` | optional |  |
+| **metadata** | `{ checksum?: string; compressed?: boolean; encryption?: string }` | optional |  |
 
 ### Nested Shape: `PluginStateSnapshot.metadata`
 

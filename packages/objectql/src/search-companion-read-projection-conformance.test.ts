@@ -240,7 +240,7 @@ async function makeEngine(declared: boolean): Promise<Harness> {
 /**
  * The `plugin-pinyin-search` write hook, in miniature.
  *
- * [#13657] Carries `stampCompanion`'s DECLARATION GUARD
+ * [commit b003cf2e8] Carries `stampCompanion`'s DECLARATION GUARD
  * (`companion-projection.ts`: `if (!schema?.fields?.[SEARCH_COMPANION_FIELD])
  * return;`). It was missing here, which made this double LOOSER than the hook
  * it stands in for — the #4550 failure shape one layer down: in the

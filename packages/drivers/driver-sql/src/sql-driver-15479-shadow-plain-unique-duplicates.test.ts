@@ -6,7 +6,7 @@
  *
  * ## The defect
  *
- * #14902 (PR #15477) brought the DIRECT arm to parity: a plain unique over
+ * Commit 61821e54c (PR #15477) brought the DIRECT arm to parity: a plain unique over
  * existing duplicates logs on the durability channel and lets the boot
  * continue, instead of throwing the database's raw error. The hash-shadow arm
  * — one branch above it in the SAME `catch`, taken when MySQL refuses to key
@@ -53,7 +53,7 @@ const LONG = 'p'.repeat(900);
  * A tenancy-DISABLED object whose one long text field carries a PLAIN unique.
  * `maxLength: 1024` exceeds the keyable ceiling, so MySQL refuses the direct
  * index and the sync takes the shadow route; `tenancy: { enabled: false }` is
- * one of the two shapes #14902 identified as reaching the plain path (the other
+ * one of the two shapes commit 61821e54c identified as reaching the plain path (the other
  * is an explicit `unique: 'global'`, exercised by `globalUniqueOn` below).
  */
 const plainUniqueOn = (name: string) => ({
@@ -125,7 +125,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
     ): Promise<{ logs: string[]; err: unknown }> => {
       driver = new SqlDriver(cell.config());
       const logs = spy();
-      // #16711: the `as any` that used to be on both of these calls was a
+      // Commit 7862fb711: the `as any` that used to be on both of these calls was a
       // workaround for `initObjects` not declaring `indexes`. The signature
       // declares it now, so the cast is gone and these two calls are checked
       // like any other.
@@ -169,7 +169,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
 
       // ⛔ And it must NOT carry the NULL-safe arm's framing, which is false
       // here: nothing admitted these rows and there is no NULL-safe key.
-      expect(diagnosis).not.toContain('#5030');
+      expect(diagnosis).not.toContain('NULL-distinct');
       expect(diagnosis).not.toContain('NULL-safe');
       expect(diagnosis).not.toContain('COALESCE');
 
@@ -183,7 +183,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
     /**
      * The same disposition on the OTHER shape that reaches the plain path — an
      * explicit `unique: 'global'` on a tenanted object. Two shapes because
-     * #14902 measured both, and a guard keyed on the wrong one would pass here
+     * commit 61821e54c measured both, and a guard keyed on the wrong one would pass here
      * and fail in production.
      */
     it("survives the boot under an explicit unique: 'global' on a tenanted object", async () => {
@@ -196,7 +196,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
       const diagnosis = logs.find((l) => l.includes("cannot create hash-shadow unique index 'uniq_os15479_global_v'"));
       expect(diagnosis, 'the degradation must reach the durability channel').toBeTruthy();
       expect(diagnosis).toMatch(/Conflicting group\(s\):/);
-      expect(diagnosis).not.toContain('#5030');
+      expect(diagnosis).not.toContain('NULL-distinct');
       expect(diagnosis).not.toContain('COALESCE');
 
       const { idx } = await catalog('os15479_global');
@@ -219,7 +219,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
       expect(err, 'the NULL-safe arm already survived the boot').toBeNull();
       const diagnosis = logs.find((l) => l.includes("cannot create hash-shadow unique index 'uniq_os15479_org_v'"));
       expect(diagnosis, 'the NULL-safe degradation must still be logged').toBeTruthy();
-      expect(diagnosis).toContain('#5030');
+      expect(diagnosis).toContain('NULL-distinct');
       expect(diagnosis).toContain('NULL-safe');
       expect(diagnosis).toContain("COALESCE(organization_id, '__global__')");
     }, 60_000);

@@ -27,8 +27,10 @@ export const entry: SemanticMigration = {
     + 'presence cannot carry the signal are `queryDateGranularity`, `autonumber` and '
     + '`batchSchemaSync`)',
   reason:
-    'The #4484 findStream close-out found `DriverCapabilities.streaming` pointing at a '
-    + 'capability the contract no longer declares, and the follow-up audit (#4634) checked '
+    'Retiring `IDataDriver.findStream` (it had no production caller, and two of its three '
+    + 'implementations read the whole result set into memory before yielding a row) left '
+    + '`DriverCapabilities.streaming` pointing at a capability the contract no longer '
+    + 'declares, and the follow-up audit checked '
     + 'every bit in the record the same way, across objectstack and cloud (objectui '
     + 'confirmed clean): of 34 declared bits, THREE have a decision-making reader — '
     + '`queryDateGranularity` (engine aggregate dispatch + checkDateBucketParity), '
@@ -47,14 +49,15 @@ export const entry: SemanticMigration = {
     + 'stack metadata — `supports` literals live in driver classes and '
     + '`DriverConfig.capabilities` is plugin TS configuration, neither ever a '
     + '`sys_metadata` shape (the stack-tree neighbour, `datasource.capabilities`, was '
-    + 'retired separately in #4583) — so there is no source for the D2 chain to rewrite '
+    + 'retired separately, as a whole block nothing read) — so there is no source for the '
+    + 'D2 chain to rewrite '
     + 'and this entry is the D3 record. The keys are tombstoned rather than deleted '
     + 'because `DriverCapabilitiesSchema` is not `.strict()` and IS parsed '
     + '(DriverConfigSchema / SQLDriverConfigSchema / NoSQLDriverConfigSchema embed it): '
     + 'a plain delete would silently strip a vendor\'s authored bit, replacing one '
     + 'silent no-op with another. `batchSchemaSync` also drops its `.default(false)` '
     + 'for `.optional()` — absence already meant false at both readers, and the default '
-    + 'forced every capability object to spell out 30+ bits. ADR-0049 / ADR-0078, #4634.',
+    + 'forced every capability object to spell out 30+ bits. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No `supports` literal or `DriverConfig.capabilities` object authors any of the 31 '
     + 'retired bits — a driver class that still writes one fails tsc against '

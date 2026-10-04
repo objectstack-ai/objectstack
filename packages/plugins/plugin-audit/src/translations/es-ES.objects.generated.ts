@@ -39,7 +39,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "Actor",
+        label: "Usuario",
         help: "Usuario que realizó la acción (null para acciones del sistema)."
       },
       actor: {
@@ -122,7 +122,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       type: {
         label: "Tipo",
-        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive (maintainer ruling 2026-08-24, #11507).",
+        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive: the vocabulary is open by decision, not a gap awaiting enforcement.",
         options: {
           created: "Creado",
           updated: "Actualizado",
@@ -175,8 +175,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Enlace profundo opcional al destino de la actividad."
       },
       environment_id: {
-        label: "Proyecto",
-        help: "Contexto del proyecto (implementaciones multiproyecto)."
+        label: "Entorno",
+        help: "Contexto del entorno (implementaciones multientorno)."
       },
       metadata: {
         label: "Metadatos",
@@ -215,11 +215,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       mentions: {
         label: "Menciones",
-        help: "Matriz JSON de objetos @mention."
+        help: "Matriz JSON de los id de usuario mencionados con @ en el comentario."
       },
       reactions: {
         label: "Reacciones",
-        help: "Matriz JSON de objetos de reacción emoji."
+        help: "Objeto JSON que asigna cada emoji a la lista de id de usuario de quienes reaccionaron."
       },
       is_edited: {
         label: "Editado"

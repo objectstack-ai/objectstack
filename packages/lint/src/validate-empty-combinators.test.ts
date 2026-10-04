@@ -272,7 +272,7 @@ describe('validateEmptyCombinators — the vocabulary is the runtime\'s (#5322/#
    * retyped: `filter-logic-conformance.ts` is what every backend is measured
    * against, so a message derived from anything else would be a second opinion.
    */
-  const identityCases = FILTER_LOGIC_CASES.filter((c) => (c.note ?? '').includes('#5322'));
+  const identityCases = FILTER_LOGIC_CASES.filter((c) => (c.note ?? '').includes('every face reduces an empty combinator to its boolean identity'));
 
   it('the identity cases are still findable in the conformance table', () => {
     // Guarded body: if the selection ever returns nothing, the loop below would

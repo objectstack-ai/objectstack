@@ -206,13 +206,48 @@ measures: [{ name: 'avg_closed', aggregate: 'avg', field: 'closed_at' }]
 `avg` over a temporal column is where this bites hardest: one SQL family coerces
 the stored text and returns a plausible number (the average *year*), another has
 no such function and fails at query time. `min`/`max` over the same field are
-**accepted** — they return a real instant of the field's own type — and
-`count`/`count_distinct` are accepted over every type, because they read no
-arithmetic off the value. The analytics service refuses the same pair with
-`400 DATASET_INVALID` when a query is built; this is the identical verdict,
+**accepted** — they return a real instant of the field's own type — `count` is
+accepted over every type, because it reads no value, and `count_distinct` over
+every type but the JSON-stored ones (the structured-JSON types and
+`multiselect` / `checkboxes` / `tags`), whose values no two backends compare
+for equality alike. The check reads the field's declaration as well as its
+type: a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared
+`multiple: true` holds a list stored as JSON, so `count_distinct` over it is
+refused too, although the table accepts the type. The analytics service
+refuses the same pair with `400 DATASET_INVALID` when a query is built — or,
+for a field reached through a relationship path, with `400 INVALID_FIELD` when
+the query runs, judged on the object the path reaches; this
+is the identical verdict,
 from the identical table, one door earlier. The rule stays silent wherever the
 field's type cannot be resolved (an object this stack does not define, a
 dangling field path, an untyped field) rather than guessing.
+
+The same check judges the dataset's **dimensions**, under its own id. A
+dimension is a group key, and the analytics service refuses a query grouped by
+a JSON-stored column with `400 INVALID_FIELD` before any SQL is built. So a
+dimension whose field is declared with a structured-JSON type, or as a
+multi-value field (`multiselect` / `checkboxes` / `tags`, or one of the types
+above declared `multiple: true`), is refused
+(`dimension-json-stored-field-refused`) at `datasets[N].dimensions[M].field`.
+Group by a field that stores one value instead. Like the measure check, it
+stays silent when the field's type cannot be resolved.
+
+Both checks also judge the members of an analytics cube (`analyticsCubes`),
+because an authored cube is queried through the same analytics door. A cube
+dimension whose `sql` column is declared with a structured-JSON type or as a
+multi-value field is refused (`dimension-json-stored-field-refused`) at
+`analyticsCubes[N].dimensions.<key>.sql`. A cube measure is judged exactly as a
+dataset measure is, its `type` being the aggregate: a pair outside the table is
+refused (`measure-aggregate-field-type-refused`, at
+`analyticsCubes[N].measures.<key>.type`). That covers `sum`, `avg`, `min` or
+`max` over a column whose type their row does not accept (a `sum` over a `text`
+column, say), and `count_distinct` over a JSON-stored column; the analytics
+door refuses each of them with `400 INVALID_FIELD` when a query names the
+measure. `count` is accepted over every type. The column is read where the door
+reads it: on the object the cube's `sql` names, or, for a relationship path,
+on the object the last hop reaches — the join the cube declares for that hop,
+else the lookup's `reference`. A measure of an expression type (`number`,
+`string`, `boolean`) and the row wildcard `'*'` are not judged by this check.
 
 ### 7. Navigation exposing objects nobody can read
 
@@ -283,8 +318,8 @@ objects.employee.fields.ssn.pii: 'pii' is not a declared field key, so its value
   is dropped at load — the `dataQuality` governance family was pruned in 2026-06
   as dead in both layers — it enforced nothing.
 objects.employee.fields.ssn.indexed: 'indexed' is not a declared field key, so its
-  value is dropped at load — never a FieldSchema key; a field-level index flag
-  built no index (#2377). Declare the index in the object's `indexes[]`.
+  value is dropped at load — never a FieldSchema key; the field-level `index` flag
+  built no index and was removed for it. Declare the index in the object's `indexes[]`.
 ```
 
 Plain typos get a "did you mean" (`requred` → `required`); a retired key does
@@ -378,11 +413,13 @@ A **filter position** is the exception that gates:
 //                                                                        ↑ error, not a warning
 ```
 
-An unknown column in a predicate is not a skipped column — the predicate can
-never match, the driver's "no such column" is swallowed, and the list comes back
-empty and indistinguishable from *"there is no data"*. Each position of a filter
-is judged on its own, so the field above is still checked even though `stage`
-comes from React state.
+An unknown column in a predicate is not a skipped column — the SQL drivers
+refuse it with `INVALID_FILTER` / 400, naming the column, instead of running
+the predicate. The remedy is to run schema sync so the declared field has its
+column, or to name a column the table has. Catching it here, before the page
+ships, means an author sees the mistake in the editor instead of a 400 in
+production. Each position of a filter is judged on its own, so the field above
+is still checked even though `stage` comes from React state.
 
 Skipped, to keep false positives at zero: the same set as §8 — non-static
 values, `{...spread}` usages, relationship paths, system fields, and objects
@@ -441,6 +478,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698), row-level-security predicates (#4983) | ✓ | ✓ | ✓ | — |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
+| Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -557,11 +595,17 @@ The fourth door does not weaken that, because it is held to the CLI's verdicts
 rather than to its own: a test fails if a rule runs at the runtime publish gate
 but not on `os build` — the two publish verbs must not disagree. What that
 column narrows is which *types* it judges, never which *verdict* it reaches. The
-one deliberate exception is the platform-schedule row (#6285), runtime-only by ruling:
-both of its inputs are facts about the **deployment** (the organization this
-write lands in, and whether this deployment walls organizations), and a build
-machine's environment is a false signal for them — so `os build` must not judge
-it at all.
+deliberate exceptions are the two rows whose inputs are facts about the
+**deployment**, and a build machine's environment is a false signal for those —
+so `os build` must not judge them at all. The platform-schedule row (#6285) is
+runtime-only by ruling: its inputs are the organization this write lands in and
+whether this deployment walls organizations. The public-form intake row (#21476)
+reads the tenancy posture **in force**: on a walled posture, an open public form
+whose object is walled by an organization column cannot take an anonymous
+submission, so the anonymous form endpoints do not offer it, and a save or
+publish of the view answers success with a `public-form-intake-unavailable`
+warning in `advisories`, located at the form's `sharing`. It never refuses the
+write.
 
 Some rows are deliberately not universal across the three commands, and each is
 one-directional (none lets a stack through a gate another command enforces):
@@ -677,8 +721,8 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (46)...
-  → Checking capability providers (#3366)...
+  → Running author-time rules (49)...
+  → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 
   ✓ Validation passed (64ms)

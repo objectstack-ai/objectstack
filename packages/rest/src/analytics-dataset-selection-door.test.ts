@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17058] `POST /analytics/dataset/query` parses its `selection` AT THE DOOR.
+ * [commit 94c930248] `POST /analytics/dataset/query` parses its `selection` AT THE DOOR.
  *
  * The defect: the route checked only that `selection.measures` was a non-empty
  * array, so every other member reached `dataset-executor` unrefused — while the
@@ -17,9 +17,9 @@
  * one that matters most: a fully-loaded VALID selection still passes. A door
  * that refuses too much is a worse defect than the one being fixed.
  *
- * ## [#17551, ruled] The half #17058 could not door
+ * ## [#17551, ruled] The half commit 94c930248 could not door
  *
- * #17058 parsed a PROJECTION — the seven members whose declarations coincide
+ * Commit 94c930248 parsed a PROJECTION — the seven members whose declarations coincide
  * with `AnalyticsQuery`'s — and projected `runtimeFilter`, `dateGranularity`,
  * `compareTo` and `totals` AWAY, because `DatasetSelection` had no Zod schema
  * anywhere in the repo and authoring one in this consumer is the second

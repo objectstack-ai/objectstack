@@ -247,8 +247,9 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
 /**
  * One strip event on a write path: the engine dropped caller-supplied field(s)
  * from the payload for a LEGAL reason — a read-only lock (static `readonly`
- * (#2948) or a TRUE `readonlyWhen` predicate (#3042)), or the primary-key strip
- * that keeps a ruled-non-key payload value out of the id column (#6437) — and
+ * (#2948) or a TRUE `readonlyWhen` predicate (#3042)), the primary-key strip
+ * that keeps a ruled-non-key payload value out of the id column (#6437), or the
+ * computed-field strip of a value no store has a column for (#20805) — and
  * completed the write without them. The write itself still succeeds —
  * stripping is legitimate semantics, not an error — but callers that report
  * success per requested field (e.g. a flow's `update_record` step) need to know
@@ -292,6 +293,12 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    *   payload `id` the update-dispatch ruling (`resolveEngineUpdateDispatch`)
    *   has already classified as *not* an identifier — an authoring error the
    *   write survives without.
+   * - `computed` — the field is a `formula`: the engine computes it on read, so
+   *   no driver has a column for it, and a value the caller supplies (the key a
+   *   full read returns, written back) is stripped on every write path and in
+   *   every context, `isSystem` included (#20805). NOT a read-only lock:
+   *   `isSystem` does not exempt it, because there is nowhere for the value to
+   *   land.
    *
    * `primary_key` names the FIELD's role, not the offending value's shape, on
    * purpose: `not_a_primary_key` would describe the value and become false the
@@ -300,7 +307,7 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    * the same register as the two read-only arms — each answers "what about this
    * FIELD caused the strip?".
    */
-  reason: z.enum(['readonly', 'readonly_when', 'primary_key']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier'),
+  reason: z.enum(['readonly', 'readonly_when', 'primary_key', 'computed']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for'),
 }).describe('A write-path strip event: caller-supplied fields legally dropped from the payload'));
 
 // --------------------------------------------------------------------------
@@ -381,6 +388,26 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
    * fast path (native driver `date_trunc`).
    */
   timezone: z.string().optional(),
+  /**
+   * Full-Text Search over the rows BEFORE they are grouped — declared exactly
+   * as {@link EngineQueryOptionsSchema}'s `search` (the bare string is the
+   * canonical Tier-1 contract, ADR-0061 D1; the structured
+   * `FullTextSearchSchema` form carries the Tier-2 knobs). `QuerySchema.search`
+   * sits beside `groupBy` / `aggregations` with no carve-out, so the aggregate
+   * verb honours it the way `find` does: the engine expands it through the
+   * same ADR-0061 `$search` → cross-field `$or` expansion and ANDs it with
+   * `where`, so every group and every aggregated number is computed over the
+   * searched rows only. Before this key was declared the engine refused it,
+   * and the one wire path to `aggregate` (`findData`'s grouped branch) left it
+   * out — a grouped answer under a search was the unsearched answer.
+   */
+  search: z.union([z.string(), FullTextSearchSchema]).optional(),
+  /**
+   * Fields the `search` expansion may match against — declared exactly as
+   * {@link EngineQueryOptionsSchema}'s `searchFields`: intersected with the
+   * object's declared/derived searchable set (ADR-0061), never widened.
+   */
+  searchFields: z.array(z.string()).optional(),
 }).describe('QueryAST-aligned options for DataEngine.aggregate operations'));
 
 // --------------------------------------------------------------------------
@@ -1389,6 +1416,12 @@ export type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.input<typeof DroppedFieldsEventSchema>;
 export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema>;
 export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema>;
+/**
+ * Post-parse shape of {@link EngineAggregateOptions} — defaults applied (ADR-0122).
+ * The two shapes part at `search`: its structured `FullTextSearchSchema` form
+ * carries flag defaults, exactly as on {@link EngineQueryOptionsParsed}.
+ */
+export type EngineAggregateOptionsParsed = z.infer<typeof EngineAggregateOptionsSchema>;
 export type EngineCountOptions = z.input<typeof EngineCountOptionsSchema>;
 
 // --- Legacy: deprecated types (kept for backward compatibility) ---

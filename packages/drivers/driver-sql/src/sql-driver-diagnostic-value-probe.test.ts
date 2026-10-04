@@ -1,14 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#9160] The instrument #8823 did not have: raise each candidate diagnostic
+ * [#9160] The instrument commit 4dfa369a9 did not have: raise each candidate diagnostic
  * family against a LIVE server and record what the server actually printed.
  *
  * ## Why this file exists
  *
- * `redactStatementFromMessage` (`@objectstack/objectql`) keeps the database's
+ * `redactStatementFromMessage` (`@objectstack/types` since #21385, in
+ * `driver-fault-redaction.ts`) keeps the database's
  * diagnostic after the statement cut, on the premise that a diagnostic names
- * IDENTIFIERS. #8823 found one family where that is false — MySQL's
+ * IDENTIFIERS. Commit 4dfa369a9 found one family where that is false — MySQL's
  * `ER_DUP_ENTRY` inlines the conflicting VALUE — and redacted that one slot.
  *
  * The list it introduced had exactly one entry and **no way to notice a second
@@ -41,12 +42,14 @@
  * or a template's phrasing drifted and the entry that matched it no longer does.
  * Both are the notification #9160 asked for.
  *
- * ⛔ This probe deliberately does NOT import the redactor. `driver-sql` does not
- * depend on `@objectstack/objectql`, and widening that package's public surface
- * to reach an internal function is a contract change this card does not carry.
- * The division is: this file establishes WHAT THE SERVER SAYS; the redactor's own
- * suite (`packages/objectql/src/driver-fault-redaction.test.ts`) drives these
- * exact recorded strings through the function. The recorded literals below are
+ * ⛔ This probe deliberately does NOT import the redactor. It was first kept out
+ * because the redactor lived in `@objectstack/objectql`, which `driver-sql` does
+ * not depend on; since #21385 it lives in `@objectstack/types`, which this
+ * package depends on and whose redaction its own refusal lines call, so the
+ * reason that stands now is the division of labour alone: this file establishes
+ * WHAT THE SERVER SAYS; the redactor's own suite
+ * (`packages/objectql/src/driver-fault-redaction.test.ts`) drives these exact
+ * recorded strings through the function. The recorded literals below are
  * duplicated there on purpose, with this file named as their warrant.
  *
  * Runs in `Temporal Conformance (live PG + MySQL)`, the one job that stands up
@@ -114,9 +117,9 @@ interface ProbeCase {
  * What these measure is the PREMISE, not the remedy: that the server really does
  * echo the caller's separator-bearing value into its own words, and that the
  * naive last-separator cut therefore lands inside that value. The redaction half
- * lives in `packages/objectql/src/driver-fault-redaction.test.ts`, for the same
- * reason the rest of this file states — `driver-sql` does not depend on
- * `@objectstack/objectql`, and this file establishes WHAT THE SERVER SAYS.
+ * lives in `packages/objectql/src/driver-fault-redaction.test.ts`, for the
+ * division of labour the rest of this file states: this file establishes WHAT
+ * THE SERVER SAYS.
  */
 interface SeparatorCase {
   /** The server's own error code, as it identifies the family. */
@@ -236,7 +239,7 @@ const PG_CASES: readonly ProbeCase[] = [
     raise: (db) => db(PG_TABLE).insert({ age: 99999999999 }),
   },
   {
-    // #8823's coincidence, re-measured. The value is on `detail`, which
+    // Commit 4dfa369a9's coincidence, re-measured. The value is on `detail`, which
     // `ObjectLogger.write` does not serialize — so Postgres is saved here by a
     // fact about our Logger, not by the cut.
     family: 'unique_violation (23505)',
@@ -400,7 +403,7 @@ for (const cell of DIALECT_CELLS) {
           expect(
             diagnostic,
             `${probe.family} changed its phrasing. Whatever entry in VALUE_BEARING_TEMPLATES `
-              + '(objectql/src/driver-fault-redaction.ts) was written against it no longer matches. '
+              + '(types/src/driver-fault-redaction.ts) was written against it no longer matches. '
               + `Server said: ${JSON.stringify(diagnostic)}`,
           ).toContain(probe.phrasing);
 
@@ -419,7 +422,7 @@ for (const cell of DIALECT_CELLS) {
               + (actual === 'message'
                 ? 'It now inlines a caller value into the diagnostic `ObjectLogger.write` SERIALIZES — '
                   + 'this is a new leak. Add the template to VALUE_BEARING_TEMPLATES in '
-                  + 'objectql/src/driver-fault-redaction.ts and cite this output as the warrant. '
+                  + 'types/src/driver-fault-redaction.ts and cite this output as the warrant. '
                 : 'The exposure changed shape; re-read the redactor before relaxing this. ')
               + `Server said: ${JSON.stringify(diagnostic)}`,
           ).toBe(probe.placement);
@@ -462,7 +465,7 @@ for (const cell of DIALECT_CELLS) {
             naive,
             `${probe.family}: the naive cut is expected to leave a SUFFIX of the caller's value standing — `
               + 'that residue is the exposure the redactor\'s head-anchored cut closes '
-              + '(objectql/src/driver-fault-redaction.ts, and its suite drives this exact string).',
+              + '(types/src/driver-fault-redaction.ts; objectql/src/driver-fault-redaction.test.ts drives this exact string).',
           ).toContain(SEPARATOR_CANARY_SUFFIX);
         });
       }

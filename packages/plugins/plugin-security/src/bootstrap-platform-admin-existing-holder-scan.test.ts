@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #16861 — whether this deployment ALREADY has a platform admin, and why the
+ * Commit 1c83ca226 — whether this deployment ALREADY has a platform admin, and why the
  * answer stopped being a function of how many ORG admins it has.
  *
  * ## The defect, re-measured on this branch's base before anything changed
@@ -58,7 +58,7 @@
  * ## Why the row ORDER is permuted rather than a second driver package
  *
  * Same reason as `bootstrap-platform-admin-promotion-selection.test.ts`
- * (#16682): `@objectstack/driver-memory` cannot be declared here without a
+ * (commit 9b9581b11): `@objectstack/driver-memory` cannot be declared here without a
  * `scripts/driver-memory-census.ledger.json` disposition, which is a
  * maintainer ruling. Each case runs the REAL engine over the REAL
  * better-sqlite3 driver behind a facade that permutes a result ONLY when the

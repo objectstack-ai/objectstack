@@ -23,6 +23,7 @@
  * the caller cannot read (e.g. `owner_id`), and must not be rejected.
  */
 
+import { FieldReferenceSchema } from '@objectstack/spec/data';
 import { PermissionDeniedError } from './errors.js';
 
 interface FieldPermissionLike {
@@ -36,6 +37,12 @@ const LOGICAL_KEYS = new Set(['$and', '$or', '$not']);
  * Collect every field name referenced by a FilterCondition. Dotted paths
  * and nested-relation conditions gate on their FIRST segment / top-level
  * relation field — local field permissions govern local traversal.
+ *
+ * A field is referenced by a condition KEY and equally by a cross-field
+ * COMPARAND (`FieldReferenceSchema`, `{ $field }` — "compare against another
+ * column of the same row"): the comparison reads the named field's value, so
+ * row presence discloses it exactly as a filter on the field itself would.
+ * Both are collected here, into the one set the one field rule judges.
  */
 export function collectConditionFields(condition: unknown, out: Set<string> = new Set()): Set<string> {
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return out;
@@ -46,8 +53,38 @@ export function collectConditionFields(condition: unknown, out: Set<string> = ne
       continue;
     }
     out.add(key.split('.')[0]);
+    collectComparandFields(value, out);
   }
   return out;
+}
+
+/**
+ * Collect the field every cross-field comparand inside one field constraint
+ * names, gated on its first segment like a key.
+ *
+ * What a comparand reference IS is the filter grammar's answer, not this
+ * guard's: each node is asked of `FieldReferenceSchema` itself, the spec's
+ * declaration of the reference (its `$field` and the whole-day `addDays`
+ * offset's own nested reference) — the reading `objectql`'s aggregation
+ * filter also takes. The walk carries no operator list and no position list:
+ * it visits every node of the constraint (operator maps, list members, a
+ * reference's own offset), so a position the grammar admits is covered
+ * without being named here, and one it later admits is covered the day it
+ * does.
+ *
+ * A node the schema refuses is not collected: every executor refuses the
+ * same malformed reference (`INVALID_FILTER`) instead of reading a field
+ * through it, so there is no value for it to disclose.
+ */
+function collectComparandFields(operand: unknown, out: Set<string>): void {
+  if (!operand || typeof operand !== 'object') return;
+  if (Array.isArray(operand)) {
+    for (const member of operand) collectComparandFields(member, out);
+    return;
+  }
+  const reference = FieldReferenceSchema.safeParse(operand);
+  if (reference.success) out.add(reference.data.$field.split('.')[0]);
+  for (const member of Object.values(operand as Record<string, unknown>)) collectComparandFields(member, out);
 }
 
 /**

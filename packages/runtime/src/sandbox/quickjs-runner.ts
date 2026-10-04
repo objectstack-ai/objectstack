@@ -7,7 +7,7 @@
  *
  * Responsibilities:
  * - L1 ExpressionBody — evaluated as a `return (<source>)` snippet.
- * - L2 ScriptBody    — wrapped in `(async (ctx) => { <source> })(ctx)` (hooks)
+ * - L2 ScriptBody    — wrapped in `(async (ctx) => { <source> })(ctx)` (hooks, jobs)
  *                      or `(async (input, ctx) => { <source> })(input, ctx)` (actions).
  * - Hard timeout via QuickJS interrupt handler.
  * - Capability gating — host-side `ctx.api`, `ctx.crypto`, `ctx.log` are only
@@ -50,6 +50,15 @@ import type {
 
 const DEFAULT_HOOK_TIMEOUT_MS = 250;
 const DEFAULT_ACTION_TIMEOUT_MS = 5000;
+// [#21489] A job body whose job declares no `timeoutMs` gets the budget an
+// action body gets. It is CPU time (ADR-0102 D1): the body's `ctx.api` awaits
+// are not charged, so it bounds runaway script work, never a slow query. A job
+// that needs more says so in `JobSchema.timeoutMs`, the one limit of a body job
+// (uncapped, unlike `ScriptBody.timeoutMs`), which reaches this runner as
+// `opts.timeoutMs` and wins. No env override, unlike the two above: those lift
+// a floor on a loaded host for the per-request paths, and a job's own
+// `timeoutMs` is already the declared place to state how long it needs.
+const DEFAULT_JOB_TIMEOUT_MS = 5000;
 const DEFAULT_MEMORY_MB = 32;
 // Wall-clock backstop (ADR-0102 D1): the CPU budget bounds VM-active time, but a
 // body parked forever on a host call that never settles burns no CPU — the
@@ -62,6 +71,11 @@ export interface QuickJSScriptRunnerOptions {
   hookTimeoutMs?: number;
   /** Default per-invocation **CPU-time** budget for actions (ms). */
   actionTimeoutMs?: number;
+  /**
+   * Default per-invocation **CPU-time** budget for job bodies (ms), used only
+   * when the job declares no `timeoutMs`. Default 5000.
+   */
+  jobTimeoutMs?: number;
   /**
    * Wall-clock ceiling (ms) — the backstop for a body stuck on a never-settling
    * host call. Effective ceiling is `max(this, cpuBudget)`, so it can never cut
@@ -85,6 +99,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     this.opts = {
       hookTimeoutMs: opts.hookTimeoutMs ?? resolveSandboxTimeoutMs('hook', DEFAULT_HOOK_TIMEOUT_MS),
       actionTimeoutMs: opts.actionTimeoutMs ?? resolveSandboxTimeoutMs('action', DEFAULT_ACTION_TIMEOUT_MS),
+      jobTimeoutMs: opts.jobTimeoutMs ?? DEFAULT_JOB_TIMEOUT_MS,
       wallCeilingMs: opts.wallCeilingMs ?? resolveSandboxTimeoutMs('wallCeiling', DEFAULT_WALL_CEILING_MS),
       memoryMb: opts.memoryMb ?? DEFAULT_MEMORY_MB,
     };
@@ -154,7 +169,15 @@ export class QuickJSScriptRunner implements ScriptRunner {
    * and pushed template authors toward denormalized rollup workarounds (#1867).
    */
   private resolveTimeout(opts: ScriptRunOptions, bodyTimeoutMs: number | undefined): number {
-    const def = opts.origin.kind === 'hook' ? this.opts.hookTimeoutMs : this.opts.actionTimeoutMs;
+    // One default per origin kind, spelled per kind rather than as a
+    // hook-or-else branch: a job body falling into the action branch would have
+    // read the action's env override as its own (#21489).
+    const def =
+      opts.origin.kind === 'hook'
+        ? this.opts.hookTimeoutMs
+        : opts.origin.kind === 'job'
+          ? this.opts.jobTimeoutMs
+          : this.opts.actionTimeoutMs;
     const explicit = [opts.timeoutMs, bodyTimeoutMs].filter((n): n is number => typeof n === 'number');
     return explicit.length > 0 ? Math.min(...explicit) : def;
   }
@@ -289,7 +312,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
             }`;
-      const wrapped = args.origin.kind === 'hook'
+      // A job body takes the hook's `(ctx)` wrapper (#21489): it has no input to
+      // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
+      // the whole surface. Only an action body is `(input, ctx)`.
+      const wrapped = args.origin.kind !== 'action'
         ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined;
             (async (ctx) => { ${args.source} })(globalThis.__ctx).then(
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
@@ -420,7 +446,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // Capture mutated ctx.input so the host can write through.
           const mutatedInput = readCtxInputJson(vm);
           // …and, on the hook path, WHICH of those keys the body actually
-          // wrote (#14758), so the write-back carries the body's own key set
+          // wrote (commit 84199cb87), so the write-back carries the body's own key set
           // rather than re-asserting the whole dump onto the engine's payload.
           const mutatedInputKeys =
             args.origin.kind === 'hook' ? readInputWritesJson(vm) : undefined;
@@ -538,7 +564,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.result !== undefined) {
       setObjectJson(vm, ctxObj, 'result', ctx.result);
     }
-    // [#13644] The declared referential-cleanup marker — installed only in its
+    // [commit 34ce8e7db] The declared referential-cleanup marker — installed only in its
     // declared shape (`true`), absent otherwise, so a body reads
     // `ctx.referentialFieldClear === true` with the spec's own back-compatible
     // absence semantics. A plain boolean: no freeze/graft ceremony needed —
@@ -547,7 +573,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.referentialFieldClear === true) {
       vm.setProp(ctxObj, 'referentialFieldClear', vm.true);
     }
-    // [#14143] The action face's caller-scope load verdict — same true-only
+    // [commit f19475c0a] The action face's caller-scope load verdict — same true-only
     // installation, same reason: a body reads `ctx.recordLoadDenied === true`
     // and an absent key means "nothing was refused". A plain boolean, so no
     // freeze/graft ceremony is needed (the write-back channel reads only
@@ -878,7 +904,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     }
     sugar.value.dispose();
 
-    // [#14758] The hook path's INPUT write-recorder — the instrument that lets
+    // [commit 84199cb87] The hook path's INPUT write-recorder — the instrument that lets
     // `applyMutationsToInput` carry back the keys the body wrote instead of
     // every key it could see.
     //
@@ -1243,7 +1269,7 @@ function safeJsonStringify(v: unknown): string {
  * nothing downstream needed teaching; the number simply never arrived. A
  * number, like `code`, carries no host state.
  *
- * [#9934] `userMessage` is the fourth member — the producer-side user-facing
+ * [commit 79c46da90] `userMessage` is the fourth member — the producer-side user-facing
  * marking (see `declaredUserMessage` in `@objectstack/types`). A hook or
  * action BODY is the authoring surface the marking exists for: an app author
  * writes `const e = new Error(msg); e.userMessage = msg; throw e`, and the
@@ -1289,7 +1315,7 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
       vm.setProp(errH, 'status', h);
       h.dispose();
     }
-    // [#9934] Non-empty strings only, same one-read rule as every other
+    // [commit 79c46da90] Non-empty strings only, same one-read rule as every other
     // boundary (`declaredUserMessage`): a blank or non-string value is not a
     // declaration and must not become one by crossing the VM.
     if (typeof e?.userMessage === 'string' && e.userMessage.trim().length > 0) {
@@ -1532,7 +1558,7 @@ function readRecordWritesJson(vm: QuickJSContext): string[] | undefined {
 }
 
 /**
- * [#14758] After the script has settled, dump the keys the write-recorder proxy
+ * [commit 84199cb87] After the script has settled, dump the keys the write-recorder proxy
  * saw on `ctx.input` — the keys the BODY assigned, defined or deleted, as
  * opposed to every key `readCtxInputJson` can see.
  *
@@ -1619,7 +1645,7 @@ export class SandboxError extends Error {
    */
   readonly status?: number;
   /**
-   * [#9934] The user-facing refusal text the error that crossed OUT of the VM
+   * [commit 79c46da90] The user-facing refusal text the error that crossed OUT of the VM
    * was marked with — the producer-side opt-in of the objectui#5210 ruling. A
    * body that throws `e.userMessage = '…'` is saying that exact text is
    * addressed to the END USER; the HTTP boundaries carry it to the wire's
@@ -1645,7 +1671,7 @@ export interface SandboxErrorInfo {
   fields?: unknown[];
   /** [#7867] See {@link SandboxError.status}. */
   status?: number;
-  /** [#9934] See {@link SandboxError.userMessage}. */
+  /** [commit 79c46da90] See {@link SandboxError.userMessage}. */
   userMessage?: string;
   /**
    * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
@@ -1686,7 +1712,7 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
   // number JSON-round-trips to `null`, and `NaN` would satisfy `typeof` while
   // making `errorFromThrown` emit a nonsense status line.
   if (typeof p?.status === 'number' && Number.isFinite(p.status)) info.status = p.status;
-  // [#9934] Non-empty strings only — the same "what counts as marked" rule as
+  // [commit 79c46da90] Non-empty strings only — the same "what counts as marked" rule as
   // `declaredUserMessage` (`@objectstack/types`), applied at this boundary too.
   if (typeof p?.userMessage === 'string' && p.userMessage.trim().length > 0) info.userMessage = p.userMessage;
   if (p?.sandboxFault === true) info.sandboxFault = true;

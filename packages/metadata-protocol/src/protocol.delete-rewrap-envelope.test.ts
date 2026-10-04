@@ -80,6 +80,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
+import { packagedBaseRegimeRow } from './packaged-base-regime.js';
 
 /**
  * The tier whose artifact-backed delete is refused BY THE REPOSITORY on a
@@ -170,6 +171,14 @@ function makeSession(opts: {
     for (const r of opts.seed ?? []) rows.set(r.id, r);
     const historyRows: Array<Record<string, unknown>> = [];
     const artifactKeys = new Set((opts.artifacts ?? []).map((a) => `${a.type}|${a.name}`));
+    // [#21694] The ADR-0010 `_lock` gate reads `sys_metadata` on EVERY topology
+    // now, ahead of the probe read this file injects its fault into — and a
+    // failure of the gate's own read is answered fail-closed, `503
+    // SERVICE_UNAVAILABLE` (#5706): that gate's contract, not this re-wrap's.
+    // So `failFindOne` arms only once the lock verdict is in, and the fault
+    // lands on the probe read, the seam this file pins (a gate that is never
+    // reached leaves the fault unarmed, and the case fails loudly).
+    let lockVerdictIn = false;
 
     const engine: any = {
         async findOne(table: string, o: { where: Record<string, unknown> }) {
@@ -178,7 +187,7 @@ function makeSession(opts: {
                 return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
             }
             if (table !== 'sys_metadata') return null;
-            if (opts.failFindOne) opts.failFindOne();
+            if (opts.failFindOne && lockVerdictIn) opts.failFindOne();
             for (const row of rows.values()) if (matchesWhere(row as any, o.where)) return row;
             return null;
         },
@@ -237,6 +246,12 @@ function makeSession(opts: {
         () => new Map(),
         opts.environmentId,
     ) as any;
+    const lockGate = protocol.assertLockAllowsDelete.bind(protocol);
+    protocol.assertLockAllowsDelete = async (args: unknown) => {
+        const verdict = await lockGate(args);
+        lockVerdictIn = true;
+        return verdict;
+    };
     return { protocol, rows, historyRows };
 }
 
@@ -309,7 +324,17 @@ describe('#7426 — the repository refusal reaches the caller with its code', ()
             // the token to the envelope, and the bracketed `[NOT_OVERRIDABLE]`
             // opener it had been trapped in was the duplicate left behind —
             // `error` is human language, `code` is the machine token.
-            expect(String(err.message), type).toContain('is not allowOrgOverride in the registry');
+            // [#20910, ADR-0126 §2] A type with a Regime C row (`flow`,
+            // `action`) is refused with its row's removal sentence, naming its
+            // sanctioned path; every other type keeps the type-door sentence.
+            if (packagedBaseRegimeRow(type)) {
+                expect(String(err.message), type).toContain(
+                    `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked against removal.`,
+                );
+                expect(String(err.message), type).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
+            } else {
+                expect(String(err.message), type).toContain('is not allowOrgOverride in the registry');
+            }
             expect(String(err.message), type).not.toContain('[NOT_OVERRIDABLE]');
             // A refusal that already deleted the row is a log line.
             expect(rows.size, type).toBe(1);

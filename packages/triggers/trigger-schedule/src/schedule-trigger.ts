@@ -10,7 +10,7 @@ import {
 } from '@objectstack/spec/automation';
 import {
     resolveScheduledWorkPolicy,
-    SCHEDULED_WORK_DISABLED_REASON,
+    scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
 } from '@objectstack/types';
 
@@ -29,7 +29,7 @@ export interface FlowTriggerBinding {
     readonly condition?: string | { dialect?: string; source?: string; ast?: unknown };
     readonly schedule?: unknown;
     /**
-     * [#16659] The ACTING ORGANIZATION a time-triggered flow declares on its
+     * [commit ecdfc9411] The ACTING ORGANIZATION a time-triggered flow declares on its
      * start node (`config.organization`), lifted onto the binding by the
      * engine's `resolveTriggerBinding` the same way `schedule` is.
      *
@@ -248,7 +248,7 @@ export interface TriggerLogger {
 const JOB_PREFIX = 'flow-schedule';
 
 /**
- * Resolve the acting organization of a time-triggered binding (#16659), or
+ * Resolve the acting organization of a time-triggered binding (commit ecdfc9411), or
  * `null` when the flow declared none.
  *
  * Reads the binding's lifted `organization` first and the raw start-node
@@ -331,10 +331,18 @@ export interface ScheduledWorkTriggerOptions {
  * it is running the configuration it asked for, and the flow it ships is
  * perfectly well-formed. Reporting the second as "binding failed" sends an
  * operator to look for a broken flow, and sends an author to look for a key
- * they may already have written. So the sentence is
- * {@link SCHEDULED_WORK_DISABLED_REASON}, it names the switch and its remedy,
+ * they may already have written. So the sentence is the policy's own reason —
+ * `scheduledWorkDisabledReason(policy)` from `@objectstack/types`, the one
+ * answer the engine's bind log, binding audit and `/_status` row read too —
  * and the automation engine's binding audit reports it under its own branch —
  * ⛔ never as "binding failed — see earlier warnings", which is ruled item 6.
+ *
+ * [#21110] That answer is the HOST's `hostDisabledReason` when the per-kernel
+ * policy that refused carries one, and otherwise the deployment sentence,
+ * `SCHEDULED_WORK_DISABLED_REASON`, which names the switch and its remedy.
+ * `policy` is the very reading the caller's gate refused on, never a second
+ * read: a resolver re-asked here could answer a different reason than the one
+ * that decided.
  *
  * ## Why `info` and not `warn` or `error`
  *
@@ -361,15 +369,16 @@ export function refuseScheduledWorkDisabled(
     logger: TriggerLogger,
     tag: 'schedule' | 'time-relative',
     flowName: string,
+    policy: ScheduledWorkPolicy,
 ): never {
-    const sentence = `${tag} flow '${flowName}' is not armed: ${SCHEDULED_WORK_DISABLED_REASON}`;
+    const sentence = `${tag} flow '${flowName}' is not armed: ${scheduledWorkDisabledReason(policy)}`;
     logger.info(`[${tag}] NOT ARMED — ${sentence}`);
     throw new Error(sentence);
 }
 
 /**
  * Refuse to bind a time-triggered flow that declares no acting organization
- * (#16659): say why at `error`, then THROW so the engine records the refusal.
+ * (commit ecdfc9411): say why at `error`, then THROW so the engine records the refusal.
  *
  * ## When this fires, after #17396 and #18378
  *
@@ -688,7 +697,7 @@ export class ScheduleTrigger implements FlowTrigger {
             // prior binding before throwing, so a rebind under a switch that
             // has since been turned off cannot leave the previous job armed.
             this.stop(binding.flowName);
-            refuseScheduledWorkDisabled(this.logger, 'schedule', binding.flowName);
+            refuseScheduledWorkDisabled(this.logger, 'schedule', binding.flowName, policy);
         }
 
         const raw = binding.schedule ?? (binding.config as Record<string, unknown> | undefined)?.schedule;
@@ -700,7 +709,7 @@ export class ScheduleTrigger implements FlowTrigger {
             return;
         }
 
-        // [#16659] The acting organization is part of the BINDING, so it is
+        // [commit ecdfc9411] The acting organization is part of the BINDING, so it is
         // checked before the job service is even resolved: a flow that cannot
         // legally run must not be reported as "not scheduled because the job
         // service is missing", which is a different defect with a different
@@ -774,7 +783,7 @@ export class ScheduleTrigger implements FlowTrigger {
             try {
                 const ctx: AutomationContext = {
                     event: 'schedule',
-                    // [#16659] When the flow declares one, the run executes AS
+                    // [commit ecdfc9411] When the flow declares one, the run executes AS
                     // that organization: `tenantId` is the acting run's
                     // organization, and every consumer already reads it —
                     // `notify-node.ts` threads it onto the notification it

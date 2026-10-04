@@ -72,7 +72,7 @@ describe('PluginStartupResultSchema — the shape the kernel produces', () => {
 // left with their defs on #16059 — a whole-def removal is strictly stronger
 // than "this one key is gone", and the retired-key registrations that dated
 // them stay in RETIRED_KEYS_BY_MAJOR[18] as the record of the narrower step.
-describe('Startup result durations carry their unit (#15678)', () => {
+describe('Startup result durations carry their unit', () => {
   it('REFUSES the retired `duration` with the rename in the message', () => {
     const result = PluginStartupResultSchema.safeParse({
       pluginName: 'crm-plugin',
@@ -91,7 +91,7 @@ describe('Startup result durations carry their unit (#15678)', () => {
 // not deletions, because this def keeps emitting and `@objectstack/core`
 // imports its type: a construction site still writing them meets the
 // prescription at the parse as well as at `tsc`.
-describe('[#16059] the re-declared result refuses the members it dropped', () => {
+describe('the re-declared result refuses the members it dropped', () => {
   it('REFUSES `plugin` and prescribes `pluginName`', () => {
     const result = PluginStartupResultSchema.safeParse({
       pluginName: 'crm-plugin',

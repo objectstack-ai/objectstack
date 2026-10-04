@@ -4,7 +4,7 @@
 //
 // Four doors on this object have been given the acting organization one card
 // at a time — `createFile` (#12745), `createSession` (#12928), and the
-// `update`/`delete` halves (#13178) — and all four run through
+// `update`/`delete` halves (commit f087c376f) — and all four run through
 // `StorageMetadataStore`, which threads a `StorageWriteContext` into
 // `context.tenantId` so the platform's insert-side chokepoint can stamp the
 // column. These two bypass that store entirely:

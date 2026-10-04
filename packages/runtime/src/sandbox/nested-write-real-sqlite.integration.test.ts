@@ -73,7 +73,7 @@ const ROLLUP_HOOK = {
 };
 
 /**
- * [#10629] This fixture provisions `expense_report` / `expense_line` and
+ * [commit 13a6cb4ad] This fixture provisions `expense_report` / `expense_line` and
  * nothing else, so the engine's own single-tenant probe
  * (`ObjectQL.probeInstallOrganizations`, memoised once per engine) reads a
  * `sys_organization` that was never created. That read is fail-soft by
@@ -81,12 +81,14 @@ const ROLLUP_HOOK = {
  * the driver and the engine each log it on the way out. Withheld and asserted
  * below rather than muted; the module header explains why.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 describe('#1867 nested cross-object write — REAL SqlDriver (better-sqlite3, on-disk)', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
-  /** [#10629] The expected-noise capture belonging to the latest {@link boot}. */
+  /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest {@link boot}. */
   let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
@@ -98,7 +100,7 @@ describe('#1867 nested cross-object write — REAL SqlDriver (better-sqlite3, on
   async function boot() {
     dir = mkdtempSync(join(tmpdir(), 'os-nested-1867-'));
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
-    // [#10629] Installed before the driver runs a statement and before the
+    // [commit 13a6cb4ad] Installed before the driver runs a statement and before the
     // engine issues a read — the two sinks the expected refusal travels out on.
     noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
     noise.captureDriver(driver);
@@ -131,11 +133,14 @@ describe('#1867 nested cross-object write — REAL SqlDriver (better-sqlite3, on
     parent = (await e.find('expense_report', { where: { id: report.id } }))[0];
     expect(parent.total_amount).toBe(175);
 
-    // ── [#10629] The capture is a PIN, not a mute. These two lines used to
+    // ── [commit 13a6cb4ad] The capture is a PIN, not a mute. These two lines used to
     // reach the shared `Test Core` log out of a PASSING test and were read
     // there as a real failure; they are withheld now and asserted here. If the
     // probe stops running, or `sys_organization` starts resolving, the log goes
     // quiet AND this goes red — the failure a bare `console` mute would hide.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

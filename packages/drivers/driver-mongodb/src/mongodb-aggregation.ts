@@ -11,7 +11,7 @@ import type { Document } from 'mongodb';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { DateGranularityValue, GroupByNode } from '@objectstack/spec/data';
-import { translateFilter } from './mongodb-filter.js';
+import { translateFilter, type ValueShapeResolver } from './mongodb-filter.js';
 import type { TemporalFieldKindResolver } from './mongodb-temporal.js';
 
 /**
@@ -57,14 +57,14 @@ export interface AggregationInput {
  * `mongodb-date-bucket-parity.test.ts` pins the identity so a future edit to one
  * cannot silently miss the other.
  *
- * ## Why all five, when `driver-sql` on SQLite advertises four
+ * ## Why `week` too
  *
- * SQLite has no ISO-week format specifier, so `driver-sql` sets `week: false`
- * and lets the engine bucket weeks in memory. MongoDB's `$dateToString` has both
- * halves of the ISO-8601 week date — `%G` (ISO week-YEAR) and `%V` (ISO week
- * number, zero-padded to 2) — which is exactly the label
- * `bucketDateValue` computes by hand. The dialect difference is real, so the
- * records differ.
+ * MongoDB's `$dateToString` has both halves of the ISO-8601 week date — `%G`
+ * (ISO week-YEAR) and `%V` (ISO week number, zero-padded to 2) — which is
+ * exactly the label `bucketDateValue` computes by hand. (`driver-sql` on
+ * SQLite advertises all five too, but cannot use `%V`: the SQLite libSQL
+ * bundles predates it, so its `week` arm computes the ISO week from the
+ * week's Thursday instead.)
  *
  * ⚠️ **Documentation-derived, not observed** (#5517). Every `$dateToString`
  * format specifier and every `$convert`/`$concat`/`$switch` null rule this
@@ -314,7 +314,7 @@ function refuseDateBucketedGroupBy(granularity: string): never {
     + `a capability gap in the backend, not a mistake in the query, which is why it answers `
     + `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets `
     + `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets `
-    + `in memory for every granularity absent from it, which is always correct (#6212).`,
+    + `in memory for every granularity absent from it, which is always correct.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -338,7 +338,7 @@ function refusePerAggregationFilter(alias: string): never {
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (driver-mongodb). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -452,7 +452,7 @@ function undeclaredAggregateFunctionError(func: string): Error {
     + `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} `
     + `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] `
     + `entry — the Query Protocol has no such function, so this is a query no backend can run, `
-    + `not a gap in this one (#5907). It is refused rather than accumulated: until #12818 this `
+    + `not a gap in this one. It is refused rather than accumulated: before this refusal, this `
     + `builder answered any unrecognised name with a $sum of that column under the alias the `
     + `caller asked for, which is a plausible number nothing downstream can tell from an answer.`,
   ) as Error & { code?: string; status?: number };
@@ -493,7 +493,7 @@ function uncompilableAggregateFunctionError(func: string): Error {
     + `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap `
     + `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 `
     + `rather than a 400. Aggregate with a function this backend lowers; whether the declaration `
-    + `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+    + `itself should stand is ADR-0049's enforce-or-remove question.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -542,12 +542,18 @@ export function buildAggregationPipeline(opts: {
    * on which one the caller took.
    */
   temporalKind?: TemporalFieldKindResolver;
+  /**
+   * [#20444] Declared value shapes of the aggregated object, so a `$match`
+   * carrying `$empty` translates the field's declared row — the answer
+   * `find()` gives the same filter.
+   */
+  valueShape?: ValueShapeResolver;
 }): Document[] {
   const pipeline: Document[] = [];
 
   // $match stage
   if (opts.where) {
-    const matchFilter = translateFilter(opts.where, opts.temporalKind);
+    const matchFilter = translateFilter(opts.where, opts.temporalKind, opts.valueShape);
     if (Object.keys(matchFilter).length > 0) {
       pipeline.push({ $match: matchFilter });
     }
@@ -640,7 +646,7 @@ export function buildAggregationPipeline(opts: {
  * `$sum`'s identity `0` and averaged to `null` here, while `SUM(col)` /
  * `AVG(col)` answer `3` / `0.5` over the same 3-true/3-false rows on every SQL
  * dialect (#11635), `driver-memory` answers those numbers on both of its faces
- * (#11065), and objectql's in-memory fallback answers them too because its
+ * (commit 20950404c), and objectql's in-memory fallback answers them too because its
  * `toNumber` is `Number(v)` and `Number(true) === 1`. A rate measure over a
  * flag column — an SLA-violation rate, a win rate — is the ordinary shape of
  * that query, and the two answers are not two spellings of one: a dashboard
@@ -648,7 +654,7 @@ export function buildAggregationPipeline(opts: {
  * indistinguishable from "no matching rows". `sum`'s `0` is the worse half,
  * being a plausible number rather than a visible hole.
  *
- * The expression is the one #11065 landed on `driver-memory`'s analytics face
+ * The expression is the one commit 20950404c landed on `driver-memory`'s analytics face
  * (`memory-analytics.ts`, `numericAggregandExpr`), reproduced rather than
  * imported: this driver shares no line of code with that one, and the shared
  * contract between them is the VALUES in `@objectstack/spec/data`, not a
@@ -742,11 +748,11 @@ function numericAggregandExpr(path: string): Document {
 function refuseRetiredAggregateFunction(func: string): never {
   const err = new Error(
     `Aggregate function "${func}" was REMOVED from @objectstack/spec `
-    + `AggregationFunction at #6188 (ADR-0049 enforce-or-remove) and is not lowered by this `
+    + `AggregationFunction (ADR-0049 enforce-or-remove: no SQL backend compiled it) and is not lowered by this `
     + `backend (driver-mongodb). Declared now: ${AggregationFunction.options.join(', ')}. `
     + `This answers INVALID_QUERY/400 rather than NOT_IMPLEMENTED/501 because the protocol no `
     + `longer has this name at all, which is a different fact from a capability gap in the `
-    + `backend (#5907) — the same answer \`driver-sql\` and \`driver-turso\` give it. There is no `
+    + `backend — the same answer \`driver-sql\` and \`driver-turso\` give it. There is no `
     + `replacement in the query vocabulary: read the rows with an ordinary \`fields\` query and `
     + `shape them in the caller, or model the roll-up as a stored field. Parsing the query `
     + `through AggregationNodeSchema reports this with the full retirement prescription.`,

@@ -50,6 +50,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import type { ServiceObject } from '@objectstack/spec/data';
 
 import { ObjectQL } from './engine.js';
+// [#21516] The stored-metadata family the protocol's overlay read consults: the engine
+// refuses a name the registry does not resolve, so the harness registers it as a boot does.
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
 
 // ---------------------------------------------------------------------------
@@ -248,6 +251,9 @@ async function makeHarness(opts?: { companion?: boolean }): Promise<Harness> {
   engine.registry.registerObject(
     opts?.companion === false ? accountBase : accountProvisioned, 'test');
   engine.registry.registerObject(ledgerBase, 'test');
+  for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    engine.registry.registerObject(o as any, 'test');
+  }
 
   const protocol = new ObjectStackProtocolImplementation(engine as never);
 

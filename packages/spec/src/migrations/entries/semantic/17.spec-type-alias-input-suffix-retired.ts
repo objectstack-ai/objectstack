@@ -23,8 +23,8 @@ export const entry: SemanticMigration = {
     + '`ObjectStackDefinitionInput` and `NavigationItemInput` are composed (recursive or '
     + '`Partial`-shaped) types no bare alias denotes.',
   reason:
-    'This entry exists for the reason `data-driver-find-stream-retired` (#4484), '
-    + '`storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` (#6011) '
+    'This entry exists for the reason `data-driver-find-stream-retired`, '
+    + '`storage-service-list-retired` and `actor-user-roles-to-positions` '
     + 'exist, and it is the same disposition: the surface is a TYPESCRIPT NAME, never stack '
     + 'metadata, so there is no source for a D2 conversion to rewrite and deliberately no '
     + 'schema tombstone — an `XInput` alias never had a carrier key, never emitted a def, '
@@ -37,16 +37,18 @@ export const entry: SemanticMigration = {
     + 'consumer gets TS2724/TS2305 naming the import. That is loud but MUTE about the '
     + 'replacement — a compile error says `ConnectorInput` does not exist, not that '
     + '`Connector` now means what it meant. The generated upgrade guide is the only channel '
-    + 'that carries the second half, which is precisely the #6048 gap ADR-0087 registration '
-    + 'exists to close. ⚠️ Deliberately NOT registered alongside it: the 1384 bare aliases '
+    + 'that carries the second half, which is precisely the gap ADR-0087 registration '
+    + 'exists to close — the `ctx.user` `roles` alias was removed with no ledger entry, and '
+    + 'that entry had to land separately. ⚠️ Deliberately '
+    + 'NOT registered alongside it: the 1384 bare aliases '
     + 'the same change FLIPPED from `z.infer` to `z.input`. Those names all still exist and '
     + 'still resolve; what moved is which of a schema\'s two shapes they denote, and only '
     + 'where the two differ (663 of 1384 — the rest are isomorphic and the flip is a no-op '
     + 'there, pinned as such). A consumer holding an authored literal is made MORE correct '
     + 'by it, silently; one holding a parse result gets a tsc error at the first defaulted '
     + 'key it reads. Registering that as a rename would misdescribe it — no name was '
-    + 'retired — and the changeset carries its own FROM -> TO for it. ADR-0122 D8/D9, '
-    + '#6083 (PR #6279).',
+    + 'retired — and the changeset carries its own FROM -> TO for it. ADR-0122 D8/D9 (its '
+    + 'phase 2, which moved every bare name to the author state).',
   acceptanceCriteria:
     'No source imports a name ending `Input` from `@objectstack/spec` except the nine listed '
     + 'above: `rg "\\b\\w+Input\\b" --type ts` over consumer code resolves only to those. A '

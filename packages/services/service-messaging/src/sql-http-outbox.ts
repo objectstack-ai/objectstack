@@ -324,7 +324,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 `SqlHttpOutbox.claim: ${this.objectName}.headers_json is declared \`internal: true\`, `
                     + 'but this data engine does not implement resolveInternalField() — stored headers '
                     + 'cannot be recovered, and a delivery must not go out missing the headers it was '
-                    + 'authored with (#8118). The claimed rows revert to pending via the claim TTL.',
+                    + 'authored with. The claimed rows revert to pending via the claim TTL.',
             );
         }
         return engine.resolveInternalField(this.objectName, ids, 'headers_json');
@@ -334,7 +334,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
      * Record one attempt's outcome — see {@link IHttpOutbox.ack}.
      *
      * [#17634] Handed `claimed` — as `HttpDispatcher` always hands it — this is
-     * the compare-and-set `SqlNotificationOutbox.ack` performs (#11453, #11859):
+     * the compare-and-set `SqlNotificationOutbox.ack` performs (commits 1a47a5368, d9cf78eaa):
      * two deterministic refusals read before any write, the same two tests
      * re-stated IN a conditional UPDATE (the half that holds under the race),
      * and a read-back that reports a write which matched nothing instead of a

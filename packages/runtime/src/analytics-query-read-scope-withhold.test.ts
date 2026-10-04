@@ -44,7 +44,7 @@
  * withhold got broader" and "the withhold swallowed everything" are one edit
  * apart.
  *
- * ⚠️ [#12281] The DECLARED half of that predicate has since widened, and this
+ * ⚠️ [commit 0783d7b80] The DECLARED half of that predicate has since widened, and this
  * file's half-envelope case was reversed with it. `declaresServerFault` required
  * a non-empty string `code` beside the 5xx and read the `status` spelling only,
  * so this exit withheld a NARROWER band than `/data`. Ruled 2026-08-27 on #12509
@@ -71,6 +71,13 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so this harness signs its caller in: an `auth` slot in the shape
+// `resolveExecutionContext` reads answers a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 // ── harness (the shape `dispatcher-plugin.error-envelope.test.ts` uses) ───────
 
 function makeFakeServer() {
@@ -92,8 +99,8 @@ function makeFakeServer() {
 
 function makeCtx(fakeServer: any, analytics: unknown) {
     const kernel = {
-        getService: (name: string) => (name === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : undefined),
+        getService: (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     return {
         getKernel: () => kernel,
@@ -270,12 +277,12 @@ describe('[#5811] POST /analytics/query — a read-scope failure says nothing ab
     });
 
     it('[#12281] a 5xx with only HALF an envelope is ALSO withheld — a status alone declares it', async () => {
-        // ⚠️ REVERSED, deliberately. Until #12281 this case asserted the opposite
+        // ⚠️ REVERSED, deliberately. Until commit 0783d7b80 this case asserted the opposite
         // ("a code is required, not just a status"), on the reasoning that a
         // producer shipping a status without a code "has not declared anything".
         //
         // The maintainer ruled otherwise on #12509, 2026-08-27 (option D),
-        // propagated to #12281: `errorResponseBase` adopts the structural
+        // landed in commit 0783d7b80: `errorResponseBase` adopts the structural
         // withhold for EVERY declared 5xx message, aligning to `/data` — whose
         // `declaredHttpStatus` never looked at `code` at all. Naming a 5xx status
         // IS the declaration; the code is a second, independent channel (#9106),

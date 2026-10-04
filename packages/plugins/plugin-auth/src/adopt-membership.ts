@@ -243,7 +243,7 @@ export async function adoptExistingMembership(
   // reporting. Keep the `console.info` default AND the receiver.
   const line =
     `[membership] adopted the existing sys_member row instead of inserting a second one ` +
-    `(${decision.verdict}) — the (organization_id, user_id) pair is unique by declaration [#7725]`;
+    `(${decision.verdict}) — the (organization_id, user_id) pair is unique by declaration`;
   const meta = {
     memberId: existing.id,
     organizationId,

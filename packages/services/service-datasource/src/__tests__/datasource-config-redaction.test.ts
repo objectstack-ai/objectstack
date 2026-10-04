@@ -404,7 +404,7 @@ describe('GREEN ON MAIN — #8078 is not weakened by anything above', () => {
 });
 
 describe('#9040 — the passthrough spelling, both halves at the service door', () => {
-  /** A legacy mongo row written before #9040: the password rides the MongoClient passthrough. */
+  /** A legacy mongo row written before commit 24206416a: the password rides the MongoClient passthrough. */
   const LEGACY_MONGO: StoredDatasource = {
     name: 'legacy_mongo',
     driver: 'mongodb',

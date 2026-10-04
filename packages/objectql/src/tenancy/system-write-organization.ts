@@ -69,7 +69,7 @@
  *    isPlatformObjectOutOfTenantAuditScope}, `platform-object-tenancy.ts`).
  *
  *    ⚠️ This exclusion used to be the whole `sys_` / `cloud_` / `ai_`
- *    NAMESPACE, on #8672's reasoning that "an org-less row is defensible for
+ *    NAMESPACE, on the reasoning commit ff08691e6 recorded, that "an org-less row is defensible for
  *    `sys_permission_set`". The maintainer WITHDREW the wholesale form on
  *    2026-08-31 (#13491, 联案 #13497): that reasoning inherits **per object**,
  *    and the same namespace also holds objects whose org-less rows are a
@@ -302,7 +302,7 @@ function buildRefusalMessage(
     `${DEFAULT_TENANT_FIELD} = NULL, which the autonumber counter and the partitioned unique index ` +
     `(COALESCE(${DEFAULT_TENANT_FIELD}, '${GLOBAL_TENANT}'), <field>) both collapse to the ` +
     `'${GLOBAL_TENANT}' pseudo-tenant — a second counter that cannot see the organization's own, so a ` +
-    `field declared unique silently gets the same value twice (#8844). Nothing was written. Fix it by ` +
+    `field declared unique silently gets the same value twice. Nothing was written. Fix it by ` +
     `carrying the organization the way a session write does: pass it on the execution context ` +
     `({ context: { isSystem: true, tenantId: '<organization id>' } }), or set ${DEFAULT_TENANT_FIELD} ` +
     `on the record itself. If rows of '${object}' are genuinely platform-global and belong to no ` +

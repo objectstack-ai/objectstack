@@ -1,44 +1,39 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
-  // Field Mapping
-  ConnectorFieldMappingSchema,
-  
-  // Data Sync
-  DataSyncConfigSchema,
-  SyncStrategySchema,
-  ConnectorConflictResolutionSchema,
-  
-  // Webhook
-  WebhookConfigSchema,
-  WebhookEventSchema,
-  
+  // (Connector-attached sync — `DataSyncConfigSchema`, `SyncStrategySchema`,
+  // `ConnectorConflictResolutionSchema` and `ConnectorFieldMappingSchema` — was
+  // retired with `connector.syncConfig` / `connector.fieldMappings`, ADR-0049;
+  // the definition moved to the target `mapping`'s `connectorSource`.
+  // `connector-sync-retirement.test.ts` pins the refusal and the absence.)
+
+  // (The connector-nested webhook shape — `WebhookConfigSchema` /
+  // `WebhookEventSchema` — was retired with `connector.webhooks`, ADR-0049;
+  // `connector-resilience-keys-retirement.test.ts` pins its absence.)
+
   // Retry (rate limiting retired in #4911 — see the pin block at the bottom)
   RetryConfigSchema,
   
   // Base Connector
   ConnectorSchema,
   ConnectorTypeSchema,
-  ConnectorStatusSchema,
 
   // Action + its declared upstream effect (#4395)
   ConnectorActionSchema,
   ConnectorActionEffectSchema,
 
-  // Health & Circuit Breaker
-  HealthCheckConfigSchema,
-  CircuitBreakerConfigSchema,
-  ConnectorHealthSchema,
+  // (Health & circuit breaker — `HealthCheckConfigSchema`,
+  // `CircuitBreakerConfigSchema`, `ConnectorHealthSchema` — and
+  // `ConnectorStatusSchema` were retired with `connector.health` /
+  // `connector.status`, ADR-0049; pinned in
+  // `connector-resilience-keys-retirement.test.ts`.)
 
-  // Trigger (declared-but-unread, #3197 — the pin block at the bottom judges
-  // its unit-carrying key name, not a runtime it does not have)
-  ConnectorTriggerSchema,
-  
+  // (The trigger shape — `ConnectorTriggerSchema` — was retired with
+  // `connector.triggers`, ADR-0049; `connector-triggers-retirement.test.ts`
+  // pins its absence and the refusal of both of its interval spellings.)
+
   // Types
   type Connector,
-  type ConnectorFieldMapping,
-  type DataSyncConfig,
-  type WebhookConfig,
 
   // The `/meta/connector/:name` door's schema (#6245) — `ConnectorSchema` plus
   // the ADR-0097 cross-field rules. The envelope pins below drive BOTH, because
@@ -47,7 +42,7 @@ import {
 } from './connector.zod';
 
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
-// [#14676] the retirement pins at the bottom of this file
+// [commit 13c48c2a5] the retirement pins at the bottom of this file
 import {
   MIGRATIONS_BY_MAJOR,
   RETIRED_DEFS_BY_MAJOR,
@@ -181,153 +176,22 @@ describe('ConnectorAuthConfigSchema (Authentication)', () => {
 });
 
 // ============================================================================
-// Field Mapping Tests
+// Field Mapping / Data Sync Configuration Tests — RETIRED
 // ============================================================================
-
-describe('ConnectorFieldMappingSchema', () => {
-  it('should accept valid field mapping', () => {
-    const mapping: ConnectorFieldMapping = {
-      source: 'firstName',
-      target: 'first_name',
-      dataType: 'string',
-      syncMode: 'bidirectional',
-    };
-    
-    expect(() => ConnectorFieldMappingSchema.parse(mapping)).not.toThrow();
-  });
-  
-  // Was `should accept field with transformation`, asserting this exact literal
-  // parsed and came back as `type: 'javascript'`. Replaced rather than
-  // re-spelled: #5552 retired the key and the whole union behind it, so there is
-  // no other member to move the fixture to. Its `value.toUpperCase()` is also
-  // the string that got the bug filed — `ExpressionInputSchema` wrapped it as
-  // `dialect: 'cel'`, where that method does not exist.
-  it('[#5552] rejects a field transformation — the key and its union are retired', () => {
-    const result = ConnectorFieldMappingSchema.safeParse({
-      source: 'name',
-      target: 'full_name',
-      transform: { type: 'javascript', expression: 'value.toUpperCase()' },
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.error!.issues[0]!.path.join('.')).toBe('transform');
-    expect(result.error!.issues[0]!.message).toMatch(/removed in @objectstack\/spec 17\.0\.0/s);
-  });
-  
-  it('should use default values', () => {
-    const mapping = {
-      source: 'field1',
-      target: 'field_1',
-    };
-    
-    const parsed = ConnectorFieldMappingSchema.parse(mapping);
-    expect(parsed.required).toBe(false);
-    expect(parsed.syncMode).toBe('bidirectional');
-  });
-});
+// (`ConnectorFieldMappingSchema` and `DataSyncConfigSchema` tests lived here
+// until connector-attached sync was retired from the connector under ADR-0049 —
+// no engine ever ran a sync or moved a value through a connector field mapping.
+// The retirement is pinned in `connector-sync-retirement.test.ts`; the
+// target-side binding in `data/mapping-connector-source.test.ts`.)
 
 // ============================================================================
-// Data Sync Configuration Tests
+// Webhook Configuration Tests — RETIRED
 // ============================================================================
-
-describe('DataSyncConfigSchema', () => {
-  it('should accept valid sync configuration', () => {
-    const config: DataSyncConfig = {
-      strategy: 'incremental',
-      direction: 'bidirectional',
-      // `schedule` was deleted outright (#16320) — the strip is pinned in
-      // `cron-typed-positions-retirement.test.ts`.
-      realtimeSync: true,
-      conflictResolution: 'latest_wins',
-      batchSize: 1000,
-      deleteMode: 'soft_delete',
-    };
-    
-    expect(() => DataSyncConfigSchema.parse(config)).not.toThrow();
-  });
-  
-  it('should use default values', () => {
-    const config = {};
-    
-    const parsed = DataSyncConfigSchema.parse(config);
-    expect(parsed.strategy).toBe('incremental');
-    expect(parsed.direction).toBe('import');
-    expect(parsed.realtimeSync).toBe(false);
-    expect(parsed.conflictResolution).toBe('latest_wins');
-    expect(parsed.batchSize).toBe(1000);
-    expect(parsed.deleteMode).toBe('soft_delete');
-  });
-  
-  it('should validate batch size range', () => {
-    expect(() => DataSyncConfigSchema.parse({ batchSize: 0 })).toThrow();
-    expect(() => DataSyncConfigSchema.parse({ batchSize: 10001 })).toThrow();
-    expect(() => DataSyncConfigSchema.parse({ batchSize: 500 })).not.toThrow();
-  });
-
-  it('resolves conflicts with the CONNECTOR vocabulary, unchanged by the #4738 rename', () => {
-    // `ConflictResolution` → `ConnectorConflictResolution` renamed the TS
-    // export only; the authored value domain is byte-for-byte the same.
-    (['source_wins', 'target_wins', 'latest_wins', 'manual'] as const).forEach((v) => {
-      expect(() => ConnectorConflictResolutionSchema.parse(v)).not.toThrow();
-    });
-    // The retired automation-side vocabulary was disjoint precisely where it
-    // mattered — these values were never part of the connector strategy:
-    expect(() => ConnectorConflictResolutionSchema.parse('destination_wins')).toThrow();
-    expect(() => ConnectorConflictResolutionSchema.parse('merge')).toThrow();
-  });
-});
-
-// ============================================================================
-// Webhook Configuration Tests
-// ============================================================================
-
-describe('WebhookConfigSchema', () => {
-  it('should accept valid webhook configuration', () => {
-    const webhook: WebhookConfig = {
-      name: 'test_webhook',
-      url: 'https://api.example.com/webhooks',
-      events: ['record.created', 'record.updated'],
-      secret: 'webhook-secret',
-      signatureAlgorithm: 'hmac_sha256',
-    };
-    
-    expect(() => WebhookConfigSchema.parse(webhook)).not.toThrow();
-  });
-  
-  it('should use default values', () => {
-    const webhook = {
-      name: 'default_webhook',
-      url: 'https://api.example.com/webhooks',
-      events: ['record.created'],
-    };
-    
-    const parsed = WebhookConfigSchema.parse(webhook);
-    expect(parsed.signatureAlgorithm).toBe('hmac_sha256');
-    expect(parsed.timeoutMs).toBe(30000);
-  });
-
-  // #4001 batch 11 closed the BASE (`automation/webhook.zod.ts`), and zod
-  // carries both the strictness and the base's error map through `.extend()`.
-  // That is the trap the ledger records as finding 16 — a base tightened for
-  // one surface silently retightening another — so it is asserted here, on the
-  // extension's own file, rather than left for someone to discover.
-  it('inherits the base webhook\'s strictness through `.extend()` (#4001)', () => {
-    const result = WebhookConfigSchema.safeParse({
-      name: 'test_webhook', url: 'https://api.example.com/webhooks', notAKey: 1,
-    });
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
-  });
-
-  it('still accepts the two keys the extension adds', () => {
-    // The base names `signatureAlgorithm` in `extraKeys` so a typo of it is
-    // still suggestible on this surface, where the base has never heard of it.
-    expect(WebhookConfigSchema.safeParse({
-      name: 'test_webhook', url: 'https://api.example.com/webhooks',
-      events: ['record.created'], signatureAlgorithm: 'hmac_sha512',
-    }).success).toBe(true);
-  });
-});
+// (`WebhookConfigSchema` tests lived here until the connector-nested `webhooks`
+// shape was retired under ADR-0049 — a webhook nested in a connector was never
+// registered or delivered. The retirement is pinned in
+// `connector-resilience-keys-retirement.test.ts`; the delivered webhook shape is
+// `automation/webhook.zod.ts`, tested beside it.)
 
 // ============================================================================
 // Retry Tests
@@ -432,7 +296,6 @@ describe('ConnectorSchema', () => {
         type: 'api-key',
         key: 'test-key',
       },
-      status: 'inactive',
       enabled: true,
     };
     
@@ -469,28 +332,14 @@ describe('ConnectorSchema', () => {
         authorizationUrl: 'https://auth.example.com/authorize',
         tokenUrl: 'https://auth.example.com/token',
       },
-      syncConfig: {
-        strategy: 'incremental',
-        direction: 'bidirectional',
-      },
-      fieldMappings: [
-        {
-          source: 'id',
-          target: 'external_id',
-        },
-      ],
-      webhooks: [
-        {
-          name: 'connector_webhook',
-          url: 'https://api.example.com/webhook',
-          events: ['record.created'],
-        },
-      ],
+      // `syncConfig` and `fieldMappings` were authored here until ADR-0049
+      // retired them (`connector-sync-retirement.test.ts`).
+      // `webhooks` and `status` were authored here until ADR-0049 retired them
+      // with `health` (`connector-resilience-keys-retirement.test.ts`).
       // `rateLimitConfig` was authored here until #4911 retired it.
       retryConfig: {
         maxAttempts: 3,
       },
-      status: 'active',
       enabled: true,
       metadata: {
         version: '1.0',
@@ -499,145 +348,18 @@ describe('ConnectorSchema', () => {
     
     const parsed = ConnectorSchema.parse(connector);
     expect(parsed.description).toBe('A comprehensive connector');
-    expect(parsed.fieldMappings).toHaveLength(1);
-    expect(parsed.webhooks).toHaveLength(1);
+    expect(parsed.retryConfig?.maxAttempts).toBe(3);
     expect(parsed.metadata?.version).toBe('1.0');
   });
 });
 
 // ============================================================================
-// Health Check Configuration Tests
+// Health Check / Circuit Breaker / Connector Health Tests — RETIRED
 // ============================================================================
-
-describe('HealthCheckConfigSchema', () => {
-  it('should accept minimal health check config', () => {
-    const config = HealthCheckConfigSchema.parse({
-      enabled: true,
-    });
-
-    expect(config.enabled).toBe(true);
-    expect(config.intervalMs).toBe(60000);
-    expect(config.timeoutMs).toBe(5000);
-    expect(config.expectedStatus).toBe(200);
-    expect(config.unhealthyThreshold).toBe(3);
-    expect(config.healthyThreshold).toBe(1);
-  });
-
-  it('should accept full health check config', () => {
-    const config = HealthCheckConfigSchema.parse({
-      enabled: true,
-      intervalMs: 30000,
-      timeoutMs: 10000,
-      endpoint: '/health',
-      method: 'HEAD',
-      expectedStatus: 204,
-      unhealthyThreshold: 5,
-      healthyThreshold: 2,
-    });
-
-    expect(config.endpoint).toBe('/health');
-    expect(config.method).toBe('HEAD');
-    expect(config.expectedStatus).toBe(204);
-  });
-
-  it('should accept all HTTP methods for health check', () => {
-    const methods = ['GET', 'HEAD', 'OPTIONS'] as const;
-    methods.forEach(method => {
-      const config = HealthCheckConfigSchema.parse({ enabled: true, method });
-      expect(config.method).toBe(method);
-    });
-  });
-});
-
-// ============================================================================
-// Circuit Breaker Configuration Tests
-// ============================================================================
-
-describe('CircuitBreakerConfigSchema', () => {
-  it('should accept minimal circuit breaker config', () => {
-    const config = CircuitBreakerConfigSchema.parse({
-      enabled: true,
-    });
-
-    expect(config.enabled).toBe(true);
-    expect(config.failureThreshold).toBe(5);
-    expect(config.resetTimeoutMs).toBe(30000);
-    expect(config.halfOpenMaxRequests).toBe(1);
-    expect(config.monitoringWindowMs).toBe(60000);
-  });
-
-  it('should accept full circuit breaker config', () => {
-    const config = CircuitBreakerConfigSchema.parse({
-      enabled: true,
-      failureThreshold: 10,
-      resetTimeoutMs: 60000,
-      halfOpenMaxRequests: 3,
-      monitoringWindowMs: 120000,
-      fallbackStrategy: 'cache',
-    });
-
-    expect(config.failureThreshold).toBe(10);
-    expect(config.fallbackStrategy).toBe('cache');
-  });
-
-  it('should accept all fallback strategies', () => {
-    const strategies = ['cache', 'default_value', 'error', 'queue'] as const;
-    strategies.forEach(strategy => {
-      const config = CircuitBreakerConfigSchema.parse({
-        enabled: true,
-        fallbackStrategy: strategy,
-      });
-      expect(config.fallbackStrategy).toBe(strategy);
-    });
-  });
-});
-
-// ============================================================================
-// Connector Health Configuration Tests
-// ============================================================================
-
-describe('ConnectorHealthSchema', () => {
-  it('should accept empty health config', () => {
-    const health = ConnectorHealthSchema.parse({});
-
-    expect(health.healthCheck).toBeUndefined();
-    expect(health.circuitBreaker).toBeUndefined();
-  });
-
-  it('should accept combined health check and circuit breaker', () => {
-    const health = ConnectorHealthSchema.parse({
-      healthCheck: {
-        enabled: true,
-        intervalMs: 30000,
-        endpoint: '/ping',
-      },
-      circuitBreaker: {
-        enabled: true,
-        failureThreshold: 3,
-        fallbackStrategy: 'queue',
-      },
-    });
-
-    expect(health.healthCheck?.enabled).toBe(true);
-    expect(health.circuitBreaker?.fallbackStrategy).toBe('queue');
-  });
-
-  it('should accept connector with health config', () => {
-    const connector = ConnectorSchema.parse({
-      name: 'resilient_connector',
-      label: 'Resilient Connector',
-      type: 'api',
-      authentication: { type: 'none' },
-      health: {
-        healthCheck: { enabled: true },
-        circuitBreaker: { enabled: true, failureThreshold: 5 },
-      },
-    });
-
-    expect(connector.health?.healthCheck?.enabled).toBe(true);
-    expect(connector.health?.circuitBreaker?.failureThreshold).toBe(5);
-  });
-});
+// (`HealthCheckConfigSchema`, `CircuitBreakerConfigSchema` and
+// `ConnectorHealthSchema` tests lived here until `connector.health` was retired
+// under ADR-0049 — no connector probe or breaker ever ran. The retirement is
+// pinned in `connector-resilience-keys-retirement.test.ts`.)
 
 // ─── [#4911] Outbound rate limiting retired — with the [#4684] pin folded in ──
 //
@@ -862,16 +584,23 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
 // The `./data` side is not a spelling variant of anything. The tests below pin
 // the three incompatibilities, because they are the ARGUMENT for the rename and
 // the thing a future "let's just unify these" has to defeat.
+//
+// ⚠️ Protocol 18 retired the `./integration` side whole, with
+// `connector.fieldMappings` (ADR-0049 — nothing ever moved a value through a
+// connector field mapping; `connector-sync-retirement.test.ts`). Two
+// declarations remain, and the pins below now hold the base against the import
+// mapping alone — plus the fact that the connector name is GONE rather than
+// folded into either survivor.
 describe('[#4703] FieldMapping no longer names three declarations', () => {
   it('each entry exposes exactly one field-mapping name, and not the others’', async () => {
     const integrationEntry = await import('./index');
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
 
-    expect(integrationEntry.ConnectorFieldMappingSchema).toBeDefined();
+    // The connector side left whole in protocol 18 (ADR-0049).
+    expect('ConnectorFieldMappingSchema' in integrationEntry).toBe(false);
     expect(dataEntry.ImportFieldMappingSchema).toBeDefined();
-    // The base keeps the bare name — it is the incumbent, and two other defs
-    // extend it.
+    // The base keeps the bare name — it is the incumbent.
     expect(sharedEntry.FieldMappingSchema).toBeDefined();
 
     // No compatibility alias on either renamed side. Re-exporting the old name
@@ -884,7 +613,6 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
 
   it('./shared keeps the base declaration byte-for-byte', async () => {
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     // Three live keys since #5552 retired `transform`: `source`/`target`
     // required, `defaultValue` optional.
@@ -899,12 +627,6 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
       target: 'first_name',
       defaultValue: '',
     });
-
-    // And it is a DIFFERENT object from the connector superset that extends it
-    // — `.extend()` builds a new schema, which is why both were in the baseline.
-    expect(integrationEntry.ConnectorFieldMappingSchema).not.toBe(
-      sharedEntry.FieldMappingSchema,
-    );
   });
 
   // ── Difference 1: `transform` is the same key name meaning opposite things.
@@ -917,23 +639,18 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
   //    prescription" versus "runs on every imported row", which is the loudest
   //    the distinction has ever been, and the reason a snippet copied across
   //    these domains can no longer half-work.
-  it('`transform` is retired on shared/integration and live on ./data', async () => {
+  it('`transform` is retired on ./shared and live on ./data', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     const unionForm = { type: 'cast' as const, targetType: 'string' as const };
 
-    // shared / integration: the object form is refused BY NAME, with the #5552
-    // prescription — not stripped, and not a generic "unrecognized key".
-    for (const schema of [
-      sharedEntry.FieldMappingSchema,
-      integrationEntry.ConnectorFieldMappingSchema,
-    ]) {
-      const result = schema.safeParse({ source: 'a', target: 'b', transform: unionForm });
-      expect(result.success).toBe(false);
-      expect(result.error!.issues.some((i) => /FieldMappingTransform/.test(i.message))).toBe(true);
-    }
+    // shared: the object form is refused BY NAME, with the #5552 prescription —
+    // not stripped, and not a generic "unrecognized key". (The integration
+    // extender carried the same tombstone until it left whole in protocol 18.)
+    const result = sharedEntry.FieldMappingSchema.safeParse({ source: 'a', target: 'b', transform: unionForm });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => /FieldMappingTransform/.test(i.message))).toBe(true);
     // The enum form does not get in either — retired is retired, whatever the
     // value's shape.
     expect(
@@ -965,10 +682,9 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
 
   // ── Difference 2: cardinality. An import may compose one target field from
   //    several source columns; a connector mapping is 1:1.
-  it('./data accepts arrays for source/target where the other two take a single string', async () => {
+  it('./data accepts arrays for source/target where the base takes a single string', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     const composed = { source: ['first_name', 'last_name'], target: 'full_name' };
 
@@ -983,17 +699,15 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     ).toEqual(['first_name', 'last_name']);
 
     expect(sharedEntry.FieldMappingSchema.safeParse(composed).success).toBe(false);
-    expect(integrationEntry.ConnectorFieldMappingSchema.safeParse(composed).success).toBe(false);
   });
 
   // ── Difference 3: OPPOSITE failure modes for an unknown key. This is what
   //    made one shared name actively dangerous: the same typo is a hard error
   //    on one side and a silent no-op on the other (ADR-0104's silent-strip
   //    class), so a snippet moved between domains "works" and does nothing.
-  it('an unknown key THROWS on ./data and is silently stripped by the other two', async () => {
+  it('an unknown key THROWS on ./data and is silently stripped by the base', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     // `strictObject` (#4001) — rejects, and prescribes the canonical spelling.
     const rejected = dataEntry.ImportFieldMappingSchema.safeParse({
@@ -1004,19 +718,12 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     expect(rejected.success).toBe(false);
     expect(JSON.stringify(rejected.error?.issues)).toContain('source');
 
-    // Plain `z.object` on the other two — the foreign key vanishes and the
-    // parse reports success. Pinned, not fixed: it is correct behaviour for a
+    // Plain `z.object` on the base — the foreign key vanishes and the parse
+    // reports success. Pinned, not fixed: it is correct behaviour for a
     // non-strict schema. The defect was the shared NAME.
     expect(
       sharedEntry.FieldMappingSchema.parse({ source: 'a', target: 'b', syncMode: 'read_only' }),
     ).toEqual({ source: 'a', target: 'b' });
-    expect(
-      integrationEntry.ConnectorFieldMappingSchema.parse({
-        source: 'a',
-        target: 'b',
-        params: { separator: ' ' }, // a `./data` key, meaningless here
-      }),
-    ).toEqual({ source: 'a', target: 'b', required: false, syncMode: 'bidirectional' });
   });
 
   // The load-bearing one, and the reason this block exists at all: `FieldMapping`
@@ -1042,10 +749,11 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     }
 
 
-    // Each renamed name resolves into its own domain's file…
+    // The connector side left whole in protocol 18 (ADR-0049)…
     for (const name of ['ConnectorFieldMapping', 'ConnectorFieldMappingSchema']) {
-      expect(originFileOf('./integration', name), name).toBe('src/integration/connector.zod.ts');
+      expect(integration.get(name), `${name} must be gone from ./integration`).toBeUndefined();
     }
+    // …the import side resolves into its own domain's file…
     for (const name of ['ImportFieldMapping', 'ImportFieldMappingSchema']) {
       expect(originFileOf('./data', name), name).toBe('src/data/mapping.zod.ts');
     }
@@ -1085,7 +793,7 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
 
 // ============================================================================
 // ADR-0010 protection envelope — PRESERVED on round-trip, not merely tolerated
-// (#6362, split out of #6245)
+// (commit b5404f496, the connector half #6245 left)
 // ============================================================================
 
 /**
@@ -1213,22 +921,13 @@ describe('ADR-0010 protection envelope (#6362)', () => {
     expect(parsed._packageId).toBe('com.acme.billing');
   });
 
-  it('WebhookConfigSchema — the nested webhook — preserves it as well', () => {
-    // `WebhookConfigSchema` extends `WebhookSchema`, which has carried the
-    // spread since #4001 batch 11. Pinned here so the inherited behaviour
-    // cannot regress silently through a future `.extend()`/`.omit()` on the
-    // connector side.
-    const parsed = WebhookConfigSchema.parse({
-      name: 'billing_events',
-      url: 'https://example.com/hooks/billing',
-      ...STAMPED_ENVELOPE,
-    });
-    expect(parsed._packageId).toBe('com.acme.billing');
-    expect(parsed._provenance).toBe('package');
-  });
+  // (A fifth case pinned the envelope through `WebhookConfigSchema`, the
+  // connector-nested webhook. That shape was retired with `connector.webhooks`
+  // under ADR-0049; the delivered `WebhookSchema` it extended keeps the spread
+  // and is pinned beside it in `automation/`.)
 });
 
-// ─── [#14676] `connector.errorMapping` RETIRED, with the three defs it carried ──
+// ─── [commit 13c48c2a5] `connector.errorMapping` RETIRED, with the three defs it carried ──
 //
 // ADR-0049 enforce-or-remove; triage ruling 2026-09-02 (route: removal via the
 // `spec-property-retirement` playbook; the split condition — a downstream
@@ -1390,7 +1089,7 @@ describe('[#14676] connector.errorMapping retirement', () => {
     const connector: Connector = {
       ...ERROR_MAPPING_WELL_FORMED,
       // @ts-expect-error — `errorMapping` is a retiredKey() tombstone: its
-      // input type is `never`, so a typed literal cannot carry it (#14676).
+      // input type is `never`, so a typed literal cannot carry it (commit 13c48c2a5).
       errorMapping: AUTHORED_ERROR_MAPPING,
     };
     // The parse channel agrees with the type channel on the same literal.
@@ -1471,9 +1170,12 @@ describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + Connector
     for (const name of [
       'ConnectorSchema',
       'DeclarativeConnectorEntrySchema',
-      'ConnectorHealthSchema',
+      // (`ConnectorHealthSchema` stood here as a survivor until `connector.health`
+      // was itself retired, ADR-0049 — `connector-resilience-keys-retirement.test.ts`.)
       'RetryConfigSchema',
-      'ConnectorFieldMappingSchema',
+      // (`ConnectorFieldMappingSchema` stood here as a survivor until
+      // `connector.fieldMappings` was itself retired, ADR-0049 —
+      // `connector-sync-retirement.test.ts`.)
     ]) {
       expect(integrationNames, `${name} must SURVIVE this retirement`).toContain(name);
     }
@@ -1509,42 +1211,11 @@ describe('[#14676] ADR-0087 registration', () => {
   });
 });
 
-// #15680 (stack card 5/6 of #14478) — ruling B. Both old spellings are
-// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
-// never on a bare `toThrow()`. Neither shape is strict, so without the
-// tombstones the old keys would be STRIPPED in silence: a breaker would fall
-// back to its 60-second default window while the author believed they had
-// widened it, and a polling trigger would lose its cadence entirely.
-describe('connector durations carry their unit (#15680)', () => {
-  it('REFUSES the retired `monitoringWindow` with the rename in the message', () => {
-    const result = CircuitBreakerConfigSchema.safeParse({ enabled: true, monitoringWindow: 120000 });
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'monitoringWindow');
-    expect(issue).toBeDefined();
-    expect(issue!.code).not.toBe('unrecognized_keys');
-    expect(issue!.message).toContain('`CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs`');
-  });
-
-  it('REFUSES the retired trigger `interval` with the rename in the message', () => {
-    const result = ConnectorTriggerSchema.safeParse({
-      key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60,
-    });
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'interval');
-    expect(issue).toBeDefined();
-    expect(issue!.code).not.toBe('unrecognized_keys');
-    expect(issue!.message).toContain('`ConnectorTrigger.interval` was renamed to `intervalSeconds`');
-  });
-
-  it('accepts both new spellings and keeps the 60000 breaker default', () => {
-    expect(CircuitBreakerConfigSchema.parse({ enabled: true }).monitoringWindowMs).toBe(60000);
-    expect(CircuitBreakerConfigSchema.parse({ enabled: true, monitoringWindowMs: 120000 }).monitoringWindowMs).toBe(120000);
-    expect(ConnectorTriggerSchema.parse({
-      key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60,
-    }).intervalSeconds).toBe(60);
-  });
-
-  it('leaves `resetTimeoutMs` alone — it already carried its unit, and is the neighbour that made the bare `monitoringWindow` a collision', () => {
-    expect(CircuitBreakerConfigSchema.parse({ enabled: true }).resetTimeoutMs).toBe(30000);
-  });
-});
+// #15680 (stack card 5/6 of #14478) — ruling B pinned the connector durations
+// that carried no unit here: `CircuitBreakerConfig.monitoringWindow` →
+// `monitoringWindowMs` and `ConnectorTrigger.interval` → `intervalSeconds`. Both
+// halves left with the container each key lived in (ADR-0049, the same
+// unreleased protocol step): the breaker half with the whole `health` block
+// (`connector-resilience-keys-retirement.test.ts`), and the trigger half with the
+// whole `triggers` array (`connector-triggers-retirement.test.ts`), each of which
+// pins that both spellings of its key now meet the removal's prescription.

@@ -127,6 +127,9 @@ import { describe, it, expect } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
+// [#21516] The rest of the stored-metadata family the repository writes through: the
+// engine refuses a name the registry does not resolve, so the harness registers it as a boot does.
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 
 const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
@@ -238,6 +241,7 @@ async function makeProtocol() {
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(sysMetadataObject, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any, 'test-package');
     const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_prod');
     const rows = () => Array.from(stores.get('sys_metadata')?.values() ?? []) as any[];
     // [#8819] The history table, for the rollback verb in group D — it restores

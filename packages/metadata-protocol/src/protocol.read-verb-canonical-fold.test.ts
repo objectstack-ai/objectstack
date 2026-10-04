@@ -210,7 +210,7 @@ async function expectSpellingRefusal(run: () => Promise<unknown>) {
 }
 
 describe('#9157 — the population, re-derived from the code rather than from the card', () => {
-    it('every `/meta` request-boundary verb with a required `type` calls the fold — all twelve', () => {
+    it('every `/meta` request-boundary verb with a required `type` calls the fold — all sixteen', () => {
         // ⭐ The card hand-listed "nine fold, three do not". Hand-listed sets of
         // this shape have shipped short before, so the set is DERIVED here and
         // the derivation is the pin: a tenth verb arriving unfolded turns this
@@ -276,10 +276,20 @@ describe('#9157 — the population, re-derived from the code rather than from th
             'getMetaItemCached',
             'getMetaItemLayered',
             'getMetaItems',
+            // [#20552] The execution face of the same flattened read — an
+            // in-process caller hands it a type spelling too.
+            'getMetaItemsForExecution',
             'historyMetaItem',
+            // [#20761] The loader's-set read and the one authoring rule every
+            // flow write door asks (below) — both take the type a caller names.
+            'packagedArtifactOwner',
+            // [#20679] The locked-base verdict a second write door asks — it
+            // takes the type a caller names, so it folds at the producer too.
+            'packagedBaseRefusal',
             'publishMetaItem',
             'rollbackMetaItem',
             'saveMetaItem',
+            'tenantAuthoredWriteRefusal',
         ]);
     });
 

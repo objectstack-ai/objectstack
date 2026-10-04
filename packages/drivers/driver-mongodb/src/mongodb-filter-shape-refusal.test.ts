@@ -74,6 +74,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { translateFilter } from './mongodb-filter.js';
+import { lowerFilterCondition } from '@objectstack/spec/data';
 
 /** The shape `mapDataError` / `sendError` read off a thrown driver error. */
 interface WireBearingError extends Error {
@@ -164,11 +165,15 @@ describe('[#5346] driver-mongodb refuses a malformed $between comparand', () => 
     });
   });
 
-  it('the whole-day upper bound rule (#4042) is untouched', () => {
-    // A bare-day max still compiles half-open, which is the behaviour the arm
-    // carried before the `else` was added — the refusal must not have changed
-    // what a VALID range means.
+  it('a bare-day range is translated as written; the whole-day bound is the seam`s (#20822)', () => {
+    // The refusal must not change what a VALID range means. Since #20822 a
+    // bare-day max is compiled as written here (ADR-0053 D-D1 item 5): the
+    // whole-day bound (#4042) is applied once, by the shared lowering at the
+    // seams, which hands this arm `$gte` and `$lt` the next day instead.
     expect(translateFilter({ due: { $between: ['2026-07-01', '2026-07-28'] } })).toEqual({
+      due: { $gte: '2026-07-01', $lte: '2026-07-28' },
+    });
+    expect(translateFilter(lowerFilterCondition({ due: { $between: ['2026-07-01', '2026-07-28'] } }))).toEqual({
       due: { $gte: '2026-07-01', $lt: '2026-07-29' },
     });
   });

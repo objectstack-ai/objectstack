@@ -1,5 +1,6 @@
 ---
-title: Events Queue
+title: Events Queue — Kernel Protocol reference
+navTitle: Events Queue
 description: "Events Queue schemas of the ObjectStack Kernel Protocol: EventQueueConfig and 2 more — each property with its type, default and a TypeScript example."
 ---
 
@@ -29,7 +30,7 @@ const result = EventQueueConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional (default: `"events"`) | Event queue name |
 | **concurrency** | `integer` | optional (default: `10`) | Max concurrent event handlers |
-| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Default retry policy for events |
+| **retryPolicy** | `{ maxRetries?: integer; backoffStrategy?: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs?: integer; maxDelayMs?: integer }` | optional | Default retry policy for events |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name for failed events |
 | **priorityEnabled** | `boolean` | optional (default: `true`) | Process events based on priority |
 
@@ -73,7 +74,7 @@ const result = EventQueueConfigSchema.parse(data);
 | **retentionDays** | `integer` | optional (default: `365`) | Days to retain events |
 | **retention** | `never` | optional | [REMOVED] `EventSourcingConfig.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. The neighbouring `snapshotRetention` is a COUNT of snapshots, not a duration, so it keeps its name. |
 | **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
-| **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
+| **storage** | `{ type?: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
 
 ### Nested Shape: `EventSourcingConfig.storage`
 

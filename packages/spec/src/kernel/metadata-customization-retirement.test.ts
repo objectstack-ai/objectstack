@@ -31,7 +31,7 @@ import { MetadataManagerConfigSchema } from './metadata-loader.zod';
 // directory: refusal, the issue `code`, the `path` naming WHICH key was
 // refused, and the prescription text (#5240: where the wording is the
 // contract, pin the wording).
-describe('[#13135] paper metadata-customization protocol retirement', () => {
+describe('paper metadata-customization protocol retirement', () => {
   /** A config that is valid except for whatever the individual test adds. */
   const baseConfig = { storage: {} } as const;
 

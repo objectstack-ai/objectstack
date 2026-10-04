@@ -14,17 +14,27 @@
  * `DatasourceConnectionService` used for declared/runtime datasources.
  *
  * Auto-detects the appropriate driver from the database URL scheme:
- *   - `memory://*`              → InMemoryDriver
  *   - `postgres[ql]://`, `pg://` → SqlDriver (pg)
  *   - `mysql[2]://`             → SqlDriver (mysql2)
  *   - `mongodb[+srv]://`        → MongoDBDriver (optional `@objectstack/driver-mongodb`)
  *   - `libsql://`, `http(s)://*.turso.*` → TursoDriver (optional `@objectstack/driver-turso`)
- *   - `file:` / `sqlite://` (alias, #6469) / no scheme → SqlDriver (better-sqlite3)
+ *   - `file:` / `sqlite://` (alias, #6469) / no scheme → SqlDriver (better-sqlite3);
+ *     the bare `:memory:` is SQLite's own in-memory database
+ *
+ * `memory://` and `mingo://` are RECOGNISED and REFUSED: they name the
+ * in-memory (mingo) engine, which is no longer a boot store — it refuses every
+ * tenant-scoped read, so a server booted on it answered data requests with 503.
+ * The spec's driver table withdrew the engine's spellings from its selection
+ * face, and both hosts refuse the two schemes with one sentence naming the
+ * SQLite replacements ({@link retiredMemoryEngineMessage}). Recognising
+ * `mingo://` here, where it used to fall to the unsupported-scheme refusal, is
+ * what makes this host and the CLI answer it alike: the CLI's inference has
+ * always classified both schemes as the one engine.
  *
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
  * when an unsupported URL was treated as a file path. The SAME refusal now
- * covers an unknown `OS_DATABASE_DRIVER` value (#6265): that env var used to be
+ * covers an unknown `OS_DATABASE_DRIVER` value (commit cfb549db8): that env var used to be
  * a bare `as` cast, so a typo — or `mysql` before this stack could dispatch it
  * — fell through the driver chain's trailing `else` into SQLite without a word.
  *
@@ -42,7 +52,7 @@
  * comes through here — refused it as an unsupported scheme.
  *
  * NOTE: `mysql://` is the same family with none of the optional-package weight
- * (#6265). The CLI has classified it as `mysql` since forever
+ * (commit cfb549db8). The CLI has classified it as `mysql` since forever
  * (`inferDriverTypeFromUrl`), the SHARED factory has always been able to build
  * it (`kind === 'mysql'` → SqlDriver on `mysql2`), and only this file was
  * missing the arm — so one `OS_DATABASE_URL=mysql://…` booted under `os start`
@@ -59,8 +69,8 @@ import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
 import { resolveArtifactCollections } from './artifact-collections.js';
 import {
-    BUILTIN_DRIVER_IDS,
     DATABASE_DRIVER_SELECTION_ALIASES,
+    DATABASE_DRIVER_SELECTION_IDS,
     driverHasLocalDefault,
     resolveDatabaseDriverId,
 } from '@objectstack/spec/data';
@@ -68,7 +78,9 @@ import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
 import {
+    namesRetiredMemoryEngine,
     resolveProjectDatabaseUrl,
+    retiredMemoryEngineMessage,
     type ProjectDatabaseUrlSource,
 } from './resolve-project-database.js';
 
@@ -96,32 +108,42 @@ export function resolveObjectStackHome(): string {
 
 /**
  * The driver kinds a standalone boot can dispatch — the ONE list, and the only
- * one (#6265), now shared with the CLI rather than merely singular here (#6345).
+ * one (commit cfb549db8), now shared with the CLI rather than merely singular here (commit e2798fab7).
  *
  * Three consumers read it and every one of them used to carry its own answer:
  * the `databaseDriver` config key (a zod enum that rejected loudly), the
  * `OS_DATABASE_DRIVER` env var (a bare `as` cast that validated nothing, so an
  * unknown value fell through the dispatch chain's trailing `else` into SQLite),
- * and the `ResolvedDriverKind` union (a hand-written third copy). #6265 made
+ * and the `ResolvedDriverKind` union (a hand-written third copy). Commit cfb549db8 made
  * them one declaration.
  *
- * What #6265 could not fix from inside this file is that the CLI had a FOURTH
+ * What commit cfb549db8 could not fix from inside this file is that the CLI had a FOURTH
  * answer. This enum listed canonical spellings only, while
  * `packages/cli/src/utils/storage-driver.ts` accepted `pg`, `mysql2`, `mongo`,
  * `libsql`, `wasm`, `sql`, `mingo`, … — measured on `main`, **10 of 21 spellings
  * disagreed**, so `OS_DATABASE_DRIVER=pg` booted under `os start` and was
  * refused here. The enum's VALUES are therefore no longer written here either:
- * they are `BUILTIN_DRIVER_IDS` from `@objectstack/spec`, the one driver
- * vocabulary both hosts read, and the accepted spellings are that table's
- * aliases via {@link resolveExplicitDriver}. A driver added to the spec table
- * appears on both hosts at once, which is the only shape in which this fork
- * cannot re-open.
+ * they come from `@objectstack/spec`, the one driver vocabulary both hosts
+ * read, and the accepted spellings are that table's aliases via
+ * {@link resolveExplicitDriver}. A driver added to the spec table appears on
+ * both hosts at once, which is the only shape in which this fork cannot
+ * re-open.
+ *
+ * The values are the table's SELECTION face reduced to canonical ids
+ * (`DATABASE_DRIVER_SELECTION_IDS`), not every id it ships a config contract
+ * for (`BUILTIN_DRIVER_IDS`). The two differed for the first time when the
+ * in-memory engine was withdrawn as a boot store: `memory` keeps its config
+ * contract, so a stored `datasource.driver: memory` still parses, but no boot
+ * door accepts it. Enumerating the contract face here would have kept offering
+ * an id every door of this stack refuses. The TYPE is still the contract
+ * union, because the URL detection below classifies the engine's schemes as
+ * `memory` before {@link refuseRetiredMemoryEngine} refuses them.
  */
-export const StandaloneDatabaseDriverSchema = z.enum(BUILTIN_DRIVER_IDS);
+export const StandaloneDatabaseDriverSchema = z.enum(DATABASE_DRIVER_SELECTION_IDS);
 
 /**
  * The `databaseDriver` CONFIG key's schema — an alias-accepting front door onto
- * {@link StandaloneDatabaseDriverSchema} (#6345).
+ * {@link StandaloneDatabaseDriverSchema} (commit e2798fab7).
  *
  * `databaseDriver` and `OS_DATABASE_DRIVER` are two spellings of one decision,
  * so accepting `pg` from the environment and refusing it from a programmatic
@@ -145,11 +167,17 @@ const DatabaseDriverSelectionSchema = z.string().transform((raw, ctx) => {
  * maintained beside them.
  */
 function unsupportedDriverMessage(raw: string, source: 'OS_DATABASE_DRIVER' | 'databaseDriver'): string {
+    // A spelling of the retired in-memory engine is not a typo, and "Supported
+    // drivers: …" would not tell the operator what replaced it — so it gets the
+    // retirement's own sentence, the same one every other memory door gives.
+    if (namesRetiredMemoryEngine(raw)) {
+        return `[StandaloneStack] ${retiredMemoryEngineMessage(`${source} "${raw}"`)}`;
+    }
     return (
         `[StandaloneStack] Unsupported ${source} value: "${raw}". ` +
         `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. ` +
         `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
-        `and write into a local database (#3276). Fix the value, or unset it ` +
+        `and write into a local database. Fix the value, or unset it ` +
         `to let the OS_DATABASE_URL scheme select the driver.`
     );
 }
@@ -194,10 +222,11 @@ export const StandaloneStackConfigSchema = z.object({
      */
     dev: z.boolean().optional(),
     /**
-     * Suppress the artifact's inline boot seed (#3917). Set by one-shot
-     * commands that boot the stack only to READ metadata — `os migrate plan` /
-     * `os migrate apply` — so the boot cannot write demo rows into the
-     * operator's live database before they have confirmed anything.
+     * Suppress the artifact's inline boot seed (#3917). Set by every one-shot
+     * CLI boot (`bootSchemaStack`, #21391), apply and delete modes included,
+     * so the boot cannot write demo rows into the operator's live database.
+     * The seed's upserts rewrite every seeded row on each boot, and no command
+     * the operator ran asked for that. Seeding stays with the serving boots.
      */
     skipSeedData: z.boolean().optional(),
     /**
@@ -230,7 +259,7 @@ export const StandaloneStackConfigSchema = z.object({
      *
      * Set `false` for a boot that must not repair anything behind the
      * operator's back. `bootSchemaStack` (the CLI's ONE one-shot boot funnel)
-     * passes `false` for every `os migrate *` / `os meta *` command: those are
+     * passes `false` for every command it boots: those are mostly
      * dry-run-by-default report commands, and a repair that fires under them
      * destroys the very evidence they were run to collect
      * (`packages/cli/src/commands/migrate/duplicates.integration.test.ts`
@@ -239,6 +268,26 @@ export const StandaloneStackConfigSchema = z.object({
      * boot an operator starts in order to RUN the install.
      */
     runPlatformMigrations: z.boolean().optional(),
+    /**
+     * [#21391] Does this boot ARM the ADR-0057 lifecycle sweep (rotation,
+     * retention reaping, archiving, and the #4551 reference audit that rides
+     * the same clock)?
+     *
+     * Defaults to `true`: a serving boot owns its data's lifecycle, and the
+     * sweep is how a declared retention is enforced at all.
+     *
+     * Set `false` for a boot that exits before the sweep's first run is due.
+     * `bootSchemaStack` (the CLI's one-shot boot funnel) passes `false` for
+     * every `os migrate *` / `os meta *` / `os secret *` / `os storage *`
+     * command. Before this key, the guarantee that such a boot never swept was
+     * a timing fact: the first sweep waits `DEFAULT_LIFECYCLE_INITIAL_DELAY_MS`
+     * on an unref'd timer, so the one-shot was expected to exit first. With
+     * `false` the sweep is never armed (`ObjectQLPlugin`'s `lifecycle.enabled`),
+     * which makes it a structural fact. `enabled` is the service's master
+     * switch, so an explicit `sweep()` on such a boot is inert too: it returns
+     * an empty report and reads nothing.
+     */
+    armLifecycleSweep: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -316,9 +365,15 @@ export interface StandaloneStackResult {
 type ResolvedDriverKind = z.infer<typeof StandaloneDatabaseDriverSchema>;
 
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
-    if (/^memory:\/\//i.test(dbUrl)) return 'memory';
+    // The in-memory (mingo) engine's two schemes — character-for-character the
+    // CLI's `inferDriverTypeFromUrl` regex, for the reason the mysql and turso
+    // arms below give. Classified here and REFUSED by the caller
+    // ({@link refuseRetiredMemoryEngine}), which knows where the URL came from
+    // and so can name the cause; `mingo://` used to fall to the unsupported-
+    // scheme refusal below while the CLI classified it as this engine.
+    if (/^(memory|mingo):\/\//i.test(dbUrl)) return 'memory';
     if (/^(postgres(ql)?|pg):\/\//i.test(dbUrl)) return 'postgres';
-    // MySQL / MariaDB (#6265). Character-for-character the regex the CLI uses
+    // MySQL / MariaDB (commit cfb549db8). Character-for-character the regex the CLI uses
     // (`utils/storage-driver.ts` `inferDriverTypeFromUrl`), for the same reason
     // the turso arm below copies its spellings: the two functions answer the
     // same question about the same `OS_DATABASE_URL`, so any divergence IS the
@@ -344,17 +399,17 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(dbUrl)) return 'sqlite';
     throw new Error(
         `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
-        `Supported schemes: memory://, postgres://, pg://, mysql://, mysql2://, ` +
+        `Supported schemes: postgres://, pg://, mysql://, mysql2://, ` +
         `mongodb://, mongodb+srv://, ` +
         `libsql:// (optional @objectstack/driver-turso), file: ` +
-        `(sqlite:// is accepted as an alias of file:)`
+        `(sqlite:// is accepted as an alias of file:; :memory: is SQLite's in-memory database)`
     );
 }
 
 /**
  * The explicit driver selection for this boot, or `undefined` when none was made.
  *
- * Two sources, ONE vocabulary (#6265). `cfg.databaseDriver` has always been
+ * Two sources, ONE vocabulary (commit cfb549db8). `cfg.databaseDriver` has always been
  * parsed by {@link StandaloneDatabaseDriverSchema}; `OS_DATABASE_DRIVER` was
  * `process.env.OS_DATABASE_DRIVER?.trim() as ResolvedDriverKind` — an assertion,
  * which checks nothing at runtime. An unknown value therefore reached the
@@ -380,8 +435,8 @@ function resolveExplicitDriver(
     if (cfg.databaseDriver) return cfg.databaseDriver;
     const raw = process.env.OS_DATABASE_DRIVER?.trim();
     if (!raw) return undefined;
-    // #6345: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
-    // this file's canonical list. Lower-casing stays for the reason #6265 gave —
+    // Commit e2798fab7: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
+    // this file's canonical list. Lower-casing stays for the reason commit cfb549db8 gave —
     // the CLI's reader of this same variable lower-cases — and is now redundant
     // with `resolveDatabaseDriverId`'s own normalization rather than the only
     // normalization there is.
@@ -392,7 +447,7 @@ function resolveExplicitDriver(
 
 /**
  * Refuse a driver whose database lives somewhere this process cannot guess when
- * nothing named where that is (#6345 fork 2).
+ * nothing named where that is (fork 2 of commit e2798fab7).
  *
  * The URL ladder always produces SOMETHING — its last rung is the unified
  * default file — so before this check a `postgres`/`mysql`/`mongodb`/`turso`
@@ -420,8 +475,41 @@ function assertUrlNamedForRemoteDriver(
         `and ${driver} has no local default to fall back on — its database lives on a server or ` +
         `endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it. ` +
         `Falling back to the local SQLite file instead would connect you to a database you never ` +
-        `named, and every write would land in the wrong place (#3276).`
+        `named, and every write would land in the wrong place.`
     );
+}
+
+/** Every kind a boot can actually open — the resolution's answer once the retired engine is refused. */
+type BootDriverKind = Exclude<ResolvedDriverKind, 'memory'>;
+
+/**
+ * Refuse the in-memory (mingo) engine wherever the URL ladder produced it — the
+ * standalone half of the retirement's URL door.
+ *
+ * Three places can hand this stack a `memory://` / `mingo://` URL, and the
+ * refusal names the one that did: `databaseUrl` / `--database` (`explicit`),
+ * `OS_DATABASE_URL` / `DATABASE_URL` (`env`), or the project's declared
+ * default datasource (`config-datasource`, whose `driver: memory` the spec's
+ * contract face still parses). The explicit DRIVER spellings never reach here:
+ * the shared resolver and {@link unsupportedDriverMessage} refuse them first,
+ * with the same sentence.
+ *
+ * Returning the narrowed kind is what lets the dispatch below drop its `memory`
+ * arm and keep its `never` exhaustiveness check honest: past this line no
+ * resolution can name the engine.
+ */
+function refuseRetiredMemoryEngine(
+    driver: ResolvedDriverKind,
+    url: string,
+    resolution: { source: ProjectDatabaseUrlSource; datasourceName?: string },
+): BootDriverKind {
+    if (driver !== 'memory') return driver;
+    const selection = resolution.source === 'config-datasource'
+        ? `The project's default datasource "${resolution.datasourceName ?? 'default'}" (driver: memory, URL "${url}")`
+        : resolution.source === 'env'
+            ? `OS_DATABASE_URL "${url}"`
+            : `The database URL "${url}"`;
+    throw new Error(`[StandaloneStack] ${retiredMemoryEngineMessage(selection)}`);
 }
 
 /** URL→filename for the two sqlite kinds. Throws on a URL that isn't a path. */
@@ -444,7 +532,11 @@ function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): s
 /** Which database a standalone boot would talk to, and how. */
 export interface ResolvedStandaloneDatabase {
     url: string;
-    driver: ResolvedDriverKind;
+    /**
+     * The engine this boot opens. Never `memory`: the in-memory engine is
+     * refused by every door of this resolution (see the module header).
+     */
+    driver: BootDriverKind;
     /**
      * The sqlite file this boot would open, or `null` for every non-sqlite
      * target and for `:memory:`. Callers that must inspect the file BEFORE a
@@ -489,8 +581,8 @@ function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSche
  * Since #6469 the URL comes from the ONE shared resolution
  * ({@link resolveProjectDatabaseUrl}) that `os dev` / `os start` also use:
  * explicit config → `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` →
- * explicit `memory` driver → the config-declared default datasource (read from
- * the compiled artifact) → the unified default file
+ * the config-declared default datasource (read from the compiled artifact) →
+ * the unified default file
  * (`<state dir>/data/objectstack.db`, with a compat-read of the legacy
  * `dev.db`/`standalone.db`). State-dir precedence is unchanged: `OS_HOME` →
  * project root → user home. No longer purely env-derived: the legacy probe and
@@ -502,9 +594,13 @@ function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSche
  * connection. Reading a source you cannot dispatch is worse than not reading it.
  *
  * Throws on a selection this stack cannot dispatch — an unknown URL scheme
- * (`detectDriverFromUrl`) or, since #6265, an unknown `OS_DATABASE_DRIVER` value
- * ({@link resolveExplicitDriver}). Both refusals happen HERE rather than at boot
- * so `os migrate`'s pre-boot probe reads the same verdict the boot would.
+ * (`detectDriverFromUrl`) or, since commit cfb549db8, an unknown `OS_DATABASE_DRIVER` value
+ * ({@link resolveExplicitDriver}) — and on every door to the retired in-memory
+ * engine: its driver spellings (the shared resolver, ahead of every rung) and
+ * its `memory://` / `mingo://` schemes, typed or declared
+ * ({@link refuseRetiredMemoryEngine}). All of these refusals happen HERE rather
+ * than at boot so `os migrate`'s pre-boot probe reads the same verdict the boot
+ * would.
  */
 export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
@@ -516,8 +612,8 @@ export function resolveStandaloneDatabase(config?: StandaloneStackConfig): Resol
     });
     const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
-    const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
-    // Fork 2 (#6345) — refuse before deriving a sqlite filename from a URL the
+    const driver = refuseRetiredMemoryEngine(explicitDriver || detectDriverFromUrl(url), url, resolution);
+    // Fork 2 (commit e2798fab7) — refuse before deriving a sqlite filename from a URL the
     // selected driver was never going to open.
     assertUrlNamedForRemoteDriver(driver, resolution.source);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
@@ -601,15 +697,15 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
      * case; everything else about the connect stays shared.
      */
     let hostFactory: IDatasourceDriverFactory | undefined;
-    if (dbDriver === 'memory') {
-        driverId = 'memory';
-        driverConfig = {};
-    } else if (dbDriver === 'postgres') {
+    // No `memory` arm: the in-memory engine is not a boot store, and
+    // `resolveStandaloneDatabase` refuses every door to it, so `dbDriver` cannot
+    // name it here (its type says so, which keeps the `never` check below honest).
+    if (dbDriver === 'postgres') {
         // Factory applies the pg pool default ({ min: 0, max: 5 }) internally.
         driverId = 'postgres';
         driverConfig = { url: dbUrl };
     } else if (dbDriver === 'mysql') {
-        // MySQL / MariaDB (#6265). Nothing special: the shared factory's `mysql`
+        // MySQL / MariaDB (commit cfb549db8). Nothing special: the shared factory's `mysql`
         // arm builds a SqlDriver on the `mysql2` client from exactly this
         // config (`MysqlConfigSchema.url` — "passed to mysql2 as-is"), and the
         // CLI's own `mysql` branch produces the same `{ driverId: 'mysql',
@@ -662,7 +758,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverConfig = { filename };
     } else {
         // Unreachable by construction — and making it unreachable is half the
-        // fix (#6265). This used to be a bare `else` meaning "sqlite", so every
+        // fix (commit cfb549db8). This used to be a bare `else` meaning "sqlite", so every
         // kind without an arm above became SQLite in silence: an unvalidated
         // `OS_DATABASE_DRIVER` value landed here, and so would the NEXT kind
         // added to the enum without a dispatch arm. `dbDriver` is now narrowed
@@ -672,7 +768,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         throw new Error(
             `[StandaloneStack] No dispatch arm for database driver kind: ${String(unreachable)}. ` +
             `Every kind in StandaloneDatabaseDriverSchema needs one — falling through to SQLite ` +
-            `is the #3276 defect.`
+            `would hand the caller a database engine they never selected.`
         );
     }
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(
@@ -789,6 +885,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             environmentId,
             runPlatformMigrations: cfg.runPlatformMigrations ?? true,
             hydrateMetadataFromDb: true,
+            // [#21391] Only a `false` is passed through, so a serving boot
+            // hands the plugin exactly the options it always did.
+            ...(cfg.armLifecycleSweep === false ? { lifecycle: { enabled: false } } : {}),
         }),
     ];
     if (artifactBundle) {

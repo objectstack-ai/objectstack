@@ -73,7 +73,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Cube, DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+import { asciiCaseInsensitiveContains, lowerFilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -162,12 +162,12 @@ const CUBE: Cube = {
   name: TABLE,
   title: 'Texts',
   sql: TABLE,
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    label: { name: 'label', label: 'Label', type: 'string', sql: 'label' },
-    v: { name: 'v', label: 'V', type: 'string', sql: 'v' },
+    label: { label: 'Label', type: 'string', sql: 'label' },
+    v: { label: 'V', type: 'string', sql: 'v' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const query = (where: unknown): AnalyticsQuery =>
@@ -273,8 +273,13 @@ for (const [engineName, makeDriver] of ENGINES) {
     });
 
     it('driver-sql (the ObjectQL execute face) answers the JavaScript rows — the reference', async () => {
+      // [#20822] As the engine drives it: the `where` through the shared
+      // lowering first (its rule 3 totalises a `$not` operand), since the
+      // driver keeps no copy of that rewrite. No column here is a `datetime`.
       const wrong = await cellsDiffering(async (where) =>
-        ((await driver.find(TABLE, { where }, BYPASS)) as Array<{ label: string }>).map((r) => r.label).sort(),
+        ((await driver.find(TABLE, { where: lowerFilterCondition(where, { isDatetimeColumn: () => false }) }, BYPASS)) as Array<{ label: string }>)
+          .map((r) => r.label)
+          .sort(),
       );
       expect(wrong, `driver-sql: ${wrong.length} of ${GRID.length} cells differ`).toEqual([]);
     });
@@ -305,9 +310,11 @@ describe('[#20025] the compiled constructs, per shape', () => {
   it('`$contains` / `$notContains` / `$icontains` take instr() and bind the comparand raw', async () => {
     expect(scope({ v: { $contains: 'a*b' } } as FilterCondition))
       .toEqual({ sql: 'instr("t"."v", ?) > 0', params: ['a*b'] });
-    // The #5298 NULL-safe wrapper composes around the negated construct unchanged.
+    // The #5298 NULL-safe escape composes around the negated construct unchanged
+    // — [ADR-0053 D-D1, amended — #5930 step 4] the shared lowering's, its one
+    // source since this compiler's own wrapper was deleted.
     expect(scope({ v: { $notContains: 'a*b' } } as FilterCondition))
-      .toEqual({ sql: '("t"."v" IS NULL OR NOT (instr("t"."v", ?) > 0))', params: ['a*b'] });
+      .toEqual({ sql: '(("t"."v" IS NULL OR NOT (instr("t"."v", ?) > 0)))', params: ['a*b'] });
     expect(scope({ v: { $icontains: 'A*b' } } as FilterCondition))
       .toEqual({ sql: 'instr(lower("t"."v"), lower(?)) > 0', params: ['A*b'] });
     const n = await native({ v: { $contains: 'a*b' } } as FilterCondition);

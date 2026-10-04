@@ -9,11 +9,11 @@
 // `Object.assign`, and `validateRecord` walks declared fields on insert and
 // `continue`s past a key with no field def on update.
 //
-// [#13657] What happens after that used to be DRIVER-DEPENDENT, and neither
+// [commit b003cf2e8] What happens after that used to be DRIVER-DEPENDENT, and neither
 // half was acceptable — SQL failed the whole write with an untyped
 // `SQLITE_ERROR` far from the authoring mistake, while schemaless drivers
 // (memory, MongoDB) spread the payload and PERSISTED the stray key as a column
-// nothing downstream reads. #13657 closed that: the declared-field door now
+// nothing downstream reads. Commit b003cf2e8 closed that: the declared-field door now
 // runs a second time over the payload the `before*` hooks produced, so the key
 // is refused `INVALID_FIELD` / 400 identically on every driver, before any
 // statement is built.
@@ -161,7 +161,7 @@ export const HOOK_BODY_WRITE_UNKNOWN_FIELD = 'hook-body-write-unknown-field';
 export const HOOK_BODY_SOURCE_UNPARSEABLE = 'hook-body-source-unparseable';
 
 /**
- * [#8663] The write-axis twin of `flow-template-field-unprovisioned` (#8340):
+ * [commit 192213f66] The write-axis twin of `flow-template-field-unprovisioned` (#8340):
  * the body writes a field {@link IMPLICIT_FIELDS} exempts, but on THIS target
  * the platform registered that anchor without provisioning storage for it.
  *
@@ -349,7 +349,7 @@ const INPUT_ENVELOPE_KEYS: ReadonlySet<string> = new Set(['id', 'options', 'ast'
  * of this extension would drift exactly the way the five hand-copied lists
  * #4330 collapsed did.
  *
- * ⛔ [#8663] This set is OBJECT-INDEPENDENT and therefore only half an answer.
+ * ⛔ [commit 192213f66] This set is OBJECT-INDEPENDENT and therefore only half an answer.
  * It says a name COULD be implicitly writable somewhere; it cannot say whether
  * the platform actually provisioned storage for it on the object being written.
  * On an ADR-0015 `external` object the two diverge — the registered anchor has
@@ -364,7 +364,7 @@ export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * [#8663] The CONSEQUENCE clause every unprovisioned-anchor WRITE diagnostic
+ * [commit 192213f66] The CONSEQUENCE clause every unprovisioned-anchor WRITE diagnostic
  * states — one wording across the three write surfaces (hook body, action body,
  * flow node), paired with `unprovisionedAnchorCause` / `unprovisionedAnchorHint`
  * from `system-fields.ts` the way #8340's four read-axis rules pair with them.
@@ -376,7 +376,7 @@ export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
  * that module's own note reserves the per-site consequence to the site, and the
  * "site" for this family is the family, not any one of its three files.
  *
- * ## Every clause below is measured, not inferred (#8663)
+ * ## Every clause below is measured, not inferred (commit 192213f66)
  *
  * The card that produced this rule asserted a structural resemblance to the
  * read-axis gap and explicitly declined to guess the runtime behaviour. Measured
@@ -405,7 +405,7 @@ export function unprovisionedAnchorWriteConsequence(): string {
     `it PAST the write-path validator that refuses an undeclared name outright (INVALID_FIELD). The remote ` +
     `database is what rejects it — on a SQL remote with an untyped driver error ('no such column') that ` +
     `aborts the whole statement, so the correctly named fields in the same payload never land either; on a ` +
-    `schemaless remote the key is persisted into a column no read surface returns (#4271).`
+    `schemaless remote the key is persisted into a column no read surface returns.`
   );
 }
 
@@ -823,7 +823,7 @@ export function validateHookBodyWrites(
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
-  // [#8663] `objectName -> its unprovisioned injected anchors`. Empty for every
+  // [commit 192213f66] `objectName -> its unprovisioned injected anchors`. Empty for every
   // ordinary stack (only an ADR-0015 `external` object contributes an entry), so
   // the lookup below doubles as the "nothing to say here" fast path.
   let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
@@ -891,7 +891,7 @@ export function validateHookBodyWrites(
         // object, so a partial miss is not statically wrong).
         if (!inputJudgeable) continue;
         if (IMPLICIT_FIELDS.has(w.field)) {
-          // [#8663] The membership test above answered "addressable somewhere",
+          // [commit 192213f66] The membership test above answered "addressable somewhere",
           // not "provisioned HERE". Ask the second question before going silent.
           //
           // EVERY target must be unprovisioned, mirroring the everywhere-miss
@@ -930,11 +930,11 @@ export function validateHookBodyWrites(
           path,
           message:
             `body writes '${w.field}' to its input, but ${objDesc} ${declares}. The sandboxed script runs ` +
-            // The post-hook declared-field door (#13657) is what refuses it; the
+            // The post-hook declared-field door (commit b003cf2e8) is what refuses it; the
             // id stays in this comment rather than in the string, which reaches
             // authors and operators who cannot resolve a tracker number.
             `clean and the value is copied back onto the record payload unfiltered, so the write is then ` +
-            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver (#4271). The ` +
+            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver. The ` +
             `record is never written, and the refusal names the field far from the body that wrote it.` +
             loc.messageSuffix,
           hint: fixHint(w.field, unionCandidates(targetSets)),
@@ -980,7 +980,7 @@ export function validateHookBodyWrites(
             // who cannot resolve a tracker number.
             `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
             `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
-            `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
+            `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver, before ` +
             `any statement is built. The nested write lands nothing, and the refusal escapes the body ` +
             `and fails the operation that triggered the hook.` +
             loc.messageSuffix,

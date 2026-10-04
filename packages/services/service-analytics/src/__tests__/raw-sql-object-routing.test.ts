@@ -101,6 +101,9 @@ function fakeEngine(opts: {
           [alias]: r[opts.shape.alias],
         }));
       },
+      // [#21080] The engine this double models answers which objects carry a
+      // middleware registered for them; none of this file's objects does.
+      hasObjectMiddleware: () => false,
       getObject: (name: string) => {
         const fields = opts.schema[name];
         if (!fields) return undefined;
@@ -365,7 +368,8 @@ describe('graceful degradation survives for a genuinely missing table (#5033)', 
 
     const result = await service.queryDataset(auditDataset as never, auditSelection as never);
 
-    expect(result).toEqual({ rows: [], fields: [], totals: [] });
+    // No rows — and, like every dataset answer, the base object (#20644).
+    expect(result).toEqual({ rows: [], fields: [], totals: [], object: 'sys_audit_log' });
     expect(warn.mock.calls.map(String).join('\n')).toMatch(
       /dataset "sys_audit_log_metrics" backing object "sys_audit_log" is unavailable/,
     );
@@ -389,7 +393,8 @@ describe('graceful degradation survives for a genuinely missing table (#5033)', 
       { dimensions: ['region'], measures: ['event_count'] } as never,
     );
 
-    expect(result).toEqual({ rows: [], fields: [], totals: [] });
+    // No rows — and, like every dataset answer, the base object (#20644).
+    expect(result).toEqual({ rows: [], fields: [], totals: [], object: 'sys_audit_log' });
     expect(warn.mock.calls.map(String).join('\n')).toMatch(/is unavailable/);
   });
 });

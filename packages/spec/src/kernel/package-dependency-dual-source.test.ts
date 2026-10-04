@@ -45,7 +45,7 @@ import {
 // (green to the dual-source gate — one declaration, many entries — but a lie
 // to anyone reading `./kernel`, and independently rejected at BUILD time by
 // RENAMED_DEFS invariant 3, "the source def is still emitted").
-describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
+describe('PackageDependency dual-source retirement (C7)', () => {
   it('resolves the export surface: one owner per name, across every public entry', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`

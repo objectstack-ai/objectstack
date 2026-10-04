@@ -182,7 +182,7 @@ export class ObjectStoreActionActivationStore extends ObjectStoreMetadataActivat
  * written from exactly two places — {@link hydrate} (boot, from the ledger) and
  * {@link setActive} (which writes the durable row FIRST and updates the set only
  * after that write returns) — so it cannot drift into being an independent,
- * process-local off-switch, which is the #10243 mechanism ADR-0126 retires.
+ * process-local off-switch, which is the env-wide toggle leak's mechanism ADR-0126 §7.2 retires.
  *
  * ⚠️ It is deliberately NOT re-read per `metadata:reloaded`: a reload
  * re-registers HANDLERS, and a re-registered handler must stay disabled. The

@@ -9,6 +9,7 @@ import * as flows from './src/flows';
 import * as dashboards from './src/dashboards';
 import * as apps from './src/apps';
 import * as skills from './src/skills';
+import * as picklists from './src/picklists';
 
 // Every value a barrel exports, as the list a stack key takes: typed by what
 // the barrel exports, and an empty list while it exports nothing yet.
@@ -77,4 +78,5 @@ export default defineStack({
   dashboards: exportsOf(dashboards),
   apps: exportsOf(apps),
   skills: exportsOf(skills),
+  picklists: exportsOf(picklists),
 });

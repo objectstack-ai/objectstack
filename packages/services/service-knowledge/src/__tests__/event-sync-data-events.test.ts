@@ -163,8 +163,71 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
     await deliver(BULK_DELETED);
 
     const [message] = harness.ctx.logger.warn.mock.calls.at(-1) as [string];
-    expect(message).toContain('#4639');
-    expect(message).toContain('lifecycle reap guard (#4672)');
+    expect(message).toContain('cannot be repaired from the event stream');
+    expect(message).toContain('the lifecycle reap guard de-indexes those rows before they are deleted');
     expect(message).toContain('application-level predicate writes are not');
+  });
+});
+
+/**
+ * No producer emits a bare `record.created|updated|deleted` event: the ObjectQL
+ * engine publishes `data.record.*` (and `data.records.*` for a predicate
+ * write), and the spec's `RealtimeEventType` no longer contains the bare names.
+ * The bridge therefore has no branch for them — and no `payload.record ??
+ * payload` fallback to read a record out of a shape nothing sends. Each case
+ * delivers the legacy shape and then the same record as `data.record.*` on the
+ * SAME subscription: the legacy delivery must sync nothing while the
+ * `data.record.*` one does, so a silent harness cannot pass for a removed branch.
+ */
+describe('a bare record.* event is not part of the sync vocabulary', () => {
+  const ROW = { id: 'task_1', title: 'Ship it', notes: 'the record body' };
+  const at = '2026-08-02T12:00:00.000Z';
+  const legacy = (type: string, payload: Record<string, unknown>): RealtimeEventPayload => ({
+    type,
+    object: 'task',
+    payload,
+    timestamp: at,
+  });
+
+  it.each([
+    ['record.created', 'under payload.record', { record: ROW }],
+    ['record.updated', 'as the payload itself', ROW],
+  ])('%s (%s) upserts nothing, while data.record.created upserts the same row', async (type, _shape, payload) => {
+    const harness = makeCtx();
+    const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
+    const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
+    const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
+
+    await deliver(legacy(type, payload));
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+
+    // Control: same subscription, same row, the name the engine publishes.
+    await deliver(CREATED);
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert).toHaveBeenCalledWith('task', ROW);
+  });
+
+  it.each([
+    ['payload.id', { id: 'task_1' }],
+    ['payload.record.id', { record: { id: 'task_1' } }],
+  ])('record.deleted (id from %s) deletes nothing, while data.record.deleted deletes the same id', async (_shape, payload) => {
+    const harness = makeCtx();
+    const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
+    const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
+    const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
+
+    await deliver(legacy('record.deleted', payload));
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+
+    // Control: same subscription, same id, the name the engine publishes.
+    await deliver(DELETED);
+
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(del).toHaveBeenCalledWith('task', 'task_1');
   });
 });

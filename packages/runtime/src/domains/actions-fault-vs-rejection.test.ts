@@ -217,10 +217,10 @@ describe('an unexpected FAULT is a 500', () => {
 });
 
 /**
- * [#17273] A sandboxed body that CRASHED is a fault — the face of #15071 this
+ * [#17273] A sandboxed body that CRASHED is a fault — the face of commit cf6e0a193 this
  * door left open.
  *
- * #15071 ruled on the `/data` door: *"A declared code is the author's statement
+ * Ruled on the `/data` door (commit cf6e0a193): *"A declared code is the author's statement
  * about the failure mode they **handled**. A crash (`isScriptFaultMessage`,
  * #7543) is not that mode, so it is classified as a fault"*. This door read the
  * question the other way round. The table above states the discriminator as the
@@ -289,7 +289,7 @@ describe('[#17273] a sandboxed body that CRASHED is a fault, not a rejection', (
     });
 
     it('negative control: a sandboxed DELIBERATE throw keeps its 400 and its own sentence', async () => {
-        // One `innerMessage` away from the first case. #15071's ruling fences
+        // One `innerMessage` away from the first case. Commit cf6e0a193's ruling fences
         // this explicitly — *"Ordinary declared refusals … are **untouched** —
         // only the crash branch moves"* — and an implementation that degraded
         // every sandbox-origin error to the fault terminal would turn the two
@@ -336,7 +336,7 @@ describe('[#17273] a sandboxed body that CRASHED is a fault, not a rejection', (
  *      "message":"Cannot read properties of undefined (reading 'id')","httpStatus":500}}
  *
  * The same crash through the `/data` door answered `"Internal server error"`
- * (#7543 / #15071). ⇒ the status was already right; what leaked was the
+ * (#7543 / commit cf6e0a193). ⇒ the status was already right; what leaked was the
  * sentence.
  *
  * **The shape worth carrying: a predicate that classifies by HOW a crash

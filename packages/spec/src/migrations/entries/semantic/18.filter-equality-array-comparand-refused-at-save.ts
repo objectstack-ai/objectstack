@@ -35,7 +35,8 @@ export const entry: SemanticMigration = {
     + 'arrays, empty lists included; every scalar equality comparand, null above all, a Date and '
     + 'a { $field } reference are untouched; and $ne is NOT judged by this entry',
   reason:
-    'Ruling on #19889 (record 5805248669, letter A): FilterConditionSchema (implicit equality) '
+    'Ruled on 2026-09-24 (option A), applying the standing refusal of an array in the '
+    + 'equality slot to the schema door: FilterConditionSchema (implicit equality) '
     + 'and FieldOperatorsSchema.$eq refuse an array comparand at parse, with the SAME remedy '
     + 'text the shared compile face emits — one constant, two doors; a stored filter carrying '
     + 'the shape is refused loudly on its next save, and never silently dropped, because a '

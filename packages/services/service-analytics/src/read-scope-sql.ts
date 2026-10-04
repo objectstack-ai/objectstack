@@ -5,10 +5,17 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
 // [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
+// at the entry of {@link compileScopedFilterToSql}, after the placeholders
+// resolve and before any clause is compiled.
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 // [#20068] The `$icontains` text-comparand door: the table's discrimination and
 // its reason half, asked at {@link compileOperator}'s `$icontains` arm and at
 // the engine-bound merges through {@link assertReadScopeComparandsRunnable}.
 import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
+// [#20445] The `$empty` operator's one expansion, asked at {@link compileOperator}'s
+// `$empty` arm for the field's declared row of the ruled per-type table.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 // [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
 // is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
 // {@link assertReadScopePlaceholdersResolvable}, and [#20075] before the
@@ -21,6 +28,8 @@ import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objec
 import type { ReadScopeFilterJudge } from './strategies/types.js';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
+import { containsMembershipSql, isJsonStoredShape } from './contains-membership-sql.js';
+import { emptyOperatorPredicateSql } from './empty-operator-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
@@ -52,7 +61,8 @@ import {
  *
  * Supports the operators the RLS layer and common policies emit: implicit
  * equality, `$eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/$between/$contains/$notContains/
- * $startsWith/$endsWith/$null/$exists`, and `$and/$or/$not` combinators.
+ * $startsWith/$endsWith/$null/$exists`, and `$and/$or/$not` combinators — plus
+ * `$icontains` (#6520) and `$empty` (#20445, the last section).
  *
  * ## `''` means TRUE, and that is a value — not "nothing happened"
  *
@@ -83,20 +93,31 @@ import {
  * `filter-normalizer` with the reduction (see the note at the `length === 0`
  * branch in {@link compileNode} for why). Reduction happens structurally over
  * the whole tree, and it composes with the #5146 NULL-safe `$not` rewrite as
- * "reduce first": {@link nullSafeNegationOperand} maps combinator arrays
- * element-wise (an empty array stays empty, a `{}` leaf has no field to
+ * "reduce first": the rewrite (the shared lowering's, below) maps combinator
+ * arrays element-wise (an empty array stays empty, a `{}` leaf has no field to
  * guard), so the identity a constant reduces to is untouched by the rewrite
  * and the rewrite only ever guards leaves that survive it.
  *
- * ## `$not` is NULL-safe (#5146)
+ * ## `$not` and the negative-polarity operators are NULL-safe (#5146, #5298)
  *
  * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
- * drops every row whose `col` is NULL — while `driver-memory` and `formula`
- * (and, since #5296, `driver-sql`) return those rows. One read scope, two
- * visible sets, chosen by which backend answered. #5146 ruled the JS answer
- * canonical; {@link nullSafeNegationOperand} here is the same rewrite
- * `sql-driver.ts` applies, so an analytics query and an ordinary `find()` scope
- * the same rows.
+ * or `col <> ?` drops every row whose `col` is NULL — while `driver-memory`,
+ * `formula` and `driver-sql` return those rows. One read scope, two visible
+ * sets, chosen by which backend answered. #5146 ruled the JS answer canonical
+ * for `$not`, and #5298 for `$ne` / `$nin` / `$notContains` — and an RLS rule
+ * is evaluated on BOTH sides, read here and by `formula`'s
+ * `matchesFilterCondition` for the write-side `check`, so one rule admitting
+ * two row sets is the security defect #5146 named.
+ *
+ * [ADR-0053 D-D1, amended — #5930 step 4] The ONE source of both rules is the
+ * shared lowering (`lowerFilterCondition`, `@objectstack/spec/data`, its rule
+ * 3), which {@link compileScopedFilterToSql} runs at its entry before a single
+ * clause compiles — the same rewrite the engine and the RLS compile seam run,
+ * so an analytics query and an ordinary `find()` scope the same rows. Every
+ * path into {@link compileNode} passes through it. This compiler kept its own
+ * copy of both rules (a `$not`-operand rewrite with its three polarity tables,
+ * and an `IS NULL OR` wrap on `$ne` / `$nin` / `$notContains`) until this
+ * face's deletion card; it compiles each operator as written now.
  *
  * ## The LIKE family compares LITERALS (#5567)
  *
@@ -174,7 +195,7 @@ import {
  * anyone parsing prose.
  *
  * ⚠️ At `error.code` — NOT `error.details.code`, which is where this note
- * pointed until #6123 corrected it. `errorResponseBase` only STAGES the code in
+ * pointed until commit 59d1933f9 corrected it. `errorResponseBase` only STAGES the code in
  * a `details` object; `buildApiError` then runs `splitSemanticCode`
  * (`@objectstack/runtime`, `src/error-envelope.ts:117`), which PROMOTES it into
  * the declared `ApiErrorSchema` field and returns the now-empty `details` as
@@ -228,7 +249,7 @@ import {
  *       family. `translateFieldOperators` passes `$nin` straight through and
  *       compiles `$notContains` to `{ $not: { $regex } }`, and both match a
  *       missing or null field — so it has always answered as this compiler does
- *       through {@link nullValueSatisfiesOperator}.
+ *       (through the shared lowering's NULL-polarity table since #5930 step 4).
  *   (b) `driver-memory` was the one real holdout, and only on its REFERENCE
  *       matcher; its live mingo query path already agreed. #13166 aligned that
  *       matcher, so on the null SEMANTICS cell nothing answers differently now.
@@ -584,6 +605,65 @@ import {
  * them. Such a host keeps today's behaviour for the four classes, and says so
  * once in its log: `AnalyticsService` when it was given no judge at all,
  * `AnalyticsServicePlugin` when its data engine lacks the member.
+ *
+ * ## `$empty` is answered by the field's DECLARED type (#20445, ruling A on #20399)
+ *
+ * The spec declares `$empty: boolean` with the ruled per-type 「is empty」 table
+ * as its meaning (#20311) and gives every compile surface one expansion to
+ * call, `expandEmptyOperator(fieldDef)`. This compiler's arm
+ * ({@link compileOperator} → {@link compileEmptyOperator}) asks the caller for
+ * the field's declaration ({@link ReadScopeCompileOptions.declaredValueShape}),
+ * expands it, and compiles the row with `empty-operator-sql.ts`:
+ *
+ *   - text-like: `(col IS NULL OR col = '')`;
+ *   - multi-value: `(col IS NULL OR <the dialect's empty-JSON-list test>)`;
+ *   - every other type: `col IS NULL`;
+ *   - `$empty: false` is the exact complement of each, and every one of them
+ *     is TOTAL, so a `$not` over it needs no NULL guard.
+ *
+ * Refused, in this module's envelope, when the caller cannot name the field's
+ * declaration, when a list-valued field meets the `'unknown'` dialect, and
+ * when the flag is not a boolean ({@link assertBooleanFlagComparands}, the
+ * gate the two null flags already had).
+ *
+ * [#20446] The operator is in `FILTER_OPERATORS`, and the view operators
+ * `is_empty` / `is_not_empty` lower to it, so a read scope built from a stored
+ * 「is empty」 rule carries it here — as an in-process `getReadScope` producer
+ * always could. A host that wires no `sourceFieldMeta` cannot name a field's
+ * declaration, so such a scope is refused on it (fail-closed, in this
+ * module's envelope) where the old `$null` lowering compiled `IS NULL`.
+ *
+ * The ObjectQL execute face does not meet this compiler: it hands the scope to
+ * the engine, whose drivers answer `$empty` by the declared row (#20444) and
+ * refuse it on a column they hold no declaration for; nothing is dropped on
+ * any face.
+ *
+ * What `$empty` did NOT change is the envelope of an operator this compiler
+ * has no arm for: still `READ_SCOPE_COMPILE_FAILED` / 500, withheld, per the
+ * #5367 section above. The note at {@link compileOperator}'s `default:` arm
+ * records why a 400 would be the wrong class here.
+ *
+ * ## A temporal comparand binds in the column's storage form (#21505, ADR-0053 D-A1 / D-A2)
+ *
+ * D-A1 binds every surface that puts a filter comparand into raw SQL to the
+ * driver's dialect-aware temporal coercion. This compiler bound the comparand
+ * as written, so the database read it by its own rules instead of the
+ * engine's: PostgreSQL cast a bare day in the SESSION's zone, and SQLite
+ * compared it as text against the canonical instant. The read scope and the
+ * engine then admitted different rows for one policy, on some cells in the
+ * admitting direction.
+ *
+ * The caller now hands the driver's pair, bound to the object
+ * ({@link ReadScopeCompileOptions.coerceTemporalFilterValue} and
+ * {@link ReadScopeCompileOptions.coerceTemporalFilterColumn}): the engine
+ * door's own functions, never a second copy of the storage rule. Every value
+ * comparison in {@link compileOperator} and {@link compileField} binds its
+ * comparand through the first and reads its column through the second. The
+ * order is D-E3's by construction: the shared lowering at the entry widens a
+ * bare day first, and the arms convert the bound they are handed. The null
+ * tests, `$empty` and the text arms read the column as stored, as the native
+ * `where` face does. An absent member is identity, the contract's own reading
+ * for a driver whose storage form is the wire form.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -679,11 +759,59 @@ export interface ReadScopeCompileOptions {
    * section.
    */
   context?: ExecutionContextLike;
+  /**
+   * [#20445] The DECLARED value shape of `field` (its type, and `multiple`),
+   * or `undefined` when the caller cannot name it. The `$empty` arm expands
+   * it through `expandEmptyOperator` (`@objectstack/spec/data`); a field it
+   * answers `undefined` for — and every field, when the option is absent —
+   * has its `$empty` refused, never guessed. Both of this compiler's
+   * consumers fill it from the context's `declaredValueShape` hook.
+   */
+  declaredValueShape?: (field: string) => ValueShapeFieldDef | undefined;
+  /**
+   * [#21505, ADR-0053 D-A1] The comparand half of the driver's temporal
+   * coercion, bound to the object this scope reads: `field`'s comparand in
+   * the form the column is STORED in. It is the engine door's own function
+   * (`IDataDriver.temporalFilterValue`, which `StrategyContext.coerceTemporalFilterValue`
+   * reaches), so a read scope and the engine compare one value. Applied after
+   * the shared lowering, to every comparand a value comparison binds
+   * (equality, `$ne`, the four orderings, `$in`, `$nin`, `$between`), never to
+   * a text pattern or a null test. Absent is identity: the comparand binds as
+   * written. Both of this compiler's consumers fill it from the context.
+   */
+  coerceTemporalFilterValue?: (field: string, value: unknown) => unknown;
+  /**
+   * [#21505, ADR-0053 D-A2] The column half of the same coercion, and its
+   * required pair: given the column reference a value comparison was going
+   * to emit, the expression it must emit instead so the column reads in the
+   * form {@link ReadScopeCompileOptions.coerceTemporalFilterValue} put the
+   * comparand in (`IDataDriver.temporalFilterColumnSql`). It answers the
+   * reference unchanged for every column that needs no repair. The
+   * expression binds nothing: the consumers renumber every `?` in this
+   * compiler's output. Absent is identity: the column reads as written.
+   */
+  coerceTemporalFilterColumn?: (field: string, columnSql: string) => string;
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
 function isFilterNode(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * [ADR-0053 D-D1 item 7, amended 2026-09-30 — #5930 step 3] The read scope's
+ * column-type reader for the shared lowering: a column is `datetime` when the
+ * caller's declared value shape says so — the declaration both of this
+ * compiler's consumers already hand it for `$empty` (#20445), and the test
+ * `SqlDriver` indexes `datetimeFields` by. So the whole-day rule rewrites a
+ * declared `datetime` column and nothing else, and a `date`, `time` or
+ * non-temporal column compiles byte-identical to before. A caller that hands no
+ * declarations reads NO column as `datetime` — the step-2 RLS seam's reading of
+ * a guard without types, for the same reason: it moves no answer.
+ */
+function readScopeLowering(options: ReadScopeCompileOptions): FilterLoweringOptions {
+  const shape = options.declaredValueShape;
+  return { isDatetimeColumn: (field) => shape?.(field)?.type === 'datetime' };
 }
 
 function quoteIdent(name: string, kind: string): string {
@@ -707,13 +835,32 @@ export function compileScopedFilterToSql(
   // the sentence those gates give it. Held rather than raised early, the tree
   // lowered on that path is the unresolved one, and its SQL is discarded with
   // the throw. See the module header's #20075 section.
-  let lowered = filter;
+  let resolved = filter;
   let unresolvable: Error | undefined;
   try {
-    lowered = resolveReadScopePlaceholders(filter, alias, options.context);
+    resolved = resolveReadScopePlaceholders(filter, alias, options.context);
   } catch (e) {
     unresolvable = e as Error;
   }
+  // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared
+  // `FilterCondition → FilterCondition` lowering, at this compiler's ENTRY —
+  // the read-scope seam the amendment's item 2 names — right after the scope's
+  // placeholders resolve (item 3: a `{today}` bound is widened as the day it
+  // resolves to) and before a single clause is compiled. It is what gives this
+  // face the whole-day upper bound it never applied: a bare-day `$lte` (or a
+  // `$between` maximum) on a declared `datetime` column compiles `< next-day`,
+  // in the calendar-string domain, and answers the rows `SqlDriver.find` does
+  // on the same filter. It also lays the NULL-polarity guards on as structure
+  // (#5146, #5298), and since #5930 step 4 it is their ONE source on this
+  // face: {@link compileNode} and {@link compileOperator} compile what they are
+  // handed (see the module header).
+  //
+  // The shared comparand faces below still judge the scope AS WRITTEN, after
+  // compilation (#20018's order). The lowering never refuses and never turns a
+  // scope those faces refuse into one they admit, so the order moves no
+  // verdict. An RLS `using` reaches here already lowered by the RLS compile
+  // seam; lowering it again is a no-op.
+  const lowered = lowerFilterCondition(resolved, readScopeLowering(options));
   const params: unknown[] = [];
   const sql = compileNode(lowered, quotedAlias, params, options);
   // [#20018] The shared comparand faces, on the scope ALONE: the judgement the
@@ -1149,12 +1296,12 @@ function compileNode(node: unknown, qAlias: string, params: unknown[], opts: Rea
       const joiner = key === '$and' ? ' AND ' : ' OR ';
       clauses.push(`(${kept.map((c) => c.sql).join(joiner)})`);
     } else if (key === '$not') {
-      // NULL-safe negation (#5146): totalise the operand's leaves first, so
-      // `NOT (…)` can never be UNKNOWN and this compiler admits the same rows
-      // `driver-sql` / `driver-memory` / `formula` admit. A non-node operand is
-      // left alone so `compileNode` still rejects it with its own message.
-      const operand = isFilterNode(value) ? nullSafeNegationOperand(value) : value;
-      const inner = compileSub(operand, qAlias, opts);
+      // NULL-safe negation (#5146): the operand's leaves arrive TOTAL — the
+      // shared lowering guarded each one at this compiler's entry — so
+      // `NOT (…)` can never be UNKNOWN and this compiler admits the rows
+      // `driver-sql` / `driver-memory` / `formula` admit. A non-node operand
+      // still reaches `compileNode`, which rejects it with its own message.
+      const inner = compileSub(value, qAlias, opts);
       if (inner.sql.length === 0) {
         // `NOT TRUE ≡ FALSE`. Emitting nothing here is what let a `{$not: {}}`
         // read scope through `applyReadScope`'s `if (!sql) return;` and ran the
@@ -1208,11 +1355,11 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
   // "not a field reference".
   assertNoFieldReferenceComparand(field, value);
 
-  // Scalar / null → implicit equality.
+  // Scalar / null → implicit equality. [#21505] A value is compared in the
+  // column's storage form, like `$eq` below; the null test reads it as stored.
   if (value === null) return `${col} IS NULL`;
   if (typeof value !== 'object' || value instanceof Date) {
-    params.push(value);
-    return `${col} = ?`;
+    return `${comparisonColumn(col, field, opts)} = ${bindComparand(params, field, value, opts)}`;
   }
   // The implicit spelling of the equality slot {@link assertNoListInEqualitySlot}
   // guards under `$eq` — the shape a CEL `field == <list>` lowers to.
@@ -1222,8 +1369,27 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
 
   const ops = value as Record<string, unknown>;
   const keys = Object.keys(ops);
-  // A value object must be ALL operators; a non-$ key means a nested relation,
-  // which a flat read scope cannot join — fail closed.
+  // [#20887] The nested-relation form — a value object whose keys are ALL
+  // fields (`{ owner: { region: 'NA' } }`) — keeps its fail-closed refusal
+  // HERE, in words that name the route that serves it. The form is answered by
+  // READING the related object as the caller (#20802's ruling: its row scope
+  // and field permissions, and a cap), and this compile cannot: it is a
+  // synchronous string builder that holds the caller's context for
+  // placeholders and no data engine, so there is nothing here to read the
+  // related object with, and a second copy of the permission rule is not an
+  // answer. The engine is where the form is served.
+  if (keys.length > 0 && keys.every((k) => !k.startsWith('$'))) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "${field}" carries a nested-relation condition ({ "${field}": { … } }), ` +
+      `which a read scope compiled to SQL cannot serve (fail-closed): the condition is answered by ` +
+      `reading the related object, and this compile reads no other object. The engine serves the ` +
+      `form in a query's where — it reads the related object as the caller, with that object's row ` +
+      `scope and field permissions, and refuses a match past its cap. In a read scope compiled to SQL, ` +
+      `name the related ids on a single-valued relation: { "${field}": { "$in": [ID, …] } }.`,
+    );
+  }
+  // A value object must be ALL operators; a non-$ key beside a $ key (or no
+  // key at all) is no shape this compiler reads — fail closed.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) {
     throw readScopeCompileError(`[read-scope-sql] "${field}" has a nested/relation value which is not supported in a read scope (fail-closed).`);
   }
@@ -1238,6 +1404,25 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
 function bind(params: unknown[], v: unknown): string {
   params.push(v);
   return '?';
+}
+
+/**
+ * [#21505] Bind a value comparison's comparand in the column's storage form,
+ * through the caller's {@link ReadScopeCompileOptions.coerceTemporalFilterValue}
+ * (identity when absent). See the module header's #21505 section.
+ */
+function bindComparand(params: unknown[], field: string, v: unknown, opts: ReadScopeCompileOptions): string {
+  return bind(params, opts.coerceTemporalFilterValue ? opts.coerceTemporalFilterValue(field, v) : v);
+}
+
+/**
+ * [#21505] A value comparison's column, read in the form its comparand was
+ * coerced into, through {@link ReadScopeCompileOptions.coerceTemporalFilterColumn}
+ * (identity when absent). Null tests, `$empty` and the text arms read the
+ * column as stored, as the native `where` face does.
+ */
+function comparisonColumn(col: string, field: string, opts: ReadScopeCompileOptions): string {
+  return opts.coerceTemporalFilterColumn ? opts.coerceTemporalFilterColumn(field, col) : col;
 }
 
 /**
@@ -1291,28 +1476,44 @@ function textOverNonTextColumn(op: string, field: string, opts: ReadScopeCompile
 }
 
 /**
- * [#5298] Wrap a negative-polarity value test so a row whose column has no value
- * SATISFIES it: `(col IS NULL OR <test>)`.
+ * [#20987] The MEMBERSHIP reading of `$contains` / `$notContains` on a column
+ * the caller DECLARED multi-valued or JSON-stored
+ * ({@link ReadScopeCompileOptions.declaredValueShape}), or `null` when the
+ * column is not one (or the caller cannot name it) and the arm keeps its text
+ * match. `contains-membership-sql.ts` carries the contract and the construct,
+ * which is `driver-sql`'s, from `@objectstack/core`.
  *
- * The read-scope twin of `driver-sql`'s `applyNullSafeNegative`, and the reason
- * this compiler had to move in the same PR rather than a later one: an RLS rule
- * is authored once and evaluated on BOTH sides — this file lowers it for the
- * read path while `formula`'s `matchesFilterCondition` evaluates it for the
- * write-side `check`. Leaving the two on different answers for `$ne` is one
- * permission rule admitting two different row sets, which is the security
- * defect #5146 named for `$not` and #5298 ruled for the rest.
- *
- * OR-expansion rather than `IS DISTINCT FROM` / `IS NOT` / `<=>`, for the three
- * reasons recorded on the driver-side twin: `NOT LIKE` has no such form, the
- * SQLite spelling depends on an engine version nothing here pins, and the
- * measured query plans are identical either way.
- *
- * The parentheses are not optional. {@link compileField} joins a field's
- * operators with bare ` AND `, so an unwrapped `col IS NULL OR …` would bind
- * looser than that AND and silently widen the whole scope.
+ * A substring test over the stored JSON text is over-reach on a read scope
+ * (#3948): a policy admitting the rows that hold `u1` admitted the row storing
+ * `["u10"]`. So the `'unknown'` dialect, where no membership construct parses
+ * on every engine, is REFUSED here in this module's one envelope, before
+ * anything binds, never answered with the substring residue — the posture
+ * {@link compileEmptyOperator} takes for a multi-value field there.
  */
-function nullSafeNegative(col: string, test: string): string {
-  return `(${col} IS NULL OR ${test})`;
+function membershipMatch(
+  col: string,
+  op: string,
+  val: unknown,
+  field: string,
+  params: unknown[],
+  opts: ReadScopeCompileOptions,
+): string | null {
+  if (!isJsonStoredShape(opts.declaredValueShape?.(field))) return null;
+  const sql = containsMembershipSql({
+    dialect: normalizeSqlDialect(opts.dialect),
+    column: col,
+    value: val,
+    negate: op === '$notContains',
+    bind: (v) => bind(params, v),
+  });
+  if (sql === null) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "${op}" on "${field}" is a membership test on a multi-valued or JSON-stored field, whose ` +
+        `JSON function differs per SQL dialect, and the dialect of this datasource is not known — refusing to ` +
+        `build read scope (fail-closed) rather than reading the stored JSON text as a substring.`,
+    );
+  }
+  return sql;
 }
 
 /**
@@ -1481,8 +1682,9 @@ function undefinedComparandError(field: string, path: string): Error {
       `predicate was meant ({ "${field}": null } or { "${field}": { "$null": true } }), or omit the key ` +
       `when the value is genuinely absent. The producer to fix is whoever BUILT this read scope — an ` +
       `admin-authored sharing rule / permission set, its CEL lowering, or the in-process code that ` +
-      `assembled the FilterCondition — never the caller of this query, who cannot author it (#6050 ` +
-      `ruling B, pushed down to this compiler by #6125).`,
+      `assembled the FilterCondition — never the caller of this query, who cannot author it. An ` +
+      `undefined comparand is refused rather than read as null, on the SQL drivers and on this door ` +
+      `alike.`,
   );
 }
 
@@ -1537,28 +1739,31 @@ function undefinedComparandError(field: string, path: string): Error {
  * conditional on evaluation order. THIS compiler has no such blind spot —
  * {@link compileNode} `.map()`s every `$and`/`$or` child into its own buffer
  * BEFORE any identity is applied (the `$or` TRUE-absorption and the `$and`
- * identity filter both read the fully-compiled list), and
- * {@link nullSafeNegationOperand} rewrites a `$not` operand without dropping a
- * single leaf. Every comparand therefore reaches `compileField`, which is also
+ * identity filter both read the fully-compiled list), and the shared lowering
+ * at {@link compileScopedFilterToSql}'s entry rewrites a `$not` operand without
+ * dropping a single leaf (each guard carries the field's spec through by
+ * reference). Every comparand therefore reaches `compileField`, which is also
  * the only path to {@link bind} — one gate, on the one road.
  *
  * The other half of `driver-sql`'s "runs FIRST" argument does not transfer
  * either, and that is worth stating rather than copying: there, the refusal had
  * to precede the `$not` rewrite because the polarity tables spelled `=== null`
  * while the `$ne` emitter spelled `== null`, so the two disagreed about
- * `undefined` itself. Here {@link nullValueSatisfiesOperator},
- * {@link operatorIsNullTotal} and every arm of {@link compileOperator} spell it
- * `=== null` alike, so the tables and the emitter agree that `undefined` is "a
- * value" — the rewrite for a `{ $not: … }` operand runs, produces a leaf, and
- * that leaf is refused. Nothing inconsistent is being outrun; the silent NULL
- * bind is.
+ * `undefined` itself. Here the shared lowering's NULL-polarity table (#5930
+ * step 4: this compiler kept its own copy until then) and every arm of
+ * {@link compileOperator} spell it `=== null` alike, so the table and the
+ * emitter agree that `undefined` is "a value" — the rewrite for a
+ * `{ $not: … }` operand runs, produces a leaf, and that leaf is refused.
+ * Nothing inconsistent is being outrun; the silent NULL bind is.
  */
 function assertDefinedComparands(field: string, spec: unknown): void {
   const root = `"${field}"`;
   if (spec === undefined) throw undefinedComparandError(field, root);
   if (!isFilterNode(spec)) return;
   for (const [op, opValue] of Object.entries(spec)) {
-    if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
+    // [#20445] `$empty` is the third declared-boolean flag, skipped for the
+    // reason the other two are and refused by the same boolean-domain gate.
+    if (!op.startsWith('$') || BOOLEAN_FLAG_OPERATORS.includes(op as BooleanFlagOperator)) continue;
     const opPath = `${root}.${op}`;
     if (opValue === undefined) throw undefinedComparandError(field, opPath);
     if (!Array.isArray(opValue)) continue;
@@ -1645,11 +1850,20 @@ function assertDefinedComparands(field: string, spec: unknown): void {
  * what makes "declared boolean" mean enforced boolean regardless of who writes
  * the scope. Graded on that measurement, not on the issue's opening wording.
  */
+/**
+ * [#20445] The flags `FieldOperatorsSchema` declares `z.boolean()`: the two
+ * null flags and the `$empty` operator. One list for the two gates that read
+ * it, {@link assertDefinedComparands} (which skips them) and
+ * {@link assertBooleanFlagComparands} (which refuses a non-boolean).
+ */
+const BOOLEAN_FLAG_OPERATORS = ['$null', '$exists', '$empty'] as const;
+type BooleanFlagOperator = (typeof BOOLEAN_FLAG_OPERATORS)[number];
+
 function nonBooleanFlagComparandError(op: string, field: string, path: string): Error {
   return readScopeCompileError(
     `[read-scope-sql] comparand for "${op}" at ${path} is not a boolean — refusing to build read scope ` +
-      `(fail-closed). @objectstack/spec FieldOperatorsSchema declares both $null and $exists as ` +
-      `z.boolean(), and this compiler used to read the comparand by TRUTHINESS instead — so a ` +
+      `(fail-closed). @objectstack/spec FieldOperatorsSchema declares $null, $exists and $empty as ` +
+      `z.boolean(), and this compiler once read the $null / $exists comparand by TRUTHINESS instead — so a ` +
       `non-boolean was silently sorted into one of the two declared answers rather than refused. The ` +
       `string "false" is TRUTHY, which is the case that matters: it landed on the side OPPOSITE the ` +
       `false it was written to mean, turning "rows with no ${field}" into "rows that have one" — a ` +
@@ -1657,7 +1871,8 @@ function nonBooleanFlagComparandError(op: string, field: string, path: string): 
       `not a string, a number, null or undefined. The producer to fix is whoever BUILT this read ` +
       `scope — an admin-authored sharing rule / permission set, its CEL lowering, or the in-process ` +
       `code (a getReadScope option) that assembled the FilterCondition — never the caller of this ` +
-      `query, who cannot author it (#5347 / #5369, pushed down to this compiler by #6387).`,
+      `query, who cannot author it. A non-boolean comparand for any of the three is refused rather ` +
+      `than coerced, on every driver and on this door alike.`,
   );
 }
 
@@ -1682,17 +1897,26 @@ function nonBooleanFlagComparandError(op: string, field: string, path: string): 
  * Same reason {@link assertDefinedComparands} sits here: {@link compileField} is
  * the one road every field constraint travels, because {@link compileNode}
  * `.map()`s every child into its own buffer BEFORE any boolean identity is
- * applied, so no sibling can absorb a malformed one. It runs AFTER
- * {@link nullSafeNegationOperand} for a `$not` operand — harmless, and worth
- * stating: that rewrite consults {@link nullValueSatisfiesOperator}, which now
- * reads these two by identity, so a non-boolean is classified before it is
- * refused. The classification is DISCARDED either way (the leaf still reaches
- * `compileField` and still throws), and the rewrite's own synthesised leaves
- * (`{ $null: false }`, `{ $null: true }`) are literal booleans by construction.
+ * applied, so no sibling can absorb a malformed one. It runs AFTER the shared
+ * lowering's `$not` rewrite (at {@link compileScopedFilterToSql}'s entry) —
+ * harmless, and worth stating: that rewrite consults its NULL-polarity table,
+ * which reads these two by identity, so a non-boolean is classified before it
+ * is refused. The classification is DISCARDED either way (the leaf still
+ * reaches `compileField` and still throws), and the rewrite's own synthesised
+ * leaves (`{ $null: false }`, `{ $null: true }`) are literal booleans by
+ * construction.
+ *
+ * [#20445] `$empty` is the third flag, and it joins the gate on the day its arm
+ * lands rather than after a flip is measured: the spec declares it
+ * `z.boolean()` exactly like the other two, and its arm reads `=== true`, so
+ * without this gate every non-boolean — the string `"true"` included — would
+ * compile to the `$empty: false` arm. The shared comparand faces judge a flag
+ * as a literal comparand and admit a string, a number, `null` or a list, so
+ * nothing else refuses it.
  */
 function assertBooleanFlagComparands(field: string, spec: unknown): void {
   if (!isFilterNode(spec)) return;
-  for (const op of ['$null', '$exists'] as const) {
+  for (const op of BOOLEAN_FLAG_OPERATORS) {
     if (!Object.prototype.hasOwnProperty.call(spec, op)) continue;
     if (typeof spec[op] === 'boolean') continue;
     throw nonBooleanFlagComparandError(op, field, `"${field}".${op}`);
@@ -1856,22 +2080,30 @@ function compileOperator(
   params: unknown[],
   opts: ReadScopeCompileOptions,
 ): string {
+  // [#21505] The value comparisons below compare in the column's STORAGE form:
+  // each comparand through {@link bindComparand}, the column through
+  // {@link comparisonColumn} — the driver's pair, identity when the caller
+  // passes none. The null tests and the text arms read the column as stored.
+  const vcol = (): string => comparisonColumn(col, field, opts);
+  const vbind = (v: unknown): string => bindComparand(params, field, v, opts);
   switch (op) {
     // [#19975] `val` is never a list here: {@link assertNoListInEqualitySlot}
     // refused one at {@link compileField}, before this emitter runs.
-    case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
-    // [#5298] `$ne: null` stays `IS NOT NULL` — already total, and "has any
-    // value" is false for a row that has none. Only the comparison is guarded.
-    case '$ne': return val === null ? `${col} IS NOT NULL` : nullSafeNegative(col, `${col} <> ${bind(params, val)}`);
-    case '$gt': return `${col} > ${bind(params, val)}`;
-    case '$gte': return `${col} >= ${bind(params, val)}`;
-    case '$lt': return `${col} < ${bind(params, val)}`;
-    case '$lte': return `${col} <= ${bind(params, val)}`;
+    case '$eq': return val === null ? `${col} IS NULL` : `${vcol()} = ${vbind(val)}`;
+    // [#5298] `$ne: null` is `IS NOT NULL` — already total, and "has any
+    // value" is false for a row that has none. A `$ne` of a value arrives
+    // inside the NULL escape the shared lowering wrote around it (see the
+    // module header), so the comparison compiles as written here.
+    case '$ne': return val === null ? `${col} IS NOT NULL` : `${vcol()} <> ${vbind(val)}`;
+    case '$gt': return `${vcol()} > ${vbind(val)}`;
+    case '$gte': return `${vcol()} >= ${vbind(val)}`;
+    case '$lt': return `${vcol()} < ${vbind(val)}`;
+    case '$lte': return `${vcol()} <= ${vbind(val)}`;
     case '$in': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return FALSE_CLAUSE; // IN () matches nothing — safe
       assertCompilableMembers(op, field, val);
-      return `${col} IN (${val.map((v) => bind(params, v)).join(', ')})`;
+      return `${vcol()} IN (${val.map(vbind).join(', ')})`;
     }
     case '$nin': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
@@ -1884,14 +2116,14 @@ function compileOperator(
       // header's #13571 section before "harmonising" the two arms.
       if (val.length === 0) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" is empty — an empty exclusion excludes nothing and would compile the read scope to constant TRUE (fail-closed).`);
       assertCompilableMembers(op, field, val);
-      // [#5298] NULL-safe: "not among this list" holds vacuously for a value
-      // that is not there.
-      return nullSafeNegative(col, `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`);
+      // [#5298] "Not among this list" holds vacuously for a value that is not
+      // there: the shared lowering's NULL escape around this leaf says so.
+      return `${vcol()} NOT IN (${val.map(vbind).join(', ')})`;
     }
     case '$between': {
       if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
       assertCompilableMembers(op, field, val);
-      return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
+      return `${vcol()} BETWEEN ${vbind(val[0])} AND ${vbind(val[1])}`;
     }
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
     // character is bound with it. See {@link textMatch}.
@@ -1904,9 +2136,14 @@ function compileOperator(
     // [#15684] …and the four case-EXACT arms take their construct from the
     // DIALECT ({@link textMatch}): a plain `LIKE` folds ASCII case on SQLite,
     // so this scope ADMITTED rows the policy excludes — over-reach (#3948).
+    // [#20987] …and on a column declared multi-valued or JSON-stored the
+    // operator is MEMBERSHIP, not a substring of the stored JSON text — see
+    // {@link membershipMatch}.
     case '$contains':
       assertRenderableText(op, field, val);
-      return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'contains', val, false, params, opts);
+      return textOverNonTextColumn(op, field, opts)
+        ?? membershipMatch(col, op, val, field, params, opts)
+        ?? textMatch(col, 'contains', val, false, params, opts);
     /**
      * [#6520] `$icontains` on the READ-SCOPE lowering — the one compiler in this
      * package where a wrong answer is an ADR-0021 scope over-reach rather than a
@@ -1949,12 +2186,16 @@ function compileOperator(
       assertIcontainsComparandNotRefused(op, field, val);
       return textOverNonTextColumn(op, field, opts)
         ?? textMatch(col, 'contains', val, false, params, opts, true);
-    // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
-    // contain" is true of a value that is not there.
+    // [#5298] `NOT LIKE` is UNKNOWN for a NULL column, and "does not contain"
+    // is true of a value that is not there: the shared lowering's NULL escape
+    // around this leaf says so, for the text test and — [#20987] — for the
+    // negated MEMBERSHIP test on a column declared multi-valued or JSON-stored
+    // alike, `driver-sql`'s NULL rule.
     case '$notContains':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts)
-        ?? nullSafeNegative(col, textMatch(col, 'contains', val, true, params, opts));
+        ?? membershipMatch(col, op, val, field, params, opts)
+        ?? textMatch(col, 'contains', val, true, params, opts);
     case '$startsWith':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'starts', val, false, params, opts);
@@ -1967,195 +2208,75 @@ function compileOperator(
     // not the "anything truthy is IS NULL" rule it used to be. That old rule is
     // what put the STRING `"false"` on the side opposite the `false` it was
     // written to mean; the identity spelling cannot, and it is the spelling
-    // {@link nullValueSatisfiesOperator} now mirrors (#5146 / #5298).
+    // the shared lowering's NULL-polarity table reads (#5146 / #5298).
     case '$null': return val === true ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val === true ? `${col} IS NOT NULL` : `${col} IS NULL`;
+    // [#20445] `val` is a boolean here too — the same gate refused anything
+    // else — so `=== true` is the whole choice between the arm and its
+    // complement. See {@link compileEmptyOperator}.
+    case '$empty': return compileEmptyOperator(col, val === true, field, params, opts);
+    // ⚠️ [#20445] An operator outside this arm list stays a SERVER fault,
+    // `READ_SCOPE_COMPILE_FAILED` / 500 with the message withheld, and NOT the
+    // `where` door's `INVALID_FILTER` / 400. The scope was not written by the
+    // caller of this query: both callers of this compiler hand it
+    // `ctx.getReadScope(object)`, which the plugin answers from the security
+    // service's compiled sharing rules / permission sets or from the host's
+    // own `getReadScope` option. A 400 would tell that caller to repair a
+    // request that was never the problem and would relay the policy's
+    // operator and field to them — the two defects the #5367 ruling (the
+    // module header's "Every refusal here is a SERVER fault" section,
+    // re-affirmed as #7598 Q2 = A) closed.
     default:
       throw readScopeCompileError(`[read-scope-sql] unsupported operator "${op}" on "${field}" (fail-closed).`);
   }
 }
 
-// ── [#5146] NULL-safe `$not` ─────────────────────────────────────────────────
-
 /**
- * What one field constraint needs so its compiled SQL is TOTAL — TRUE or FALSE
- * for every row, never UNKNOWN.
+ * [#20445] The `$empty` arm: the field's DECLARED row of the ruled per-type
+ * table, from the spec's one expansion, compiled by `empty-operator-sql.ts`.
  *
- * - `'none'`         — already total (`IS NULL` / `IS NOT NULL`), or a shape
- *                      this compiler refuses outright, which must keep refusing.
- * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
- * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
+ * The declaration comes from the caller ({@link ReadScopeCompileOptions.declaredValueShape});
+ * this compiler calls `expandEmptyOperator` on it and keeps no table of its
+ * own. Two refusals, both in this module's one envelope and both before
+ * anything binds, so `params` stays aligned:
+ *
+ * - the caller cannot name the field's declaration. The row decides what the
+ *   SQL compares (`''` is a type error against a numeric column on Postgres,
+ *   and an empty list is only recognisable as JSON), so there is no reading to
+ *   fall back to;
+ * - the field is list-valued and the dialect is `'unknown'`, where no JSON
+ *   test parses on every engine.
  */
-type NullGuard = 'none' | 'requireValue' | 'allowNull';
-
-/**
- * Does a NULL column satisfy this one operator, under the semantics the JS
- * backends (`driver-memory`'s `match`, `formula`'s `matchesFilterCondition`)
- * give it? They evaluate a missing value in ordinary two-valued JS — `undefined
- * !== 'won'` is simply `true` — and #5146 ruled that answer canonical.
- *
- * This is `sql-driver.ts`'s `nullValueSatisfiesOperator` table, entry for entry,
- * with ONE deliberate difference that comes from THIS file's emitter rather than
- * from a different reading of #5146:
- *
- *   - `$between` exists in this compiler and not in that table; it is a
- *     positive comparison, so it takes the default (a value that is not there
- *     does not lie between two bounds) exactly as the other comparisons do.
- *
- * ⚠️ [#6387] There used to be a SECOND difference, and its removal is half of
- * that change rather than a tidy-up. `$null` / `$exists` were read here by
- * TRUTHINESS — `Boolean(value)` / `!value` — because {@link compileOperator}
- * wrote them as `val ? … : …`, while `driver-sql` read them by identity because
- * its emitter did. That was correct under the invariant #5146 / #5298 state:
- * each polarity table pins the spelling of ITS OWN emitter, not the other
- * file's. So when the emitter stopped guessing at a non-boolean, these two arms
- * had to move WITH it in the same change — leaving them truthy would have
- * broken the invariant silently, at its own definition, with nothing red. The
- * divergence is gone now because its cause is: both emitters read the declared
- * boolean domain, so both tables spell it by identity, and the two files agree
- * on every arm for the first time.
- *
- * The default is the large positive-comparison family (`$gt`/`$in`/`$contains`/
- * …), every member of which answers `false` for a value that is not there. An
- * operator this compiler does not support also lands here; it is guarded and
- * then still throws from {@link compileOperator}, so fail-closed is preserved.
- */
-function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
-  switch (op) {
-    // `$eq: null` IS the null predicate; any other comparand is a value test.
-    case '$eq': return value === null;
-    // Mirror image: `$ne: null` compiles to `IS NOT NULL`, which a NULL fails.
-    case '$ne': return value !== null;
-    // [#6387] Identity, matching this file's emitter (see the note above).
-    // `assertBooleanFlagComparands` refuses anything but `true` / `false` before
-    // this table is consulted, so each arm is an exhaustive TWO-WAY choice over
-    // the declared domain — and the strict spelling is chosen over the lenient
-    // one it replaces for the reason #5347 gave: `Boolean(value)` and
-    // `value === true` are equivalent only while the gate upstream holds, and
-    // the lenient spelling would quietly resume answering for shapes nobody
-    // ruled on if that gate were ever moved. A NULL column satisfies `$null`
-    // exactly when the author asked for null…
-    case '$null': return value === true;
-    // …and satisfies `$exists` exactly when the author asked for "no value".
-    // `$null: true` and `$exists: false` are the same question, so these two
-    // arms are correctly each other's MIRROR, not each other's copy (#5369).
-    case '$exists': return value === false;
-    // Negative-polarity set / substring tests hold vacuously for an absent value.
-    case '$nin': return true;
-    // `$notContains` is the one operator where the two JS backends disagree for
-    // a null-valued field (`driver-memory` answers false, `formula` true).
-    // `formula` is followed because `driver-sql` follows it, so this compiler
-    // does not cast a vote on a disagreement that is filed elsewhere.
-    case '$notContains': return true;
-    default: return false;
+function compileEmptyOperator(
+  col: string,
+  empty: boolean,
+  field: string,
+  params: unknown[],
+  opts: ReadScopeCompileOptions,
+): string {
+  const shape = opts.declaredValueShape?.(field);
+  if (!shape) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "$empty" on "${field}" needs the field's declared type, and this host could not ` +
+        `name it (no field metadata wired, or no such field on the object) — refusing to build read scope ` +
+        `(fail-closed). What counts as empty depends on the declaration: null or '' for a text-like ` +
+        `field, null or [] for a multi-value field, null only for every other type. The producer to fix ` +
+        `is whoever BUILT this read scope, or the host's field metadata — never the caller of this query.`,
+    );
   }
-}
-
-/** Is this operator's compiled SQL already total for a NULL column? */
-function operatorIsNullTotal(op: string, value: unknown): boolean {
-  switch (op) {
-    // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
-    case '$null':
-    case '$exists':
-      return true;
-    // A null comparand makes these null PREDICATES too, not comparisons.
-    case '$eq':
-    case '$ne':
-      return value === null;
-    default:
-      return false;
+  const sql = emptyOperatorPredicateSql({
+    dialect: normalizeSqlDialect(opts.dialect),
+    column: col,
+    expansion: expandEmptyOperator(shape),
+    empty,
+    bind: (v) => bind(params, v),
+  });
+  if (sql === null) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "$empty" on "${field}" is a multi-value field, whose empty list is tested with a ` +
+        `JSON function that differs per SQL dialect, and the dialect of this datasource is not known — ` +
+        `refusing to build read scope (fail-closed) rather than guessing the construct.`,
+    );
   }
-}
-
-/**
- * The guard one field constraint needs. A constraint is the AND of its
- * operators, so it is total when every operator is, and a NULL column satisfies
- * it only when it satisfies all of them.
- */
-function nullGuardForFieldSpec(spec: unknown): NullGuard {
-  // `{ field: null }` compiles to `IS NULL` — already total.
-  if (spec === null) return 'none';
-  // A scalar / Date is an implicit `=`; a NULL column fails it. A bare array is
-  // REFUSED by `compileField`; classifying it here keeps that refusal reachable
-  // (the unrewritten `{field: […]}` conjunct still throws its own message).
-  if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
-  const entries = Object.entries(spec as Record<string, unknown>);
-  // `{ field: {} }` and any non-`$` key are shapes `compileField` throws on.
-  // Passing them through unrewritten is what preserves the exact error; a guard
-  // wrapped around them would only change which message the caller sees.
-  if (entries.length === 0) return 'none';
-  let total = true;
-  let nullSatisfies = true;
-  for (const [op, value] of entries) {
-    if (!operatorIsNullTotal(op, value)) total = false;
-    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
-  }
-  if (total) return 'none';
-  return nullSatisfies ? 'allowNull' : 'requireValue';
-}
-
-/**
- * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
- * predicate — which is what makes `NOT (…)` mean here what it means in
- * `driver-memory`, `formula` and (since #5296) `driver-sql`.
- *
- * # Why the guard rides the LEAF, not the `NOT`
- *
- * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
- * NULL` are the same predicate. They stop being the same as soon as the operand
- * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
- * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
- * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
- * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
- * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
- * On an RLS lowering that difference is rows a policy excludes becoming visible,
- * so it is the whole reason this is a rewrite and not a suffix.
- *
- * # Why polarity is per operator
- *
- * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
- * `{$not: {a: {$ne: 5}}}` means "a is 5", and both JS backends exclude a NULL
- * row from it. Adding an unconditional null escape there would hand back exactly
- * the rows the scope excludes. So each leaf is guarded in the direction its own
- * operator answers, per {@link nullValueSatisfiesOperator}.
- *
- * The rewrite runs ONLY inside a `$not`; an ordinary comparison's SQL is
- * untouched, so nothing outside a negation changes shape. A nested `$not` is
- * left alone on purpose — its own branch totalises its operand, and
- * `NOT <total>` is itself total, so recursing would stack a redundant guard on
- * the same column.
- */
-function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const guarded: unknown[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
-      // A non-node element is passed through so `compileNode` still rejects it.
-      out[key] = value.map((element) => (isFilterNode(element) ? nullSafeNegationOperand(element) : element));
-      continue;
-    }
-    if (key.startsWith('$')) {
-      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
-      // whatever this compiler does with them today — the rewrite rules on NULL,
-      // not on the operator vocabulary, and an unknown one must still throw.
-      out[key] = value;
-      continue;
-    }
-    const guard = nullGuardForFieldSpec(value);
-    if (guard === 'none') {
-      out[key] = value;
-    } else if (guard === 'requireValue') {
-      // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
-      guarded.push({ [key]: { $null: false } }, { [key]: value });
-    } else {
-      // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the
-      // AND this node's keys form.
-      guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: value }] });
-    }
-  }
-  if (guarded.length > 0) {
-    const existing = Array.isArray(out.$and) ? out.$and : [];
-    out.$and = [...existing, ...guarded];
-  }
-  return out;
+  return sql;
 }

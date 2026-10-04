@@ -12,13 +12,14 @@ export const entry: SemanticMigration = {
     + 'prescription. Metadata at rest is untouched: raw `.parse()`/`.safeParse()` still accept '
     + 'the old shape, the security gate\'s derived enforcement stays, and the lint rule '
     + '`relationship/master-detail-required` stays `warning` until its own v18 promotion '
-    + '(#8772 Direction 1)',
+    + '(Direction 1 of the 2026-08-16 maintainer ruling whose Direction 2 this is)',
   reason:
     'A `controlled_by_parent` detail derives ALL of its record access from the master that its '
     + '`master_detail` reference names (ADR-0055). With the reference not `required`, an insert '
     + 'may omit the master FK: the row lands with a null FK that the derived read filter '
     + '`masterFK IN (accessible master ids)` can never match — unreadable by everyone — and '
-    + 'every later by-id write answers `422 MISSING_REQUIRED_FIELD`. #8772 measured that only '
+    + 'every later by-id write answers `422 MISSING_REQUIRED_FIELD`. The finding behind the '
+    + 'ruling measured that only '
     + 'the security gate closed this shape while the declaration surface still accepted it. '
     + 'The maintainer ruling (2026-08-16, Direction 2) makes the unsafe shape impossible to '
     + 'NEWLY declare at the builder; whether to keep `required: false` was never a real choice '

@@ -27,8 +27,10 @@ import {
   unbindAllHooks,
 } from './lifecycle-hooks.js';
 import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
+import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
+import { backfillActionSlots } from './action-slot-backfill.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -246,6 +248,18 @@ export class ApprovalsServicePlugin implements Plugin {
           ? sec.getReadableFields(object, context)
           : Promise.resolve(undefined);
       },
+      // [#20964] The masked-for-this-caller answer, from the same service: the
+      // read projection counts a masked field readable, so the service door
+      // narrows by both. A service without the member answers `undefined`
+      // here, which the redaction reads as "cannot tell" and fails closed on
+      // (`resolveReadableSnapshotFields`). The generic data door below is
+      // handed the service itself and reads the same member directly.
+      getQueryableFields: (object: string, context?: unknown) => {
+        const sec = fieldVisibility();
+        return sec && typeof sec.getQueryableFields === 'function'
+          ? sec.getQueryableFields(object, context)
+          : Promise.resolve(undefined);
+      },
     });
 
     // Record lock: block edits to a record while it has a pending request.
@@ -268,6 +282,10 @@ export class ApprovalsServicePlugin implements Plugin {
         // `payload-redaction-middleware.ts` on why one door covered alone is
         // worse than none.
         bindSnapshotRedactionMiddleware(engine as any, fieldVisibility, ctx.logger);
+        // [#21154] …and its query half: the redaction narrows only what a read
+        // hands back, so a filter or a group key over the snapshot would select
+        // on a value the reader is not served. See `payload-predicate-guard.ts`.
+        bindSnapshotPredicateGuard(engine as any, fieldVisibility, ctx.logger);
       } catch (err: any) {
         ctx.logger.warn?.('[approvals] failed to bind approval hooks', { error: err?.message });
       }
@@ -400,14 +418,46 @@ export class ApprovalsServicePlugin implements Plugin {
       }
     };
 
+    // Action-slot backfill (#21411): move the slot literals rows written
+    // before `acted_as` existed still hold in `actor_id`, null the machine
+    // sentinels earlier writers stored there (ADR-0118 D1), and give the votes
+    // a pending request's tally still counts their `acted_as`. Every slot
+    // reader reads `acted_as` with no fallback to `actor_id`, so this runs at
+    // boot rather than waiting for an operator. Idempotent; see the module.
+    //
+    // `error`, not `warn`: a failed run leaves the system looking normal while
+    // in-flight multi-approver tallies have lost the votes they already
+    // counted and holders have lost sight of position-slot history.
+    const slotEngine = engine as ApprovalEngine;
+    const backfillSlots = async () => {
+      try {
+        const out = await backfillActionSlots(slotEngine);
+        if (out.literalsMoved > 0 || out.sentinelsCleared > 0 || out.votesStamped > 0) {
+          ctx.logger.info('ApprovalsServicePlugin: action slots backfilled', out);
+        }
+      } catch (err: any) {
+        ctx.logger.error(
+          '[approvals] action-slot backfill failed — approvals recorded before the slot column existed are '
+          + 'missing from multi-approver tallies and from the already-acted visibility of the slot\'s holders, '
+          + 'and stored machine actors still sit in the actor lookup where every join drops them, while '
+          + 'everything else looks healthy. The repair is idempotent and runs at every boot: fix the cause '
+          + 'below and restart.',
+          err instanceof Error ? err : undefined,
+          { error: err?.message ?? String(err) },
+        );
+      }
+    };
+
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', wireEscalationClock);
       (ctx as any).hook('kernel:ready', mountActionPages);
       (ctx as any).hook('kernel:ready', backfillApproverIndex);
+      (ctx as any).hook('kernel:ready', backfillSlots);
     } else {
       await wireEscalationClock();
       await mountActionPages();
       await backfillApproverIndex();
+      await backfillSlots();
     }
 
     // ADR-0019: contribute the `approval` node to the flow engine when one is

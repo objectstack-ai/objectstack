@@ -407,8 +407,10 @@ const ORDERING_COMPARAND_DESCRIPTION =
  * one form the platform's own date-macro path can never hand them. This is the
  * declaration aligning to a contract the rest of the stack already keeps, not
  * a new capability: every evaluation surface ALREADY compares strings
- * (`driver-sql` binds `>`/`>=`/`<`/`<=`, `formula`'s `matchesFilter` and
- * `driver-memory`'s matcher fall through to the JS operators).
+ * (`driver-sql` binds `>`/`>=`/`<`/`<=`, `formula`'s `matchesFilter` falls
+ * through to the JS operators, and `driver-memory`'s query path hands the
+ * comparison to mingo, which orders strings; its reference matcher, retired by
+ * commit `8fec76a2b`, fell through to the JS operators).
  *
  * ## Why a BARE string, and not an ISO-shaped refinement (#5685 rider ①)
  *
@@ -428,11 +430,12 @@ const ORDERING_COMPARAND_DESCRIPTION =
  *    that in the COMPARAND position (`'14:30'` → `'14:30:00'`, the #3979
  *    contract pair). A `$gte: '09:00'` on a `time` column is a supported
  *    comparison an ISO refinement would refuse.
- * 3. **date-only and full-timestamp are already reconciled by the driver**, so
+ * 3. **date-only and full-timestamp are already reconciled downstream**, so
  *    narrowing buys no safety there. A bare `YYYY-MM-DD` anchors to midnight
- *    UTC for a lower bound and is rewritten to the half-open
- *    `< next-day-midnight` for an upper bound (`calendarDayUpperBoundRewrite`,
- *    the #3777 convention).
+ *    UTC for a lower bound, and an upper bound is rewritten to the half-open
+ *    `< next-day-midnight` by the shared `lowerFilterCondition` at the seams
+ *    (ADR-0053 D-D1, as amended; the #3777 convention) before each driver
+ *    puts it in its storage form.
  *
  * ## What widening ADMITS, stated plainly
  *
@@ -464,9 +467,10 @@ const ORDERING_COMPARAND_DESCRIPTION =
  */
 function nullOrderingComparandMessage(op: string): string {
   return (
-    `null is not a valid ${op} comparand. null is not ordered, and no two evaluation faces `
-    + 'agree on what an ordering against it matches (driver-memory\'s live path reads two '
-    + 'absences as equal; its reference matcher compares through JS coercion). State absence '
+    `null is not a valid ${op} comparand. null is not ordered, and the evaluation faces do not `
+    + 'agree on what an ordering against it matches (driver-memory\'s query path reads a '
+    + 'stored null as equal to it, so {"$gte": null} admits that row; driver-sql compares '
+    + 'against SQL NULL and admits no row). State absence '
     + 'with the null predicate instead: {"$eq": null} is "has no value", {"$ne": null} is '
     + '"has a value". Ruled 2026-09-01: a null ordering comparand is refused at the validation '
     + 'entrance.'
@@ -650,7 +654,7 @@ export const SetOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
- * The endpoint contract shared by both of `$between`'s bounds (#6571).
+ * The endpoint contract shared by both of `$between`'s bounds (commit 2f3e79351).
  *
  * Module-private on purpose, exactly like {@link ORDERING_COMPARAND_DESCRIPTION}:
  * it is documentation attached to a slot, not an authorable surface of its own,
@@ -704,7 +708,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * writes the two bounds separately (`{ $gte: { $field: 'a' }, $lte: { $field: 'b' } }`),
  * which every face already answers.
  *
- * ## Why `string` is in BOTH endpoint unions (#6571)
+ * ## Why `string` is in BOTH endpoint unions (commit 2f3e79351)
  *
  * This is the same contradiction {@link ComparisonOperatorSchema} carried until
  * #5685, in the one slot where it bites hardest. Until this was written down
@@ -728,28 +732,29 @@ const RANGE_ENDPOINT_DESCRIPTION =
  *   `{ at: { $between: ['08:00:00', '18:00:00'] } }` on a `Field.time` column.
  *   A declaration contradicted by the conformance table one directory over is
  *   not under-describing reality; it is disagreeing with it.
- * - **The driver already normalises both ends per column type.**
+ * - **Both ends are already normalised per column type downstream.**
  *   `SqlDriver.coerceFilterValue` recurses through arrays member-wise
- *   (`value.map(v => this.coerceFilterValue(table, field, v))`), and
- *   `calendarDayBetweenRewrite` coerces the min and rewrites a bare-calendar-day
- *   max into the half-open `< next-day(max)` bound — knex's `whereBetween` being
- *   inclusive on both ends, it inherits the same rule `$lte` has (#3777).
+ *   (`value.map(v => this.coerceFilterValue(table, field, v))`), and the shared
+ *   `lowerFilterCondition` (ADR-0053 D-D1, as amended) splits a `$between` at
+ *   the seams into `$gte` its min and `$lte` its max, so a bare-calendar-day max
+ *   becomes the half-open `< next-day(max)` bound by the same rule `$lte` has
+ *   (#3777) — a range being inclusive on both ends.
  *
  * A closed interval is the natural spelling of a **date window**, which makes
  * this the slot an author — an AI author in particular — is most likely to
  * reach for with the resolver's own output in hand, and the old declaration
  * told them that output was invalid.
  *
- * ## Why a BARE string, and not an ISO-shaped refinement (#6571 rider ①)
+ * ## Why a BARE string, and not an ISO-shaped refinement (commit 2f3e79351, rider ①)
  *
  * Identical to {@link ComparisonOperatorSchema}'s finding, and re-measured for
  * the tuple: this schema is field-**agnostic** (it never sees which column the
  * range applies to), an ISO refinement would reject the `HH:MM[:SS[.fff]]` form
  * `field-value.zod.ts`'s `CLOCK_TIME_TYPES` declares and the conformance case
  * above exercises, and date-only vs full-timestamp is already reconciled
- * downstream by `calendarDayBetweenRewrite`. Endpoint-vs-column correctness is
- * a field-TYPED judgement that already has an owner; re-guessing it here would
- * refuse working ranges.
+ * downstream, by the shared `lowerFilterCondition` at the seams.
+ * Endpoint-vs-column correctness is a field-TYPED judgement that already has an
+ * owner; re-guessing it here would refuse working ranges.
  *
  * ## What widening ADMITS, stated plainly
  *
@@ -763,7 +768,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * nothing, at every backend.
  */
 /**
- * [#18012] The author-facing refusal for a BLANK `$between` endpoint — the
+ * [commit 176b03582] The author-facing refusal for a BLANK `$between` endpoint — the
  * empty string and `undefined`, at either bound. Ruled 2026-09-17 (decision
  * batch #146 item 5, letter A): both endpoints present and non-empty.
  *
@@ -799,7 +804,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
 
 /**
  * [#7596] One `$between` endpoint, with the `{ $field }` shape ruled out — and,
- * since the 2026-09-17 ruling (#18012), the BLANK endpoint likewise.
+ * since the 2026-09-17 ruling (commit 176b03582), the BLANK endpoint likewise.
  *
  * ## Why the union's `error` carries three of the four refusals
  *
@@ -818,7 +823,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
  *
  * `null`, `undefined` and `{ $field }` never passed the union; for all three
  * the ruling adds only a POINTED SENTENCE. `''` is a string and the union
- * ACCEPTS it, so the empty-string arm is the one place where #18012 changes
+ * ACCEPTS it, so the empty-string arm is the one place where commit 176b03582 changes
  * what parses. It rides an ELEMENT-level `superRefine` — not the tuple-level
  * one the paragraph above rules out — which runs exactly when this endpoint
  * passed the union, i.e. precisely when there is an `''` to report.
@@ -836,7 +841,7 @@ const rangeEndpointSchema = (index: 0 | 1) =>
       // mechanism the `{ $field }` shape uses one line down.
       issue.input === null
         ? nullListComparandMemberMessage(`$between endpoint at index ${index}`)
-        // [#18012] `undefined` never passed it either — an absent bound is the
+        // [commit 176b03582] `undefined` never passed it either — an absent bound is the
         // same replace-only substitution, pointed at the side that is missing.
         : issue.input === undefined
           ? blankRangeBoundMessage(index)
@@ -844,7 +849,7 @@ const rangeEndpointSchema = (index: 0 | 1) =>
             ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
             : undefined,
   }).superRefine((endpoint, ctx) => {
-    // [#18012] The empty string is the one blank spelling the union accepts.
+    // [commit 176b03582] The empty string is the one blank spelling the union accepts.
     // ⛔ Not a trim and not a whitespace rule: the ruling is the empty string,
     // and widening it here would narrow a published face further than ruled.
     if (endpoint !== '') return;
@@ -935,7 +940,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * | `driver-sql` | ANSWERS both rows | its own `case '$icontains'`, folding through the same emitter that carries the escaping |
  * | `driver-sqlite-wasm` | ANSWERS both rows | INHERITED — `SqliteWasmDriver extends SqlDriver`; this package carries no text case arm of its own, on a different ENGINE |
  * | `driver-turso` | ANSWERS both rows, on BOTH transports | local inherits `SqlDriver`; the remote transport compiles independently and has its own arm |
- * | `driver-memory` — query path, reference matcher, analytics face | ANSWERS both rows | #6520; the pattern faces take {@link asciiCaseInsensitiveRegexSource}, the matcher {@link asciiCaseInsensitiveContains} |
+ * | `driver-memory` — query path, analytics face | ANSWERS both rows | #6520; both take {@link asciiCaseInsensitiveRegexSource} (its reference matcher took {@link asciiCaseInsensitiveContains} until commit `8fec76a2b` retired it) |
  * | `driver-mongodb` | ANSWERS both rows | #6520; an ASCII-only `$regex`, never `$options: 'i'` |
  * | objectql `having` | ANSWERS both rows | #6520; {@link asciiCaseInsensitiveContains} over the aggregated row |
  * | `formula` `matchesFilterCondition` | ANSWERS both rows | #6520; the same helper, on the RLS write-side `check` |
@@ -971,7 +976,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * driver-conformance ledger is empty. Read the open set from a run of that gate
  * rather than from this paragraph.
  *
- * ### A JSON-stored column changes what `$contains` ASKS (#17590, maintainer ruling via the director seat, 2026-09-12)
+ * ### A JSON-stored column changes what `$contains` ASKS (commit e04a0aff2, maintainer ruling via the director seat, 2026-09-12)
  *
  * **On a `multiple: true` field or a `JSON_COLUMN_TYPES` member, `$contains: v`
  * is a MEMBERSHIP test — `v` is a member of the stored array — answered
@@ -1012,17 +1017,39 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *   SQLite. Measured on better-sqlite3, live PostgreSQL 16.13 and live MySQL
  *   8.0.46 over one fixture whose rows make substring and membership disagree.
  *   `driver-sqlite-wasm` and `driver-turso` inherit it.
- * - **`driver-memory` — DOES NOT ANSWER IT YET, and reads `multiple: true`
- *   two ways of its own.** Measured on the same fixture: its live query path
- *   matches a stored array by substring PER ELEMENT (so `['redwood']` answers
- *   `$contains: 'red'`, the same over-match the SQL family just lost) and
- *   answers NOTHING at all for a `multiple: true` NUMBER, while its reference
- *   matcher answers no array at all. That whole axis — every non-equality arm
- *   over a stored array, in both directions — is measured and owned by #17286,
- *   which recorded the semantics as undecided; this ruling is the decision it
- *   was missing. ⚠️ So an application whose tests run on the in-memory double
- *   and whose production runs SQL still gets two answers from one filter here.
- *   Read the open set from that card, ⛔ not from this paragraph.
+ * - **`driver-memory` — ANSWERS the membership contract, on every face.** Its
+ *   live query path (both filter spellings) and its analytics face fork on the
+ *   field's DECLARED storage shape, read from the schema `syncSchema` recorded
+ *   (`STRUCTURED_JSON_TYPES`, or `isMultiValueField`): membership there, the
+ *   substring test on a scalar column. Measured over `driver-sql`'s own
+ *   fixture, row for row: `['redwood']` no longer answers `'red'`, `['u10']` no
+ *   longer answers `'u1'`, and the stored number `1` answers `'1'`. The
+ *   analytics face's SQL echo renders SQLite's `json_each` construct for the
+ *   same question. A field with no recorded declaration keeps the substring
+ *   reading, as a table `driver-sql` was never told about does.
+ * - **`driver-mongodb` — ANSWERS the membership contract, on every face.**
+ *   `translateFilter` (query, count, write and the aggregation `$match` alike)
+ *   forks on the field's DECLARED value shape, read from the schema
+ *   `syncSchema` recorded (`STRUCTURED_JSON_TYPES`, or `isMultiValueField`): an
+ *   array-only `$elemMatch` over the members `@objectstack/core`'s
+ *   `jsonMembershipCandidates` names there, the substring `$regex` on a scalar
+ *   column. `['u10']` no longer answers `'u1'`; the stored number `1` answers
+ *   `'1'`. Measured on the emitted documents, read server-free and cross-checked
+ *   against mingo; a real `mongod` was not measured. A field with no recorded
+ *   declaration keeps the substring reading.
+ * - **`@objectstack/formula`'s `matchesFilterCondition` — ANSWERS the
+ *   membership contract.** This face judges one record (the RLS write check,
+ *   the explain engine), so it reads the column's DECLARATION when its caller
+ *   supplies one (`options.fields`) and the stored value's shape otherwise: an
+ *   array asks membership, anything else substring — the by-value reading this
+ *   face already gives `$empty`. Measured through `plugin-security` on SQLite: a
+ *   `contains` policy over a multi-valued field admits a write of the row its
+ *   read shows (`['x']`) and refuses `['xy']`, which its read hides.
+ *
+ * Only `$contains` / `$notContains` are ruled here. The other text operators
+ * over a stored array are not: measured on the same fixture, `$startsWith`
+ * still answers per element on `driver-memory` and over the serialized text on
+ * SQLite, so those two backends still disagree there.
  *
  * The comparand stays a STRING on every column ({@link CONTAINS_DESCRIPTION}),
  * so a member that is stored as a JSON number or boolean is named by its text:
@@ -1037,9 +1064,8 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the membership reading — the SQL family landed)
+ * @see commit e04a0aff2 (the membership reading, landed with the SQL family)
  * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the refusal whose prescription this spelling is)
- * @see https://github.com/objectstack-ai/objectstack/issues/17286 (driver-memory's stored-array axis — open)
  */
 /**
  * The comparand contract the four CASE-SENSITIVE members of this family share
@@ -1171,16 +1197,17 @@ const ASCII_CASE_DELTA = 0x20; // 'a' - 'A'
  *
  * ## Why this is in the spec and not four times in four packages
  *
- * `$icontains` has six JS evaluation faces (`driver-memory`'s query path,
- * reference matcher and analytics face, `driver-mongodb`, objectql's `having`,
- * `@objectstack/formula`'s `matchesFilterCondition`) plus three SQL compilers in
+ * `$icontains` has five JS evaluation faces (`driver-memory`'s query path and
+ * analytics face, `driver-mongodb`, objectql's `having`,
+ * `@objectstack/formula`'s `matchesFilterCondition`; a sixth, `driver-memory`'s
+ * reference matcher, was retired by commit `8fec76a2b`) plus three SQL compilers in
  * `service-analytics`. Every one of them needs the same fold, and this repo has
  * already measured what happens when such a rule is written out per package:
  * *"a list written out here would agree with the spec on the day it was typed
  * and never again"* (`driver-memory/src/filter-refusal.ts`, on the operator
  * vocabulary) — the #3948 shape, reached through the fold instead of the word
  * list. One definition means a fold that is wrong is wrong everywhere at once,
- * which is the only way six faces can be held to one answer.
+ * which is the only way these faces can be held to one answer.
  *
  * ## Why not `toLowerCase()`
  *
@@ -1216,7 +1243,8 @@ export function foldAsciiCase(value: string): string {
  * [#6520] Does `haystack` contain `needle`, ignoring ASCII case only?
  *
  * The `$icontains` predicate for every face that can compare two JS strings
- * directly — the reference matcher, objectql's `having`, `formula`. The fold
+ * directly — objectql's `having` and `formula` (and `driver-memory`'s reference
+ * matcher until commit `8fec76a2b` retired it). The fold
  * runs on BOTH sides, which is the half that is easy to get wrong: folding only
  * the comparand compares a folded needle against a raw haystack and matches just
  * the rows that were already lower-case. `FILTER_TEXT_CASES`' first row (an
@@ -1537,7 +1565,46 @@ const EXISTS_PREDICATE_DESCRIPTION =
   + '`{ $eq: null }` (false) on MongoDB.';
 
 /**
- * Special check operators for null and existence.
+ * [#20311] The `describe()` `$empty` carries in both copies — and it IS the
+ * operator's meaning, not a gloss on it.
+ *
+ * Ruling B on #20311 (record 5861435168) set what 「is empty」 means once, per
+ * field type; ruling A on #20399 (record 5865693155) spelled it as this
+ * operator, "whose describe IS the per-type table". So this string is the
+ * table, and `filter-empty-operator.test.ts` pins it to the ruled text and
+ * pins each type list it names to the set `expandEmptyOperator`
+ * (`./filter-empty-operator.ts`) reads — `STRING_VALUE_TYPES`,
+ * `MULTI_OPTION_TYPES`, `MULTI_CAPABLE_TYPES` in `field-value.zod.ts` — so the
+ * prose and the function cannot drift apart. The lists are spelled out rather
+ * than joined from those sets on purpose: this module takes no import from
+ * `field-value.zod` (the two meet in the `field.zod` import cycle, where a
+ * module-scope read of a set is not safe under `OS_EAGER_SCHEMAS=1`), and the
+ * expansion lives in its own module for the same reason.
+ *
+ * The last sentences are load-bearing too. [#20446] The staging is over
+ * (the maintainer's amendment of ruling A, record 5868169573, 「照 $like
+ * 先例分阶段」, ended with every face holding an arm): the operator is in
+ * {@link FILTER_OPERATORS} and the view operators `is_empty` /
+ * `is_not_empty` lower to it. So the description tells an author the one
+ * place it is refused rather than guessed — a face that answers by the
+ * declared type, asked about a column it holds no declaration for — and what
+ * to write there instead. The measured per-face table is on
+ * {@link FILTER_OPERATORS}.
+ */
+const EMPTY_PREDICATE_DESCRIPTION =
+  'Is-empty check by the field\'s DECLARED type. `true` matches rows whose field is empty, '
+  + '`false` is its exact complement. What counts as empty: text-like types (text, textarea, '
+  + 'email, url, phone, password, secret, markdown, html, richtext, code, color, signature, '
+  + 'qrcode) = null or \'\' (the empty string); multi-value types (multiselect, checkboxes, '
+  + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
+  + '(the empty list); every other type = null only. A face that holds no field declaration '
+  + 'judges by the value: null, \'\' and [] are empty. A face that answers by the declared '
+  + 'type refuses the operator on a column whose declaration it does not hold (the built-in '
+  + 'id, for one) rather than guess a row; use $null there for "has no value". The view '
+  + 'operators is_empty / is_not_empty lower to this operator.';
+
+/**
+ * Special check operators for null, existence and emptiness.
  */
 export const SpecialOperatorSchema = lazySchema(() => z.object({
   /** Is null check - SQL: IS NULL (true) / IS NOT NULL (false) | MongoDB: field: null */
@@ -1549,6 +1616,15 @@ export const SpecialOperatorSchema = lazySchema(() => z.object({
    * `{$ne: null}` / `{$eq: null}` on MongoDB.
    */
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
+
+  /**
+   * [#20311] Field IS EMPTY by its declared type — the per-type table
+   * {@link EMPTY_PREDICATE_DESCRIPTION} carries, expanded per field by
+   * `expandEmptyOperator` (`./filter-empty-operator.ts`). [#20446] In
+   * {@link FILTER_OPERATORS}; the view operators `is_empty` / `is_not_empty`
+   * lower to it.
+   */
+  $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -1590,7 +1666,7 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $in: setMembershipSchema('$in').optional().describe(SET_MEMBER_DESCRIPTION),
   $nin: setMembershipSchema('$nin').optional().describe(SET_MEMBER_DESCRIPTION),
   // Range. `string` is in BOTH endpoint unions for the reason
-  // {@link RangeOperatorSchema} gives at length (#6571): the date-macro resolver
+  // {@link RangeOperatorSchema} gives at length (commit 2f3e79351): the date-macro resolver
   // walks into arrays, so a token range resolves to two ISO/clock STRINGS, and
   // this package's own `temporal-conformance.ts` corpus spells that shape.
   // `FieldReferenceSchema` is NOT in them, for the reason the same docblock
@@ -1620,6 +1696,11 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // Special
   $null: z.boolean().optional().describe(NULL_PREDICATE_DESCRIPTION),
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
+  // [#20311] Emptiness by the field's declared type — the ruled per-type table
+  // IS the description. [#20446] Declared here and in `SpecialOperatorSchema`
+  // and, now that every face has its arm, enforced by `FILTER_OPERATORS` —
+  // see the `$empty` paragraph there.
+  $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -1869,7 +1950,9 @@ function checkFilterConditionComparands(
     const hasOperatorKeys = Object.keys(value).some((k) => k.startsWith('$'));
     if (!hasOperatorKeys) {
       // Nested relation / deep equality — the schema does not re-parse these,
-      // so the walk descends itself.
+      // so the walk descends itself. (At query time the engine serves the
+      // nested relation in `where` and refuses a whole-value match,
+      // `INVALID_FILTER`; see form 4 on {@link FilterCondition}.)
       checkFilterConditionComparands(value, ctx, [...path, key], depth + 1);
       continue;
     }
@@ -1926,13 +2009,28 @@ function checkFilterConditionComparands(
  * 1. Implicit equality: { field: value }
  * 2. Explicit operators: { field: { $op: value } }
  * 3. Logical combinations: { $and: [...], $or: [...], $not: {...} }
- * 4. Nested relations: { relation: { field: value } }
+ * 4. Nested relations: { relation: { field: value } } — a condition on the
+ *    related record's own fields, beneath a relation field (`lookup`,
+ *    `master_detail`, `user`, `tree`; single or multiple). The query engine
+ *    SERVES it in `where`, the same on every driver: it reads the related
+ *    object with the condition AS THE CALLER — that object's row scope and
+ *    field permissions apply, so a condition on a field the caller cannot read
+ *    is refused, never answered empty — and matches the relation field against
+ *    the ids it returns (`$in` on a single-valued relation; any member, an
+ *    `$or` of `$contains` per id, on a multi-valued one). One level: every key
+ *    must be a field the related object declares, and a relation condition
+ *    beneath it, or a dotted key, is refused. A condition matching more related
+ *    records than the engine's cap is refused rather than truncated; filter the
+ *    related object yourself then, and match its ids the same way. An
+ *    aggregation's own `filter` and `having` do not serve the form. The same
+ *    object beneath a JSON-valued field (a whole-value match) and beneath a
+ *    scalar field is refused.
  */
 export type FilterCondition = {
   [key: string]: 
     | any  // Implicit equality: key: value
     | z.infer<typeof FieldOperatorsSchema>  // Explicit operators: key: { $op: value }
-    | FilterCondition;  // Nested relation: key: { nested: ... }
+    | FilterCondition;  // Nested relation: key: { nested: ... } — served by the engine in `where`, one level (form 4 above)
 } & {
   /** Logical AND - combines all conditions that must be true */
   $and?: FilterCondition[];
@@ -2069,8 +2167,8 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
  *       { role: "admin" },
  *       { email: { $contains: "@company.com" } }
  *     ],
- *     profile: {                           // Nested relation
- *       verified: true
+ *     account: {                           // Nested relation (form 4): a field
+ *       industry: "tech"                   // of the related record, one level
  *     }
  *   }
  * }
@@ -2133,7 +2231,7 @@ export type Filter<T = any> = {
         $lte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
         $in?: T[K][];
         $nin?: T[K][];
-        // Range (#6571). The TYPED half of what {@link RangeOperatorSchema}
+        // Range (commit 2f3e79351). The TYPED half of what {@link RangeOperatorSchema}
         // declares, and the exact mirror of the ordering guard above — a range
         // IS its two ordering bounds, so the two must agree slot for slot:
         //   - a `Date` field also takes the ISO STRINGS the date-macro resolver
@@ -2161,7 +2259,7 @@ export type Filter<T = any> = {
         $null?: boolean;
         $exists?: boolean;
       }
-    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation
+    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed at any depth here; the engine serves one level, in `where` (see FilterCondition)
 } & {
   $and?: Filter<T>[];
   $or?: Filter<T>[];
@@ -2457,10 +2555,10 @@ const AST_OPERATOR_MAP = {
   'is_not_null': '$null',
   'isnull': '$null',
   'isnotnull': '$null',
-  'is_empty': '$null',
-  'is_not_empty': '$null',
-  'isempty': '$null',
-  'isnotempty': '$null',
+  'is_empty': '$empty',
+  'is_not_empty': '$empty',
+  'isempty': '$empty',
+  'isnotempty': '$empty',
 } satisfies Record<string, string>;
 
 /**
@@ -2509,17 +2607,16 @@ const CANONICAL_INFIX: Record<string, string> = {
 
 export function canonicalAstOperator(op: string): string {
   const lower = String(op).toLowerCase();
-  // Null predicates carry a DIRECTION that the shared `$null` lowering erases,
-  // so they cannot round-trip through CANONICAL_INFIX — fold them by name.
-  if (lower === 'is_null' || lower === 'isnull' || lower === 'is_empty' || lower === 'isempty') {
-    return 'is_null';
-  }
-  if (
-    lower === 'is_not_null' || lower === 'isnotnull'
-    || lower === 'is_not_empty' || lower === 'isnotempty'
-  ) {
-    return 'is_not_null';
-  }
+  // Null and empty predicates carry a DIRECTION that their shared `$null` /
+  // `$empty` lowering erases, so they cannot round-trip through
+  // CANONICAL_INFIX — fold them by name. [#20446] The empty pair is its OWN
+  // canonical name now, not `is_null` / `is_not_null`: it lowers to `$empty`
+  // (the field's declared row of the 「is empty」 table), which is a different
+  // question from `$null` on a text or multi-value field.
+  if (lower === 'is_null' || lower === 'isnull') return 'is_null';
+  if (lower === 'is_not_null' || lower === 'isnotnull') return 'is_not_null';
+  if (lower === 'is_empty' || lower === 'isempty') return 'is_empty';
+  if (lower === 'is_not_empty' || lower === 'isnotempty') return 'is_not_empty';
   // `like`/`ilike` used to need a hand-written exemption here: they SHARED the
   // `$contains` lowering while not being substring matches, so the generic
   // round-trip below would have folded them onto `contains` and silently
@@ -2640,14 +2737,24 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // Null / empty predicates — direction comes from the operator NAME, not the
   // (filler) value: the ObjectUI client sends a truthy placeholder value for
   // both `isnull` and `isnotnull`, so keying off `value` would collapse them.
-  if (op === 'is_null' || op === 'isnull' || op === 'is_empty' || op === 'isempty') {
+  // [#20446] The empty pair lowers to `$empty`, its ruled spelling (ruling A
+  // on #20399, record 5865693155), typelessly: each face expands it by the
+  // field's DECLARED row (`expandEmptyOperator`), so a stored 「is empty」 on a
+  // text field also finds `''` and on a multi-value field also finds `[]`
+  // (ruling B on #20311). It lowered to `$null` while `$empty` was staged out
+  // of `FILTER_OPERATORS`; the face that holds no declaration for the column
+  // now refuses it loudly (prescribing `$null`) where `$null` answered.
+  if (op === 'is_null' || op === 'isnull') {
     return { [field]: { $null: true } } as FilterCondition;
   }
-  if (
-    op === 'is_not_null' || op === 'isnotnull'
-    || op === 'is_not_empty' || op === 'isnotempty'
-  ) {
+  if (op === 'is_not_null' || op === 'isnotnull') {
     return { [field]: { $null: false } } as FilterCondition;
+  }
+  if (op === 'is_empty' || op === 'isempty') {
+    return { [field]: { $empty: true } } as FilterCondition;
+  }
+  if (op === 'is_not_empty' || op === 'isnotempty') {
+    return { [field]: { $empty: false } } as FilterCondition;
   }
 
   const mapped = astOperatorLowering(op);
@@ -3006,7 +3113,7 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * |---|---|
  * | `driver-sql` (and `driver-sqlite-wasm`, which inherits its compiler) | ANSWERS — `LIKE` / `GLOB` per dialect, caller-bound wildcards |
  * | `driver-turso` — local (inherits `SqlDriver`) and remote (its own compiler) | ANSWERS on both transports |
- * | `driver-memory` — query path and reference matcher | ANSWERS — it widens its own `SUPPORTED_FIELD_OPERATORS` by hand, the way `driver-turso`'s remote transport has carried `$icontains` since #5702. It is the in-memory DOUBLE: an app whose tests run there and whose production runs SQL must not get a 400 for a filter that works |
+ * | `driver-memory` — query path (its reference matcher answered too until commit `8fec76a2b` retired it) | ANSWERS — it widens its own `SUPPORTED_FIELD_OPERATORS` by hand, the way `driver-turso`'s remote transport has carried `$icontains` since #5702. It is the in-memory DOUBLE: an app whose tests run there and whose production runs SQL must not get a 400 for a filter that works |
  * | `@objectstack/formula` `matchesFilterCondition` | ANSWERS — {@link matchesLikePattern}, so a write-side `check` agrees with the read-side SQL |
  * | `driver-mongodb`, `objectql` `having`, `service-analytics` | REFUSE, loudly, in the ADR-0112 `INVALID_FILTER` envelope — they derive acceptance from THIS array, which does not name the operator |
  *
@@ -3015,6 +3122,39 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * quietly answers a different question is strictly worse than one that
  * refuses. Clearing the staging means arms on the remaining faces in ONE PR,
  * the #6520 direction — tracked as the follow-up filed on #7536.
+ *
+ * ## `$empty` JOINED this array in #20446 — its staging is over
+ *
+ * Declared by {@link SpecialOperatorSchema} and {@link FieldOperatorsSchema},
+ * its description the ruled per-type 「is empty」 table (ruling B on #20311,
+ * record 5861435168; the spelling is ruling A on #20399, record 5865693155),
+ * with `expandEmptyOperator` / `isEmptyFilterValue`
+ * (`./filter-empty-operator.ts`) as the one expansion every face calls. It was
+ * staged out of this array (the maintainer's amendment of ruling A, record
+ * 5868169573: 「照 $like 先例分阶段」) for the mechanism measured above, until one
+ * compile-surface lane card per face (#20444, #20445) had given every face its
+ * arm. #20446 added it here — measured first, with `$empty` in this array and
+ * no other change, on every face: no face drops the predicate — and flipped the
+ * `is_empty` / `is_not_empty` lowering from `$null` to `$empty` in the same
+ * commit.
+ *
+ * | face | `$empty` |
+ * |---|---|
+ * | `driver-sql` (and `driver-sqlite-wasm`, `driver-turso`'s local transport) | the field's DECLARED row, from `initObjects` / `registerObjectMetadata` / `registerExternalObject` |
+ * | `driver-turso` remote transport | the declared row, through the resolver `TursoDriver` wires |
+ * | `driver-memory` query path, `driver-mongodb` | the declared row, from `syncSchema` |
+ * | `service-analytics` — `where` and read-scope SQL | the declared row, from the host's `sourceFieldMeta` |
+ * | objectql `having`, `@objectstack/formula` `matchesFilterCondition` (and `driver-memory`'s reference matcher until commit `8fec76a2b` retired it) | by VALUE — null, `''` and `[]` are empty (they hold no declarations) |
+ * | `driver-memory` analytics (cube) face | REFUSES — `INVALID_FILTER` / 400, as it refuses `$null` |
+ *
+ * A declared-row face asked about a column it holds NO declaration for refuses
+ * the operator loudly (`INVALID_FILTER` / 400; `READ_SCOPE_COMPILE_FAILED` /
+ * 500 on a read scope) and prescribes `$null`, rather than guessing a row. The
+ * flip made that refusal reachable from a stored view rule, where `$null`
+ * answered before: the built-in `id`, a federated object on a driver with no
+ * `registerExternalObject` (the boot reports it unbound), an analytics host
+ * built without `sourceFieldMeta`, and a multi-value column over a SQL dialect
+ * `driver-sql` does not model. The changeset declares it as a narrowing.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.
@@ -3029,7 +3169,7 @@ export const FILTER_OPERATORS = [
   // String
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   // Special
-  '$null', '$exists',
+  '$null', '$exists', '$empty',
 ] as const;
 
 /**
@@ -3119,7 +3259,8 @@ export const RETIRED_FILTER_OPERATORS: Readonly<
   $regex: {
     to: '$icontains',
     why:
-      '`$regex` was never declared by the Filter Protocol and is retired (#4706). It could not '
+      '`$regex` was never declared by the Filter Protocol and is retired under ADR-0049 '
+      + 'enforce-or-remove: it is refused here, never reinterpreted. It could not '
       + 'mean one thing across the backends: driver-sql compiled it to a LIKE-escaped substring '
       + 'match (so "a.b" matched only the literal "a.b"), driver-memory evaluated it as a real '
       + 'RegExp (so it also matched "axb", and an invalid pattern silently matched nothing), and '
@@ -3134,7 +3275,8 @@ export const RETIRED_FILTER_OPERATORS: Readonly<
     to: '$icontains',
     why:
       '`$options` was never a predicate — it was the regex-flags companion to `$regex`, which is '
-      + 'retired (#4706). Its only real use was `$options: "i"` for a case-insensitive match: '
+      + 'retired under ADR-0049 enforce-or-remove. Its only real use was `$options: "i"` for a '
+      + 'case-insensitive match: '
       + 'write `$icontains` instead, which says that in the operator name and folds ASCII case on '
       + 'every backend. On its own, with no `$regex` beside it, it never constrained anything.',
   },

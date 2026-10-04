@@ -358,7 +358,7 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
         // registration than §1, so the overlay consult has to be on both or
         // the fix covers only one of the two doors this card puts in scope.
         //
-        // [#12194] The fixture used to be authored through `runtimePublish` —
+        // [commit 311433f6b] The fixture used to be authored through `runtimePublish` —
         // the item-name grammar now refuses a slash name at that door, and the
         // READ door deliberately stays open for pre-grammar residue rows. So
         // the row is seeded directly in the store, which is exactly what such
@@ -377,7 +377,7 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
 
         expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(1);
 
-        // [#12195] Read through the SINGLE-SEGMENT door, which is where a
+        // [commit 7986d973f] Read through the SINGLE-SEGMENT door, which is where a
         // pre-grammar residue row is addressed now. This used to drive the
         // compound arity `GET /:type/:section/:name/published` with
         // `{ section: 'views', name: 'all_leads' }`, which the handler folded
@@ -387,7 +387,7 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
         // percent-encodes the name, `%2F` matches `/:type/:name/published`
         // (Hono does not split on an encoded slash — measured), and Hono decodes
         // the parameter back to `views/all_leads` before the handler runs. So
-        // the handler receives exactly the value passed below, and #12194's
+        // the handler receives exactly the value passed below, and commit 311433f6b's
         // "any stored junk name remains listable and clearable" still holds.
         const res = await callPublished(
             setup(protocol, metadata),
@@ -475,5 +475,130 @@ describe('[#8278] what the overlay consult must NOT change', () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toMatchObject({ label: 'Project Task' });
+    }, 60_000);
+});
+
+/**
+ * [#21002, ADR-0126 §2] For a flow name the loader ships, the layered read's
+ * effective layer is the loader's body even when a stored row of that name is
+ * present (`isShippedFlowName` decides it). This door reads that layered answer,
+ * so when that decision was made it serves the effective layer; in every other
+ * case it serves the stored row exactly as before. The predicate is ASKED of the
+ * protocol, never re-derived here.
+ *
+ * The registry below ships ONE flow from a package — the package id stamped
+ * on the loader's own entry, the shape `lookupArtifactItem` reads off a
+ * partial registry — so the real protocol's predicate, code layer and layered
+ * read all run unmocked over the file's own engine double. The cold-boot proof over
+ * the real composition is `flow-shipped-name-published-door.dogfood.test.ts`.
+ */
+describe('[#21002] the published door follows the layered read for a shipped flow name', () => {
+    const SHIPPED = 'pkg_flow';
+    const CUSTOMER = 'customer_flow';
+    const flowBody = (name: string, label: string) => ({
+        name,
+        label,
+        type: 'autolaunched',
+        nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: `${label.toLowerCase()}_end`, type: 'end', label: 'End' }],
+        edges: [{ id: 'e1', source: 'start', target: `${label.toLowerCase()}_end` }],
+    });
+
+    /** The file's engine double, with a registry that ships {@link SHIPPED} from a package. */
+    function shippedHarness() {
+        const { engine, rows } = makeStubEngine();
+        const loaderEntry = { ...flowBody(SHIPPED, 'LOADER'), _packageId: 'com.example.pkg' };
+        engine.registry = {
+            registerItem: () => {},
+            registerObject: () => {},
+            getPackage: () => undefined,
+            getItem: (type: string, name: string) =>
+                (type === 'flow' || type === 'flows') && name === SHIPPED ? loaderEntry : undefined,
+        };
+        const metadata = new MetadataManager({});
+        const protocol = makeProtocol(engine, metadata);
+        return { engine, rows, metadata, protocol };
+    }
+
+    async function storeActiveRow(engine: any, type: string, name: string, body: unknown) {
+        await engine.insert('sys_metadata', {
+            type, name, organization_id: null, package_id: null, state: 'active',
+            metadata: JSON.stringify(body), checksum: 'sha256:stored', version: 1,
+        });
+    }
+
+    it('a shipped flow name with a stored row: the door answers the loader\'s body, the layered effective layer', async () => {
+        const { engine, metadata, protocol } = shippedHarness();
+        await storeActiveRow(engine, 'flow', SHIPPED, flowBody(SHIPPED, 'STORED'));
+
+        // The decision this door follows: a stored layer IS present, and the
+        // layered read put the loader's body over it.
+        const layered: any = await protocol.getMetaItemLayered({ type: 'flow', name: SHIPPED });
+        expect(layered.overlay).toMatchObject({ label: 'STORED' });
+        expect(layered.effective).toMatchObject({ label: 'LOADER' });
+        expect(protocol.isShippedFlowName('flow', SHIPPED)).toBe(true);
+
+        const res = await callPublished(setup(protocol, metadata), { type: 'flow', name: SHIPPED });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ name: SHIPPED, label: 'LOADER' });
+        expect(JSON.stringify(res.body)).not.toContain('STORED');
+        expect(res.body).toEqual(layered.effective);
+    }, 60_000);
+
+    it('the plural type spelling reaches the same decision', async () => {
+        const { engine, metadata, protocol } = shippedHarness();
+        await storeActiveRow(engine, 'flow', SHIPPED, flowBody(SHIPPED, 'STORED'));
+
+        const res = await callPublished(setup(protocol, metadata), { type: 'flows', name: SHIPPED });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ name: SHIPPED, label: 'LOADER' });
+    }, 60_000);
+
+    it('control: a flow name no package ships keeps its stored row on this door', async () => {
+        const { engine, metadata, protocol } = shippedHarness();
+        await storeActiveRow(engine, 'flow', CUSTOMER, flowBody(CUSTOMER, 'STORED'));
+
+        const layered: any = await protocol.getMetaItemLayered({ type: 'flow', name: CUSTOMER });
+        const res = await callPublished(setup(protocol, metadata), { type: 'flow', name: CUSTOMER });
+
+        expect(protocol.isShippedFlowName('flow', CUSTOMER)).toBe(false);
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ name: CUSTOMER, label: 'STORED' });
+        expect(res.body).toEqual(layered.overlay);
+    }, 60_000);
+
+    it('control: an object\'s published stored row is served unchanged, not its effective layer', async () => {
+        const { metadata, protocol } = shippedHarness();
+        await runtimePublish(protocol, 'proj_task', RUNTIME_BODY);
+
+        const layered: any = await protocol.getMetaItemLayered({ type: 'object', name: 'proj_task' });
+        // The control discriminates: the effective layer is NOT the stored
+        // row, so serving the effective layer here would fail the last line.
+        expect(layered.effective).not.toEqual(layered.overlay);
+
+        const res = await callPublished(setup(protocol, metadata), { type: 'object', name: 'proj_task' });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(layered.overlay);
+    }, 60_000);
+
+    it('control: a protocol that brings no such predicate keeps today\'s answer, the stored row', async () => {
+        const { engine, metadata, protocol } = shippedHarness();
+        await storeActiveRow(engine, 'flow', SHIPPED, flowBody(SHIPPED, 'STORED'));
+        // The same protocol with the predicate hidden from the door only; its
+        // own methods keep calling it on the real instance.
+        const withoutPredicate = new Proxy(protocol, {
+            get(target, key) {
+                if (key === 'isShippedFlowName') return undefined;
+                const value = Reflect.get(target, key);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+
+        const res = await callPublished(setup(withoutPredicate, metadata), { type: 'flow', name: SHIPPED });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ name: SHIPPED, label: 'STORED' });
     }, 60_000);
 });

@@ -1,5 +1,6 @@
 ---
-title: Odata
+title: Odata schema — API Protocol property reference
+navTitle: Odata
 description: "Open Data Protocol (OData) v4 is an industry-standard protocol for building and consuming RESTful APIs."
 ---
 
@@ -179,7 +180,7 @@ const result = ODataConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Entity type name |
 | **key** | `string[]` | ✅ | Key fields |
-| **properties** | `{ name: string; type: string; nullable: boolean }[]` | ✅ |  |
+| **properties** | `{ name: string; type: string; nullable?: boolean }[]` | ✅ |  |
 | **navigationProperties** | `{ name: string; type: string; partner?: string }[]` | optional |  |
 
 ### Nested Shape: `ODataMetadata.entitySets[number]`

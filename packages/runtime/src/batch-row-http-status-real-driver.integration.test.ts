@@ -74,7 +74,7 @@ const CHILD = {
 };
 
 /**
- * [#10629] This fixture provisions its three business objects and nothing else,
+ * [commit 13a6cb4ad] This fixture provisions its three business objects and nothing else,
  * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -86,15 +86,20 @@ const CHILD = {
  * make that test red for a reason that has nothing to do with it.
  * `expected-read-refusal-noise.ts` says why this withholds instead of muting.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
-/** [#10629] The capture is a PIN, not a mute — this is the assertion half. */
+/** [commit 13a6cb4ad] The capture is a PIN, not a mute — this is the assertion half. */
 const expectExpectedNoiseWithheld = (noise: ExpectedReadRefusalCapture | null): void => {
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
 };
 
 describe('[#8570] a batch row carries the status its producer DECLARED — real driver', () => {
-    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest rig. */
     let noise: ExpectedReadRefusalCapture | null = null;
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
@@ -112,7 +117,7 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
             connection: { filename: join(dir, 'data.sqlite') },
             useNullAsDefault: true,
         });
-        // [#10629] Installed on the REAL driver (the one that logs) before it
+        // [commit 13a6cb4ad] Installed on the REAL driver (the one that logs) before it
         // runs a statement — the `Object.create(real)` wrapper below resolves
         // `logger` through the prototype chain to this sink.
         noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);

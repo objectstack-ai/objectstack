@@ -61,7 +61,7 @@ export const NotificationPreference = ObjectSchema.create({
             label: 'User',
             required: true,
             searchable: true,
-            // [#12978] Referenced-column bound (#11374 route A): a
+            // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): a
             // `sys_user.id` — physical varchar(255), the id column driver-sql
             // creates (`table.string('id').primary()`) — or the 1-char
             // literal '*'.
@@ -74,7 +74,7 @@ export const NotificationPreference = ObjectSchema.create({
             required: true,
             searchable: true,
             defaultValue: '*',
-            // [#12978] Sibling-declaration bound (#11374 route A): rows are
+            // [commit e4902d2b9] Sibling-declaration bound (route A, ruling 2026-08-24): rows are
             // matched against the event's `sys_notification.topic`
             // (maxLength: 200 there) — `preference-resolver` keys
             // `${user}|${topic}|${channel}` against `ctx.topic` — so a longer
@@ -88,7 +88,7 @@ export const NotificationPreference = ObjectSchema.create({
             label: 'Channel',
             required: true,
             defaultValue: '*',
-            // [#12978] Machine channel-id vocabulary (#11374 route A), same
+            // [commit e4902d2b9] Machine channel-id vocabulary (route A, ruling 2026-08-24), same
             // sourcing as `sys_notification_delivery.channel`: registered
             // `MessagingChannel.id`s (inbox/email/sms today; spec's widest
             // enum member is 7 chars), 64 per the landed machine-vocabulary

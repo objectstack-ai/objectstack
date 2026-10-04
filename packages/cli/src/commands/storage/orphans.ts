@@ -16,6 +16,7 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { absentTableReads } from '../../utils/absent-table-reads.js';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { StrandedOrphanInventoryEngine } from '@objectstack/service-storage';
 
@@ -100,10 +101,16 @@ export default class StorageOrphans extends Command {
 
     let stack;
     try {
+      // [#21391] The report boots READ-ONLY, the boot `os migrate plan` takes:
+      // `deferSchemaDdl` holds schema DDL back on every SQL datasource, and
+      // `readOnlyProbe` keeps a missing sqlite file from being created. This
+      // command has no writing mode.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins({ storage: true }),
+        deferSchemaDdl: true,
+        readOnlyProbe: true,
       });
     } catch (error: any) {
       if (flags.json) {
@@ -143,12 +150,25 @@ export default class StorageOrphans extends Command {
         '@objectstack/service-storage'
       );
 
-      const report = await inventoryStrandedFileOrphans(engine, {
+      // [#21552] Not asked: the report's read-only boot measured which tables
+      // exist, and a table that does not exist holds no file, so none is
+      // stranded. The inventory reads through this view, which answers such a
+      // table with its true contents (no rows) without issuing the read. Read
+      // anyway, a project whose database does not exist yet was refused here
+      // with exit 1. This command has no writing mode.
+      // ⛔ Only a table the boot MEASURED absent: any other refused read still
+      // throws into the catch below and still exits 1.
+      const reads = absentTableReads(stack);
+      const readView: StrandedOrphanInventoryEngine = {
+        find: (object, query) => reads.rows(object, () => engine.find(object, query)),
+      };
+      const report = await inventoryStrandedFileOrphans(readView, {
         maxCandidates: flags['max-candidates'],
         sampleLimit: flags.samples,
       });
 
       if (flags.json) {
+        reads.notice(true);
         await emitJson({
           database: stack.dbLabel,
           readOnly: true,
@@ -159,6 +179,7 @@ export default class StorageOrphans extends Command {
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      reads.notice(false);
       console.log('');
       console.log(formatStrandedOrphanInventory(report));
       console.log('');
@@ -170,8 +191,8 @@ export default class StorageOrphans extends Command {
         printSuccess('Nothing stranded on this deployment.');
       } else {
         printInfo(
-          'Reporting only. Reclaiming these bytes is a separate, deliberately deferred decision — ' +
-            'see issue #10950.',
+          'Reporting only. Reclaiming these bytes was decided against: deletes no longer strand files, ' +
+            'and files stranded before that fix are left in place.',
         );
       }
       console.log(chalk.dim(`  ${timer.display()}`));

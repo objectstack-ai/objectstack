@@ -154,8 +154,11 @@ describe('view overlay identity (#2555)', () => {
         expect(persisted.object).toBe('showcase_task');
         expect(persisted.label).toBe('All Tasks');
         expect(persisted.name).toBe('showcase_task.default');
-        // …and the personalization survives untouched.
-        expect(persisted.sort).toEqual(personalization.sort);
+        // …and the personalization survives. [#20051] Minus the sort row's
+        // `id`: a console row key (`VIEW_CONSOLE_ROW_DECORATIONS`) the save
+        // strips before the parse, and a view now stores its parsed body.
+        expect(persisted.sort).toEqual([{ field: 'estimate_hours', order: 'desc' }]);
+        expect(persisted.columns).toEqual(personalization.columns);
     });
 
     it('read path: getMetaItems heals a pre-fix identity-less overlay row from the shadowed entry', async () => {

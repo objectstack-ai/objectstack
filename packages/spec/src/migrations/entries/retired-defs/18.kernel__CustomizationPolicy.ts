@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-// #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+// Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+// #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
 // the widened surface). Part of the whole-module removal of
 // `kernel/metadata-customization.zod.ts` — the paper three-layer
 // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -21,6 +21,6 @@
 // boundary where `migrate meta` users look. No carrier key survives for
 // these defs and no authored document embedded them, so no tombstone and no
 // D2 conversion — this table plus the D3 semantic entry
-// `metadata-customization-protocol-retired` ARE the declaration (the #8715
+// `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
 // route-3 shape).
 export const entry = 'kernel/CustomizationPolicy';

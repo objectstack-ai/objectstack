@@ -55,6 +55,7 @@ import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import {
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
+  NO_DATETIME_COLUMNS,
 } from '../strategies/filter-normalizer.js';
 import { AnalyticsService } from '../analytics-service.js';
 
@@ -163,7 +164,7 @@ const CASES: Array<{
 describe('[#5526] a leaf carries the author comparand ITSELF', () => {
   for (const c of CASES) {
     it(`${c.name} → leaf ${JSON.stringify(c.leaf)}`, () => {
-      const node = normalizeAnalyticsFilterTree({ where: { code: { $eq: c.value } } });
+      const node = normalizeAnalyticsFilterTree({ where: { code: { $eq: c.value } } }, NO_DATETIME_COLUMNS);
       expect(node?.kind).toBe('leaf');
       // Exact set, not "contains": the leaf carries one comparand and it is the
       // author's.
@@ -173,7 +174,7 @@ describe('[#5526] a leaf carries the author comparand ITSELF', () => {
 
   it('the leaf value is the SAME REFERENCE for a non-primitive, i.e. nothing re-encoded it', () => {
     const when = new Date('2026-03-04T05:06:07.000Z');
-    const node = normalizeAnalyticsFilterTree({ where: { closed: { $gte: when } } }) as
+    const node = normalizeAnalyticsFilterTree({ where: { closed: { $gte: when } } }, NO_DATETIME_COLUMNS) as
       | { kind: 'leaf'; values: unknown[] }
       | null;
     expect(node?.values[0]).toBe(when);
@@ -239,7 +240,7 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     // shared comparand-TYPE face, which the door runs before any leaf is built
     // (#7872, 2026-08-12: 「refuses everything else loudly at the compile
     // face」), in its sentence and at its path — the FilterArray spelling's.
-    const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } });
+    const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } }, NO_DATETIME_COLUMNS);
     expect(refusal).toThrowError(/^Filter comparand at where\.code\.\$eq is undefined\./);
     // Still the module's one envelope (#5352), so the REST face answers 400.
     try {
@@ -252,7 +253,7 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     // The neighbouring `null` comparand keeps compiling, and to the null
     // PREDICATE rather than a value comparison (#5332) — the row that proves the
     // refusal did not widen to `== null`.
-    expect(normalizeAnalyticsFilterTree({ where: { code: { $eq: null } } })).toEqual({
+    expect(normalizeAnalyticsFilterTree({ where: { code: { $eq: null } } }, NO_DATETIME_COLUMNS)).toEqual({
       kind: 'leaf', member: 'code', operator: 'notSet', values: [],
     });
   });
@@ -294,13 +295,13 @@ const CUBE: Cube = {
   name: 'orders',
   title: 'Orders',
   sql: 'orders',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    code: { name: 'code', label: 'Code', type: 'string', sql: 'code' },
-    score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    code: { label: 'Code', type: 'string', sql: 'code' },
+    score: { label: 'Score', type: 'number', sql: 'score' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const ROW_CASES: Array<{ name: string; filter: FilterCondition; expected: string[]; note: string }> = [
@@ -523,7 +524,7 @@ describe('[#5526] the LIKE family stringifies at the emitter, on all three emitt
   };
   /** The operand the engine receives, via the private converter. */
   const engineOperand = (where: FilterCondition): unknown => {
-    const node = normalizeAnalyticsFilterTree({ where }) as {
+    const node = normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS) as {
       operator: string;
       values: unknown[];
     };
@@ -604,9 +605,14 @@ function makeEngine(captured: Array<Record<string, unknown> | undefined>) {
   ): Promise<Array<Record<string, unknown>>> => {
     captured.push(options.filter);
     const filtered = ENGINE_ROWS.filter((row) =>
-      Object.entries(options.filter ?? {}).every(
-        ([field, cond]) => (row as Record<string, unknown>)[field] === cond,
-      ),
+      Object.entries(options.filter ?? {}).every(([field, cond]) => {
+        const stored = (row as Record<string, unknown>)[field];
+        // [#20918] The null predicate, in the engine's own `{ $null: flag }`
+        // spelling: it asks about presence, never compares a value.
+        const flag = (cond as { $null?: unknown } | null)?.$null;
+        if (typeof flag === 'boolean') return (stored === null) === flag;
+        return stored === cond;
+      }),
     );
     return [{ order_count: filtered.length }];
   };
@@ -651,9 +657,10 @@ describe('[#5526] analytics engine path — the comparand reaches engine.aggrega
 
   it('a real null comparand is still the null predicate, not a value', async () => {
     const { captured, result } = await run(null);
-    // `convertFilter` maps `notSet` to a bare `null` — the spelling every driver
-    // reads as IS NULL (#5332 / #5525), reached without entering `values`.
-    expect(captured[0]).toEqual({ code: null });
+    // `convertFilter` maps `notSet` to `{ $null: true }` — the engine's own IS
+    // NULL predicate (#5332 / #5525; the bare `null` before #20918), reached
+    // without entering `values`.
+    expect(captured[0]).toEqual({ code: { $null: true } });
     expect(result.rows).toEqual([{ order_count: 1 }]);
   });
 });

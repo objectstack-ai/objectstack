@@ -13,6 +13,7 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
+import { markStackProvenance, markRefusalConversions, hasStackProvenance, stackConversionsOf } from './stack-provenance';
 import {
   normalizeStackInput,
   MAP_SUPPORTED_FIELDS,
@@ -25,6 +26,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
+import { InlineGridColumnSchema } from './data/field.zod';
 import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
@@ -60,6 +62,7 @@ import { ToolSchema } from './ai/tool.zod';
 // Data Protocol (additional)
 import { HookSchema } from './data/hook.zod';
 import { MappingSchema } from './data/mapping.zod';
+import { PicklistSchema, PicklistExtensionSchema } from './data/picklist.zod';
 import { CubeSchema } from './data/analytics.zod';
 
 // Automation Protocol (additional)
@@ -335,6 +338,27 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    */
   objectExtensions: z.array(ObjectExtensionSchema).optional().describe('Extensions to objects owned by other packages'),
 
+  /**
+   * Shared option lists (`data/picklist.zod.ts`): one list of select options
+   * that fields on any object reference by name — `Field.select({ picklist:
+   * 'industry' })` — instead of each field copying an `options` array.
+   */
+  picklists: z.array(PicklistSchema).optional().describe('Shared option lists that select fields reference by name'),
+
+  /**
+   * Picklist Extensions: options to ADD to picklists owned by other packages —
+   * the `objectExtensions` idiom, additive only.
+   *
+   * @example
+   * ```ts
+   * picklistExtensions: [{
+   *   extend: 'industry',
+   *   options: [{ label: 'Healthcare', value: 'healthcare' }],
+   * }]
+   * ```
+   */
+  picklistExtensions: z.array(PicklistExtensionSchema).optional().describe('Options added to picklists owned by other packages (additive only)'),
+
   /** 
    * ObjectUI: User Interface Layer 
    * Apps, Menus, Pages, and Visualizations.
@@ -411,7 +435,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     + 'composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) '
     + 'and names both source stacks on a collision.',
   ),
-  // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
+  // `themes` was REMOVED in 17.1 (commit 35ad101bc, ADR-0049 enforce-or-remove — ruled
   // 退役授权面, 2026-08-21). The pipeline was live from authoring gate through
   // artifact ingest and stopped there: no framework package ever read the
   // stored items, `theme` was never a registered metadata type, no first-party
@@ -629,7 +653,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    *
    * BOTH shapes therefore reach this schema twice: once as authored, once
    * lowered. All four combinations (map/array × bare/declared) are accepted —
-   * the map's two lowered forms since #4343 and #4976, the array's since #6238.
+   * the map's two lowered forms since #4343 and #4976, the array's since commit c8d6f6e08.
    * `packages/cli`'s `lower-callables.test.ts` pins every cell against what the
    * lowering actually emits, rather than against a belief about it.
    */
@@ -1007,6 +1031,8 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   datasourceMapping: 'concat',
   translations: 'concat',
   objectExtensions: 'concat',
+  picklists: 'concat',
+  picklistExtensions: 'concat',
   apps: 'concat',
   views: 'concat',
   // [#5320] Machine-assembled channel (never authorable — the schema types it
@@ -1019,7 +1045,7 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   reports: 'concat',
   datasets: 'concat',
   actions: 'concat',
-  // `themes` left this table with the key (#10485) — the total-record type is
+  // `themes` left this table with the key (commit 35ad101bc) — the total-record type is
   // what forces this comment to move in lockstep with the schema.
   flows: 'concat',
   jobs: 'concat',
@@ -1229,7 +1255,7 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  *
  * NO `strictObject` spelling appears here, and none is needed. This schema is
  * `ManifestSchema.extend(...)`, and `.extend()` carries the base's unknown-key
- * posture: #14192 closed `ManifestSchema`, so an assembled body is closed too,
+ * posture: commit 4d0d9445a closed `ManifestSchema`, so an assembled body is closed too,
  * BY INHERITANCE — an undeclared key on one is REFUSED, by name and with the
  * declared spelling offered for a near miss. ⛔ Do not read the absence of the
  * `strictObject` spelling as a declined posture; it is an inherited one.
@@ -1335,9 +1361,15 @@ export type AssembledPackageBodyParsed = z.infer<typeof AssembledPackageBodySche
  * the base's `.optional()`: a hook that carries a `body` instead declares no
  * handler at all, and the registry record of a hook whose handler was an inline
  * callable has none either (the projection drops it).
+ *
+ * `safeExtend`, not `extend` (#21565): `HookSchema` carries an object-level
+ * check — a hook `body` may not target a stored-metadata table — and zod
+ * refuses to overwrite a key on a refined object with `extend`. `safeExtend`
+ * accepts the narrower `handler` and keeps that check, so an artifact's parse
+ * refuses the same hook the authoring door does.
  */
 function jsonStageHooksKey() {
-  return z.array(HookSchema.extend({
+  return z.array(HookSchema.safeExtend({
     handler: z.string().optional()
       .describe('Handler function name — the lowered string ref the JSON artifact carries'),
   })).optional().describe('Object Lifecycle Hooks, as a JSON document carries them');
@@ -1910,18 +1942,11 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
   isRecord(value) && typeof value.type === 'string';
 
 /**
- * Every inline action a page's component tree carries, each with a locatable
- * path — the traversal `validateCrossReferences` needs and `config.actions`
- * cannot supply (#6889).
- *
- * An action authored **inline** on a page element (`element:button` →
- * `properties.action`, an {@link InlineActionSchema}) never enters
- * `config.actions`, so before this walk NO cross-reference check visited one: a
- * dangling `type: 'modal'` target built clean and failed only when a user
- * clicked, while the identical target on a *registered* action was a build
- * error. Inline is also the shape AI authoring emits most readily — a button
- * with its behaviour written right there — so it is the surface that most needs
- * authoring-time rejection.
+ * Visit every component a page carries, with its locatable path, parent before
+ * children — the one traversal of a page's component tree the cross-reference
+ * checks share (inline actions, #6889; master-detail detail columns, #20928).
+ * `visit` receives the node and its `properties` record; a node without one is
+ * not visited, since every check here reads under `properties`.
  *
  * Two traversal facts make this a walk rather than a loop:
  *
@@ -1933,45 +1958,17 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
  *   a button nested inside a container survives parse as raw data. We recurse
  *   into any array under `properties` whose entries are component-shaped, which
  *   reaches every container spelling without this walk enumerating them.
- *
- * Candidates are normalized by parsing with `InlineActionSchema` rather than
- * read key-by-key: that schema's preprocess is what canonicalizes the legacy
- * `to` spelling onto `target`, and page-component `properties` are a loose
- * record, so a raw node has NOT been through it. Reading `action.target ??
- * action.to` here would be a second, hand-mirrored copy of the producer's
- * normalization — the consumer-side leniency Prime Directive #12 rejects.
- *
- * When that parse fails the node is still checked, from its raw `type`/`target`
- * strings. A node that is not a valid inline action is broken on some *other*
- * axis (a key page-component `properties` does not validate today), and the
- * fallback neither invents a target nor accepts one — it only keeps a dangling
- * reference from hiding behind an unrelated defect. The legacy `to` spelling is
- * deliberately NOT read there: canonicalization stays the schema's job.
  */
-function collectInlinePageActions(page: unknown): InlineActionSite[] {
-  if (!isRecord(page)) return [];
-  const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
-  const sites: InlineActionSite[] = [];
-
+function forEachPageComponent(
+  page: Record<string, unknown>,
+  visit: (node: Record<string, unknown>, props: Record<string, unknown>, path: string) => void,
+): void {
   const visitComponent = (node: unknown, path: string): void => {
     if (!isComponentNode(node)) return;
     const props = isRecord(node.properties) ? node.properties : undefined;
     if (!props) return;
 
-    if (isRecord(props.action)) {
-      const parsed = InlineActionSchema.safeParse(props.action);
-      const action = parsed.success
-        ? (parsed.data as InlineActionSite['action'])
-        : {
-          type: typeof props.action.type === 'string' ? props.action.type : undefined,
-          name: typeof props.action.name === 'string' ? props.action.name : undefined,
-          target: typeof props.action.target === 'string' ? props.action.target : undefined,
-        };
-      // An inline action's `name` is optional (the button supplies its own
-      // label), so the path is the only identity an anonymous one has.
-      const subject = action.name ? `Inline action '${action.name}'` : 'Inline action';
-      sites.push({ action, where: `${subject} on page '${pageName}' (${path})` });
-    }
+    visit(node, props, path);
 
     for (const [key, value] of Object.entries(props)) {
       if (!Array.isArray(value)) continue;
@@ -1999,6 +1996,58 @@ function collectInlinePageActions(page: unknown): InlineActionSite[] {
       }
     }
   }
+}
+
+/**
+ * Every inline action a page's component tree carries, each with a locatable
+ * path — the traversal `validateCrossReferences` needs and `config.actions`
+ * cannot supply (#6889).
+ *
+ * An action authored **inline** on a page element (`element:button` →
+ * `properties.action`, an {@link InlineActionSchema}) never enters
+ * `config.actions`, so before this walk NO cross-reference check visited one: a
+ * dangling `type: 'modal'` target built clean and failed only when a user
+ * clicked, while the identical target on a *registered* action was a build
+ * error. Inline is also the shape AI authoring emits most readily — a button
+ * with its behaviour written right there — so it is the surface that most needs
+ * authoring-time rejection.
+ *
+ * The traversal is {@link forEachPageComponent}'s: every root, every nesting.
+ *
+ * Candidates are normalized by parsing with `InlineActionSchema` rather than
+ * read key-by-key: that schema's preprocess is what canonicalizes the legacy
+ * `to` spelling onto `target`, and page-component `properties` are a loose
+ * record, so a raw node has NOT been through it. Reading `action.target ??
+ * action.to` here would be a second, hand-mirrored copy of the producer's
+ * normalization — the consumer-side leniency Prime Directive #12 rejects.
+ *
+ * When that parse fails the node is still checked, from its raw `type`/`target`
+ * strings. A node that is not a valid inline action is broken on some *other*
+ * axis (a key page-component `properties` does not validate today), and the
+ * fallback neither invents a target nor accepts one — it only keeps a dangling
+ * reference from hiding behind an unrelated defect. The legacy `to` spelling is
+ * deliberately NOT read there: canonicalization stays the schema's job.
+ */
+function collectInlinePageActions(page: unknown): InlineActionSite[] {
+  if (!isRecord(page)) return [];
+  const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
+  const sites: InlineActionSite[] = [];
+
+  forEachPageComponent(page, (_node, props, path) => {
+    if (!isRecord(props.action)) return;
+    const parsed = InlineActionSchema.safeParse(props.action);
+    const action = parsed.success
+      ? (parsed.data as InlineActionSite['action'])
+      : {
+        type: typeof props.action.type === 'string' ? props.action.type : undefined,
+        name: typeof props.action.name === 'string' ? props.action.name : undefined,
+        target: typeof props.action.target === 'string' ? props.action.target : undefined,
+      };
+    // An inline action's `name` is optional (the button supplies its own
+    // label), so the path is the only identity an anonymous one has.
+    const subject = action.name ? `Inline action '${action.name}'` : 'Inline action';
+    sites.push({ action, where: `${subject} on page '${pageName}' (${path})` });
+  });
 
   return sites;
 }
@@ -2364,14 +2413,38 @@ class StackHierarchyScopeCapabilityRequiredError extends StackRefusalError {
 
 /**
  * [ADR-0112 · #15963] An auto-launched flow is declared while `requires` omits
- * `triggers` — {@link validateTriggerCapability}, the declared-capability class
- * that fails SILENT. Same `_REQUIRED` spelling as its hierarchy sibling.
+ * `triggers`, `automation`, or both — the pair that installs its trigger
+ * (#20332) — {@link validateTriggerCapability}, the declared-capability class
+ * that fails SILENT. One code for every arm: which token is missing is in the
+ * finding, not in the code. Same `_REQUIRED` spelling as its hierarchy sibling.
  */
 class StackTriggerCapabilityRequiredError extends StackRefusalError {
   readonly code = 'STACK_TRIGGER_CAPABILITY_REQUIRED';
 
   constructor(message: string, issues: readonly string[]) {
     super('StackTriggerCapabilityRequiredError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #20367 ruling B] `composeStacks` refuses an input no stack
+ * producer built — the composition half of the one-authoring-shape rule
+ * (`stack-provenance.ts` states it). The per-stack refusals above run only
+ * inside `defineStack`, so an input that never passed through it arrives
+ * unjudged; composing it would publish those findings nowhere. `issues` carries
+ * one entry per refused input, naming it the way every other composition
+ * refusal does.
+ *
+ * The SAME code `os validate` / `os build` raise for an unmarked default export
+ * (`@objectstack/cli`, `utils/stack-provenance-refusal.ts`): one condition, one
+ * vocabulary, two emitters — the `ENVIRONMENT_NOT_FOUND` precedent in the
+ * ADR-0112 ledger. Module-local like every member above.
+ */
+class StackProvenanceMissingError extends StackRefusalError {
+  readonly code = 'STACK_PROVENANCE_MISSING';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackProvenanceMissingError', message, issues);
   }
 }
 
@@ -2616,6 +2689,188 @@ function collectPermissionGrantObjectErrors(
 }
 
 /**
+ * The inline grid column type a column that declares NO `type` renders as,
+ * keyed by the type of the child field it names — for the field types whose
+ * column type carries a type-conditional refusal in
+ * {@link InlineGridColumnSchema}, and for no other.
+ *
+ * Read from the renderer, not decided here: objectui's `hydrateColumns`
+ * (`packages/plugin-form/src/deriveMasterDetail.ts`, read at the
+ * `.objectui-sha` pin `db11afd4967c`) leaves a column that declares a `type`
+ * alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`,
+ * whose only `currency` arm is the `currency` field type. Today the column
+ * schema's one type-conditional rule is the `currency` refusal of `scale`, so
+ * `currency` is the one row; a new type-conditional rule on the column adds its
+ * row here, and `inline-grid-column-carriers.test.ts` reds until it does.
+ */
+const HYDRATED_INLINE_COLUMN_TYPE: Readonly<Record<string, 'currency'>> = {
+  currency: 'currency',
+};
+
+/** Own-key lookup — a column `name` such as `constructor` must not resolve up the prototype chain. */
+const hasOwnKey = (record: object, key: string): boolean => Object.prototype.hasOwnProperty.call(record, key);
+
+/**
+ * [#20901] Inline grid columns whose TYPE comes from the child field, judged by
+ * the column contract's own rules against the type they will render as.
+ *
+ * `InlineGridColumnSchema` refuses `scale` on a column that DECLARES
+ * `type: 'currency'` (ruling B on #19629, remedy 乙 on #19910), and sees only
+ * the declared type: an identity-only column (`{ name: 'amount', scale: 2 }`)
+ * takes its type from the child field when the grid hydrates it, so a column
+ * over a `currency` child field published green carrying the refused key. The
+ * child field is a fact the stack holds, so this is where it is judged.
+ *
+ * ⛔ No second rule. The verdict is the column schema's own: the column is
+ * re-parsed as `{ ...column, type: <resolved> }` and every issue that parse
+ * raises is reported, with the schema's own message. A column is judged only
+ * once it is a valid column WITHOUT the type, so an issue here is one the
+ * resolved type brings. On the two carriers the stack's parse reaches, it
+ * already passed that parse; on the page carrier, whose `properties` the
+ * stack's parse never reaches, the column is parsed alone first and a column
+ * that fails is left to the component-props gate (`@objectstack/lint`'s
+ * `validateComponentProps`), which reports its own defects against
+ * `ComponentPropsMap`.
+ *
+ * All three carriers of the column are walked:
+ *
+ * - a relationship field's `inlineColumns` — the field sits on the CHILD
+ *   object, so a column names a field of the object that owns the field;
+ * - a form view's `subforms[].columns` (the container's `form` and each
+ *   `formViews` entry) — a column names a field of the subform's
+ *   `childObject`;
+ * - [#20928] an `object-master-detail-form` page block's `details[].columns`,
+ *   wherever the block sits on a page ({@link forEachPageComponent}) — a column
+ *   names a field of the detail entry's `childObject`.
+ *
+ * Resolution is against the stack's own `objects`: a `childObject` this stack
+ * does not declare, or a column naming no field of it, is not judged here — an
+ * unresolved column is not a wrong one, and the console's render-time report
+ * stays the backstop for it.
+ */
+function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    fieldsByObject.set(obj.name, obj.fields);
+  }
+
+  const judge = (columns: unknown, childObject: string, where: string): void => {
+    const childFields = fieldsByObject.get(childObject);
+    if (!childFields || !Array.isArray(columns)) return;
+    columns.forEach((column: unknown, k: number) => {
+      if (!isRecord(column) || column.type !== undefined || typeof column.name !== 'string') return;
+      const childField = hasOwnKey(childFields, column.name) ? childFields[column.name] : undefined;
+      const fieldType = isRecord(childField) ? childField.type : undefined;
+      const resolved = typeof fieldType === 'string' && hasOwnKey(HYDRATED_INLINE_COLUMN_TYPE, fieldType)
+        ? HYDRATED_INLINE_COLUMN_TYPE[fieldType]
+        : undefined;
+      if (!resolved) return;
+      // Valid without the type, or not judged here — see the docblock.
+      if (!InlineGridColumnSchema.safeParse(column).success) return;
+      const verdict = InlineGridColumnSchema.safeParse({ ...column, type: resolved });
+      if (verdict.success) return;
+      for (const issue of verdict.error.issues) {
+        const at = issue.path.map((segment) => `.${String(segment)}`).join('');
+        errors.push(
+          `${where}[${k}]${at}: column '${column.name}' declares no \`type\`, so it renders as a ` +
+            `\`${resolved}\` column (field '${childObject}.${column.name}' is \`${fieldType}\`). ${issue.message}`,
+        );
+      }
+    });
+  };
+
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    for (const [fieldName, field] of Object.entries(obj.fields)) {
+      if (!isRecord(field)) continue;
+      judge(field.inlineColumns, obj.name, `Object '${obj.name}' field '${fieldName}' inlineColumns`);
+    }
+  }
+
+  for (const [i, view] of (config.views ?? []).entries()) {
+    const forms: Array<[where: string, form: unknown]> = [];
+    if (view.form) forms.push([`View[${i}].form`, view.form]);
+    for (const [key, form] of Object.entries(view.formViews ?? {})) {
+      forms.push([`View[${i}].formViews.${key}`, form]);
+    }
+    for (const [where, form] of forms) {
+      const subforms = isRecord(form) ? form.subforms : undefined;
+      if (!Array.isArray(subforms)) continue;
+      subforms.forEach((subform: unknown, j: number) => {
+        if (!isRecord(subform) || typeof subform.childObject !== 'string') return;
+        judge(subform.columns, subform.childObject, `${where}.subforms[${j}].columns`);
+      });
+    }
+  }
+
+  // [#20928] The page carrier: `properties` is an open record the stack's parse
+  // never reaches, so `details` is read raw, entry by entry.
+  for (const page of config.pages ?? []) {
+    if (!isRecord(page)) continue;
+    const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
+    forEachPageComponent(page, (node, props, path) => {
+      if (node.type !== 'object-master-detail-form' || !Array.isArray(props.details)) return;
+      props.details.forEach((detail: unknown, j: number) => {
+        if (!isRecord(detail) || typeof detail.childObject !== 'string') return;
+        judge(
+          detail.columns,
+          detail.childObject,
+          `Page '${pageName}' (${path}) object-master-detail-form details[${j}].columns`,
+        );
+      });
+    });
+  }
+  return errors;
+}
+
+/**
+ * A job's `pull.mapping` must name a mapping this stack declares, and that
+ * mapping must carry a `connectorSource` (ruling Q1-B on the connector-sync
+ * card: "`os validate` checks the mapping name").
+ *
+ * Both halves are refused here rather than at the first tick, where the
+ * automation service would reject the run (`mapping_not_found` /
+ * `no_connector_source`): a job is package-authored, and a reference its own
+ * stack cannot resolve is an authoring defect the package would otherwise ship.
+ * Resolved against the stack's own `mappings`, like every mapping reference in
+ * this function. A disabled job is judged too — `enabled: false` turns a job
+ * off, it does not make a dangling name correct.
+ */
+function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const jobs = Array.isArray(config.jobs) ? config.jobs : [];
+  if (jobs.length === 0) return errors;
+  const mappings = new Map<string, { connectorSource?: unknown }>();
+  for (const m of Array.isArray(config.mappings) ? config.mappings : []) {
+    if (isRecord(m) && typeof m.name === 'string') mappings.set(m.name, m);
+  }
+  for (const job of jobs) {
+    if (!isRecord(job) || !isRecord(job.pull)) continue;
+    const name = job.pull.mapping;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const mapping = mappings.get(name);
+    if (!mapping) {
+      errors.push(
+        `Job '${String(job.name)}' pulls mapping '${name}' which is not defined in mappings. ` +
+          `Declare the mapping (its targetObject, fieldMapping and a connectorSource naming the ` +
+          `rest or openapi connector it pulls from) or correct the name.`,
+      );
+      continue;
+    }
+    if (mapping.connectorSource === undefined) {
+      errors.push(
+        `Job '${String(job.name)}' pulls mapping '${name}', which declares no connectorSource — ` +
+          `there is nothing to pull. Add connectorSource: { connector, action } to the mapping, ` +
+          `naming the rest or openapi connector it reads from.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  *
@@ -2641,6 +2896,9 @@ function validateCrossReferences(
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
+  // Same placement: a job's `pull` names a MAPPING, resolved against the
+  // stack's mappings, and needs no object to resolve against.
+  errors.push(...collectJobPullMappingErrors(config));
 
   if (objectNames.size === 0) return errors;
 
@@ -2690,6 +2948,11 @@ function validateCrossReferences(
       }
     }
   }
+
+  // Validate identity-only inline grid columns against the child field's type
+  // (#20901) — every carrier (#20928 added the page block's), the column
+  // schema's own verdict.
+  errors.push(...collectHydratedInlineColumnErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
   errors.push(...collectSeedDataObjectErrors(config, artifactScope));
@@ -3009,7 +3272,7 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * and before this the second merge doubled every bound action in the composed
  * object (three copies for two declarations under `objectConflict: 'override'`
  * / `'merge'`). Identity, deliberately not equality: an author writing one
- * action in both positions produces two distinct objects, which #14686's
+ * action in both positions produces two distinct objects, which commit 279431e7a's
  * same-key refusal (run before this merge) rejects and which this merge must
  * not quietly fold.
  *
@@ -3166,7 +3429,7 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
     // surviving objects through as-is — ran this merge a second time over that
     // echo and doubled every bound action. A hand-written twin (one action
     // authored in both positions) is two objects after the strict parse, and
-    // #14686's same-key refusal has already run ahead of this merge to refuse
+    // commit 279431e7a's same-key refusal has already run ahead of this merge to refuse
     // it; an equality skip here would have swallowed it instead.
     const fresh = (actionsByObject.get(obj.name) ?? []).filter((action) => !base.includes(action));
     const merged = fresh.length > 0 ? [...base, ...fresh] : base;
@@ -3257,34 +3520,61 @@ function validateHierarchyScopeCapability(data: unknown): string[] {
  * Auto-launched flows are an ENFORCED capability class, exactly like the
  * hierarchy scopes above: the trigger that fires a `record_change` /
  * `schedule` / `time_relative` / `api` flow ships in `@objectstack/trigger-*`
- * and is installed by ONE token, `requires: ['triggers']`
- * (`PLATFORM_CAPABILITY_PROVIDERS.triggers`). A stack that declares such a
- * flow while `requires` omits the token registers the flow, validates, builds
- * — and never fires it. The automation engine's boot audit names it after
- * deploy (`declares a '…' trigger but is NOT bound`), and nothing before that.
- * That is the fail-SILENT half of the pair: a hierarchy scope without its
- * capability fails closed (a user notices the missing rows); an autolaunched
- * flow without its trigger fails silent (the automation simply does not
- * happen). Refuse it here, at authoring, in the boot audit's own words — one
- * vocabulary, moved from post-deploy to author time.
+ * and is installed by the PAIR `requires: ['automation', 'triggers']`.
+ * `triggers` mounts the trigger plugins
+ * (`PLATFORM_CAPABILITY_PROVIDERS.triggers`); each of them installs its
+ * trigger INTO the automation service at `kernel:ready`, and without that
+ * service installs nothing — `RecordChangeTriggerPlugin`,
+ * `ScheduleTriggerPlugin`, `TimeRelativeTriggerPlugin` and `ApiTriggerPlugin`
+ * each warn `automation service not available — … trigger NOT installed` and
+ * return. `automation` mounts that service (`@objectstack/service-automation`,
+ * the engine that runs the flow). Neither token implies the other on any
+ * runtime's resolver: `os serve` expands neither, and cloud's
+ * `resolveCapabilityDependencies` pulls `queue` / `job` / `messaging` for
+ * `triggers`, never `automation`. So all four kinds need both tokens.
  *
- * An ABSENT `requires` counts as omitting the token: the CLI reads it as `[]`
- * and appends only the always-on slate (`PLATFORM_ALWAYS_ON_CAPABILITIES`),
+ * A stack that declares such a flow while `requires` omits either token
+ * registers the flow, validates, builds — and never fires it. The automation
+ * engine's boot audit names the missing `triggers` after deploy (`declares a
+ * '…' trigger but is NOT bound`); the missing `automation` is named only by
+ * the trigger plugin's warn and the CLI banner's `the automation engine is
+ * not enabled — they will never run`, and nothing before that. That is the
+ * fail-SILENT half of the pair: a hierarchy scope without its capability fails
+ * closed (a user notices the missing rows); an autolaunched flow without its
+ * trigger fails silent (the automation simply does not happen). Refuse it
+ * here, at authoring, in the boot audit's own words — one vocabulary, moved
+ * from post-deploy to author time. ⛔ `triggers` never IMPLIES `automation`
+ * here either: that would switch on a service the author did not name.
+ *
+ * One line per offending flow, and its prescription is the WHOLE fix for the
+ * `requires` it was given, so following it once is enough:
+ *
+ *   `automation` present, `triggers` missing → add `'triggers'` (the message
+ *                                              this refusal has always said);
+ *   `triggers` present, `automation` missing → add `'automation'`;
+ *   neither                                  → add both, `['automation', 'triggers']`
+ *                                              — never `['triggers']` alone,
+ *                                              which the arm above would refuse.
+ *
+ * An ABSENT `requires` counts as omitting both tokens: the CLI reads it as
+ * `[]` and appends only the always-on slate (`PLATFORM_ALWAYS_ON_CAPABILITIES`),
  * which carries neither `automation` nor `triggers`, so a stack that declares
  * nothing gets no trigger either (measured on `serve`'s capability resolver).
  *
  * Flows whose `status` disables them (`obsolete` / `invalid`) are skipped —
  * the engine never binds those, its boot audit skips them for the same
  * reason, and a stack that deliberately retired a triggered flow owes no
- * capability for it. The kind is `resolveFlowTriggerKind`, shared with
- * `@objectstack/lint`, so the two authoring surfaces cannot disagree on which
- * flows auto-launch.
+ * capability for it. A stack with no auto-launched flow owes neither token.
+ * The kind is `resolveFlowTriggerKind`, shared with `@objectstack/lint`, so the
+ * two authoring surfaces cannot disagree on which flows auto-launch.
  */
 function validateTriggerCapability(data: unknown): string[] {
   const errors: string[] = [];
   const d = data as { requires?: unknown; flows?: unknown };
   const requires = Array.isArray(d?.requires) ? (d.requires as string[]) : [];
-  if (requires.includes('triggers')) return errors;
+  const hasTriggers = requires.includes('triggers');
+  const hasAutomation = requires.includes('automation');
+  if (hasTriggers && hasAutomation) return errors;
   const flows = Array.isArray(d?.flows) ? (d.flows as unknown[]) : [];
   for (const flow of flows) {
     const f = flow as { name?: unknown; status?: unknown } | null;
@@ -3292,11 +3582,29 @@ function validateTriggerCapability(data: unknown): string[] {
     const kind = resolveFlowTriggerKind(flow);
     if (!kind) continue;
     const name = typeof f?.name === 'string' ? f.name : '?';
-    errors.push(
-      `flow '${name}' declares a '${kind}' trigger but \`requires\` does not include 'triggers' — ` +
-        `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
-        `Add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*).`,
-    );
+    const subject = `flow '${name}' declares a '${kind}' trigger but \`requires\` does not include`;
+    if (!hasTriggers && hasAutomation) {
+      errors.push(
+        `${subject} 'triggers' — ` +
+          `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
+          `Add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*).`,
+      );
+    } else if (hasTriggers) {
+      errors.push(
+        `${subject} 'automation' — ` +
+          `'triggers' installs the '${kind}' trigger into the automation service, and without it no '${kind}' ` +
+          `trigger would be registered, so the flow would never auto-launch. ` +
+          `Add 'automation' to requires: ['automation', 'triggers'] ` +
+          `(@objectstack/service-automation runs the flow; @objectstack/trigger-* only fires it).`,
+      );
+    } else {
+      errors.push(
+        `${subject} 'automation' or 'triggers' — ` +
+          `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
+          `Add requires: ['automation', 'triggers'] (record_change/schedule/time_relative/api ship in ` +
+          `@objectstack/trigger-* and install into @objectstack/service-automation — 'triggers' alone installs nothing).`,
+      );
+    }
   }
   return errors;
 }
@@ -3518,6 +3826,60 @@ export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
 ): ObjectStackDefinition {
+  // Every ADR-0087 D2 conversion this call applies is RECORDED, beside the
+  // provenance mark on the stack it returns (`stackConversionsOf`,
+  // `stack-provenance.ts`): the stack leaves here already canonical, so a door
+  // that reports conversions — the `--json` `conversions` field,
+  // `os validate --strict` — can learn what was converted only from this
+  // producer. The record starts from the input's own record, so a built stack
+  // handed straight back here keeps what its first build applied (the pass
+  // finds nothing left to convert on it); it is not subject to the stderr
+  // warn-once.
+  //
+  // A call that REFUSES returns no stack, so the record rides on the refusal
+  // instead: every ADR-0112 refusal thrown below — the schema parse, the six
+  // cross-field refusals, and the bound-action merge's shape refusal that ends
+  // BOTH modes — carries the conversions applied so far, and
+  // `stackConversionsOf(error)` reads them off the caught error. The same
+  // array, as it stands at the throw: never a second conversion pass.
+  const appliedConversions: ConversionNotice[] = [...stackConversionsOf(config)];
+  try {
+    return buildDefinedStack(config, options, appliedConversions);
+  } catch (error) {
+    throw withRefusalConversions(error, () => appliedConversions);
+  }
+}
+
+/**
+ * [ADR-0087 · ADR-0112] The one rule for which throw carries a producer's
+ * conversion record, applied in each producer's `catch` before it rethrows: a
+ * member of the {@link StackRefusalError} family — the producers' own answer
+ * to authored input — is stamped with the record
+ * (`markRefusalConversions`, `stack-provenance.ts`); anything else is returned
+ * untouched. Either way it is the SAME object, rethrown, so its `code`,
+ * `status`, `issues`, message and stack are exactly what the throw site built.
+ * A non-refusal throw is not the producer's answer (a bare zod error from an
+ * options parse, an internal invariant), so it is not given a record that
+ * would read as one.
+ *
+ * `conversions` is lazy so a producer computes its record only when there is
+ * a refusal to carry it.
+ */
+function withRefusalConversions(error: unknown, conversions: () => readonly ConversionNotice[]): unknown {
+  if (error instanceof StackRefusalError) markRefusalConversions(error, conversions());
+  return error;
+}
+
+/**
+ * The body of {@link defineStack}. `appliedConversions` is the caller's
+ * record, pushed to as the conversion pass runs, so the caller holds what was
+ * applied so far whichever line below throws.
+ */
+function buildDefinedStack(
+  config: ObjectStackDefinitionInput,
+  options: DefineStackOptions | undefined,
+  appliedConversions: ConversionNotice[],
+): ObjectStackDefinition {
   // Default to strict=true for safety (validate by default)
   const strict = options?.strict !== false;
 
@@ -3525,9 +3887,13 @@ export function defineStack(
   // surface every ADR-0087 D2 conversion the pass had to apply. Unlike the alias
   // warning below this runs in BOTH modes: a conversion happens whether or not
   // we go on to parse, so `strict: false` does not make the old shape any less
-  // retiring.
+  // retiring. Each notice is pushed to the caller's record (see
+  // {@link defineStack}) as well as printed, warn-once, on stderr.
   const normalized = normalizeStackInput(config as Record<string, unknown>, {
-    onConversionNotice: warnConversionNotice,
+    onConversionNotice: (notice) => {
+      appliedConversions.push(notice);
+      warnConversionNotice(notice);
+    },
   });
 
   // Pre-parse: the parse below is what strips an undeclared key, so this is the
@@ -3535,8 +3901,15 @@ export function defineStack(
   warnUnknownAuthoringKeys(normalized);
 
   if (!strict) {
-    // Non-strict mode: skip validation (advanced use cases only).
-    return mergeActionsIntoObjects(normalized as ObjectStackDefinition);
+    // Non-strict mode: skip validation (advanced use cases only). The output is
+    // still this producer's, so it carries the provenance mark — `strict: false`
+    // is an explicit authoring choice made INSIDE the producer, which is what
+    // the doors check for (`stack-provenance.ts`).
+    return markStackProvenance(
+      mergeActionsIntoObjects(normalized as ObjectStackDefinition),
+      'defineStack',
+      appliedConversions,
+    );
   }
 
 
@@ -3624,8 +3997,21 @@ export function defineStack(
   // reaches the caller.
   warnEmailTemplateLocaleFloor(data);
 
-  return mergeActionsIntoObjects(data);
+  // [#20367 ruling B] The mark the author-time doors and `composeStacks` check:
+  // this value went through the judgement above. Non-enumerable, so it reaches
+  // neither the schema nor the compiled artifact (`stack-provenance.ts`). The
+  // conversion record rides beside it, stamped in the same act.
+  return markStackProvenance(mergeActionsIntoObjects(data), 'defineStack', appliedConversions);
 }
+
+/**
+ * [#20367 ruling B] The published halves of stack provenance — see
+ * `stack-provenance.ts`. `os validate` / `os build` read the mark off the
+ * config's default export and refuse an unmarked one
+ * (`STACK_PROVENANCE_MISSING`), and fold the conversion record into their
+ * `conversions` field and the `--strict` gate.
+ */
+export { hasStackProvenance, stackConversionsOf };
 
 
 // ─── composeStacks ──────────────────────────────────────────────────
@@ -4404,7 +4790,7 @@ function mergeObjects(
 }
 
 /**
- * Cross-stack duplicate action keys over the COMPOSED action set (#14662).
+ * Cross-stack duplicate action keys over the COMPOSED action set (commit 35dffeace).
  *
  * `defineStack` refuses two declarations that resolve to one scope-qualified
  * runtime key within ONE stack ({@link collectDuplicateActionKeyErrors}), and
@@ -4964,7 +5350,7 @@ function collectArtifactCrossReferenceErrors(
  * stacks declaring *different* values throw an error naming both stacks
  * (#5005; `i18n` joined them in #5051).
  * **Actions** concatenate like every other collection, and the composed set is
- * then checked the way `defineStack` checks one stack (#14662): two input
+ * then checked the way `defineStack` checks one stack (commit 35dffeace): two input
  * stacks whose declarations resolve to one scope-qualified runtime key
  * (`objectName:name`, or `global:name` for an object-less action) throw, and
  * the error names both stacks by manifest id and where each declaration sits.
@@ -5016,7 +5402,61 @@ export function composeStacks(
   stacks: ObjectStackDefinition[],
   options?: ComposeStacksOptions,
 ): ObjectStackDefinition {
-  if (stacks.length === 0) return {} as ObjectStackDefinition;
+  // [ADR-0087 · ADR-0112] A composition that REFUSES carries the conversion
+  // record the artifact would have carried — its inputs' records, by the rule
+  // the return below uses ({@link composedConversions}) — so a door that
+  // catches a composition conflict still reports what the inputs' own
+  // `defineStack` calls converted. Composition converts nothing itself, so the
+  // record is complete from the first line; `stackConversionsOf(error)` reads
+  // it off the caught refusal.
+  try {
+    return composeBuiltStacks(stacks, options);
+  } catch (error) {
+    throw withRefusalConversions(error, () => composedConversions(stacks));
+  }
+}
+
+/**
+ * The conversion record of a composition: its inputs' records, concatenated
+ * in input order, one application once — a `Set` over the (frozen,
+ * identity-kept) notices counts the same built stack passed twice once. Each
+ * notice's `path` stays relative to the `defineStack` call that applied it.
+ * One formula for the artifact {@link composeStacks} returns and for the
+ * refusal it throws.
+ */
+function composedConversions(stacks: readonly unknown[]): readonly ConversionNotice[] {
+  return [...new Set(stacks.flatMap((stack) => stackConversionsOf(stack)))];
+}
+
+/** The body of {@link composeStacks}. */
+function composeBuiltStacks(
+  stacks: ObjectStackDefinition[],
+  options?: ComposeStacksOptions,
+): ObjectStackDefinition {
+  // 0. [#20367 ruling B] Every input must be a stack a producer built. The
+  //    per-stack refusals run only inside `defineStack`, so an input that never
+  //    passed through it is unjudged, and nothing below re-judges it (the
+  //    artifact pass in step 3b re-runs two artifact-scoped rules, not the
+  //    family). FIRST, and before the single-input early return, so a lone
+  //    plain object is refused as well rather than handed straight back.
+  const unbuilt = stacks.flatMap((stack, i) => {
+    if (hasStackProvenance(stack)) return [];
+    return [stack !== null && typeof stack === 'object' ? stackLabel(stack, i) : `stack #${i}`];
+  });
+  if (unbuilt.length > 0) {
+    const count = unbuilt.length;
+    throw new StackProvenanceMissingError(
+      `composeStacks provenance check failed (${count} input${count === 1 ? '' : 's'}): ` +
+        `${unbuilt.join(', ')} ${count === 1 ? 'was' : 'were'} not built by \`defineStack\`. ` +
+        `composeStacks composes only stacks \`defineStack\` (or a nested \`composeStacks\`) returned — ` +
+        `the cross-field refusals run inside \`defineStack\`, so a plain object here would reach the ` +
+        `artifact unjudged. Wrap each input: \`composeStacks([defineStack({ … }), …])\`. A spread ` +
+        `(\`{ ...stack }\`) or JSON copy of a built stack drops the mark too: pass the built stack itself.`,
+      unbuilt,
+    );
+  }
+
+  if (stacks.length === 0) return markStackProvenance({}, 'composeStacks') as ObjectStackDefinition;
   if (stacks.length === 1) return stacks[0];
 
   const opts = ComposeStacksOptionsSchema.parse(options ?? {});
@@ -5164,7 +5604,7 @@ export function composeStacks(
     if (single.declared) composed[key] = single.value;
   }
 
-  // 6. Cross-stack action key collisions (#14662) — the check `defineStack`
+  // 6. Cross-stack action key collisions (commit 35dffeace) — the check `defineStack`
   //    runs within one stack, over what composition actually carries. AFTER
   //    every collection is composed, and BEFORE `mergeActionsIntoObjects`
   //    copies each bound standalone action into its object: that copy is the
@@ -5203,5 +5643,13 @@ export function composeStacks(
     }
   }
 
-  return artifact as ObjectStackDefinition;
+  // [#20367 ruling B] Built from built inputs only (step 0), so the artifact is
+  // a producer's output too: a nested `composeStacks` or an author-time door
+  // accepts it.
+  //
+  // Its conversion record is its inputs' records ({@link composedConversions}).
+  // Composition converts nothing itself — every input arrived canonical from
+  // its own `defineStack` — so this is the whole of what was applied to build
+  // the artifact.
+  return markStackProvenance(artifact, 'composeStacks', composedConversions(stacks)) as ObjectStackDefinition;
 }

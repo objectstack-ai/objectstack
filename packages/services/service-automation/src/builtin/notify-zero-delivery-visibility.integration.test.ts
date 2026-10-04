@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #17123 — a `notify` node that reached NOBODY must not read like a run that
+ * The card behind commit ae6dcf6a4: a `notify` node that reached NOBODY must not read like a run that
  * had nobody to reach.
  *
  * ## What was measured, and why a green suite proved nothing
@@ -40,12 +40,14 @@
  *     a maintainer ruling. `pnpm check:driver-memory-census` refuses a new
  *     binding and says in as many words that adding a ledger entry to silence
  *     it is not this author's call.
- *   - `@objectstack/driver-sqlite-wasm` (the migrate route) is outside this
+ *   - `@objectstack/driver-sqlite-wasm` (the migrate route) was outside this
  *     package's SHRINK-ONLY type-source registry, and
- *     `pnpm check:type-source-resolution` states that widening it is not the
- *     fix and that `paths` is the measured-wrong tool here (this package's
- *     `rootDir` is `src`, which is the TS6059 shape that gate names). Its own
- *     remedy for that case is "do NOT take the dependency".
+ *     `pnpm check:type-source-resolution` stated that widening it was not the
+ *     fix and that `paths` was the measured-wrong tool here (this package's
+ *     `rootDir` is `src`, which is the TS6059 shape that gate named). Its own
+ *     remedy for that case was "do NOT take the dependency". That gate and its
+ *     registry were retired on 2026-09-18 (#18373); this bullet records why the
+ *     arm below was built.
  *
  * So the second arm is an in-process `IDataEngine` — the same CLASS of store as
  * the mingo driver (in-process, non-SQL, no schema sync) — stood up here rather
@@ -63,15 +65,15 @@
  * context. A test that invented its own two context shapes could agree with
  * itself while disagreeing with both doors.
  *
- * ## Why #16659 landing does not close this, stated as a measurement
+ * ## Why commit ecdfc9411 does not close this, stated as a measurement
  *
- * #16659 makes a scheduled flow carry its organization. That stops ONE cause
+ * Commit ecdfc9411 makes a scheduled flow carry its organization. That stops ONE cause
  * of a zero delivery; it does not make a zero delivery visible. The schedule
  * arm here is therefore driven in BOTH shapes:
  *
  *   - `cronTickToday()`   — no organization, the shape production builds now;
  *   - `cronTickWithOrg()` — carrying the PLATFORM organization, the shape a
- *     scheduled flow has once #16659 lands.
+ *     scheduled flow takes under commit ecdfc9411.
  *
  * On a multi-organization install the platform organization is not where the
  * recipients live, so the org-scoped `role:` expansion
@@ -142,7 +144,7 @@ function cronTickToday(): AutomationContext {
 }
 
 /**
- * `type: 'schedule'` as it fires once #16659 lands: the same context, now
+ * `type: 'schedule'` as it fires under commit ecdfc9411: the same context, now
  * carrying the organization the scheduled flow belongs to. On a
  * multi-organization install that is the platform organization, not the
  * employer one the recipients live in.
@@ -179,8 +181,9 @@ type DriverKind = 'in-process' | 'sqlite';
 /**
  * The `sys_member` / `sys_notification` shapes this harness needs, declared as
  * fixtures rather than imported from `@objectstack/platform-objects` — that
- * package is outside this package's shrink-only type-source registry (see the
- * deviation note in the header), and only two columns of each are load-bearing
+ * package was outside this package's shrink-only type-source registry, which
+ * has since been retired with its gate (see the deviation note in the header),
+ * and only two columns of each are load-bearing
  * here anyway: what `RecipientResolver.resolveRole` filters on, and what
  * `MessagingService.writeEvent` inserts.
  */
@@ -411,7 +414,7 @@ describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (k
     it('DIFFERENTIAL CONTROL: the two trigger families no longer render the same run', async () => {
         stack = await boot(kind);
 
-        // Family 1 — the cron tick, in the shape #16659 gives it. The platform
+        // Family 1 — the cron tick, in the shape commit ecdfc9411 gives it. The platform
         // organization has no admin members, so the org-scoped `role:` expansion
         // resolves to nobody and `emit()` returns delivered 0 / enqueued 0.
         const scheduled = await stack.engine.execute('nudge', cronTickWithOrg());

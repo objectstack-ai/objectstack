@@ -269,8 +269,11 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // `validation` left this list with the kind (#4509, ADR-0088): it is
             // no longer registered, so "runtime-creatable" no longer describes
             // it. The reintroduction guard below is what holds the line now.
-            { type: 'hook', item: { name: 'before_save', object: 'case', events: ['beforeInsert'] } },
-            { type: 'hooks', item: { name: 'before_save', object: 'case', events: ['beforeInsert'] } }, // plural
+            // [#21689] Each hook carries a `body`: the save door refuses a hook
+            // with no `body` (it could never run), and this loop measures the
+            // two-tier verdict, not that refusal.
+            { type: 'hook', item: { name: 'before_save', object: 'case', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } } },
+            { type: 'hooks', item: { name: 'before_save', object: 'case', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } } }, // plural
             // object reverted to allowOrgOverride:false on 2026-05-29 —
             // packaged items locked, brand-new tenant-authored items succeed.
             {
@@ -349,7 +352,8 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             const result = await localProto.saveMetaItem({
                 type: 'hook',
                 name: 'my_hook',
-                item: { name: 'my_hook', object: 'case', events: ['beforeUpdate'] },
+                // [#21689] With a `body`: the door refuses a hook without one.
+                item: { name: 'my_hook', object: 'case', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
             });
             expect(result.success).toBe(true);
         });
@@ -403,7 +407,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // allowOrgOverride:false (no per-org agent fork). The kernel ships
             // exactly two platform agents; tenants extend via skills + tools.
             expect(allowedFromRegistry.has('agent')).toBe(false);
-            // #6483 — `permission`/`position` rolled BACK to
+            // Commit ee58392e1 — `permission`/`position` rolled BACK to
             // allowOrgOverride:false (with page/app/action/dataset/book/
             // tool/skill; the whole nine-type divergence family). ADR-0005's
             // security row has always said ❌: "Authorization correctness;

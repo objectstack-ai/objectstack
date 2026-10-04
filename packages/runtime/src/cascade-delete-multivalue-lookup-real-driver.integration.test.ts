@@ -164,7 +164,7 @@ const SINGLE = {
 const OWNER_PACKAGE = 'com.objectstack.test.9362';
 
 /**
- * [#10629] This fixture provisions its own business objects and nothing else,
+ * [commit 13a6cb4ad] This fixture provisions its own business objects and nothing else,
  * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -172,6 +172,8 @@ const OWNER_PACKAGE = 'com.objectstack.test.9362';
  * Withheld and asserted rather than muted; `expected-read-refusal-noise.ts`
  * says why.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 // ── [#18617] The driver axis (ADR-0053 D-A3: "Postgres at minimum") ──────────
@@ -371,18 +373,21 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
     () => {
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
-    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest rig. */
     let noise: ExpectedReadRefusalCapture | null = null;
 
     afterEach(async () => {
         try { await engine?.destroy(); } catch { /* noop */ }
         engine = null;
         if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-        // [#10629] The capture is a PIN, not a mute — asserted after teardown so
+        // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so
         // a failure here can never leave the engine running. Every test in this
         // file rigs and writes, so the probe fires for each of them: this holds
         // for a single `-t` run as well as for the whole file.
-        expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+        // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+        // hold before any driver, so the declared refusal no longer occurs. The capture stays
+        // declared (a returning read is still withheld and counted) and this asserts nothing was.
+        expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
         noise = null;
     });
 
@@ -405,7 +410,7 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
 
     async function rig(objects: unknown[]) {
         const real = await newDriver();
-        // [#10629] Installed before the driver runs a statement and before the
+        // [commit 13a6cb4ad] Installed before the driver runs a statement and before the
         // engine issues a read — the two sinks the expected refusal travels out on.
         // [#18617] The reason half is this CELL'S dialect: the refusal line the
         // driver writes says `no such table: sys_organization` on SQLite and

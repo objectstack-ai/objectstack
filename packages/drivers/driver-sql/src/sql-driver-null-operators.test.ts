@@ -1,8 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { markFilterSubtreeProvenance, parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance, parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The driver no longer carries its own copy of that
+ * rewrite, so the answers below are the ones every seamed read gets,
+ * unchanged. No column here is a declared `datetime`, so the whole-day rule has nothing
+ * to rewrite.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 /**
  * Regression tests for issue #2704 — driver-sql must give IS NULL / IS NOT NULL
@@ -34,6 +45,17 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
       t.string('title');
       t.string('assignee').nullable();
     });
+
+    // [#20446] The table is built through knex, outside the driver's
+    // registration, so its declaration is registered beside it — as the engine
+    // does for every object it serves. `is_empty` / `is_not_empty` lower to
+    // `$empty` now, which this driver answers by the column's DECLARED row and
+    // refuses on a column it was never told the type of; `assignee` is text,
+    // so its row is null or `''`, and this fixture stores no `''`, so the rows
+    // below are the IS NULL / IS NOT NULL rows they always were.
+    driver.registerObjectMetadata([
+      { name: 'tasks', fields: { title: { type: 'text' }, assignee: { type: 'text' } } } as any,
+    ]);
 
     await k('tasks').insert([
       { id: '1', title: 'A', assignee: 'alice' },
@@ -162,7 +184,7 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
       // assignee" counts as "is not alice", as it always did on the other two
       // backends. The unassigned rows are the behaviour change.
       const rows = await driver.find('tasks', {
-        where: { $not: { assignee: { $eq: 'alice' } } },
+        where: seamed({ $not: { assignee: { $eq: 'alice' } } }),
       } as any);
       expect(ids(rows)).toEqual(['2', '3', '4']);
     });

@@ -326,9 +326,12 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // authors is the OBJECT. The crossing carries the #9313 property that makes
   // it safe — this member resolves only against `stack.objects`, the
   // collection the per-write snapshot does carry, so it has no
-  // missing-collection false-positive channel; and it resolves each name
-  // against the object's OWN field map, so a one-object snapshot is not
-  // merely sufficient, it is the whole universe the question has.
+  // missing-collection false-positive channel. [#20432] Most of its names
+  // resolve against the object's OWN field map, but the picker keys a lookup
+  // field carries (`lookupColumns`, `lookupFilters[].field`, the filter half
+  // of `dependsOn`) address the REFERENCED object: that object is judged when
+  // the snapshot's `objects` carries it, and an object it does not carry is
+  // `unknowable` — never a miss — so the channel stays closed.
   //
   // It names `flow` because EVERY member of this suite does — the #4463 P1
   // surface is the floor the member axis was never meant to narrow, and
@@ -560,7 +563,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // build the other command would have stopped. Joining the suite is the whole
   // fix; the two hand-wired call sites are deleted with it (#4345 follow-up).
   { name: 'validateReadonlyFlowWrites', run: validateReadonlyFlowWrites },
-  // [#13653] The SAME question as the member above, on the surface that had no
+  // [commit 36d287803] The SAME question as the member above, on the surface that had no
   // answer for it: a hook body's `ctx.api.object('x').update({ readonlyField })`.
   // A hook's `ctx.api` is a ScopedContext over the TRIGGERING operation's
   // context, so on a non-system trigger the engine strips the key and the call

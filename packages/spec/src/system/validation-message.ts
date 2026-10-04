@@ -41,6 +41,16 @@
  * (`invalid_option_value`, `invalid_datetime`, `invalid_type_array`, …) are
  * rendering detail and never appear on the wire.
  *
+ * `invalid_date_range` / `invalid_datetime_range` (#20846) are two more
+ * `invalid_date` sentences, for a value the kind's rule reads but whose year
+ * falls outside the kind's supported years. "Must be a valid date (ISO-8601)"
+ * is false for such a value — `0500-07-15T10:00:00Z` is valid ISO 8601 — and
+ * sends its author to rewrite a spelling when the year is what is refused. The
+ * years come from `{{firstYear}}` / `{{lastYear}}`, which the refusing door
+ * fills from `@objectstack/core`'s `SUPPORTED_TEMPORAL_YEARS`, the range it
+ * judges by; ⛔ no template spells the numbers, so the sentence cannot drift
+ * from the range it names.
+ *
  * The `import_*` keys are the CSV/XLSX importer's cell-coercion failures
  * (`rest/import-coerce.ts`) — "this cell is not a number" rather than "this
  * value violates a constraint". They live here because they land in the same
@@ -55,8 +65,11 @@
  * `{{name}}` placeholders, matching `II18nService.t()`'s convention, filled from
  * the error's `constraint` values (`min`, `maxLength`, `actual`, `allowed`, …)
  * plus `{{value}}` (the offending value), `{{label}}` (the field's display name
- * in the caller's locale) and `{{field}}` (its API name). An unknown placeholder
- * is left verbatim so a broken override is visible rather than silently blank.
+ * in the caller's locale) and `{{field}}` (its API name). A few are filled from
+ * the refusing door's message-only parameters, which name a fact of the
+ * platform rather than a constraint of the field and are never shipped on the
+ * error (`{{firstYear}}` / `{{lastYear}}` above). An unknown placeholder is
+ * left verbatim so a broken override is visible rather than silently blank.
  */
 
 import { resolveBundleLocale } from './i18n-resolver';
@@ -90,6 +103,11 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}} must be ≥ {{min}}',
     max_value: '{{label}} must be ≤ {{max}}',
     max_scale: '{{label}} must have at most {{scale}} decimal places (got {{actual}})',
+    // `max_precision` (#19992): two sentences, one wire code. The plain one when
+    // the count is the value's own digits; `_scaled` when the field's scale
+    // padded it, so `1234.5` at `scale: 2` reads as the 6 digits of `1234.50`.
+    max_precision: '{{label}} must have at most {{precision}} digits in total (got {{actual}})',
+    max_precision_scaled: '{{label}} must have at most {{precision}} digits in total, counting {{scale}} decimal places (got {{actual}})',
     invalid_email: '{{label}} must be a valid email address',
     invalid_url: '{{label}} must be a valid URL (scheme://...)',
     invalid_phone: '{{label}} must be a valid phone number',
@@ -97,10 +115,26 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}} must be true or false',
     invalid_date: '{{label}} must be a valid date (ISO-8601)',
     invalid_datetime: '{{label}} must be a valid datetime (ISO-8601)',
+    // `invalid_date`'s range sentences (#20846): a value the kind's rule reads,
+    // in a year outside the kind's supported years. The years are parameters
+    // the refusing door fills from the range it judges by, never literals here.
+    invalid_date_range: '{{label}} must be a date in the years {{firstYear}} to {{lastYear}}',
+    invalid_datetime_range: '{{label}} must be a datetime whose UTC year falls in the years {{firstYear}} to {{lastYear}}',
     invalid_time: '{{label}} must be a valid time (HH:MM or HH:MM:SS)',
+    // `invalid_time`'s second sentence: a time of day written with a `Z` or an
+    // offset. A `time` field is a zone-less wall clock, so the sentence says
+    // what to do instead.
+    invalid_time_zoned: '{{label}} is a time of day with no time zone: drop the Z or offset (HH:MM or HH:MM:SS), or use a datetime field for an instant',
     invalid_option: '{{label}} must be one of: {{allowed}}',
     reference_not_found: '{{label}}: no {{target}} record has id "{{value}}"',
     invalid_option_value: '{{label}}: "{{value}}" is not one of: {{allowed}}',
+    // `invalid_option`'s picklist sentences: the field takes its options from a
+    // shared picklist, so the refusal names the list (`{{picklist}}`, a
+    // message-only parameter). `_unresolved` is the field whose list no loaded
+    // package declares, which accepts no value at all.
+    invalid_option_picklist: '{{label}} must be one of the values of picklist "{{picklist}}": {{allowed}}',
+    invalid_option_value_picklist: '{{label}}: "{{value}}" is not a value of picklist "{{picklist}}": {{allowed}}',
+    invalid_option_picklist_unresolved: '{{label}} takes its values from picklist "{{picklist}}", which no loaded package declares, so no value can be accepted',
     // `value_domain` (ADR-0114 member; the field-level `valueDomain` card's
     // spec half) — the code-named default names the domain by its machine
     // word; the three finer variants (one per vocabulary member, rendering
@@ -134,6 +168,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}}必须大于或等于 {{min}}',
     max_value: '{{label}}必须小于或等于 {{max}}',
     max_scale: '{{label}}的小数位数不能超过 {{scale}} 位(当前 {{actual}} 位)',
+    max_precision: '{{label}}的总位数不能超过 {{precision}} 位(当前 {{actual}} 位)',
+    max_precision_scaled: '{{label}}的总位数不能超过 {{precision}} 位(按 {{scale}} 位小数计,当前 {{actual}} 位)',
     invalid_email: '{{label}}必须是有效的电子邮件地址',
     invalid_url: '{{label}}必须是有效的 URL(scheme://...)',
     invalid_phone: '{{label}}必须是有效的电话号码',
@@ -141,10 +177,16 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}}必须是 true 或 false',
     invalid_date: '{{label}}必须是有效的日期(ISO-8601)',
     invalid_datetime: '{{label}}必须是有效的日期时间(ISO-8601)',
+    invalid_date_range: '{{label}}必须是 {{firstYear}} 年至 {{lastYear}} 年之间的日期',
+    invalid_datetime_range: '{{label}}必须是 UTC 年份在 {{firstYear}} 年至 {{lastYear}} 年之间的日期时间',
     invalid_time: '{{label}}必须是有效的时间(HH:MM 或 HH:MM:SS)',
+    invalid_time_zoned: '{{label}}是不带时区的时刻:请去掉 Z 或时区偏移(HH:MM 或 HH:MM:SS),表示时间点请改用日期时间字段',
     invalid_option: '{{label}}必须是以下值之一:{{allowed}}',
     reference_not_found: '{{label}}:不存在 id 为“{{value}}”的{{target}}记录',
     invalid_option_value: '{{label}}:“{{value}}”不在允许的取值范围内:{{allowed}}',
+    invalid_option_picklist: '{{label}}必须是选项列表“{{picklist}}”中的值之一:{{allowed}}',
+    invalid_option_value_picklist: '{{label}}:“{{value}}”不是选项列表“{{picklist}}”中的值:{{allowed}}',
+    invalid_option_picklist_unresolved: '{{label}}的取值来自选项列表“{{picklist}}”,但没有已加载的包声明该列表,因此无法接受任何值',
     value_domain: '{{label}}必须是 {{valueDomain}} 值域的成员(当前 “{{value}}”)',
     value_domain_iana_time_zone: '{{label}}必须是有效的 IANA 时区标识符,例如 Europe/Zurich(当前 “{{value}}”)',
     value_domain_iso_4217_currency: '{{label}}必须是有效的 ISO 4217 货币代码,例如 CHF(当前 “{{value}}”)',
@@ -171,6 +213,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}}は {{min}} 以上で入力してください',
     max_value: '{{label}}は {{max}} 以下で入力してください',
     max_scale: '{{label}}の小数点以下は {{scale}} 桁以内で入力してください(現在 {{actual}} 桁)',
+    max_precision: '{{label}}は合計 {{precision}} 桁以内で入力してください(現在 {{actual}} 桁)',
+    max_precision_scaled: '{{label}}は小数点以下 {{scale}} 桁を含めて合計 {{precision}} 桁以内で入力してください(現在 {{actual}} 桁)',
     invalid_email: '{{label}}は有効なメールアドレスを入力してください',
     invalid_url: '{{label}}は有効な URL(scheme://...)を入力してください',
     invalid_phone: '{{label}}は有効な電話番号を入力してください',
@@ -178,10 +222,16 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}}は true または false で入力してください',
     invalid_date: '{{label}}は有効な日付(ISO-8601)を入力してください',
     invalid_datetime: '{{label}}は有効な日時(ISO-8601)を入力してください',
+    invalid_date_range: '{{label}}は {{firstYear}} 年から {{lastYear}} 年までの日付を入力してください',
+    invalid_datetime_range: '{{label}}は UTC の年が {{firstYear}} 年から {{lastYear}} 年までの日時を入力してください',
     invalid_time: '{{label}}は有効な時刻(HH:MM または HH:MM:SS)を入力してください',
+    invalid_time_zoned: '{{label}}はタイムゾーンを持たない時刻です。Z やオフセットを外す(HH:MM または HH:MM:SS)か、時点を表すには日時フィールドを使ってください',
     invalid_option: '{{label}}は次のいずれかを指定してください:{{allowed}}',
     reference_not_found: '{{label}}:id が「{{value}}」の{{target}}レコードは存在しません',
     invalid_option_value: '{{label}}:「{{value}}」は指定できません(指定可能:{{allowed}})',
+    invalid_option_picklist: '{{label}}は選択リスト「{{picklist}}」の値のいずれかを指定してください:{{allowed}}',
+    invalid_option_value_picklist: '{{label}}:「{{value}}」は選択リスト「{{picklist}}」の値ではありません(指定可能:{{allowed}})',
+    invalid_option_picklist_unresolved: '{{label}}の値は選択リスト「{{picklist}}」から取りますが、読み込まれたパッケージにこのリストがないため、値を受け付けられません',
     value_domain: '{{label}}は {{valueDomain}} 値ドメインのメンバーでなければなりません(現在「{{value}}」)',
     value_domain_iana_time_zone: '{{label}}は有効な IANA タイムゾーン識別子でなければなりません(例: Europe/Zurich、現在「{{value}}」)',
     value_domain_iso_4217_currency: '{{label}}は有効な ISO 4217 通貨コードでなければなりません(例: CHF、現在「{{value}}」)',
@@ -208,6 +258,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}} debe ser mayor o igual que {{min}}',
     max_value: '{{label}} debe ser menor o igual que {{max}}',
     max_scale: '{{label}} no debe superar {{scale}} decimales (actual: {{actual}})',
+    max_precision: '{{label}} no debe superar {{precision}} dígitos en total (actual: {{actual}})',
+    max_precision_scaled: '{{label}} no debe superar {{precision}} dígitos en total, contando {{scale}} decimales (actual: {{actual}})',
     invalid_email: '{{label}} debe ser una dirección de correo electrónico válida',
     invalid_url: '{{label}} debe ser una URL válida (scheme://...)',
     invalid_phone: '{{label}} debe ser un número de teléfono válido',
@@ -215,10 +267,16 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}} debe ser true o false',
     invalid_date: '{{label}} debe ser una fecha válida (ISO-8601)',
     invalid_datetime: '{{label}} debe ser una fecha y hora válidas (ISO-8601)',
+    invalid_date_range: '{{label}} debe ser una fecha entre los años {{firstYear}} y {{lastYear}}',
+    invalid_datetime_range: '{{label}} debe ser una fecha y hora cuyo año UTC esté entre los años {{firstYear}} y {{lastYear}}',
     invalid_time: '{{label}} debe ser una hora válida (HH:MM o HH:MM:SS)',
+    invalid_time_zoned: '{{label}} es una hora del día sin zona horaria: quite la Z o el desfase (HH:MM o HH:MM:SS), o use un campo de fecha y hora para un instante',
     invalid_option: '{{label}} debe ser uno de: {{allowed}}',
     reference_not_found: '{{label}}: ningún registro de {{target}} tiene el id «{{value}}»',
     invalid_option_value: '{{label}}: «{{value}}» no es uno de: {{allowed}}',
+    invalid_option_picklist: '{{label}} debe ser uno de los valores de la lista de selección «{{picklist}}»: {{allowed}}',
+    invalid_option_value_picklist: '{{label}}: «{{value}}» no es un valor de la lista de selección «{{picklist}}»: {{allowed}}',
+    invalid_option_picklist_unresolved: '{{label}} toma sus valores de la lista de selección «{{picklist}}», que ningún paquete cargado declara, así que no se puede aceptar ningún valor',
     value_domain: '{{label}} debe pertenecer al dominio de valores {{valueDomain}} (actual: «{{value}}»)',
     value_domain_iana_time_zone: '{{label}} debe ser un identificador de zona horaria IANA válido, p. ej. Europe/Zurich (actual: «{{value}}»)',
     value_domain_iso_4217_currency: '{{label}} debe ser un código de moneda ISO 4217 válido, p. ej. CHF (actual: «{{value}}»)',

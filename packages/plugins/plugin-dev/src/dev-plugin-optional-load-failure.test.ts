@@ -280,9 +280,29 @@ describe('DevPlugin — an optional service that is installed and fails to const
     const line = allLines(ctx).find((l) => l.includes('REST API NOT enabled'));
     expect(line, 'the no-auth refusal is reported on its own terms').toBeDefined();
     expect(line).toContain('no auth is mounted');
-    expect(line).toContain('#3963');
+    expect(line).toContain('always denied, with no setting that turns that off');
     expect(line).toContain('NOT a missing-package problem');
     // And the false claim it used to emit instead is gone.
     expect(allLines(ctx).some((l) => l.includes('@objectstack/rest not installed'))).toBe(false);
+  });
+
+  // #20376 changed HOW the setup / account app-package loop names its two
+  // packages (a literal `import()` per entry, in place of one variable
+  // specifier), never what it does when one cannot be imported. Both still
+  // reach the absent arm: one line each, at the loop's `warn`, never at the
+  // present-but-failed arm's `error`, and carrying the resolver's own code and
+  // the specifier that failed.
+  it('keeps the setup / account app packages on the absent arm when they cannot be imported', async () => {
+    const ctx = mockCtx();
+    await new DevPlugin({ seedAdminUser: false }).init(ctx);
+
+    const warnLines: string[] = ctx.logger.warn.mock.calls.map((call: unknown[]) => String(call[0]));
+    for (const pkg of ['@objectstack/setup', '@objectstack/account']) {
+      const lines = warnLines.filter((l) => l.includes(pkg));
+      expect(lines, `${pkg}: reported once, at warn`).toHaveLength(1);
+      expect(lines[0]).toContain('code: ERR_MODULE_NOT_FOUND');
+      expect(lines[0]).toContain(`Cannot find package '${pkg}'`);
+      expect(errorLines(ctx).some((l) => l.includes(pkg)), `${pkg}: not the present-but-failed arm`).toBe(false);
+    }
   });
 });

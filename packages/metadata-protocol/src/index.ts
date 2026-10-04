@@ -25,6 +25,8 @@ export {
 } from './write-response-internal-fields.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol, shouldRunPlatformMigrations } from './plugin.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
+// [#20312] The service key a host registers its SDUI component manifest under, read by the save door per publish.
+export { SDUI_MANIFEST_SERVICE } from './runtime-authoring-gate.js';
 // [#6710] The declared authoring channel — the explicit expression of ADR-0005's
 // "package author's own bootstrap channel", replacing the `environmentId ===
 // undefined` proxy the #4463 gate used to key its activation off.
@@ -146,7 +148,7 @@ export type { ClusterMetadataMutationPayload } from './protocol.js';
 // kernel-wide `metadata:reloaded` announce. Exported for the same reason its
 // mutation sibling is: the subscriber lives in another package.
 export type { MetaItemPublishedEvent } from './protocol.js';
-export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';
+export type { MetadataAuthoringGate, MetadataAuthoringGateContext, MetadataCredentialChannel } from './protocol.js';
 
 export { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 export type {
@@ -159,6 +161,7 @@ export type {
 
 export { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
 export type {
+  StoredDecisionModeReview,
   StoredFlowCanonicalization,
   StoredMigrationNotice,
   StoredMigrationOutcome,
@@ -186,6 +189,44 @@ export {
   redactMetadataItem,
   redactMetadataItems,
 } from './metadata-redaction.js';
+
+// [#21454] The generic data door's serve of a stored-metadata ROW: the body
+// projected (`storedMetadataBodyProjection` plus this package's
+// `redactStoredMetadataRows`, the `dropType` wrinkle included) and the stored
+// content hash keyed (`serveStoredMetadataHashColumnRows`, under the crypto
+// provider's digest or, while none is registered, `ephemeralStoredHashDigest`,
+// this module's ONE process-scoped key). Exported so the in-process reader
+// contexts in `@objectstack/runtime` serve the family exactly as the door does
+// by consuming these functions, never a copy: a second ephemeral key would
+// serve a second keyed form of the same row.
+export {
+  ephemeralStoredHashDigest,
+  redactStoredMetadataRows,
+  serveStoredMetadataHashColumnRows,
+  storedMetadataBodyProjection,
+} from './metadata-redaction.js';
+export type { StoredHashDigest } from './metadata-redaction.js';
+
+// [#21454] The generic data door's EVALUATE refusals on the same family
+// (#21086 grouping, #21120 body filter / sort, #21207 content-hash evaluate and
+// search). Exported so the in-process reader contexts in `@objectstack/runtime`
+// refuse the evaluate shapes the way the door does — each through the door's
+// OWN predicate, never a copy: a second definition of which shapes leak a
+// stored body or hash is exactly the drift the family's one rule exists to
+// prevent.
+export {
+  storedMetadataBodyGroupingRefusal,
+  storedMetadataBodyPredicateRefusal,
+  storedMetadataHashEvaluateRefusal,
+  storedMetadataSearchRefusal,
+} from './metadata-redaction.js';
+// [#21544] …and what those refusals are FED: the door's one default-search
+// narrowing and its one filter-field collector, module functions the door
+// itself calls. Exported so the reader-context seam calls the same two
+// functions rather than re-stating either — a second control flow over the
+// same columns is where the two doors would drift.
+export { collectStoredMetadataFilterFields, narrowStoredMetadataSearch } from './protocol.js';
+export type { StoredMetadataSearchSchema } from './protocol.js';
 
 export type { MetadataHostEngine } from './host-engine.js';
 

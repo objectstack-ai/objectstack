@@ -44,7 +44,7 @@ import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 import { declaredRefusalMessage, resolveThrownHttpError, serverFaultProvenance } from '@objectstack/types';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -72,9 +72,9 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    [['id', 'string'], ['stage', 'string'], ['amt', 'number']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
+    [['id', 'string'], ['stage', 'string'], ['amt', 'number']].map(([n, t]) => [n, { label: n, type: t, sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } } as never;
 
@@ -88,13 +88,15 @@ const NON_BOOLEAN: Array<[string, unknown]> = [
   ['0', 0],
   ['1', 1],
   ['null', null],
-  ['[true]', [true]],
+  // [#21448] `[true]` left this table: a LIST at a flag is the shared
+  // comparand-shape face's refusal now, one face before this gate, in that
+  // face's words (the precedence block below pins it).
   ['{ $field }', { $field: 'id' }],
   ['a Date', new Date('2026-01-01T00:00:00.000Z')],
   ['2n', 2n],
 ];
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;
@@ -192,6 +194,17 @@ describe('[#20040] existing refusals keep their order and their sentence', () =>
     }
   });
 
+  it('[#21448] a LIST at a flag is the shared comparand-shape face\'s, in its words — how many values before which', () => {
+    for (const op of FLAGS) {
+      const list = refusalOf(() => tree({ stage: { [op]: [true] } }));
+      expect(list.code, op).toBe('INVALID_FILTER');
+      expect(list.status, op).toBe(400);
+      expect(list.message, op).not.toContain('requires a boolean comparand');
+      expect(list.message.startsWith(`Operator "${op}" on field "stage" requires a single comparable value`), op).toBe(true);
+      expect(list.message, op).toContain(`at where.stage.${op}.`);
+    }
+  });
+
   it('a shape or type defect elsewhere in the same where is answered first, as the faces order it', () => {
     const shape = refusalOf(() => tree({ amt: { $in: 'x' }, stage: { $null: 'x' } }));
     expect(shape.code).toBe('INVALID_FILTER');
@@ -228,7 +241,7 @@ const SELECT = 'SELECT id AS "id", COUNT(*) AS "n" FROM "deal" WHERE ';
 const TAIL = ' GROUP BY id';
 const notSet = { kind: 'leaf', member: 'stage', operator: 'notSet', values: [] };
 const set = { kind: 'leaf', member: 'stage', operator: 'set', values: [] };
-const neLost = { kind: 'or', children: [notSet, { kind: 'leaf', member: 'stage', operator: 'notEquals', values: ['lost'] }] };
+const neLost = { kind: 'leaf', member: 'stage', operator: 'notEquals', values: ['lost'] };
 
 interface ControlFamily {
   tree: unknown;
@@ -238,36 +251,43 @@ interface ControlFamily {
   rows: string[];
 }
 const IS_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
-  top: { tree: notSet, sql: `${SELECT}stage IS NULL${TAIL}`, params: [], engine: { stage: null }, rows: ['r2'] },
+  top: { tree: notSet, sql: `${SELECT}stage IS NULL${TAIL}`, params: [], engine: { stage: { $null: true } }, rows: ['r2'] },
   not: {
     tree: { kind: 'not', child: notSet },
     sql: `${SELECT}NOT (stage IS NULL)${TAIL}`,
     params: [],
-    engine: { $and: [{ $not: { stage: null } }] },
+    engine: { $and: [{ $not: { stage: { $null: true } } }] },
     rows: ['r1', 'r3'],
   },
+  // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's `allowNull`
+  // escape on the `$not` operand, and nothing else: this face's own copies of
+  // the escape (around the operand, and around the `$ne` leaf) are deleted.
+  // The rows are the family's, unchanged.
   notNe: {
     tree: { kind: 'not', child: { kind: 'or', children: [notSet, { kind: 'and', children: [notSet, neLost] }] } },
-    sql: `${SELECT}NOT ((stage IS NULL OR (stage IS NULL AND (stage IS NULL OR stage != $1))))${TAIL}`,
+    sql: `${SELECT}NOT ((stage IS NULL OR (stage IS NULL AND stage != $1)))${TAIL}`,
     params: ['lost'],
-    engine: { $and: [{ $not: { $or: [{ stage: null }, { stage: null, $and: [{ $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }] }] } }] },
+    engine: { $and: [{ $not: { $or: [{ stage: { $null: true } }, { stage: { $null: true, $ne: 'lost' } }] } }] },
     rows: ['r1', 'r3'],
   },
 };
 const IS_NOT_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
-  top: { tree: set, sql: `${SELECT}stage IS NOT NULL${TAIL}`, params: [], engine: { stage: { $ne: null } }, rows: ['r1', 'r3'] },
+  top: { tree: set, sql: `${SELECT}stage IS NOT NULL${TAIL}`, params: [], engine: { stage: { $null: false } }, rows: ['r1', 'r3'] },
   not: {
     tree: { kind: 'not', child: set },
     sql: `${SELECT}NOT (stage IS NOT NULL)${TAIL}`,
     params: [],
-    engine: { $and: [{ $not: { stage: { $ne: null } } }] },
+    engine: { $and: [{ $not: { stage: { $null: false } } }] },
     rows: ['r2'],
   },
+  // [ADR-0053 D-D1, amended — #5930 step 4] …and the `requireValue` guard the
+  // same way, once. The second `stage IS NOT NULL` is the `$null: false`
+  // operator itself. Rows unchanged.
   notNe: {
     tree: { kind: 'not', child: { kind: 'and', children: [set, { kind: 'and', children: [set, neLost] }] } },
-    sql: `${SELECT}NOT ((stage IS NOT NULL AND (stage IS NOT NULL AND (stage IS NULL OR stage != $1))))${TAIL}`,
+    sql: `${SELECT}NOT ((stage IS NOT NULL AND (stage IS NOT NULL AND stage != $1)))${TAIL}`,
     params: ['lost'],
-    engine: { $and: [{ $not: { stage: { $ne: null }, $and: [{ stage: { $ne: null } }, { $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }] } }] },
+    engine: { $and: [{ $not: { stage: { $null: false, $ne: 'lost' }, $and: [{ stage: { $null: false } }] } }] },
     rows: ['r2', 'r3'],
   },
 };

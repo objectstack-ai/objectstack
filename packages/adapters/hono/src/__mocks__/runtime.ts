@@ -9,13 +9,13 @@
 // in `packages/**`. Declaring MORE than this adapter calls is fine (it calls
 // only `getDiscoveryInfo`, `handleAuth` and `dispatch`); declaring something the
 // dispatcher does not implement is not.
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 
 export class HttpDispatcher {
-  getDiscoveryInfo = vi.fn().mockReturnValue({ version: '1.0', routes: {} });
-  handleAuth = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { ok: true } } });
-  handleMetadata = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { objects: [] } } });
-  handleData = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { records: [] } } });
+  getDiscoveryInfo: Mock = vi.fn().mockReturnValue({ version: '1.0', routes: {} });
+  handleAuth: Mock = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { ok: true } } });
+  handleMetadata: Mock = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { objects: [] } } });
+  handleData: Mock = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { records: [] } } });
 
   constructor(_kernel: any) {}
 }

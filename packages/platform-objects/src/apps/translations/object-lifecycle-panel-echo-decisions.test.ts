@@ -239,11 +239,23 @@ const BOTH_TRANSLATE: Readonly<Record<string, Verdict>> = {
   'es-ES': 'translate',
 };
 
-/** The `agent` panel's own authored `Lifecycle` — the head noun two rows copy. */
-const AGENT_LIFECYCLE: Copy = {
+/**
+ * The authored `Lifecycle` head noun two rows copy, as a SHARED FRAGMENT.
+ *
+ * ⚠️ RE-JUDGED (#21320). These rows were decided against the `agent` panel's
+ * own `Lifecycle` label (`agent.fields.lifecycle.label`, copied whole, mode
+ * `in`). That twin left the catalog when `agent.lifecycle` — the agent
+ * conversation state machine — was retired and its form row deleted, so the
+ * copy had nothing left to be asserted against. The renderings did not move:
+ * the same head noun stands authored in the hook form's `Lifecycle events`
+ * helpText (ライフサイクルイベント / Eventos de ciclo de vida), the twin this
+ * ledger already copies `例: ` / `p. ej.` from, so the head noun is now asserted
+ * as a fragment both strings carry.
+ */
+const LIFECYCLE_HEAD_NOUN: Copy = {
   catalog: 'metadataForms',
-  key: 'agent.fields.lifecycle.label',
-  modes: { 'ja-JP': 'in', 'es-ES': 'in' },
+  key: 'hook.fields.events.helpText',
+  modes: { 'ja-JP': 'ライフサイクル', 'es-ES': 'ciclo de vida' },
 };
 
 const DECISIONS: readonly Decision[] = [
@@ -255,9 +267,9 @@ const DECISIONS: readonly Decision[] = [
     en: 'Lifecycle',
     verdict: BOTH_TRANSLATE,
     verbatim: [],
-    copies: [AGENT_LIFECYCLE],
+    copies: [LIFECYCLE_HEAD_NOUN],
     reason:
-      'THE HEAD NOUN IS COPIED FROM AN EXACT AUTHORED TWIN and then QUALIFIED, because the bare word is already spent. agent.fields.lifecycle.label carries the IDENTICAL English string and is 生命周期 / ライフサイクル / Ciclo de vida — but it names the AGENT conversation state machine, a different concept on a different panel, and this block is ADR-0057 DATA lifecycle. Leaving both as the bare word would collide two contracts on one rendering. ⇒ the twin is copied and the catalog word for "data" is prefixed: データ from object.sections.fields.description (データモデル), datos from the same twin (modelo de datos). ⇒ データライフサイクル / Ciclo de vida de los datos. ⭐ CONCEPT settled by zh-CN, which reached the same qualification independently (数据生命周期 against the agent panel plain 生命周期); the WORDS come from each locale own authored twin, and the containment of the twin is asserted below.',
+      '⚠️ RE-JUDGED: the twin this row was decided against, agent.fields.lifecycle.label, left the catalog with the retired agent.lifecycle key; the head noun is now asserted against hook.fields.events.helpText (see LIFECYCLE_HEAD_NOUN), and the rendering below is unchanged. As decided: THE HEAD NOUN IS COPIED FROM AN EXACT AUTHORED TWIN and then QUALIFIED, because the bare word is already spent. agent.fields.lifecycle.label carried the IDENTICAL English string and was 生命周期 / ライフサイクル / Ciclo de vida — but it named the AGENT conversation state machine, a different concept on a different panel, and this block is ADR-0057 DATA lifecycle. Leaving both as the bare word would collide two contracts on one rendering. ⇒ the twin is copied and the catalog word for "data" is prefixed: データ from object.sections.fields.description (データモデル), datos from the same twin (modelo de datos). ⇒ データライフサイクル / Ciclo de vida de los datos. ⭐ CONCEPT settled by zh-CN, which reached the same qualification independently (数据生命周期 against the agent panel plain 生命周期); the WORDS come from each locale own authored twin, and the containment of the twin is asserted below.',
   },
   {
     population: 'lifecycle',
@@ -281,9 +293,9 @@ const DECISIONS: readonly Decision[] = [
     prop: 'label',
     en: 'Class',
     verdict: BOTH_TRANSLATE,
-    copies: [AGENT_LIFECYCLE],
+    copies: [LIFECYCLE_HEAD_NOUN],
     reason:
-      'THE HUMANIZE IS A BARE WORD AND THE BARE WORD IS AMBIGUOUS IN BOTH LOCALES. objectForm declares no label (asserted), so "Class" is humanizeFieldPath of the path leaf; bare クラス and bare Clase read as a programming class or a CSS class, and the form nests this row under a composite whose own label is now the qualified one. ⇒ qualified with the parent block, copying AGENT_LIFECYCLE the same way the row above does: ライフサイクルクラス / Clase de ciclo de vida. ⭐ CONCEPT from the live LifecycleSchema, ⛔ not from zh-CN: `class` is LifecycleClassSchema, a five-member enum (record | audit | telemetry | transient | event) asserted below, i.e. the persistence contract of the object rows — zh-CN independently reached the same qualification (生命周期类别), which is corroboration rather than the source.',
+      'THE HUMANIZE IS A BARE WORD AND THE BARE WORD IS AMBIGUOUS IN BOTH LOCALES. objectForm declares no label (asserted), so "Class" is humanizeFieldPath of the path leaf; bare クラス and bare Clase read as a programming class or a CSS class, and the form nests this row under a composite whose own label is now the qualified one. ⇒ qualified with the parent block, copying the same head noun the row above does (LIFECYCLE_HEAD_NOUN): ライフサイクルクラス / Clase de ciclo de vida. ⭐ CONCEPT from the live LifecycleSchema, ⛔ not from zh-CN: `class` is LifecycleClassSchema, a five-member enum (record | audit | telemetry | transient | event) asserted below, i.e. the persistence contract of the object rows — zh-CN independently reached the same qualification (生命周期类别), which is corroboration rather than the source.',
   },
   {
     population: 'lifecycle',
@@ -1115,8 +1127,47 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // form's `columns` / `sort` / `tabs` repeaters, authored in all three
       // locales. 608 since #20161: the report form's joined-block `chart` row
       // left with its key (nothing ever drew a block chart), taking its label
-      // — authored in all three locales — out of the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(608);
+      // — authored in all three locales — out of the catalog. 614 since #20349:
+      // six new row labels (the object form's `highlightFields`,
+      // `searchableFields`, `access`, `access.default` and `requiredPermissions`,
+      // and the permission form's `adminScope`), authored in all three locales.
+      // 633 since #19332 flight G1b: nineteen new row labels — the field form's
+      // `accept`, `currencyConfig` (and its `currencyMode` / `defaultCurrency`),
+      // `dependsOn`, `lookupColumns`, `lookupFilters`, `relatedListColumns`,
+      // `storage` (and its `notNull`), `visibleWhen`, `readonlyWhen`,
+      // `requiredWhen` and `requiredPermissions`, and the action form's
+      // `patch`, `description`, `errorMessage`, `requiredPermissions` and
+      // `bodyExtra` — authored in all three locales.
+      // 623 since #20301:
+      // the list view's own `tabs` is a retired key, and its form repeater left
+      // `view.form.ts` with it — the repeater's own label and its nine row labels
+      // (`name`, `label`, `icon`, `view`, `filter`, `order`, `pinned`,
+      // `isDefault`, `visible`), ten leaves authored in all three locales, out of
+      // the catalog.
+      // 634 since #19332 flight G2a: eleven new row labels — the object form's
+      // `fieldGroups` repeater (and its `key`, `label`, `icon`, `description`,
+      // `collapse` and `visibleWhen` sub-rows) and its `indexes` repeater (and
+      // its `name`, `fields` and `unique` sub-rows) — authored in all three
+      // locales.
+      // 657 since #19332 flight G2b: twenty-three new row labels — the object
+      // form's `activityMilestones` repeater (and its `field`, `value`,
+      // `summary` and `type` sub-rows), `publicSharing` composite (and its
+      // `enabled`, `allowedAudiences`, `allowedPermissions`, `maxExpiryDays`,
+      // `redactFields` and `eligibility` sub-rows) and `userActions` composite
+      // (and its `create`, `import`, `edit`, `delete` and `exportCsv`
+      // sub-rows), and the field form's `inlineColumns` repeater (and its
+      // `name`, `label`, `width` and `defaultHidden` sub-rows) — authored in all
+      // three locales.
+      // 658 with the `picklist` metadata type's display pair, authored in all
+      // three locales.
+      // 659 since the field form offers `useGrouping` on `number` fields: one
+      // new row label, authored in all three locales.
+      // 660 since the agent form offers `structuredOutput`: one new row label,
+      // authored in all three locales.
+      // 659 since #21320: the agent form's `lifecycle` row left with its key
+      // (the conversation state machine was retired — nothing ever read it),
+      // taking its label — authored in all three locales — out of the catalog.
+      expect(translated.length, `${locale} positive control`).toBe(659);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
@@ -1261,20 +1312,22 @@ describe('#19403 round 10 — ⚠️⚠️ the phantom-translation trap, asserte
     }
   });
 
-  it('⭐ the near-twin that was LOOKED UP AND REFUSED is asserted to be a fill, not a decision', () => {
-    // `Access Token TTL` is byte-identical in all three locales and reads like a
-    // standing decision to keep TTL verbatim. It is an unauthored fill in every
-    // locale — including zh-CN — and the provenance tables say so. Asserted so
-    // that no later round leans on it.
+  it('⭐ the near-twin that was LOOKED UP AND REFUSED is authored in every locale, never a standing echo', () => {
+    // `Access Token TTL` was byte-identical in all three locales and read like a
+    // standing decision to keep TTL verbatim. It was an unauthored fill in every
+    // locale, and the provenance tables said so. Asserted so that no later round
+    // leans on it. #20462 then AUTHORED the zh-CN leaf (访问令牌 TTL) and #20493
+    // the ja-JP (アクセストークン TTL) and es-ES (TTL del token de acceso) ones:
+    // the concept is rendered and the initialism survives, the same treatment
+    // the lifecycle rows give TTL.
     const key = 'sys_oauth_resource.fields.access_token_ttl.label';
     const en = FLAT_OBJECTS.get('en')!.get(key);
     expect(en).toBe('Access Token TTL');
     for (const [locale, table] of PROVENANCE) {
-      expect(FLAT_OBJECTS.get(locale)!.get(key), `${locale} ${key}`).toBe(en);
-      expect(
-        table[`objects.${key}`],
-        `${locale} no longer records ${key} as a fill — if a translator authored it, this ledger note is stale`,
-      ).toBeTypeOf('string');
+      const value = FLAT_OBJECTS.get(locale)!.get(key);
+      expect(value, `${locale} ${key} reads its en source again`).not.toBe(en);
+      expect(carriesToken(value!, 'TTL'), `${locale} dropped the machine token`).toBe(true);
+      expect(table[`objects.${key}`], `${locale} still records the authored ${key} as a fill`).toBeUndefined();
     }
   });
 });
@@ -1287,7 +1340,9 @@ describe('#19403 round 10 — the SECOND WITNESS, over the `metadataForms.`-pref
       // exists exactly while the leaf IS a byte copy of the source revision, so
       // a leaf this round authored must have lost its row.
       const keys = Object.keys(table);
-      expect(keys.length, 'the provenance table is empty — the witness cannot testify').toBeGreaterThan(300);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(keys.length, 'the provenance table is empty — the witness cannot testify').toBeGreaterThan(0);
       const metadataFormRows = keys.filter((k) => k.startsWith('metadataForms.'));
       // The reading: NOTHING under the metadataForms. prefix is a fill any more.
       expect(metadataFormRows, `${locale} still records a metadata-form leaf as an unauthored fill`).toEqual([]);
@@ -1312,7 +1367,9 @@ describe('#19403 round 10 — the SECOND WITNESS, over the `metadataForms.`-pref
       const loc = FLAT_OBJECTS.get(locale)!;
       const echoing = [...en].filter(([k, v]) => loc.get(k) === v).map(([k]) => k);
       const authored = [...en].filter(([k, v]) => loc.get(k) !== undefined && loc.get(k) !== v).map(([k]) => k);
-      expect(echoing.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(50);
+      // At least one of each is what makes a positive AND a negative; since
+      // #20462 zh-CN's echoing objects leaves are its 42 declared English ones.
+      expect(echoing.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(0);
       expect(authored.length, `${locale} has no authored objects leaf to sample`).toBeGreaterThan(50);
       expect(
         echoing.filter((k) => table[`objects.${k}`] === undefined),

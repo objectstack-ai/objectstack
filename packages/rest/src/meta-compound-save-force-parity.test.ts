@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11095 → #12195] `?force=true` on the `/meta` save doors — a two-door parity
+ * [#11095 → commit 7986d973f] `?force=true` on the `/meta` save doors — a two-door parity
  * suite whose SECOND DOOR NO LONGER EXISTS.
  *
  * ## What this file is now, and why it was not deleted
@@ -16,10 +16,10 @@
  * do, got the identical refusal back, with nothing saying the parameter had
  * been ignored. #11095 closed it by threading the parameter.
  *
- * #12176's maintainer ruling (2026-08-25) then retired compound metadata item
- * names outright. Stage 1 (#12194) declared the item-name grammar and refuses
+ * The maintainer ruling of 2026-08-25 (completed by commit 7986d973f) then retired compound metadata item
+ * names outright. Stage 1 (commit 311433f6b) declared the item-name grammar and refuses
  * every slash-bearing name at the publish door — BEFORE the destructive gate
- * this file was written about — and stage 3 (#12195) un-mounts the arity.
+ * this file was written about — and stage 3 (commit 7986d973f) un-mounts the arity.
  *
  * ⛔ REWORKED rather than deleted. The guard worth keeping is against the arity
  * coming BACK: a re-mounted compound door is a door that reads neither `?force`
@@ -33,7 +33,7 @@
  *     the remedy, honoured `?force=true`, the truthy table (§2);
  *  3. #6877's repeated-parameter guard is re-pinned on the surviving door (§3);
  *  4. the slash-bearing name a caller would once have spelled compound is
- *     pinned answering #12194's `400 INVALID_REQUEST` at the surviving door,
+ *     pinned answering commit 311433f6b's `400 INVALID_REQUEST` at the surviving door,
  *     with `?force` unable to acknowledge past it (§4).
  *
  * ⛔ Still not a precedent for the dispatcher: `@objectstack/runtime`'s
@@ -274,7 +274,7 @@ function boot() {
         compoundFields: () => Object.keys(JSON.parse(rows.get('row_compound')!.metadata).fields ?? {}).sort(),
         singleFields: () => Object.keys(JSON.parse(rows.get('row_single')!.metadata).fields ?? {}).sort(),
         /**
-         * [#12195] The compound door's REGISTRATION, not a call to it. This
+         * [commit 7986d973f] The compound door's REGISTRATION, not a call to it. This
          * used to be `compoundPut()`; the arity is retired, so what is
          * assertable now is that nothing is mounted there.
          */
@@ -287,7 +287,7 @@ function boot() {
         singlePut: (query: Record<string, unknown> = {}) =>
             call(SINGLE_PATH, { type: 'object', name: SINGLE_NAME }, query),
         /**
-         * [#12195] The surviving door addressed with an ARBITRARY name — the
+         * [commit 7986d973f] The surviving door addressed with an ARBITRARY name — the
          * shape a caller now uses for a slash-bearing one (percent-encoded on
          * the wire, decoded by Hono before the handler runs).
          */
@@ -300,14 +300,14 @@ function boot() {
 const PUT_REMEDY = 're-submit with ?force=true to proceed.';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. ⭐ [#12195] The compound door is GONE — the pin the removal owes
+// 1. ⭐ [commit 7986d973f] The compound door is GONE — the pin the removal owes
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#11095 / #12195] the compound-name `PUT` arity is retired', () => {
     /**
      * ⛔ REWORKED, not deleted — same reasoning as the `mode` suite next door.
      * #11095 threaded `?force` onto the compound door to close the fourth
-     * divergence on the pair; #12176 then retired the pair itself. The guard
+     * divergence on the pair; commit 7986d973f then retired the pair itself. The guard
      * worth keeping is against the arity coming BACK, because a re-mounted
      * compound door is a door that reads neither `?force` nor `?mode` unless
      * someone re-threads them — the divergence family this file documents.
@@ -435,7 +435,7 @@ describe('[#11095 / #6877] a REPEATED `?force` is refused, never read as force-O
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. ⭐ [#12194] A slash-bearing name is refused at the GRAMMAR gate, before
+// 4. ⭐ [commit 311433f6b] A slash-bearing name is refused at the GRAMMAR gate, before
 //    the destructive gate — and `?force` cannot acknowledge past it.
 // ═══════════════════════════════════════════════════════════════════════════
 

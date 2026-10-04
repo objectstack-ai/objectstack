@@ -105,6 +105,7 @@ import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
+import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
 import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
 import { validatePresetComparands } from './validate-preset-comparands.js';
@@ -117,7 +118,10 @@ import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
 import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
-import { validateFlowTriggerReadiness } from './validate-flow-trigger-readiness.js';
+import {
+  validateFlowApiTriggerSecret,
+  validateFlowTriggerReadiness,
+} from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle } from './validate-record-title.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
@@ -135,6 +139,7 @@ import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
+import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
@@ -195,7 +200,7 @@ export interface AuthoringFinding {
    * on the runtime gate's wire surface the top-level collection index of a
    * collection-resident finding is rewritten to the entry's NAME
    * (`objects.acme_invoice.sharingModel`) — see `nameKeyFindingPath` in
-   * `runtime-gate.ts` (#10064).
+   * `runtime-gate.ts` (commit def0d3e63).
    */
   path: string;
   /** What is wrong. */
@@ -334,6 +339,28 @@ export interface AuthoringRuleContext {
    * this input or does not judge.
    */
   judgeFilter?: IObjectQLEngine['judgeFilter'];
+  /**
+   * [#20611] The credential positions of the WRITTEN item that the write path
+   * restores from the stored row before it persists the item — stack-relative,
+   * in the rules' own finding-path spelling (`flows[0].nodes[1].config.secret`).
+   *
+   * Set only by the runtime publish gate (`runtime-gate.ts`), from what its host
+   * states; ABSENT on the three CLI commands, whose stacks carry the author's
+   * own values. It exists because the read path withholds a credential from
+   * every served definition (a flow's start-node `config.secret`), so a body
+   * saved back after a read arrives WITHOUT it, and the host's carry-forward
+   * puts the stored value back only after every gate has run — on purpose, so
+   * that no gate handles a restored credential. A rule therefore cannot tell a
+   * withheld credential from a missing one by reading the body, and this set is
+   * how it is told: a path listed here is WITHHELD AND STORED, and a rule
+   * judging whether a credential is present reads it as present. A path not
+   * listed is judged on the body as sent, so a credential that is absent and
+   * not stored is missing.
+   *
+   * ⛔ Positions only, never values: the gate never sees a restored credential.
+   * Read by `validateFlowApiTriggerSecret` only.
+   */
+  restoredCredentialPaths?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -410,19 +437,44 @@ const CLI_AND_RUNTIME: readonly AuthoringSurface[] = ['cli', 'runtime-publish'];
  * collection the sentence above stands.
  */
 const RUNTIME_NEEDS_FULL_SNAPSHOT =
-  'P2 (#4463): reads a stack-wide collection the per-write snapshot does not carry, so running it ' +
+  'P2 of the runtime publish gate (the Studio, REST and MCP door that runs this registry): reads a ' +
+  'stack-wide collection the per-write snapshot does not carry, so running it ' +
   'now would report the rest of the tenant\'s metadata as missing rather than judging this write.';
 
 /**
- * The rule parses authored SOURCE (react/jsx page bodies, L2 JS hook/action
+ * The rule parses authored SOURCE (react page bodies, L2 JS hook/action
  * bodies) through `typescript` / `sucrase`. Those are exactly the dependencies
  * `lazy-deps.test.ts` keeps off the kernel boot path, and `@objectstack/lint`'s
  * runtime entry is guarded to load neither. Studio's page editor has its own
  * save-time compile path; this gate is not where that check belongs.
+ *
+ * The html tier's rule (`validateJsxPages`) is NOT this case — see
+ * {@link RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE}.
  */
 const RUNTIME_HEAVY_SOURCE_PARSE =
   'Not runtime-safe: parses authored source through typescript/sucrase, the two dependencies the ' +
   'kernel boot path must never load (lazy-deps.test.ts). Studio compiles page source on its own path.';
+
+/**
+ * `validateJsxPages` parses an html page's source with `@objectstack/sdui-parser`
+ * — no dependencies, never executes the source — so nothing about it is unsafe
+ * on the kernel boot path. It stays off this registry's runtime surface because
+ * the save door already runs the same compile itself: `findHtmlPageSourceGaps`
+ * in `@objectstack/metadata-protocol`'s `runtime-authoring-gate.ts` imports the
+ * same `compile()` and runs it against the deployment's SDUI component manifest,
+ * reports under the same `jsx-CODE` rule ids, and adds the page's `requires`
+ * check (`page-requires-disagrees-with-source`). Wiring this entry there too
+ * would judge every html page twice.
+ *
+ * The two differ in one case: with no manifest this rule still checks syntax
+ * and structure, while a host that registered no manifest has its save door
+ * judge nothing and says so once at boot.
+ */
+const RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE =
+  'Runtime-safe (the dependency-free @objectstack/sdui-parser, which never executes the source) but ' +
+  'not wired here: the save door already compiles an html page\'s source itself, with the same ' +
+  'compiler against the deployment\'s SDUI component manifest and under the same jsx-* rule ids ' +
+  '(metadata-protocol\'s findHtmlPageSourceGaps), so a second run would judge each page twice.';
 
 /**
  * The rule judges an OBJECT/field declaration at `advisory` tier — it can
@@ -452,8 +504,9 @@ const RUNTIME_HEAVY_SOURCE_PARSE =
  */
 const RUNTIME_OBJECT_ADVISORY_VOLUME =
   'Advisory-tier object rule: it cannot refuse a write, and it is held off the runtime door for ' +
-  'advisory VOLUME (~8 findings per object write measured on unswept metadata, rendered in Studio ' +
-  'since #4717), not refusal risk. Crossing it is a UX decision with its own card (#4716).';
+  'advisory VOLUME (~8 findings per object write measured on unswept metadata, each carried back in ' +
+  'the save response and rendered by Studio\'s designer), not refusal risk. The object door opened to ' +
+  'the gating object rules alone; crossing an advisory one is a separate UX decision.';
 
 /**
  * `ExprIssue` is the one rule finding that carries no rule id of its own — it
@@ -691,6 +744,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // over the shipped dataset corpus before crossing, at the door's own
     // snapshot shape: 11 datasets (platform-objects 5, showcase 4, crm 1,
     // todo 1) — 0 findings, with a lit synthetic probe refused.
+    //
+    // [#21082] The rule also walks `analyticsCubes` (the cube leg, same two
+    // ids). That leg is CLI-only by construction, not by a narrowing here: a
+    // `dataset` write's snapshot carries no `analyticsCubes` (the context
+    // collections are `RuntimeStackContext`'s), so it reads nothing at this
+    // door, and an `analytics_cube` write has no `TYPE_TO_STACK_KEY` row.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
@@ -709,6 +768,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateDashboardActionRefs(stack),
+  },
+  // A dashboard widget `options` key no renderer reads parses clean (the bag
+  // is `.passthrough()`) and styles nothing. `@objectstack/sdui-parser`'s
+  // `checkDashboardWidgetOptions` already says so for a `dashboard` node in an
+  // SDUI page; this entry runs that SAME check over dashboard metadata, at its
+  // same level (`warning`) and code (`unconsumed-widget-option`), reading the
+  // same `CONSUMED_WIDGET_OPTION_KEYS`. The rule file is an adapter that
+  // localizes the check's diagnostics; it holds no key list and no verdict.
+  {
+    name: 'validateDashboardWidgetOptions',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dashboard-widget-options.ts',
+    surfaces: CLI_ONLY,
+    // The judgement is dashboard-local, so the per-write `dashboard` snapshot
+    // `validateWidgetBindings` already runs on would carry everything it
+    // reads. What holds it at the CLI is scope, not input: crossing an
+    // advisory rule onto the Studio/REST/MCP door puts a warning on every
+    // dashboard save that writes such a key, which is a rollout decision over
+    // stored tenant rows the in-repo corpus does not measure.
+    surfaceReason:
+      'Advisory, dashboard-local: the per-write dashboard snapshot would carry its input. Held at the CLI ' +
+      'doors by scope: crossing an advisory rule onto the Studio/REST/MCP door adds a warning to dashboard ' +
+      'saves, a rollout decision over stored tenant rows the in-repo corpus does not measure.',
+    run: (stack) => validateDashboardWidgetOptions(stack),
   },
   // #3574 — a filter value like `{current_user}` resolves in no vocabulary,
   // reaches the data engine as a literal and matches nothing. The surface
@@ -1025,8 +1110,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the only door that tenant has. Crossing is its own rollout decision with
     // that replay as its evidence, not a bare `runtimeTypes` edit.
     surfaceReason:
-      'Gating rule held off the runtime door pending the #4716 crossing discipline: a measured ' +
-      'false-refusal budget over stored tenant page rows (the in-repo 0-finding measurement covers ' +
+      'Gating rule held off the runtime door pending the crossing discipline the gating object rules ' +
+      'went through: a measured false-refusal budget, here over stored tenant page rows (the in-repo ' +
+      '0-finding measurement covers ' +
       'authored config-file metadata only). Crossing is its own rollout card.',
     run: (stack) => validateComponentTypes(stack),
   },
@@ -1052,7 +1138,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-jsx-pages.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_HEAVY_SOURCE_PARSE,
+    surfaceReason: RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE,
     run: (stack, ctx) =>
       validateJsxPages(stack, ctx.sduiManifest ? { manifest: ctx.sduiManifest as never } : {}),
   },
@@ -1091,7 +1177,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-capability-references.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: 'P2 (#4463): the ONE rule the runtime universe makes strictly stronger — the advisory hedge ("another '
+    surfaceReason: 'P2 of the runtime publish gate (the Studio, REST and MCP door that runs this registry): '
+      + 'the ONE rule the runtime universe makes strictly stronger — the advisory hedge ("another '
       + 'installed package may provide it") is decidable against the live capability registry, so it '
       + 'graduates from advisory to gating there rather than merely being ported. That promotion is a '
       + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
@@ -1107,14 +1194,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // predicate cannot route at all, a `record-*` triggerType outside the
   // closed token grammar `triggerTypeToHookEvents` maps, and (#6637) a
   // `type: 'record_change'` flow whose triggerType the engine's binding resolver
-  // routes nowhere, silently demoting it to a manual flow. None of those verdicts
+  // routes nowhere, silently demoting it to a manual flow. #20553 made it five: an
+  // `api`-bound flow with no usable `config.secret`, which the engine's own
+  // `registerFlow` refuses (ADR-0041) — on its OWN entry below
+  // (`validateFlowApiTriggerSecret`), because it reads a context input this entry
+  // has no use for (#20611). None of those verdicts
   // can be changed by installing a package, so there is no reading under which
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
   // that one is ambiguity of intent, not a dead flow).
   //
-  // #16659 added a sixth id, `flow-schedule-organization-missing`, at
+  // Commit ecdfc9411 added a sixth id, `flow-schedule-organization-missing`, at
   // `warning`; #17396 RETIRED it. The criterion above is what retired it: this
   // stack is not enough to know the flow is dead, because a deployment-level
   // switch and the tenancy posture decide whether the key is required, and
@@ -1136,6 +1227,34 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
     run: (stack) => validateFlowTriggerReadiness(stack),
+  },
+  // #20553 — `flow-api-trigger-secret-missing`, split out of the entry above as
+  // its own exported rule. Same family, same `error`, all three commands.
+  //
+  // #20611 — and the runtime publish gate too. The flow read path withholds
+  // `config.secret` from every served definition (#20552), and `saveMetaItem`
+  // restores the stored secret only just before the put, AFTER this table has
+  // judged the body the caller sent — deliberately, so no gate handles a
+  // restored credential. So the gate is handed the POSITIONS that restore will
+  // fill (`AuthoringRuleContext.restoredCredentialPaths`), and the rule reads a
+  // withheld-and-stored secret as present: a signed flow's ordinary
+  // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
+  // with this id instead of being stored for the engine to refuse at
+  // registration.
+  {
+    name: 'validateFlowApiTriggerSecret',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    // Runtime publish gate (#20611): judged on the per-write snapshot like the
+    // entry above, with the host's restored-credential positions read as
+    // present. The CLI never sets that input, so there the author's own
+    // `config.secret` is the whole answer.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack, ctx) =>
+      validateFlowApiTriggerSecret(stack, { restoredCredentialPaths: ctx.restoredCredentialPaths }),
   },
   // ADR-0090 D3 fallout — an approval `{ type: 'role' }` resolves against the
   // better-auth org-membership tier, not positions, so a position name authored
@@ -1408,10 +1527,37 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         hint: f.hint,
       })),
   },
+  // A credential typed as a LITERAL into a flow position every flow reader is
+  // served — an `http` node's `headers` or `url` query, a node's
+  // `connectorConfig.input` — named at every authoring door, with the
+  // declarative connector's `credentialRef` as the route (the triage ruling on
+  // #20590, direction A). Nothing is withheld and nothing is refused: the
+  // predicate is a heuristic, so the tier is `advisory`, and
+  // `authoring-rule-wiring.test.ts` holds the source to it. The fourth door is the one a Studio / REST / MCP
+  // author of a flow has, so the entry is on it for `flow`, exactly where
+  // `lintFlowPatterns`' advisories already surface.
+  {
+    name: 'lintFlowCredentialLiterals',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-flow-credential-literals.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack) =>
+      lintFlowCredentialLiterals(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
+      })),
+  },
   // The spec-liveness loop on the author side: a property the ledger marks
-  // dead-and-misleading or experimental is set hopefully and does nothing.
-  // Ledger-driven (entries opt in via `authorWarn`), so it is high-signal and
-  // never fatal.
+  // dead, live-elsewhere or experimental is set hopefully and does nothing
+  // here. Ledger-driven (those verdicts warn on their own; any other row only
+  // when it opts in via `authorWarn`), and never fatal.
   {
     name: 'lintLivenessProperties',
     tier: 'advisory',
@@ -1432,12 +1578,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     //
     // ⚠️ MEASURED, and the report's first reading: this rule is LEDGER-DRIVEN
     // and `continue`s on an empty warn map. `packages/spec/liveness/
-    // email_template.json` is 13 props / 0 warn keys and `mapping.json` is 7 /
+    // email_template.json` is 13 props / 0 warn keys and `mapping.json` was 7 /
     // 0 (lit control, same script, same dir: `tool.json` 6/1, `object.json`
-    // 35/1), so these two writes dispatch this rule and it judges NOTHING
-    // today. That is the ruled end state, not a half-landing: the ruling
-    // dispatched the wiring and ⛔ no ledger population («the empty warn maps
-    // stay empty until a real property needs a row — zero pull, the wiring is
+    // 35/1), so these two writes dispatched this rule and it judged NOTHING.
+    // [#20919] `mapping.json` is 8 / 0 again: `connectorSource` (the connector
+    // sync binding) went `live` and, since #21127, carries no `authorWarn` — a
+    // warned `live` row made this rule throw instead of warn, so a `mapping`
+    // write authoring it got an `authoring-rule-threw` advisory and `os
+    // validate` / `os lint` exited 1. The scheduling caveat (a pull runs only
+    // when a `job`'s `pull` names the mapping) is on the key's description, and
+    // `check:liveness` refuses a warned `live` row. That is the ruled end
+    // state, not a half-landing: the ruling dispatched the wiring and ⛔ no
+    // ledger population («the empty warn maps stay empty until a real property needs a row — zero pull, the wiring is
     // the whole deliverable»). `runtime-gate.inert-type-writes.test.ts` pins
     // both halves — that the rule is dispatched, and that it is silent — so
     // the day a ledger row lands the door lights up with no second edit here.
@@ -1684,7 +1836,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    `security-master-detail-ungranted` per-write vs 4 whole-stack,
   //    PR #7886). `RuntimeStackContext` now carries `permissions`/`books` in
   //    BOTH differential passes and `TYPE_TO_STACK_KEY` maps both types.
-  //  - #8310 slice 1: `runtimeTypes` gains `permission` + `book` (PR #8546).
+  //  - #8310 slice 1: `runtimeTypes` gains `permission` + `book` (commit ba5e957ef).
   //    `object` measured DIRTY on that tree and was escalated, not forced.
   //  - #8310 slice 2 (this state): `object` crosses under the maintainer
   //    ruling recorded on #8310 (2026-08-13, 「接受你的全部建议」): an
@@ -1710,7 +1862,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // where a permission set named `role_manager` is refused and a position named
   // `sales_role` walks through, the #7220 failure this table refuses to build
   // in either direction. So it was split out and held back WHOLE (#8310's
-  // explicit call). [#19370] It has since crossed, also whole, on its own
+  // explicit call). [commit a227afa41] It has since crossed, also whole, on its own
   // entry; the split is what let each half cross on its own evidence, and it
   // stays split for that reason rather than being folded back.
   //
@@ -1730,7 +1882,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['seed', 'permission', 'book', 'object'],
     run: (stack) => validateSecurityPosture(stack),
   },
-  // [ADR-0090 D3 / #8310 → #19370] The vocabulary freeze, split out of
+  // [ADR-0090 D3 / #8310 → commit a227afa41] The vocabulary freeze, split out of
   // `validateSecurityPosture` the day the rest of that block crossed the
   // runtime wall — so that it could stay behind WHOLE rather than cross for
   // three of the six collections it judges (#7220: one rule id must sit on ONE
@@ -1823,15 +1975,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-sharing-rule-enforceability.ts',
     surfaces: CLI_ONLY,
     surfaceReason:
-      'P2 (#4463): a sharing rule is not a `flow`, and P1 gates `flow` alone. This entry used to add '
+      'P2 of the runtime publish gate (the Studio, REST and MCP door that runs this registry): a sharing '
+      + 'rule is not a `flow`, and P1 gates `flow` alone. This entry used to add '
       + 'that the rule reads ONLY `stack.sharingRules[].condition` and needs no other collection, so '
-      + 'crossing was a lone `runtimeTypes` edit. #9698 FALSIFIED that: the anchor arm resolves '
+      + 'crossing was a lone `runtimeTypes` edit. The anchor arm, which refuses a rule anchored on a '
+      + 'public-OWD object or a master-detail detail (no share row could widen either), FALSIFIED that: '
+      + 'it resolves '
       + '`sharingRules[].object` against `stack.objects` to read the anchor\'s OWD, so the rule is now '
-      + 'cross-collection. `objects` IS carried by the per-write snapshot (`CONTEXT_STACK_KEYS`, #8309), '
+      + 'cross-collection. `objects` IS carried by the per-write snapshot (`CONTEXT_STACK_KEYS`), '
       + 'so the remaining gap is unchanged in SHAPE — the gate must accept a `sharing_rule` type and the '
       + 'snapshot must carry `sharingRules`, which it does not — but it is now TWO collections, not one. '
       + 'Crossing with `sharingRules` uncarried would enforce this id for zero of its inputs while the '
-      + 'entry claimed the door (#7220). Recorded as pending rather than done, because a rule that has '
+      + 'entry claimed the door. Recorded as pending rather than done, because a rule that has '
       + 'never run at a door should not claim it.',
     run: (stack) => validateSharingRuleEnforceability(stack),
   },

@@ -84,23 +84,23 @@
  * ## Unregistered types are SKIPPED — a required semantic, not leniency
  *
  * `PageComponentSchema.type` is `z.union([PageComponentType, z.string()])`, an
- * open union by design: the example corpus alone authors `flex`, `grid`,
- * `object-chart` and `record:line_items` — nodes whose props schema
- * `ComponentPropsMap` simply does not carry (SDUI blocks live in objectui's
- * registry and in the ADR-0080 manifest). Judging those against an absent
- * schema would report every one of them as broken.
- * `validate-page-field-bindings` skips unknown types for the same reason and
- * says so in its own header.
+ * open union by design: the example corpus alone authors `flex`, `grid` and
+ * `object-chart` — nodes whose props schema `ComponentPropsMap` simply does
+ * not carry (SDUI blocks live in objectui's registry and in the ADR-0080
+ * manifest). Judging those against an absent schema would report every one of
+ * them as broken. `validate-page-field-bindings` skips unknown types for the
+ * same reason and says so in its own header.
  *
  * ⚠️ The skip is also the silent-failure direction, which is why the list
  * above keeps shrinking: earlier editions of this sentence named the
  * `object-*` family (#7751 declared six rows), then `record:reference_rail`
  * (#8691), then `record:quick_actions` and `record:alert` (#8744, with
- * `record:history` and `record:discussion`) — each a type with a registered
- * renderer whose authored keys this skip was quietly waving through. A type
- * both registered in objectui AND absent from the map is a gap to measure
- * (see #8691's method), not a state to preserve; `object-chart`'s absence is
- * the recorded deliberate one (#7751).
+ * `record:history` and `record:discussion`), then `record:line_items` (#21142,
+ * whose five `field`-keyed showcase columns drew an empty grid) — each a type
+ * with a registered renderer whose authored keys this skip was quietly waving
+ * through. A type both registered in objectui AND absent from the map is a gap
+ * to measure (see #8691's method), not a state to preserve; `object-chart`'s
+ * absence is the recorded deliberate one (#7751).
  */
 
 import { ComponentPropsMap } from '@objectstack/spec/ui';
@@ -175,7 +175,13 @@ const DATASOURCE_SUPPLIED_PROP = 'object';
 function suppliedByDataSource(issue: LintZodIssue, component: AnyRec): boolean {
   if (issue.path.length !== 1 || issue.path[0] !== DATASOURCE_SUPPLIED_PROP) return false;
   const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
-  return strName(dataSource?.object) !== undefined;
+  if (strName(dataSource?.object) === undefined) return false;
+  // "Missing" is read off the component, never off the issue: the path alone
+  // also matches a PRESENT value the row rejects (`object: 7`, `object: null`),
+  // and the binding supplies nothing there — the author wrote that value and
+  // the row's own verdict on it stands. Only no key, or `undefined`, is waived.
+  const props = isRec(component.properties) ? component.properties : undefined;
+  return props?.[DATASOURCE_SUPPLIED_PROP] === undefined;
 }
 
 /**
@@ -316,8 +322,9 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           message: `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)}`,
           hint:
             `\`${type}\`'s props are declared by ComponentPropsMap (@objectstack/spec/ui) — the ` +
-            'rejection above carries the fix. Advisory for now: the props bag is not parsed on the ' +
-            'storage path either, so nothing rejects this today (objectstack#5068).',
+            'rejection above carries the fix. Advisory for now: props are judged here, at the authoring ' +
+            'door, as a warning before they become an error, and the props bag is not parsed on the ' +
+            'storage path either, so nothing rejects this today.',
         });
       }
     }

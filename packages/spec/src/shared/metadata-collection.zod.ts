@@ -79,7 +79,7 @@ export const MAP_SUPPORTED_FIELDS = [
   'reports',
   'datasets',
   'actions',
-  // `themes` left with the retired carrier key (#10485, ADR-0049).
+  // `themes` left with the retired carrier key (commit 35ad101bc, ADR-0049).
   'flows',
   'jobs',
   'positions',

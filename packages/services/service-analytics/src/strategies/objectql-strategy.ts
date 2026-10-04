@@ -5,11 +5,15 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark: `withReadScope` below is one of the
 // two merge boundaries that stamp it.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
+  declaredDatetimeLowering,
   invalidFilterError,
   lowerAnalyticsWhere,
+  NO_DATETIME_COLUMNS,
   normalizeAnalyticsFilterTree,
+  normalizeDateRangeWindow,
   collectFilterLeaves,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
@@ -24,10 +28,17 @@ import {
   compileScopedFilterToSql,
 } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
+import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
+// [#20986] The one resolver of the object a relationship-path hop reads.
+import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { invalidMemberError } from '../dataset-refusal.js';
+import { projectedDimensions } from '../order-key-door.js';
+// [#21316] The package's one row comparator and window, shared with the
+// dataset door's post-pass (#3588) — this face orders by it, never by a copy.
+import { applyOrdering, applyWindow } from '../dataset-executor.js';
 import { type LikeShape } from '../like-pattern.js';
-import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
+import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import {
   rebucketCrossObject,
@@ -36,13 +47,16 @@ import {
   type MeasureRecombine,
   type RecombinableMethod,
 } from './cross-object-rebucket.js';
-// [#12209] The custom-SQL half of the `AggregationMetricType` partition, ONE
-// source shared with `NativeSQLStrategy` and pinned against the spec enum by
-// `metric-type-coverage.test.ts` — a second literal set here would drift.
-import { EXPRESSION_METRIC_TYPES } from './native-sql-strategy.js';
+// [#21000] The ONE verdict on a cube measure's `type`, shared with
+// `NativeSQLStrategy` so the two paths accept and refuse the same set — it
+// replaces the custom-SQL partition both used to key on, retired from the
+// spec with the three types it named.
+// [#21365] `windowClauseSql` is the same rule for the row window: one spelling
+// of an offset-only window per dialect, shared with the native face.
+import { aggregateOfMeasure, windowClauseSql } from './native-sql-strategy.js';
 
 /**
- * [#10861 / #11461] Where a member in the cross-object envelope's inventory
+ * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
  * came from.
  *
  * THREE producers put predicates in front of `engine.aggregate` on this path:
@@ -128,6 +142,82 @@ interface CrossObjectPlan {
 }
 
 /**
+ * Why the echo of a date bucket refuses: the in-memory zone, or no driver
+ * expression for the bucket (with the dialect the host names, `'unknown'` when
+ * it names none).
+ */
+type BucketEchoRefusalCause = { zone: string } | { dialect: AnalyticsSqlDialect };
+
+/**
+ * The echo of a date bucket that no driver expression stands for: it refuses
+ * rather than print one.
+ *
+ * [#21647] One rule. `generateSql` prints a date-bucketed dimension only in
+ * the expression the driver itself renders for it (the `dateBucketSql` hook),
+ * at a UTC or unset `timezone`. Everything else refuses here, and the
+ * refusal names its cause:
+ *
+ * - [#21630] **A non-UTC `timezone`, on every driver.** The engine then
+ *   buckets in memory on that zone's calendar (ADR-0053 Phase 2, D2;
+ *   `tzRequiresInMemory` in objectql's `engine.ts`): the driver only fetches
+ *   the rows, and no statement the database runs groups by those keys. The
+ *   `date_trunc('<granularity>', col)` this used to print groups on the
+ *   database SESSION's calendar where it runs at all. Measured on PostgreSQL
+ *   16.14 with the server at `Asia/Shanghai`, it answered timestamp keys such
+ *   as `2025-12-31T16:00:00.000Z` where the face answers `2026-01`, and at
+ *   `America/New_York` it grouped 20 and 8 where the face groups 27 and 1.
+ * - [#21647] **No driver expression for the bucket, on every driver.** The
+ *   hook answers nothing: a driver that runs no SQL (`driver-memory`, whose
+ *   bucket the engine computes in memory; `driver-mongodb`, which buckets in
+ *   its own aggregation pipeline), a SQL driver with no expression for the
+ *   granularity (the engine buckets it in memory), or a host that wires no
+ *   hook. The echo used to print `date_trunc` there and call it
+ *   representative. Measured on `driver-memory` at UTC, the face answered
+ *   `2026-01` and `2026-W02` from rows the driver only fetched, while both
+ *   faces printed `date_trunc('month', closed_at)`, a statement nothing ran.
+ *   [#21595] SQLite, which has no `date_trunc` at all, was the first case of
+ *   this arm.
+ *
+ * `NOT_IMPLEMENTED` / 501, for the reason `driver-sql`'s own bucket refusal
+ * gives: the query is spelled correctly and served, and the gap is the
+ * backend's. `refusal: true` declares the 501 a deliberate refusal addressed
+ * to the caller (`ApiErrorSchema.refusal`), so the boundaries keep its message
+ * instead of withholding it as a fault.
+ *
+ * The reach is the cross-field decline's: `execute()` calls `generateSql`
+ * inside a `try`, so `/analytics/query` still serves the rows and carries no
+ * `sql`, and the dry run (`/analytics/sql`) refuses. Both are within the
+ * declared response contracts: `sql` is optional on the query answer, and the
+ * dry run answers in the error envelope.
+ */
+function bucketEchoRefused(dimension: string, granularity: string, cause: BucketEchoRefusalCause): Error {
+  const err = new Error(
+    `[analytics] cannot render display SQL for the "${granularity}" bucket of "${dimension}"` +
+      ('zone' in cause
+        ? ` with timezone "${cause.zone}". The query itself is SERVED: the engine buckets it in memory on that ` +
+          `zone's calendar, so no statement the database runs groups by those bucket keys. Refusing rather than ` +
+          `printing one that groups on another calendar. Run the query itself (/analytics/query) to get its rows; ` +
+          `with timezone "UTC" or none, this dry run renders the expression the driver groups the bucket by, ` +
+          `where the driver has one.`
+        : (cause.dialect === 'unknown'
+            ? `: the driver behind this datasource names no SQL dialect and renders no expression for it. A ` +
+              `driver that runs no SQL, such as the in-memory or MongoDB driver, buckets it without one: the ` +
+              `engine in memory, MongoDB in its own aggregation pipeline. A host that wires no dateBucketSql hook ` +
+              `cannot ask its driver at all.`
+            : `: no SQL expression for it is known on this "${cause.dialect}" datasource. Either its driver ` +
+              `renders none for this granularity, and the engine buckets it in memory, or this host wires no ` +
+              `dateBucketSql hook to ask the driver.`) +
+          ` The query itself is SERVED. Refusing rather than printing a bucket expression nothing here ran: ` +
+          `this dry run prints only the expression the driver itself groups the bucket by. Run the query itself ` +
+          `(/analytics/query) to get its rows.`),
+  ) as Error & { code?: string; status?: number; refusal?: true };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  err.refusal = true;
+  return err;
+}
+
+/**
  * ObjectQLStrategy — Priority 2
  *
  * Translates an analytics query into an ObjectQL `engine.aggregate()` call.
@@ -150,10 +240,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     // Build groupBy from dimensions, honouring `timeDimensions` granularity.
     // A date dimension with a granularity becomes a STRUCTURED groupBy item
-    // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (driver
-    // date_trunc or in-memory). Without this the ObjectQL path grouped raw
-    // timestamps (one bucket per row) and date-bucketed dataset widgets never
-    // matched their legacy `categoryGranularity` counterpart.
+    // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
+    // driver's own SQL expression, or in memory). Without this the ObjectQL
+    // path grouped raw timestamps (one bucket per row) and date-bucketed
+    // dataset widgets never matched their legacy `categoryGranularity`
+    // counterpart.
     type GroupByItem = string | { field: string; dateGranularity: string };
     const granByDim = new Map<string, string>();
     for (const td of query.timeDimensions ?? []) {
@@ -180,6 +271,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
+    // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] The column-type reader the
+    // `where` door's shared lowering applies at the three filter positions this
+    // path hands the engine (item 7): a member is `datetime` when the column it
+    // binds against is declared so. The engine seam lowers the same filter
+    // again with the object's own field map, and the lowering is idempotent. A
+    // column the host cannot name a type for is left as written: the engine's
+    // seam reads the declaration this one cannot (and applies item 7's
+    // type-blind reading itself to an object with no field map).
+    const lowering = declaredDatetimeLowering(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, objectName, relationshipReferenceOf(ctx)),
+      'as-written',
+    );
+
     // Build aggregations from measures.
     //
     // [#10413 phase 2] A measure's own `filter` (`stage: 'closed_won'`) lowers
@@ -197,7 +302,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         const { field, method } = this.resolveMeasureAggregation(cube, measure);
         const measureFilter = datasetScope?.measureFilters?.[measure];
         const filterCondition = measureFilter
-          ? this.filterNodeToCondition(normalizeAnalyticsFilterTree({ where: measureFilter }), cube)
+          ? this.filterNodeToCondition(normalizeAnalyticsFilterTree({ where: measureFilter }, lowering), cube)
           : null;
         aggregations.push(
           filterCondition
@@ -216,7 +321,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Operands that cannot merge into their field's entry without one silently
     // replacing the other; ANDed in below so the engine intersects them.
     const conjuncts: Record<string, unknown>[] = [];
-    this.applyFilterNode(normalizeAnalyticsFilterTree(query), cube, filter, conjuncts);
+    this.applyFilterNode(normalizeAnalyticsFilterTree(query, lowering), cube, filter, conjuncts);
     // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
     // `dateRange` and a caller `where` bound on one field compose instead of
     // clobbering each other.
@@ -252,7 +357,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // `null` = constrains nothing, which is the AND identity — nothing to add,
       // and nothing invented for a filter that says nothing.
       const scopeCondition = this.filterNodeToCondition(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, lowering),
         cube,
       );
       if (scopeCondition) conjuncts.push(scopeCondition);
@@ -280,7 +385,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // differently for one query. `/analytics/query` reached `engine.aggregate`
     // with a predicate the engine cannot join and silently mis-bucketed it,
     // which is the exact outcome #3654's loud refusal exists to prevent.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx), relationshipReferenceOf(ctx));
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
@@ -327,7 +432,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     });
 
     const fields = this.buildFieldMeta(query, cube);
-    // Echo a representative SQL alongside the rows (#3588). `NativeSQLStrategy`
+    // Echo the SQL the query stands for alongside the rows (#3588). `NativeSQLStrategy`
     // returns the statement it actually ran, and dataset responses surface that
     // string — it is how an author checks what their widget compiled to. This
     // path builds an AST, so it had nothing to echo, and the `sql` field simply
@@ -342,18 +447,64 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     } catch {
       sql = undefined;
     }
-    return sql ? { rows: mappedRows, fields, sql } : { rows: mappedRows, fields };
+    const answer = this.orderAndWindow(query, mappedRows);
+    return sql ? { rows: answer, fields, sql } : { rows: answer, fields };
   }
 
   /**
-   * Render a REPRESENTATIVE SQL string for an ObjectQL aggregate query.
+   * [#21316] Apply the query's `order`, then its `offset` and `limit`, to the
+   * aggregated answer — the statement {@link generateSql} echoes, and the
+   * clauses `NativeSQLStrategy` compiles from the same three keys.
+   *
+   * `engine.aggregate` has no ordering or window grammar
+   * (`EngineAggregateOptions` declares neither), so the engine returns every
+   * group in its own arrival order and the face is where these keys are
+   * applied. Before this, the face dropped all three: every date-bucketed
+   * query — which the native face declines, so it lands here — answered every
+   * bucket unordered while its echoed `sql` and `/analytics/sql` rendered
+   * `ORDER BY … LIMIT …`.
+   *
+   * It runs on the remapped rows, keyed by the member spellings the caller
+   * selected, so an `order` key names a column exactly as the analytics door's
+   * order-key rule (`order-key-door.ts`, #21267) admitted it. `order` is read
+   * verbatim, in its own key order, and no implicit ordering is added: a bare
+   * `limit` slices the engine's order, as `LIMIT` without `ORDER BY` does.
+   *
+   * The comparison is the package's one row comparator, `applyOrdering`, which
+   * the dataset door's post-pass applies to every grid it assembles; the window
+   * is the same door's `applyWindow`. Where the native face answers the same
+   * query, its `ORDER BY` follows the driver's collation and NULL placement
+   * (SQLite sorts NULL lowest, PostgreSQL highest), while `applyOrdering` keeps
+   * NULL and `''` last in both directions, compares numeric text as numbers and
+   * other text with `localeCompare`. The two faces therefore agree on numbers
+   * and on text of single-case ASCII letters, and can differ on a NULL, an
+   * `''`, numeric text, mixed case or punctuation. (A date bucket key is minted
+   * sort-stable, `2026-03`, so it orders chronologically here.)
+   */
+  private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+    return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);
+  }
+
+  /**
+   * Render the SQL statement an ObjectQL aggregate query stands for.
    *
    * This path executes through `engine.aggregate()`, not raw SQL, so the string
    * is documentation rather than the literal statement — but it must be an
    * honest account of what the query does, because dataset responses echo it
    * and authors read it to verify their widget options landed (#3588). It
-   * therefore renders date bucketing (`date_trunc`), the WHERE predicate,
-   * ordering, and the row window.
+   * therefore renders date bucketing, the WHERE predicate, ordering, and the
+   * row window.
+   *
+   * [#21441] A date bucket renders the expression the driver itself groups by
+   * for its dialect, through the `dateBucketSql` hook, so the echo runs there
+   * and answers the face's bucket keys. [#21647] That expression is the only
+   * thing a bucket is ever printed as. Where there is none, the echo refuses
+   * ({@link bucketEchoRefused}), on every driver and every dialect: a non-UTC
+   * `timezone`, which the engine buckets in memory on that zone's calendar
+   * (#21630), and a hook that answers nothing at UTC, which is a driver that
+   * runs no SQL, a granularity the driver leaves to the engine, or a host that
+   * wires no hook (#21595 was SQLite's case of it). No bucket expression is
+   * written here.
    *
    * Filter VALUES are rendered as `$n` placeholders and returned in `params`,
    * never inlined: the echoed statement travels to the browser, and a filter
@@ -400,11 +551,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         `{ "$field": "${crossField.ref}" } under "${crossField.op}" on "${crossField.field}". ` +
         `The query itself is SERVED — \`NativeSQLStrategy.canHandle\` declines a cross-field ` +
         `comparison so it routes to the ObjectQL engine path, where driver-sql compiles it into a ` +
-        `column-to-column predicate written TOTAL across NULLs and enforces the #5222 rulings ` +
-        `(#7598, maintainer ruling 2026-08-12). This renderer has no faithful rendering of that ` +
+        `column-to-column predicate written TOTAL across NULLs and enforces the cross-field rules ` +
+        `(declared same-table columns only, never the tenant-isolation column, one comparison class) ` +
+        `with metadata it owns, so those rules are enforced in one place, next to the metadata they ` +
+        `read. This renderer has no faithful rendering of that ` +
         `predicate: what it can emit is a comparison against the reference object as a bound VALUE, ` +
         `which reproduces none of the rows the query returns. Refusing rather than half-rendering — ` +
-        `an echo that contradicts execution is worse than no echo (#3601 / #3602 / #3650). Run the ` +
+        `an echo that contradicts execution is worse than no echo, so the echo renders every ` +
+        `predicate the query runs with, or refuses. Run the ` +
         `query itself (/analytics/query) to get its rows.`,
       );
     }
@@ -413,9 +567,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const groupByParts: string[] = [];
     const params: unknown[] = [];
 
-    // Date-bucketed dimensions render as `date_trunc('<granularity>', col)` —
-    // the SQL shape the driver's own bucketing implements — so a `month` trend
-    // no longer reads as if it grouped by the raw column.
+    // Date-bucketed dimensions render as a bucket expression, so a `month`
+    // trend does not read as if it grouped by the raw column — see `dimExpr`
+    // below for which expression.
     const granByDim = new Map<string, string>();
     for (const td of query.timeDimensions ?? []) {
       if (td.granularity) granByDim.set(td.dimension, td.granularity);
@@ -432,14 +586,65 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // rather than two copies: "the preview accepts/rejects the same set" is an
     // invariant between two call sites, and two copies of a view can drift
     // apart while each stays individually correct — which is how they drifted.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx), relationshipReferenceOf(ctx));
     // Read once, reused below for both the per-measure conditional aggregate
     // (#10413 phase 2) and the dataset-scope WHERE conjunct (#10413 phase 1) —
     // the same channel `execute()` reads it from, so the echo cannot drift
     // from what actually ran.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
+    // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] The same column-type
+    // reader `execute()` hands the `where` door's shared lowering, so the echo
+    // prints the lowered bound the engine receives — a bare-day `$lte` on a
+    // `datetime` member reads `< next-day` here because that is what runs, in
+    // the `where`, the scopes and the `dateRange` windows alike.
+    const echoLowering = declaredDatetimeLowering(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
+      'as-written',
+    );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
+    // [#21441] The bucket expression the driver itself groups by for its
+    // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on
+    // SQLite, `to_char(…, 'YYYY-MM')` on PostgreSQL, whose argument is
+    // `(col)::timestamptz AT TIME ZONE 'UTC'` for a `datetime` and, since
+    // #21485, `(col)::date::timestamp` for a `date`. The echo then runs there
+    // and answers the face's bucket keys. It used to print
+    // `date_trunc('<granularity>', col)` on every dialect, calling that the
+    // driver's own bucketing: no driver buckets with it, SQLite refuses it
+    // (`no such function`), and PostgreSQL answers a timestamp where the face
+    // answers `2026-01`.
+    //
+    // Asked only for a UTC or unset `timezone`. The driver's expression is a
+    // UTC bucket. [#21630] A non-UTC zone makes the engine bucket in memory on
+    // that zone's calendar instead, on every driver (ADR-0053 Phase 2, D2;
+    // `tzRequiresInMemory` in objectql's `engine.ts`, the same test on the same
+    // `timezone`), so no statement the database runs groups by those keys, and
+    // the echo refuses on every dialect before the hook is asked
+    // ({@link bucketEchoRefused}).
+    //
+    // [#21647] Where the hook answers nothing at UTC, the echo refuses too, on
+    // every dialect. That is the engine's other in-memory condition, read off
+    // the driver rather than restated here: every `driver-sql` dialect answers
+    // `null` exactly where its `supports.queryDateGranularity` is false (both
+    // read `dateGranularityCapabilities`), which is where the engine buckets in
+    // memory. A driver that runs no SQL has no hook to answer: `driver-memory`
+    // advertises no granularity, so the engine buckets in memory, and
+    // `driver-mongodb` buckets in its own pipeline, which no SQL stands for
+    // either. The engine's predicate itself is not reachable from here.
+    //
+    // Two cells print the driver's expression while the engine buckets in
+    // memory, because the hook answers there and the expression, run on that
+    // dialect, answers the face's keys: a measure carrying its own `filter`
+    // (the engine aggregates every such query in memory, #10576), and
+    // `driver-turso`'s remote face (it advertises no granularity, and inherits
+    // the SQLite expression, which libSQL runs).
+    const zone = query.timezone;
+    const inMemoryZone = zone && zone !== 'UTC' ? zone : undefined;
+    const driverBucketSql = (col: string, granularity: string): string | undefined => {
+      const answered = (ctx as DatasetScopedStrategyContext).dateBucketSql?.(tableName, col, granularity);
+      return typeof answered === 'string' && answered !== '' ? answered : undefined;
+    };
     const dimExpr = (dim: string): string => {
       const cd = crossByDim.get(dim);
       if (cd) {
@@ -450,7 +655,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
-      return gran ? `date_trunc('${gran}', ${col})` : col;
+      if (!gran) return col;
+      if (inMemoryZone !== undefined) throw bucketEchoRefused(dim, gran, { zone: inMemoryZone });
+      const bucket = driverBucketSql(col, gran);
+      if (bucket === undefined) throw bucketEchoRefused(dim, gran, { dialect: sqlDialectFor(ctx, tableName) });
+      return bucket;
     };
 
     if (query.dimensions) {
@@ -478,7 +687,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
         const measureFilter = datasetScope?.measureFilters?.[m];
         const predicate = measureFilter
-          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params, ctx)
+          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }, echoLowering), cube, params, ctx)
           : null;
         const aggSql = predicate
           ? this.conditionalAggregateSql(method, field, predicate)
@@ -517,7 +726,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `$or` rendered as a conjunction (or dropped) is exactly the lie this
     // block's comment above warns about, in the other direction.
     const filterClause = this.renderFilterNodeSql(
-      normalizeAnalyticsFilterTree(query),
+      normalizeAnalyticsFilterTree(query, echoLowering),
       cube,
       params,
       ctx,
@@ -530,7 +739,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // same lowering `execute()` uses, so the two cannot drift.
     if (datasetScope?.filter) {
       const scopeSql = this.renderFilterNodeSql(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, echoLowering),
         cube,
         params,
         ctx,
@@ -539,16 +748,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     }
     // Bounds bind as `$n` placeholders like every other comparand: this string
     // travels to the browser, and a window can carry tenant-derived dates.
-    // A bare-day upper bound renders half-open (`< day+1`) because that is
-    // what `execute()`'s driver actually runs for it on a datetime column
-    // (#3777) — rendering the BETWEEN would hand a debugger SQL that drops
-    // the final day's rows and cannot reproduce the result.
-    for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
-      const nextDay = nextUtcCalendarDay(bounds.$lte);
-      params.push(bounds.$gte, nextDay ?? bounds.$lte);
-      whereParts.push(
-        `(${field} >= $${params.length - 1} AND ${field} ${nextDay ? '<' : '<='} $${params.length})`,
-      );
+    //
+    // [ADR-0053 D-D1 item 8, amended — #5930 step 4] Each window renders as the
+    // `{ $gte, $lte }` pair `execute()` hands the engine, lowered by
+    // {@link normalizeDateRangeWindow} with the echo's reader and rendered by
+    // the same `renderFilterNodeSql` as the `where`. So a bare-day end on a
+    // `datetime` column renders half-open (`< day+1`), and on the last
+    // supported day as `IS NOT NULL` beside the start, because that is what
+    // the engine's seam runs for it (#3777, #20600); a `date` column renders
+    // the inclusive `<=` the engine runs there. This echo kept its own
+    // type-blind copy of the rule, which rendered `< day+1` on every column,
+    // until #5930 step 4.
+    for (const { member, bounds } of this.dateRangeBounds(cube, query)) {
+      const windowSql = this.renderFilterNodeSql(normalizeDateRangeWindow(member, bounds, echoLowering), cube, params, ctx);
+      if (windowSql) whereParts.push(windowSql);
     }
     // Read scope last, so it reads as the outermost constraint. Compiled by the
     // same fail-closed compiler `NativeSQLStrategy` uses — it throws rather than
@@ -565,10 +778,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#20075] …and the request context `execute()` forwards to the engine,
       // so the echo prints the value the engine resolves a scope placeholder
       // to, and refuses one it cannot resolve, as `execute()` does.
+      // [#20445] …and the same declared value shape, so the echoed scope
+      // prints the `$empty` arm the executed native statement runs.
+      // [#21505] …and the same temporal coercion pair, so the echo prints
+      // the storage-form comparand and column the executed statement binds.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
         dialect: sqlDialectFor(ctx, tableName),
         context: ctx.context,
+        declaredValueShape: declaredValueShapeResolver(ctx, tableName),
+        coerceTemporalFilterValue: ctx.coerceTemporalFilterValue
+          ? (field, value) => ctx.coerceTemporalFilterValue!(tableName, field, value)
+          : undefined,
+        coerceTemporalFilterColumn: ctx.coerceTemporalFilterColumn
+          ? (field, columnSql) => ctx.coerceTemporalFilterColumn!(tableName, field, columnSql)
+          : undefined,
       });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
@@ -605,8 +829,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (query.limit != null) sql += ` LIMIT ${query.limit}`;
-    if (query.offset != null) sql += ` OFFSET ${query.offset}`;
+    // [#21365] The window renders through the native face's own
+    // `windowClauseSql`, for the dialect of the driver the engine aggregate
+    // runs on — the same `sqlDialect` read the read scope above makes. An
+    // offset with no limit then carries that dialect's no-limit spelling
+    // (`LIMIT -1 OFFSET n` on SQLite, whose grammar has no bare `OFFSET`), so
+    // the echoed `sql` and `/analytics/sql` print a window the dialect runs.
+    sql += windowClauseSql(query.limit, query.offset, sqlDialectFor(ctx, tableName));
 
     return { sql, params };
   }
@@ -690,12 +919,22 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return { $and: [userFilter, scopeFilter] };
   }
 
-  /** Is `field` a resolved cross-object (relationship-traversal) reference? */
-  private isCrossObjectField(cube: Cube, field: string, baseObject: string): boolean {
+  /**
+   * Is `field` a resolved cross-object (relationship-traversal) reference?
+   *
+   * [#20986] Its first hop is resolved by the one resolver
+   * ({@link resolvePathHops}): the cube's join, else the relationship field's
+   * declared target, else the alias. A field whose DECLARED target is the base
+   * object itself — a self-reference, named differently from that object — is
+   * still a traversal: its value is another record's id, read through the
+   * FK-expand like any other. Only the cube's own qualifier (`<cube>.<field>`,
+   * which no field declares) and a join the cube declares onto its own object
+   * keep reading as base.
+   */
+  private isCrossObjectField(cube: Cube, field: string, baseObject: string, referenceOf: HopReference | undefined): boolean {
     if (!field.includes('.')) return false;
-    const alias = field.split('.')[0];
-    const joinedObject = cube.joins?.[alias]?.name ?? alias;
-    return joinedObject !== baseObject;
+    const [hop] = resolvePathHops(cube, baseObject, [field.split('.')[0]], referenceOf);
+    return hop.via === 'reference' || hop.object !== baseObject;
   }
 
   /**
@@ -715,7 +954,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the members inside were unreadable from the outside and the envelope check
    * could not reject what it could not see.
    *
-   * ## Three producers, one inventory (#10861, #11461)
+   * ## Three producers, one inventory (#10861, commit 399ecad58)
    *
    * The caller's `where` is not the only thing that reaches `engine.aggregate`
    * as a predicate. Since PR #10758 the compiled dataset's own definition-level
@@ -730,7 +969,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * which driver will serve the dataset and would refuse a dataset that is
    * perfectly legal on a native-SQL deployment.
    *
-   * [#11461] #10413 phase 2 then added a THIRD producer with the same reach and
+   * [commit 399ecad58] #10413 phase 2 then added a THIRD producer with the same reach and
    * none of the coverage: a compiled measure's own `filter`, lowered onto that
    * measure's `aggregations[].filter` entry (#10576). This view enumerated two
    * origins, so the third was invisible to the envelope check and the arm of
@@ -773,7 +1012,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * last write wins on a duplicate key. Two things follow, in that order of
    * importance. A member named by the request too keeps the CALLER's provenance,
    * because if it is in the request that is the actionable place to fix it. And
-   * every shape that was refused before #11461 keeps the exact message it had:
+   * every shape refused before commit 399ecad58 keeps the exact message it had:
    * the new origin can only ever win a key no older producer names.
    *
    * Time-dimension WINDOWS are deliberately absent (they live in
@@ -790,21 +1029,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): Record<string, FilterMemberOrigin> {
     // Read from the SAME channel both doors lower the scope from, so the view
     // and the predicate cannot disagree about what the engine will receive.
-    // [#11461] The whole scope now, not just `.filter` — the per-measure filters
+    // [commit 399ecad58] The whole scope now, not just `.filter` — the per-measure filters
     // travel the identical channel to the identical engine call.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
     const leaves = (node: ReturnType<typeof normalizeAnalyticsFilterTree>, origin: FilterMemberOrigin) =>
       collectFilterLeaves(node).map(
         (f) => [this.resolveFieldName(cube, f.member, 'any'), origin] as const,
       );
-    // [#11461] Keyed by measure so the refusal can name the measure to go and
+    // [commit 399ecad58] Keyed by measure so the refusal can name the measure to go and
     // edit; `query.measures` is the iteration order both aggregation loops use,
     // so the view covers exactly the filters that will be lowered.
     const measureLeaves = (query.measures ?? []).flatMap((m) => {
       const measureFilter = datasetScope?.measureFilters?.[m];
       return measureFilter
         ? leaves(
-            normalizeAnalyticsFilterTree({ where: measureFilter }),
+            normalizeAnalyticsFilterTree({ where: measureFilter }, NO_DATETIME_COLUMNS),
             { kind: 'measure-filter', measure: m },
           )
         : [];
@@ -812,9 +1051,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return Object.fromEntries([
       ...measureLeaves,
       ...(datasetScope?.filter
-        ? leaves(normalizeAnalyticsFilterTree({ where: datasetScope.filter }), { kind: 'dataset-filter' })
+        ? leaves(normalizeAnalyticsFilterTree({ where: datasetScope.filter }, NO_DATETIME_COLUMNS), { kind: 'dataset-filter' })
         : []),
-      ...leaves(normalizeAnalyticsFilterTree(query), { kind: 'where' }),
+      ...leaves(normalizeAnalyticsFilterTree(query, NO_DATETIME_COLUMNS), { kind: 'where' }),
     ]);
   }
 
@@ -831,7 +1070,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * (needs a real join to evaluate), a cross-object leaf in the DATASET's own
    * definition-level `filter` (#10861 — same join it does not have, arriving
    * from the producer PR #10758 added), a cross-object leaf in ONE MEASURE's own
-   * `filter` (#11461 — the same join again, arriving from the producer #10413
+   * `filter` (commit 399ecad58 — the same join again, arriving from the producer #10413
    * phase 2 added), a MULTI-HOP dimension (`a.b.c`), or a non-recombinable
    * measure (`avg`/`count_distinct`, whose sub-bucket values cannot be merged).
    * A loud error beats the silent mis-bucket #3654 kills.
@@ -843,7 +1082,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * [#5716] All six refusals below are `invalidMemberError` — `INVALID_FIELD` /
    * 400, naming the member — and the four that predate #10861 keep their
    * MESSAGES unchanged (they are good diagnostics, and #5923's tests read
-   * them); so does #10861's own, which #11461 left untouched beside it. Each is decided by two facts and nothing else: a member that will
+   * them); so does #10861's own, which commit 399ecad58 left untouched beside it. Each is decided by two facts and nothing else: a member that will
    * reach the engine's predicate, and whether that member resolves across a
    * join. Neither is an internal invariant — a cube where the member exists and
    * a driver that could serve it are both perfectly ordinary, which is exactly
@@ -852,7 +1091,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * because the fix is always to change or drop ONE named member, and because
    * four of them fire on `/analytics/query` where no dataset exists.
    *
-   * [#10861, #11461] The fifth and sixth are the exceptions that prove the rule
+   * [#10861, commit 399ecad58] The fifth and sixth are the exceptions that prove the rule
    * and are written to it: they can only fire where a dataset DOES exist, and
    * they are the two refusals here whose member no request key named — so each
    * carries `cube` and no `param`, and says in its own words which document to
@@ -869,6 +1108,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     query: AnalyticsQuery,
     filter: Record<string, FilterMemberOrigin>,
+    referenceOf: HopReference | undefined,
   ): CrossObjectPlan | null {
     const baseObject = this.extractObjectName(cube);
 
@@ -878,7 +1118,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // true of the lowered predicate, but not what the author wrote.
     for (const td of query.timeDimensions ?? []) {
       const field = this.resolveFieldName(cube, td.dimension, 'dimension');
-      if (this.isCrossObjectField(cube, field, baseObject)) {
+      if (this.isCrossObjectField(cube, field, baseObject, referenceOf)) {
         throw invalidMemberError(
           `[Analytics] ObjectQLStrategy cannot bucket a cross-object time dimension ("${field}").`,
           { member: td.dimension, param: 'timeDimensions', cube: cube.name },
@@ -899,7 +1139,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       ...Object.entries(filter)
         .filter(([, origin]) => origin.kind === 'where')
         .map(([f]) => ({ where: 'filter', member: f, field: f })),
-    ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject));
+    ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject, referenceOf));
     if (nonDim.length > 0) {
       throw invalidMemberError(
         `[Analytics] ObjectQLStrategy cannot evaluate a cross-object ${nonDim[0].where} ` +
@@ -936,7 +1176,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // locator that IS actionable: the dataset whose definition holds the leaf.
     const scopeCross = Object.entries(filter)
       .filter(([field, origin]) =>
-        origin.kind === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject))
+        origin.kind === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject, referenceOf))
       .map(([field]) => field);
     if (scopeCross.length > 0) {
       throw invalidMemberError(
@@ -951,7 +1191,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       );
     }
 
-    // [#11461] The THIRD producer, and the same physical verdict a third time:
+    // [commit 399ecad58] The THIRD producer, and the same physical verdict a third time:
     // a leaf of one compiled MEASURE's own `filter`, lowered onto that measure's
     // `aggregations[].filter` entry (#10413 phase 2 / #10576). Checked last, so
     // every shape refused before this card is refused with the message it
@@ -992,7 +1232,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `measure` field of its own would be a new wire shape for one diagnostic;
     // the message is where a locator with no request key belongs.
     const measureCross = Object.entries(filter).flatMap(([field, origin]) =>
-      origin.kind === 'measure-filter' && this.isCrossObjectField(cube, field, baseObject)
+      origin.kind === 'measure-filter' && this.isCrossObjectField(cube, field, baseObject, referenceOf)
         ? [{ field, measure: origin.measure }]
         : [],
     );
@@ -1014,7 +1254,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const crossDims: CrossObjectPlanDim[] = [];
     for (const dim of query.dimensions ?? []) {
       const field = this.resolveFieldName(cube, dim, 'dimension');
-      if (!this.isCrossObjectField(cube, field, baseObject)) continue;
+      if (!this.isCrossObjectField(cube, field, baseObject, referenceOf)) continue;
       const [alias, ...rest] = field.split('.');
       const attr = rest.join('.');
       if (attr.includes('.')) {
@@ -1024,7 +1264,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
           { member: dim, param: 'dimensions', cube: cube.name },
         );
       }
-      crossDims.push({ outputName: dim, fkField: alias, attr, refObject: cube.joins?.[alias]?.name ?? alias });
+      // [#20986] The object the FK-expand reads the attribute from — and whose
+      // read scope it applies there — is the hop's object from the one
+      // resolver, the object the door admitted and scoped for this query.
+      const [hop] = resolvePathHops(cube, baseObject, [alias], referenceOf);
+      crossDims.push({ outputName: dim, fkField: alias, attr, refObject: hop.object });
     }
 
     if (crossDims.length === 0) return null;
@@ -1137,7 +1381,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return out;
     });
 
-    return { rows: mappedRows, fields: this.buildFieldMeta(query, cube) };
+    // [#21316] Ordered and windowed after the re-bucket, which is the step
+    // that yields one row per caller group — never before it, where a limit
+    // would cut FK groups that merge into a group it keeps.
+    return { rows: this.orderAndWindow(query, mappedRows), fields: this.buildFieldMeta(query, cube) };
   }
 
   /**
@@ -1265,6 +1512,26 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): string | null {
     if (operator === 'set') return `${col} IS NOT NULL`;
     if (operator === 'notSet') return `${col} IS NULL`;
+    // [#20445] `$empty`'s leaf, rendered by the SAME function
+    // `NativeSQLStrategy.buildFilterClause` compiles it with, on the same
+    // target and hook, so the three SQL compilers of this package print one
+    // predicate for it. A caller that hands no target or no context cannot be
+    // asked for the declaration and gets the refusal, not a guess.
+    //
+    // ⚠️ `execute()` hands `{ $empty }` to the ENGINE (`convertFilter`), whose
+    // arm is the engine lane's. Until `driver-sql` carries it, the engine
+    // refuses the operator (`INVALID_FILTER` / 400) while this echo prints the
+    // declared arm — the row set that arm is ruled to return, on a query that
+    // is refused rather than answered differently. No face drops it.
+    if (operator === 'empty' || operator === 'notEmpty') {
+      return whereEmptyLeafSql({
+        ctx,
+        target,
+        column: col,
+        empty: operator === 'empty',
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
+    }
 
     if (!values || values.length === 0) return null;
 
@@ -1348,7 +1615,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         `filter-normalizer.ts refuses anything it cannot map — so this means a new ` +
         `operator reached the normalizer without an arm here. Add one rather than ` +
         `dropping the predicate: an echo without it describes a WIDER query than the ` +
-        `one that ran (#5333).`,
+        `one that ran, and the echo renders every predicate the query runs with, or refuses.`,
       );
     }
     params.push(values[0]);
@@ -1395,18 +1662,23 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * renders a description of the statement THAT compiler produces, and the
    * declared-type test both apply is keyed by object and field. A dotted
    * `sql` is a relationship path (ADR-0071): every segment but the last is a
-   * hop whose join alias is the dot-to-`__` spelling the dataset compiler keys
-   * `cube.joins` by, the last is the column.
+   * hop, the last is the column, and the column's object is the one the last
+   * hop reaches — [#20986] as {@link resolvePathHops} names it, the same object
+   * that compiler joins there.
    */
-  private resolveStorageTarget(cube: Cube, member: string, baseObject: string): { object: string; field: string } {
+  private resolveStorageTarget(
+    cube: Cube,
+    member: string,
+    baseObject: string,
+    referenceOf: HopReference | undefined,
+  ): { object: string; field: string } {
     const dim = this.lookupMember(cube, member, 'dimension');
     const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
     const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
     if (rawSql.includes('.')) {
       const segments = rawSql.split('.');
       const field = segments[segments.length - 1];
-      const relPath = segments.slice(0, -1).join('.');
-      const object = cube.joins?.[relPath.replace(/\./g, '__')]?.name ?? relPath;
+      const object = columnObjectOf(cube, baseObject, rawSql, referenceOf);
       return { object, field };
     }
     return { object: baseObject, field: rawSql.replace(/^\$/, '') };
@@ -1429,55 +1701,32 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       | { sql: string; type: string }
       | undefined;
     if (direct) {
-      // [#12209] A custom-SQL measure (`AggregationMetricType`
-      // `number`/`string`/`boolean`) is REFUSED here rather than forwarded. Its
-      // `sql` IS the whole computation (a ratio, a `CASE`, a window function),
-      // and the engine aggregate AST has no place to carry a raw SQL
-      // expression: forwarding put the whole expression in `field` and the
-      // metric TYPE in `method`, so `driver-sql` threw `INVALID_QUERY`/400
-      // blaming a `function` key the author never wrote, and the in-memory
-      // evaluator answered `null` for every bucket through its `switch`
-      // default — a silent wrong answer under the author's own metric name,
-      // the #4157 class in its null variant. #4157's fix landed on
-      // `NativeSQLStrategy` only (where the expression is legal and emitted
-      // verbatim, `EXPRESSION_METRIC_TYPES`); this arm is the matching
-      // partition on the strategy that cannot serve it.
+      // [#21000] The measure's aggregate, or the one refusal both strategies
+      // give a type no aggregate lowers ({@link aggregateOfMeasure}).
       //
-      // Same posture and same envelope as `planCrossObject`'s refusals below
-      // (`INVALID_FIELD` / 400, #5716; the non-recombinable-measure arm is the
-      // wording twin): the engine physically cannot evaluate this member, and
-      // a loud, correctly-attributed refusal beats a silent wrong number.
+      // This arm used to refuse exactly the custom-SQL partition —
+      // `AggregationMetricType`'s `number` / `string` / `boolean` (commit
+      // 017130a09), `INVALID_FIELD` / 400, because the engine aggregate AST
+      // cannot carry a raw SQL expression — and let every other type through
+      // unchecked ON PURPOSE: an enum-INVALID type (`median`, host drift) is
+      // OUR bug, the undeclared-500 tier, and a method allowlist answering 400
+      // would have re-blamed the caller for it. The three were retired from
+      // the spec (a member's `sql` became a column reference, so they had
+      // nothing left to compute), and with them gone the partition had nothing
+      // to name. What replaces it keeps BOTH halves of that reasoning: the
+      // check is an allowlist of the aggregates, and its refusal is the
+      // undeclared-500 tier with the spec's own words — so a retired type is
+      // refused with its prescription and a never-declared one with zod's
+      // vocabulary, neither re-blamed on the caller, and neither handed to the
+      // engine as a method no driver declares (forwarded, `median` reached the
+      // host's `executeAggregate` and the SQL echo printed `MEDIAN(amount)`).
+      //
       // Sitting HERE — the one resolver both doors call — keeps
       // `/analytics/query` and `/analytics/sql` accepting/rejecting the same
       // set by construction (#10759's invariant).
-      //
-      // Keyed on the DECLARED metric-type partition, deliberately NOT on
-      // "method is not one of the six aggregates": the two read identically on
-      // every enum-valid cube, but an enum-INVALID type (host drift, e.g. a
-      // cube registered without meeting `CubeSchema`) is OUR bug — the
-      // undeclared-500 tier `dataset-refusal.ts`'s header assigns it — and a
-      // method allowlist would re-blame the caller for it with a 400.
-      if (EXPRESSION_METRIC_TYPES.has(direct.type)) {
-        throw invalidMemberError(
-          `[Analytics] ObjectQLStrategy cannot evaluate the custom-SQL measure ` +
-          `("${measureName}") — its type "${direct.type}" declares a raw SQL ` +
-          `expression, which the engine aggregate AST cannot carry; served ` +
-          `anyway it would answer null for every bucket under the measure's ` +
-          `own name. Use an aggregate measure ` +
-          `(count/sum/avg/min/max/count_distinct), or run on a native-SQL ` +
-          `driver.`,
-          { member: measureName, param: 'measures', cube: cube.name },
-        );
-      }
       return {
         field: direct.sql.replace(/^\$/, ''),
-        // The assertion, not a parse: for a CubeSchema-legal cube the type
-        // partition above leaves exactly the six `AggregationFunction` values.
-        // An enum-INVALID type (host drift, the comment above) still flows
-        // through unchecked ON PURPOSE — adding a method allowlist here would
-        // re-blame the caller with a 400 for OUR bug, so the cast keeps the
-        // compile-time contract (#12776) without changing that posture.
-        method: (direct.type === 'count_distinct' ? 'count_distinct' : direct.type) as AggregationFunction,
+        method: aggregateOfMeasure(cube.name, measureName, direct.type),
       };
     }
     // Accept `${field}_${type}` aliases (e.g. 'amount_sum') for measures whose
@@ -1549,6 +1798,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return;
     }
 
+    if (node.kind === 'relation') {
+      // [#20887] Its own conjunct, never merged into the field's entry: an
+      // operator beside it on the same field would make one mixed object the
+      // engine refuses, where the author wrote two constraints.
+      conjuncts.push(this.relationCondition(node));
+      return;
+    }
+
     if (node.kind === 'and') {
       for (const child of node.children) this.applyFilterNode(child, cube, filter, conjuncts);
       return;
@@ -1565,7 +1822,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * OR ABSORBER, so a `null` branch makes the whole disjunction unconstrained
    * instead of collapsing it to its surviving branches (#5325). FALSE is handed
    * to the engine as `{$not: {}}`, the spelling `driver-sql`, `formula` and
-   * `driver-memory`'s matcher all already pin as the zero-row filter (#5134) —
+   * `driver-memory`'s query path all already pin as the zero-row filter (#5134) —
    * this strategy invents no second one.
    */
   private filterNodeToCondition(
@@ -1577,6 +1834,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (node.kind === 'const') {
       return node.value ? null : { $not: {} };
     }
+
+    if (node.kind === 'relation') return this.relationCondition(node);
 
     if (node.kind === 'not') {
       const inner = this.filterNodeToCondition(node.child, cube);
@@ -1605,6 +1864,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * [#20887] A nested-relation condition as the engine reads it — the author's
+   * `{ owner: { region: 'NA' } }`, beneath the relation field it was written
+   * under. The engine answers it (#20802's ruling, lowered at the #5930 seam):
+   * in `where` it reads the related object AS THE CALLER — the context this
+   * strategy forwards with the aggregate — with the related object's row scope
+   * and field permissions, and matches the relation against the ids, refusing
+   * past its cap; at an aggregation's own `filter` it refuses the form. This
+   * strategy judges none of that: one rule, the engine's.
+   *
+   * The key is the field of the queried object the author named, not a cube
+   * member resolved through `resolveFieldName`: the form names "a relation field
+   * on the queried object" (the ruling's words), and the engine judges it
+   * against that object's declared fields.
+   */
+  private relationCondition(node: Extract<NormalizedFilterNode, { kind: 'relation' }>): Record<string, unknown> {
+    return { [node.member]: node.condition };
+  }
+
+  /**
    * Render a normalized filter node as the display SQL `/analytics/sql`
    * echoes. Values still bind as `$n` placeholders — the echo travels to the
    * browser, so a comparand is never inlined.
@@ -1629,6 +1907,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
     }
 
+    if (node.kind === 'relation') {
+      // [#20887] The echo DECLINES the nested-relation form, the way it
+      // declines a cross-field comparison (#7598's echo ruling: one consistent,
+      // loud answer, never a half-rendering). What runs is a read of the
+      // related object as the caller, then a match against the ids it
+      // returned; no statement this renderer can print reproduces that — a
+      // JOIN would name rows the caller's field permissions and the engine's
+      // cap never let through. `execute()` swallows the echo's refusal, so the
+      // query face still answers; only the dry-run face refuses.
+      throw invalidFilterError(
+        `[analytics] cannot render display SQL for the nested-relation condition on "${node.member}" ` +
+        `({ "${node.member}": { … } }). The query itself is answered by the engine: it reads the ` +
+        `related object as the caller, with that object's row scope and field permissions, and ` +
+        `matches "${node.member}" against the ids it returns, refusing a match past its cap. No ` +
+        `statement printed here reproduces that read. Run the query itself (/analytics/query) for ` +
+        `its rows.`,
+      );
+    }
+
     if (node.kind === 'leaf') {
       return this.buildFilterClauseSql(
         this.resolveFieldName(cube, node.member, 'any'),
@@ -1639,7 +1936,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         // way `NativeSQLStrategy.resolveStorageTarget` resolves it, so the echo
         // asks the declared-type hook the same question the executed statement
         // asked and prints the same constant for a non-text column.
-        this.resolveStorageTarget(cube, node.member, this.extractObjectName(cube)),
+        this.resolveStorageTarget(cube, node.member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
         ctx,
       );
     }
@@ -1696,11 +1993,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    *
    * An EXPLICIT `[a, b]` window is inclusive on both ends — logically "from day
    * X through day Y". The `$lte` end is left as the bare calendar day on
-   * purpose: the driver's filter compiler owns the calendar-day → instant
-   * translation, compiling a bare-day `$lte` on a `datetime` column into the
-   * half-open `< nextDay` (#3777) while a `date` column keeps the plain `<=`.
-   * `NativeSQLStrategy` performs the same half-open translation itself because
-   * it binds into raw SQL, so one dashboard reads the same on every driver.
+   * purpose: the shared lowering at the engine's `where` seam owns the
+   * calendar-day → instant translation, rewriting a bare-day `$lte` on a
+   * `datetime` column into the half-open `< nextDay` (#3777) while a `date`
+   * column keeps the plain `<=` (ADR-0053 D-D1, amended, items 7 and 8).
+   * `NativeSQLStrategy` runs the same lowering on the same pair because it
+   * binds into raw SQL, so one dashboard reads the same on every driver.
    *
    * [#16322] A window this face RESOLVED is a different question and carries
    * its own upper reading — see the string arm below.
@@ -1746,7 +2044,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * a vocabulary word against a timestamp — which is precisely how the two
    * backends came to answer one bad input with opposite wrong answers.
    *
-   * [#17124] An oddly-sized array is REFUSED with the same envelope, by the one
+   * [commit 86c505286] An oddly-sized array is REFUSED with the same envelope, by the one
    * `explicitDateRangeWindow` every face in this package now calls. ⛔ The
    * per-face fallback this replaced — take the first two entries, a one-entry
    * array degenerating to a point — was one of THREE readings of the same
@@ -1757,8 +2055,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private dateRangeBounds(
     cube: Cube,
     query: AnalyticsQuery,
-  ): Array<{ field: string; bounds: Record<string, unknown> }> {
-    const out: Array<{ field: string; bounds: Record<string, unknown> }> = [];
+  ): Array<{ member: string; field: string; bounds: Record<string, unknown> }> {
+    const out: Array<{ member: string; field: string; bounds: Record<string, unknown> }> = [];
     for (const td of query.timeDimensions ?? []) {
       if (!td.dateRange) continue;
       // [#16322] The STRING arm is the CLOSED preset vocabulary, resolved by
@@ -1769,6 +2067,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       if (!Array.isArray(td.dateRange)) {
         const window = resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
         out.push({
+          member: td.dimension,
           field: this.resolveFieldName(cube, td.dimension, 'dimension'),
           // A window this path RESOLVED states its own upper reading: the ten
           // calendar presets stop BEFORE their end instant (`$lt`, so two
@@ -1783,10 +2082,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
       // ⛔ The CALLER's explicit window is untouched, bound for bound: `$lte`
       // on a bound they wrote is the reading this face has published since it
-      // existed (#16179), and the driver's own bare-day widening still owns
-      // the calendar-day → instant translation for it.
+      // existed (#16179), and the shared lowering at the engine's `where` seam
+      // owns the calendar-day → instant translation for it (ADR-0053 D-D1 item
+      // 8; the echo renders the same lowering).
       const [start, end] = explicitDateRangeWindow(td.dateRange);
       out.push({
+        member: td.dimension,
         field: this.resolveFieldName(cube, td.dimension, 'dimension'),
         bounds: { $gte: start, $lte: end },
       });
@@ -1822,8 +2123,29 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * it was strict about, which is why the guard sits at the door and not here.
    */
   private convertFilter(operator: string, values?: unknown[]): unknown {
-    if (operator === 'set') return { $ne: null };
-    if (operator === 'notSet') return null;
+    // [#20918] The null predicates reach the engine in the engine's OWN
+    // spelling, `{ $null: false }` / `{ $null: true }`: the shared lowering
+    // (`lowerFilterCondition`, run at the engine's `where` seam) emits exactly
+    // these for the NULL-safe guards of a `$not` operand (#5146) and of the
+    // negative-polarity operators (#5298), and `driver-sql` applies them on
+    // every column. These two leaves carry the same guards out of this
+    // package's `where` door, so their spelling decides whether such a filter
+    // is served at all. They used to be `{ $ne: null }` and the bare `null`,
+    // which `driver-sql` refuses over a multi-valued lookup's JSON column (a
+    // scalar comparison and the bare equality spelling, #7398): so
+    // `{ $not: { owners: { $contains: 'u1' } } }` answered `400 INVALID_FILTER`
+    // here while the engine and the native strategy answered its rows. In the
+    // lowering's own spelling the engine also recognises the guard as one it
+    // already carries, instead of adding a second beside it.
+    if (operator === 'set') return { $null: false };
+    if (operator === 'notSet') return { $null: true };
+    // [#20445] `$empty` goes to the engine as the canonical operator the
+    // author wrote — never as a local expansion into `$null` / `$eq: ''`
+    // fragments, which could not spell the multi-value row at all (an empty
+    // list is refused as an equality comparand, ruling 乙 on #19757). The
+    // engine resolves the field's declared row against its own metadata.
+    if (operator === 'empty') return { $empty: true };
+    if (operator === 'notEmpty') return { $empty: false };
     if (!values || values.length === 0) return undefined;
 
     const v0 = values[0];
@@ -1872,9 +2194,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       //      filter tree no longer travelled between two consumers of the same
       //      contract sitting in the same directory.
       //   3. On a backend that reads `$regex` as a real regex — driver-memory's
-      //      `memory-matcher.ts` does, deliberately, for plugin-auth's adapter
-      //      — an unescaped comparand changes what the author asked for:
-      //      `a.b` also matched `axb`, and `50% (+)` did not compile at all, so
+      //      `memory-matcher.ts` did, deliberately, for plugin-auth's adapter,
+      //      until #4706 retired `$regex` (commit `8fec76a2b` has since retired
+      //      the matcher too) — an unescaped comparand changes what the author
+      //      asked for: `a.b` also matched `axb`, and `50% (+)` did not compile at all, so
       //      the `catch { return false }` answered zero rows in silence.
       //      `driver-sql` meanwhile compiles `$regex` to a substring LIKE, so
       //      the same widget returned different row sets per driver.
@@ -1956,14 +2279,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the measures and a `fields` list that never mentioned the bucket — a trend
    * chart got N values and no x-axis (#4033) — even though the SQL had
    * selected `date_trunc(…) AS "<dim>"` all along. One definition, every
-   * consumer.
+   * consumer — [#21267] including the analytics door's order-key rule, which
+   * is why the body lives in `order-key-door.ts`.
    */
   private projectedDimensions(query: AnalyticsQuery): string[] {
-    const out = [...(query.dimensions ?? [])];
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity && !out.includes(td.dimension)) out.push(td.dimension);
-    }
-    return out;
+    return projectedDimensions(query);
   }
 
   private buildFieldMeta(query: AnalyticsQuery, cube: Cube): Array<{ name: string; type: string }> {

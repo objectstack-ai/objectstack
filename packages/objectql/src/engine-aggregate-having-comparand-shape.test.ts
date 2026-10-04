@@ -646,6 +646,8 @@ describe('[#20099] having — a { $field } reference resolves against the aggreg
     ['a reference as a $nin member', () => ({ total: { $nin: [1, { $field: 'max_cap' }] } }), 'having.total.$nin'],
     ['a reference as a $contains pattern', () => ({ customer_id: { $contains: { $field: 'customer_id' } } }), 'having.customer_id.$contains'],
     ['a reference as a $startsWith pattern', () => ({ customer_id: { $startsWith: { $field: 'customer_id' } } }), 'having.customer_id.$startsWith'],
+    // [#20981] These two are refused at the same path as a non-boolean flag
+    // first now — the words are pinned in engine-aggregate-flag-comparand-refusal.test.ts.
     ['a reference under $exists', () => ({ total: { $exists: { $field: 'max_cap' } } }), 'having.total.$exists'],
     ['a reference under $null', () => ({ total: { $null: { $field: 'max_cap' } } }), 'having.total.$null'],
     ['a reference naming no column', () => ({ total: { $gt: { $field: 'nope' } } }), 'having.total.$gt'],
@@ -820,7 +822,7 @@ describe('[#20127] having — a { $field, addDays } pair is judged by each aggre
     ['date / date with a numeric offset column (a max)', { last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'max_grace' } } } }, ['c1']],
     ['date / date with a numeric offset column (a count)', { last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'order_count' } } } }, ['c3']],
     ['datetime / datetime', { last_closed: { $gte: { $field: 'first_opened', addDays: 1 } } }, ['c1', 'c2']],
-    ['a numeric pair with NO addDays (the rule is the offset\'s)', { total: { $gt: { $field: 'max_cap' } } }, ['c1']],
+    ['a numeric pair with NO addDays (one class on both sides)', { total: { $gt: { $field: 'max_cap' } } }, ['c1']],
   ];
 
   for (const [name, having, expected] of ANSWERED) {
@@ -862,5 +864,124 @@ describe('[#20127] having — a { $field, addDays } pair is judged by each aggre
       const { engine } = await makeEngine(DT_ROWS, native);
       expect(groups(await engine.aggregate(OBJECT, query)), door).toEqual([]);
     }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // [#21255] …and a PLAIN { $field } — the class rule `where` gives every reference
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('[#21255] a plain { $field } across two comparison classes is refused, as where refuses it', () => {
+    // The card's measured shape: `max(closed_at)` (a datetime) against a `day`
+    // bucket (a date). Before (2791138cbf) it was answered by
+    // `@objectstack/formula`'s whole-day reading of the bucket's day — here 3
+    // of the 6 groups (due 2026-01-05, 2026-01-20 and 2026-03-01), measured
+    // with the rule reverted, and the same shape kept groups on `SqlDriver`
+    // over better-sqlite3 through `engine.aggregate` — while its `where` twin,
+    // `closed_at` against `due_on`, was refused 400 by `driver-sql`'s
+    // cross-field compiler. The twin itself runs in `packages/rest`
+    // (`aggregation-filter-where-doors.test.ts`).
+    const BUCKETED: EngineAggregateOptions = {
+      groupBy: [{ field: 'due_on', dateGranularity: 'day', alias: 'due_day' }],
+      aggregations: [{ function: 'max', field: 'closed_at', alias: 'last_closed' }],
+    };
+
+    it('the card\'s query — max(closed_at) against a day bucket — is refused in driver-sql\'s words', async () => {
+      const message = await expectRowIndependentRefusal(
+        { ...BUCKETED, having: { last_closed: { $lte: { $field: 'due_day' } } } }, DT_ROWS);
+      expect(message).toContain('having.last_closed.$lte');
+      expect(message).toContain('"last_closed" is datetime but "due_day" is date');
+      // A plain reference is named as one — it carries no offset.
+      expect(message).toContain('({ "$field": "due_day" })');
+    });
+
+    const REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, string, string]> = [
+      ['a datetime against a date', () => ({ last_closed: { $lte: { $field: 'first_due' } } }), 'having.last_closed.$lte', '"last_closed" is datetime but "first_due" is date'],
+      ['a date against a datetime', () => ({ first_due: { $gte: { $field: 'last_closed' } } }), 'having.first_due.$gte', '"first_due" is date but "last_closed" is datetime'],
+      ['a groupBy text column against a sum', () => ({ customer_id: { $gt: { $field: 'total' } } }), 'having.customer_id.$gt', '"customer_id" is text but "total" is numeric'],
+      ['a sum against a date', () => ({ total: { $gt: { $field: 'last_placed' } } }), 'having.total.$gt', '"total" is numeric but "last_placed" is date'],
+      ['a count against a datetime under $ne', () => ({ order_count: { $ne: { $field: 'first_opened' } } }), 'having.order_count.$ne', '"order_count" is numeric but "first_opened" is datetime'],
+      ['a datetime against a date behind a $or branch that holds', () => ({ $or: [{ total: { $gt: 0 } }, { last_closed: { $lte: { $field: 'first_due' } } }] }), 'having.$or[1].last_closed.$lte', '"last_closed" is datetime but "first_due" is date'],
+      ['a datetime against a date under $not', () => ({ $not: { last_closed: { $lte: { $field: 'first_due' } } } }), 'having.$not.last_closed.$lte', '"last_closed" is datetime but "first_due" is date'],
+    ];
+
+    for (const [name, having, path, fragment] of REFUSED) {
+      it(`${name}: refused at ${path}, whatever the rows`, async () => {
+        const message = await expectRowIndependentRefusal(offContract({ ...DT_QUERY, having: having() }), DT_ROWS);
+        expect(message).toContain(path);
+        expect(message).toContain(fragment);
+      });
+    }
+
+    it('a coarser bucket is a text label — against a date it is refused too', async () => {
+      const message = await expectRowIndependentRefusal({
+        groupBy: [{ field: 'placed_on', dateGranularity: 'month', alias: 'placed' }],
+        aggregations: [{ function: 'min', field: 'due_on', alias: 'first_due' }],
+        having: { placed: { $lte: { $field: 'first_due' } } },
+      }, DT_ROWS);
+      expect(message).toContain('"placed" is text but "first_due" is date');
+    });
+
+    // Answered exactly as before, on both doors: one class on both sides. The
+    // numeric pair is the `ANSWERED` row above ("a numeric pair with NO addDays").
+    const SAME_CLASS: ReadonlyArray<readonly [string, EngineAggregateOptions, (rows: any[]) => unknown, unknown]> = [
+      ['a day bucket against a date (date / date)', {
+        groupBy: [{ field: 'placed_on', dateGranularity: 'day', alias: 'placed' }],
+        aggregations: [{ function: 'min', field: 'due_on', alias: 'first_due' }],
+        having: { placed: { $lte: { $field: 'first_due' } } },
+      }, (rows) => rows.map((r: any) => r.placed).sort(), ['2026-01-02', '2026-01-15']],
+      ['datetime / datetime', { ...DT_QUERY, having: { last_closed: { $gt: { $field: 'first_opened' } } } }, groups, ['c1', 'c2']],
+      ['a count against a max (numeric / numeric)', { ...DT_QUERY, having: { order_count: { $gte: { $field: 'max_grace' } } } }, groups, ['c2', 'c3']],
+    ];
+
+    for (const [name, query, read, expected] of SAME_CLASS) {
+      it(`${name} answers ${JSON.stringify(expected)} on both doors`, async () => {
+        for (const [door, native] of DOORS) {
+          const { engine } = await makeEngine(DT_ROWS, native);
+          expect(read(await engine.aggregate(OBJECT, query)), door).toEqual(expected);
+        }
+      });
+    }
+
+    it('a registry-less host is not judged — [#21516] the engine refuses the object itself, before any read', async () => {
+      // [#21516] An in-process verb resolves its target only through the
+      // registry and refuses a name it does not resolve with the data door's
+      // own `OBJECT_NOT_FOUND` before `having` or any read runs: no class
+      // verdict is invented, and no group is answered from a table reached by
+      // its raw name. How the matcher compares a pair as written (#21242) is
+      // pinned on the registered cases beside this one.
+      for (const [door, native] of DOORS) {
+        const { driver } = makeDriver(DT_ROWS, native);
+        const engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        const refused: any = await engine
+          .aggregate(OBJECT, { ...DT_QUERY, having: { last_closed: { $lte: { $field: 'first_due' } } } })
+          .then(() => undefined, (e) => e);
+        expect({ code: refused?.code, status: refused?.status }, door).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
+      }
+    });
+
+    it('[#21242] two text group columns (one class): "2026-01-05 noon" is not <= "2026-01-05" — the group is dropped, as where compares them', async () => {
+      // `having` compares two groupBy projections with the matcher. A bare-day
+      // label was read as "through that day" by its deleted whole-day copy,
+      // which kept the `2026-01-05 noon` group; compared as written, as
+      // `driver-sql` compares two text columns in a `where`, it is dropped.
+      const LABEL_ROWS = [
+        { customer_id: 'c1', code: '2026-01-05 noon', label: '2026-01-05' },
+        { customer_id: 'c2', code: '2026-01-04', label: '2026-01-05' },
+        { customer_id: 'c3', code: '2026-01-06', label: '2026-01-05' },
+      ];
+      const { driver } = makeDriver(LABEL_ROWS, false);
+      const engine = new ObjectQL();
+      engine.registerDriver(driver, true);
+      await engine.init();
+      engine.registry.registerObject({ name: OBJECT, fields: { customer_id: { type: 'text' }, code: { type: 'text' }, label: { type: 'text' } } } as any);
+      const out = await engine.aggregate(OBJECT, {
+        groupBy: ['code', 'label'],
+        aggregations: [{ function: 'count', alias: 'n' }],
+        having: { code: { $lte: { $field: 'label' } } },
+      });
+      expect(out.map((r: any) => r.code)).toEqual(['2026-01-04']);
+    });
   });
 });

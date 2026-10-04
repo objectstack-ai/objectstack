@@ -11,7 +11,7 @@ import {
 } from './flow-function.zod';
 import { defineStack } from '../stack.zod';
 
-describe('FlowFunctionEffectSchema (#4396)', () => {
+describe('FlowFunctionEffectSchema — a function that writes says so; pure is the default', () => {
   it('declares exactly the two effects the runtime acts on', () => {
     expect(FlowFunctionEffectSchema.options).toEqual(['pure', 'writes']);
   });
@@ -147,7 +147,7 @@ describe('FlowFunctionEntrySchema', () => {
   });
 });
 
-describe('defineStack({ functions }) — the authoring surface (#4396)', () => {
+describe('defineStack({ functions }) — the authoring surface where a function declares its effect', () => {
   const base = {
     manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
   };
@@ -196,7 +196,7 @@ describe('defineStack({ functions }) — the authoring surface (#4396)', () => {
 // reading exactly like a dead sweep, on a flow that did its work; the `effect`
 // declaration is what would have kept it out (`unmeasured > 0`), and the
 // misspelling is what dropped it.
-describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const base = {
     manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
   };

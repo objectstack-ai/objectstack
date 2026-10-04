@@ -21,7 +21,7 @@ os init my-app
 # Generate metadata
 os generate object task
 os generate view task
-os generate flow task
+os generate flow task_changed --object task
 
 # Validate configuration
 os validate
@@ -39,8 +39,8 @@ os compile
 
 | Command | Description |
 |---------|-------------|
-| `os init [name]` | Initialize a new ObjectStack project in the current directory |
-| `os dev [package]` | Start development mode with hot reload |
+| `os init [name]` | Initialize a new ObjectStack project — in a new directory of that name when `name` is given, otherwise in the current directory |
+| `os dev [package]` | Start development mode — watch sources, rebuild the artifact, and restart the server on change |
 | `os serve [config]` | Start the ObjectStack server with plugin auto-detection |
 
 ### Build & Validate
@@ -58,7 +58,11 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Scaffold a standalone **kernel code** plugin project (the `Plugin` contract, built by `tsc`) from a built-in template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`
+
+`picklist` writes a shared option list (`src/picklists/<name>.picklist.ts`, with
+`definePicklist`). A select field names it with `Field.select({ picklist: '<name>' })`
+in place of its own `options`, and the server serves that field with the list's options.
 
 `agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
 `src/agents/*.ts` validated, published and was then filtered out of the runtime
@@ -77,9 +81,8 @@ and keep loading through their barrel `index.ts`.
 ### Cloud — publish & install
 
 Push a locally-built package to ObjectStack Cloud and (optionally) install it
-into one of your environments in a single command. Credentials and server URL
-come from `os cloud login` (stored in `~/.objectstack/cloud.json`) or the
-`--token` / `OS_CLOUD_API_KEY` and `--server` / `OS_CLOUD_URL` flags.
+into one of your environments in a single command. The commands below do not
+share one session or one flag spelling — see [Credentials and server URL](#credentials-and-server-url).
 
 | Command | Description |
 |---------|-------------|
@@ -93,22 +96,59 @@ Typical flow (build → publish → install into an environment, seeding sample 
 
 ```bash
 os compile                                 # → dist/objectstack.json
-os cloud login                             # one-time, stores the cloud session
+os cloud login                             # one-time; the session os package publish and os environments read
 os environments create --org "$ORG" --name "Dev" --activate
 os package publish --env <env-id> --install --seed-sample-data
 ```
+
+`os environments` runs on either stored session. With no `--url` it talks to
+the server of the `os login` session (`credentials.json`) when there is one,
+else to the server of the `os cloud login` session (`cloud.json`), with that
+session's token. A `--url` (or `OS_CLOUD_URL`) picks the session that names
+that server, `credentials.json`'s first — so with both stored, a `--url` naming
+the cloud uses the cloud session. A `--url` neither file names gets
+`credentials.json`'s token as before, never `cloud.json`'s. With no session and
+no `--token` / `OS_TOKEN`, it exits 1 with `Authentication required`.
 
 `os package publish` registers a `sys_package` (keyed by a reverse-domain
 `--manifest-id`, derived from the artifact when omitted), snapshots the
 artifact as a new `--version`, and — with `--env <id> --install` — installs
 that version into the environment. Useful flags: `--visibility private|org|
 marketplace`, `--note`, and for marketplace listings `--submit` (request
-review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` (or
-`--server`) to target a non-default control plane, e.g. a staging cloud.
+review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` to
+target a non-default control plane, e.g. a staging cloud. `os cloud login`,
+`os package publish` and `os environments` read it; the flag is `--server` on
+`os package publish` and `--url` on the other two.
+
+#### Credentials and server URL
+
+Two stored sessions exist, and each command authenticates with one of them:
+
+| Command | Server URL | Token | Stored session |
+|---------|------------|-------|-------------------------|
+| `os cloud login` | `-u, --url` (env `OS_CLOUD_URL`, default `https://cloud.objectos.ai`) | none — `-e, --email` / `-p, --password`, or the browser device flow | writes `~/.objectstack/cloud.json` |
+| `os cloud whoami` / `os cloud logout` | — | — | reads / deletes `~/.objectstack/cloud.json` |
+| `os package publish`, `os plugin publish` | `-s, --server` (env `OS_CLOUD_URL`); else the URL in `cloud.json`; else `https://cloud.objectos.ai` | `-t, --token` (env `OS_CLOUD_API_KEY`, then `OS_TOKEN`) | `~/.objectstack/cloud.json` — the `os cloud login` session |
+| `os environments list` / `show` / `create` / `bind` / `switch` | `-u, --url` (env `OS_CLOUD_URL`); else the URL of the stored session it uses; else `http://localhost:3000` | `-t, --token` (env `OS_TOKEN`) | No `--url`: `~/.objectstack/credentials.json` (the `os login` session), else `~/.objectstack/cloud.json` (the `os cloud login` session). With `--url`: the file that names that server, `credentials.json` first; when neither does, `credentials.json` as before. `cloud.json`'s token is never sent to another URL |
+
+`os package install` is not a cloud command: it installs into a running runtime
+(`-r, --runtime`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and signs
+in there with `--email` / `--password` (env `OS_RUNTIME_EMAIL` /
+`OS_RUNTIME_PASSWORD`).
 
 ### Plugin Management
 
-Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. There is no `os plugin` command group in v1; runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
+Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. Runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
+
+A code-bearing plugin — a directory carrying an `objectstack.plugin.json` manifest — is packaged and shipped through the `os plugin` command group (ADR-0025 §3.4, build → sign → publish):
+
+| Command | Description |
+|---------|-------------|
+| `os plugin build [dir]` | Compile a plugin into a signed-ready `.osplugin` artifact (`--entry`, `--out`, `--minify`) |
+| `os plugin sign <artifact> --key <pem>` | Sign a built `.osplugin` with a publisher Ed25519 key, writing a detached `<artifact>.sig` |
+| `os plugin publish [artifact]` | Publish a signed `.osplugin` to ObjectStack Cloud |
+
+The group has no `install`: ADR-0025 records the code-plugin install half (download, verify, materialize, load) as not yet implemented. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
 
 ### Quality
 
@@ -172,8 +212,13 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 ### Global
 
-- `-v, --version` — Show version number
-- `-h, --help` — Show help
+- `--version` — Show version number
+- `--help` — Show help (`os --help`, or `os <command> --help` for one command)
+
+There are no short forms: `os -h` and `os -v` exit 2 with `command -h not found` /
+`command -v not found`. `-v` is a command's own flag instead — `--verbose` on `os dev`,
+`os serve`, `os start` and `os doctor`, `--version <semver>` on `os package publish` and
+`os package install`.
 
 ### `os init`
 
@@ -196,16 +241,16 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 - `-p, --port <port>` — Server port. Resolution: `--port` › `$OS_PORT` › `$PORT` › `3000`. With `--dev` a busy port auto-hops to the next free one; in production mode it's a hard error (never silently drifts).
 - `--dev` — Run in development mode (load devPlugins, pretty logging)
-- `--ui` — Enable Studio UI
+- `--ui` — Enable the bundled Console portal at `/_console/` when `@object-ui/console` is installed (default: true)
 - `--no-server` — Skip starting HTTP server plugin
 
 ### `os generate`
 
 - `-d, --dir <directory>` — Override target directory
 
-### `os plugins` (oclif)
+### `os plugins` and `os help` (not commands)
 
-`os plugins install`, `os plugins uninstall`, `os plugins update`, and friends come from `@oclif/plugin-plugins`. They install third-party CLI extensions (oclif plugins), not runtime plugins for an ObjectStack project. See [oclif's plugin docs](https://oclif.io/docs/plugins) for the full surface.
+This package ships no oclif plugin manager: its `package.json` declares no `oclif.plugins` and does not depend on `@oclif/plugin-plugins` or `@oclif/plugin-help`. So `os plugins` (`install`, `uninstall`, `update`, `link`, and the rest) and `os help` are not registered commands; each exits 2 with `command … not found`. Use `os --help` or `os <command> --help` for help. To add third-party CLI commands, see [oclif Plugin System](#oclif-plugin-system).
 
 ### `os info`
 
@@ -218,13 +263,13 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 ## oclif Plugin System
 
-The CLI uses oclif's built-in plugin system for extensibility. Third-party plugins (e.g., cloud commands, marketplace tools) can extend the CLI without modifying the main package.
+The CLI is built on oclif, and oclif's plugin system is its only command-extension mechanism: a third-party package (e.g., cloud commands, marketplace tools) ships oclif Command classes and is loaded as an oclif plugin, without modifying this package. The `os` binary this package publishes declares no plugins and ships no plugin manager, so there is no `os plugins install`.
 
 ### How Plugin Extension Works
 
 1. **Create an oclif plugin package** with its own `oclif` config in `package.json`
 2. **Export oclif Command classes** from the plugin's `src/commands/` directory
-3. **Install the plugin** via `os plugins install <package>` or declare it in the main CLI's `oclif.plugins`
+3. **Load the plugin through an `os` distribution you build**: a package whose own `package.json` lists the plugin in **both** `oclif.plugins` and `dependencies`. oclif's core-plugin loader matches `oclif.plugins` names only against `dependencies`; a name listed under `devDependencies` alone never loads.
 
 ### Creating a CLI Plugin
 
@@ -263,10 +308,11 @@ export default class MarketplaceSearch extends Command {
 }
 ```
 
-**3. Install and use:**
+**3. Load it through your `os` distribution, then use it:**
+
+List `@acme/plugin-marketplace` in both `oclif.plugins` and `dependencies` of the distribution's `package.json` (see [How Plugin Extension Works](#how-plugin-extension-works)). Its commands then appear in that distribution's `os --help`:
 
 ```bash
-os plugins install @acme/plugin-marketplace
 os marketplace search "crm"
 ```
 
@@ -274,7 +320,7 @@ os marketplace search "crm"
 
 | Before (Commander.js) | After (oclif) |
 |---|---|
-| Plugins declared in `objectstack.config.ts` | Plugins installed via `os plugins install` or `oclif.plugins` |
+| Plugins declared in `objectstack.config.ts` | Plugins listed in an `os` distribution's `oclif.plugins` and `dependencies` |
 | Custom `loadPluginCommands` mechanism | oclif's built-in plugin discovery |
 | `contributes.commands` in manifest | `oclif.commands` in `package.json` |
 | Commander.js `new Command(...)` exports | oclif `class extends Command` exports |

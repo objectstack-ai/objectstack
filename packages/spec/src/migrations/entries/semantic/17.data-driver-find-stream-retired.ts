@@ -30,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'no schema tombstone either: nothing ever ran a driver object through '
     + '`DriverInterfaceSchema.parse()`, so a prescription there would have no one to '
     + 'reach. The enforced channel is tsc, and it points at callers. ADR-0049 / '
-    + 'ADR-0078, #4484.',
+    + 'ADR-0078.',
   acceptanceCriteria:
     'No code calls `driver.findStream(...)`; large reads page through `find()` with '
     + '`limit`/`offset` (which guarantees a total order across the whole walk) or go '

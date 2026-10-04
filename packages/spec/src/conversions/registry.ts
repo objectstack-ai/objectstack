@@ -28,6 +28,7 @@ import {
 } from './walk.js';
 import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
 import { RETIRED_SUB_DAY_INTERVALS } from '../data/analytics.zod.js';
+import { ClockTimeValueSchema } from '../data/field-value.zod.js';
 import {
   FILTER_ARRAY_LOGIC_KEYWORDS,
   FILTER_OPERATORS,
@@ -44,6 +45,7 @@ import {
   type ViewFilterOperator,
 } from '../ui/view.zod.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
+import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -224,6 +226,7 @@ const objectCompactLayoutRename: MetadataConversion = {
   id: 'object-compactLayout-to-highlightFields',
   toMajor: 11,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'object.compactLayout',
   summary: "object key 'compactLayout' → 'highlightFields' (ADR-0085 semantic roles)",
   apply(stack, emit) {
@@ -262,6 +265,7 @@ const stackRolesToPositions: MetadataConversion = {
   id: 'stack-roles-to-positions',
   toMajor: 13,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'stack.roles',
   summary: "stack collection key 'roles' → 'positions' (ADR-0090 D3)",
   apply(stack, emit) {
@@ -297,6 +301,7 @@ const owdLegacyReadAliases: MetadataConversion = {
   id: 'owd-legacy-read-aliases',
   toMajor: 13,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'object.sharingModel',
   summary: "object sharingModel 'read' → 'public_read', 'read_write' → 'public_read_write' (ADR-0090 D4)",
   apply(stack, emit) {
@@ -353,6 +358,7 @@ const sharingRecipientRoleToPosition: MetadataConversion = {
   id: 'sharing-recipient-role-to-position',
   toMajor: 13,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'sharingRule.sharedWith.type',
   summary: "sharing-rule recipient type 'role' → 'position' (ADR-0090 D3)",
   apply(stack, emit) {
@@ -413,6 +419,7 @@ const bookAudienceProfileToPermissionSet: MetadataConversion = {
   id: 'book-audience-profile-to-permission-set',
   toMajor: 14,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'book.audience',
   summary: "book audience gated arm '{ profile }' → '{ permissionSet }' (ADR-0090 D2/D9)",
   apply(stack, emit) {
@@ -457,7 +464,7 @@ function renameVisibilityAlias(
  * `visibleWhen` across all layers. Applies to form sections and (recursively
  * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
  * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
- * flattened form overlay's top level (#13031). **Live window**: the protocol-15 loader accepts the deprecated
+ * flattened form overlay's top level (commit b799ac553). **Live window**: the protocol-15 loader accepts the deprecated
  * key (the zod schemas also normalize it at parse — this entry makes the
  * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
  * graduate into the step-16 chain when the alias is removed).
@@ -715,8 +722,9 @@ const actionExecuteToTarget: MetadataConversion = {
   id: 'action-execute-to-target',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'action.execute',
-  summary: "action key 'execute' → 'target' (the deprecated handler alias, #3713)",
+  summary: "action key 'execute' → 'target' (the deprecated handler alias; the spec and the renderer had resolved the pair in opposite directions, so one key now names the handler)",
   apply(stack, emit) {
     const renameOn = (action: Dict, path: string): Dict => {
       const renamed = renameKey(action, 'execute', 'target');
@@ -754,8 +762,9 @@ const fieldConditionalRequiredToRequiredWhen: MetadataConversion = {
   id: 'field-conditionalRequired-to-requiredWhen',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'field.conditionalRequired',
-  summary: "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754)",
+  summary: "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, folded into the canonical key so no reader picks its own precedence)",
   apply(stack, emit) {
     const withObjects = mapObjectFieldsKey(stack, 'objects', 'conditionalRequired', 'requiredWhen', emit);
     return mapObjectFieldsKey(withObjects, 'objectExtensions', 'conditionalRequired', 'requiredWhen', emit);
@@ -808,8 +817,9 @@ const agentToolsToSkills: MetadataConversion = {
   id: 'agent-tools-to-skills',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'agent.tools',
-  summary: "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
+  summary: "agent key 'tools' removed — declare capability in a skill (ADR-0064: an agent's tools are exactly its skills' tools, and this inline slot resolved names against the whole registry with no surface check)",
   apply(stack, emit) {
     return mapCollection(stack, 'agents', (agent, path) => {
       if (!('tools' in agent) || agent.tools == null) return agent;
@@ -868,7 +878,7 @@ const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
   id: 'sharing-rule-access-level-full-to-edit',
   toMajor: 17,
   surface: 'sharingRule.accessLevel',
-  summary: "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
+  summary: "sharing-rule accessLevel 'full' → 'edit' (`full` never granted more than `edit`; a sharing rule grants read or edit, while delete and transfer come from object permissions and ownership)",
   apply(stack, emit) {
     return mapCollection(stack, 'sharingRules', (rule, path) => {
       if (rule.accessLevel !== 'full') return rule;
@@ -941,7 +951,7 @@ const flowNodeCrudObjectAlias: MetadataConversion = {
   id: 'flow-node-crud-object-alias',
   toMajor: 17,
   surface: 'flow.node.config.objectName',
-  summary: "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+  summary: "CRUD flow-node config key 'object' → 'objectName' (the last alias in the executors' `readAliasedConfig` shim graduates into this layer, and the shim is deleted)",
   apply(stack, emit) {
     const crudTypes = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
     return renameFlowConfigAliases(stack, crudTypes, [['object', 'objectName']], emit);
@@ -1064,8 +1074,8 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
   toMajor: 17,
   surface: 'flow.node.notify.config',
   summary:
-    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), " +
-    "and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (executor `??` fallbacks graduated into this layer; `actionUrl` is canonical because the notification chain downstream already uses it), " +
+    "and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (a shape the executor read that no config schema declared)",
   apply(stack, emit) {
     const renamed = renameFlowConfigAliases(
       stack,
@@ -1276,7 +1286,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
   surface: 'flow.node.wait.waitEventConfig',
   summary:
     "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', " +
-    "'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (#4045)",
+    "'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (the executor also read these keys from the loose config, a second contract beside the declared block)",
   apply(stack, emit) {
     return liftWaitEventConfig(stack, emit);
   },
@@ -1351,7 +1361,7 @@ const flowNodeMapFlowAlias: MetadataConversion = {
   id: 'flow-node-map-flow-alias',
   toMajor: 17,
   surface: 'flow.node.map.config.flowName',
-  summary: "map flow-node config key 'flow' → 'flowName' (#4045 — undeclared executor fallback graduation)",
+  summary: "map flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback; it graduates into this layer)",
   apply(stack, emit) {
     return renameFlowConfigAliases(stack, new Set(['map']), [['flow', 'flowName']], emit);
   },
@@ -1408,7 +1418,7 @@ const flowNodeSubflowFlowAlias: MetadataConversion = {
   id: 'flow-node-subflow-flow-alias',
   toMajor: 17,
   surface: 'flow.node.subflow.config.flowName',
-  summary: "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+  summary: "subflow flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback, found when the schemaless nodes were reconciled with their executors; it graduates into this layer)",
   apply(stack, emit) {
     return renameFlowConfigAliases(stack, new Set(['subflow']), [['flow', 'flowName']], emit);
   },
@@ -1473,9 +1483,11 @@ const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
  * default: the loader parses the CONVERTED flow, and `connectorConfig` requires
  * `connectorId` + `actionId` once the block exists. Unlike `eventType` there is
  * no defensible default for either, so when lifting cannot complete that pair
- * the node is left **untouched** — it keeps failing at run time with the same
- * clear refusal it produces today, rather than going from "registers, fails
- * the step" to "fails to load".
+ * the node is left **untouched** — materializing a half block would only move
+ * the refusal onto a key the author never wrote. The flow parse then refuses
+ * the node for its missing `connectorConfig` block, whose prescription names
+ * the move out of `config` (#20418); before the parse required the block, such
+ * a node registered and failed every run at the executor's guard.
  */
 function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
   return mapFlowNodes(stack, (node, path) => {
@@ -1515,7 +1527,7 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
   surface: 'flow.node.connector_action.connectorConfig',
   summary:
     "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → " +
-    'the declared `connectorConfig` block (#4045)',
+    'the declared `connectorConfig` block (the executor reads only that block; the published designer form had been writing these keys where nothing read them)',
   apply(stack, emit) {
     return liftConnectorConfigShape(stack, emit);
   },
@@ -1547,7 +1559,7 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
             },
             // Completeness guard: no actionId anywhere, so lifting would
             // create a block the loader rejects — left untouched instead
-            // (same run-time refusal as today).
+            // (the flow parse refuses it for the missing block).
             {
               id: 'n4',
               type: 'connector_action',
@@ -1626,7 +1638,7 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
   id: 'flow-node-script-config-aliases',
   toMajor: 17,
   surface: 'flow.node.script.config',
-  summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+  summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (executor `??` fallbacks, graduated into this layer)",
   apply(stack, emit) {
     return renameFlowConfigAliases(
       stack,
@@ -1722,11 +1734,12 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
   id: 'app-dead-authoring-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
     + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / '
     + 'app.homePageId / app.areas.order',
-  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (premise corrected in #4709; the retirement stands), and no renderer ever sorted areas)",
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits found each one unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (the first retirement record said nothing read it, a premise since corrected; the retirement stands), and no renderer ever sorted areas)",
   apply(stack, emit) {
     const RETIRED = [
       'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
@@ -1835,8 +1848,9 @@ const appAreaFailOpenGatesRemoved: MetadataConversion = {
   id: 'app-area-fail-open-gates-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'app.areas.visible / app.areas.requiredPermissions',
-  summary: "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+  summary: "navigation-area keys 'visible'/'requiredPermissions' removed (ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
   apply(stack, emit) {
     const RETIRED_AREA_GATES = ['visible', 'requiredPermissions'];
     return mapCollection(stack, 'apps', (app, path) => {
@@ -1936,8 +1950,9 @@ const permissionRlsPriorityRemoved: MetadataConversion = {
   id: 'permission-rls-priority-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'permission.rowLevelSecurity.priority',
-  summary: "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+  summary: "RLS-policy key 'priority' removed (a security audit found no reader: policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
   apply(stack, emit) {
     return mapCollection(stack, 'permissions', (ps, path) => {
       const rls = (ps as { rowLevelSecurity?: unknown }).rowLevelSecurity;
@@ -2004,8 +2019,9 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
   id: 'tool-inert-authoring-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'tool.category / tool.permissions / tool.active / tool.builtIn',
-  summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+  summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (authorable and inert, so removed under ADR-0049 enforce-or-remove; permissions gated nothing, active:false withdrew nothing)",
   apply(stack, emit) {
     const RETIRED = ['category', 'permissions', 'active', 'builtIn'] as const;
     return mapCollection(stack, 'tools', (tool, path) => {
@@ -2080,9 +2096,10 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  *
  * ⚠️ Fact 2 is about the MECHANISM, not about this entry, and it outlived the
  * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
- * (#16864). Before setting that flag on a DEFAULT FLIP — as opposed to a
- * lossless delete or a rename — read that card, because the flag does not mean
- * what its name and every docblock around it say it means.
+ * (ADR-0087's 2026-09-13 addendum names all three). Before setting that flag on a DEFAULT FLIP — as opposed to a
+ * lossless delete or a rename — read that addendum, because the flag does not mean
+ * what its name says: its own docblock (`RetiredConversionState` in `types.ts`) has
+ * stated the authoring-only reach since commit 29dd1a6dd.
  */
 
 /**
@@ -2115,8 +2132,9 @@ const actionInertKeysRemoved: MetadataConversion = {
   id: 'action-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'action.shortcut / action.bulkEnabled',
-  summary: "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+  summary: "action keys 'shortcut'/'bulkEnabled' removed (inert, removed under ADR-0049 enforce-or-remove: no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
   apply(stack, emit) {
     return mapCollection(stack, 'actions', (a, path) => stripKeys(a, ['shortcut', 'bulkEnabled'], emit, path));
   },
@@ -2139,8 +2157,9 @@ const flowInertKeysRemoved: MetadataConversion = {
   id: 'flow-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId',
-  summary: "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+  summary: "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (inert, removed under ADR-0049 enforce-or-remove: active:false never stopped a flow; status is the enforced lifecycle)",
   apply(stack, emit) {
     let out = mapCollection(stack, 'flows', (f, path) => {
       let next = stripKeys(f, ['active', 'template'], emit, path);
@@ -2197,8 +2216,9 @@ const viewInertKeysRemoved: MetadataConversion = {
   id: 'view-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria',
-  summary: "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+  summary: "view keys removed as inert (ADR-0049 enforce-or-remove): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
   apply(stack, emit) {
     const LIST_KEYS = ['responsive', 'performance'] as const;
     // NOT 'data': the sweep's removal attempt was refuted by the build —
@@ -2242,8 +2262,9 @@ const viewListPassthroughKeysRemoved: MetadataConversion = {
   id: 'view-list-passthrough-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'view.list.striped / view.list.bordered / view.list.virtualScroll',
-  summary: "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
+  summary: "view list keys removed: 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (a key that is only passed through is dead in effect; ADR-0049 enforce-or-remove)",
   apply(stack, emit) {
     const LIST_KEYS = ['striped', 'bordered', 'virtualScroll'] as const;
     return mapViewPayloads(stack, (payload, kind, path) =>
@@ -2308,10 +2329,11 @@ const viewExportOptionsPdfRemoved: MetadataConversion = {
   id: 'view-export-options-pdf-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'view.list.exportOptions / view.listViews.*.exportOptions',
   summary:
-    "list-view export format 'pdf' removed (#8010 — PDF export was declined as #1301 NOT_PLANNED; "
-    + 'ObjectGrid dropped the declared format from the menu with only a runtime console.warn)',
+    "list-view export format 'pdf' removed (PDF export was declined as not planned, and ObjectGrid "
+    + 'dropped the declared format from the menu with only a runtime console.warn; an honest enum replaces that warning)',
   apply(stack, emit) {
     const stripPdf = (slot: unknown, path: string): unknown => {
       if (!slot || typeof slot !== 'object' || Array.isArray(slot)) return slot;
@@ -2377,8 +2399,9 @@ const dashboardInertKeysRemoved: MetadataConversion = {
   id: 'dashboard-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dashboard.aria / dashboard.performance / dashboard.widgets[].performance',
-  summary: "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+  summary: "dashboard keys 'aria'/'performance' and widget 'performance' removed (inert, removed under ADR-0049 enforce-or-remove: no renderer applied any of them)",
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
       let next = stripKeys(d, ['aria', 'performance'], emit, path);
@@ -2446,8 +2469,9 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
   id: 'dashboard-widget-responsive-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dashboard.widgets[].responsive',
-  summary: "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
+  summary: "dashboard widget key 'responsive' removed (no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was measured equally unread and retired at protocol 18)",
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
       const widgets = d.widgets;
@@ -2523,12 +2547,13 @@ const dashboardWidgetActionAriaRemoved: MetadataConversion = {
   id: 'dashboard-widget-action-aria-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / '
     + 'dashboard.widgets[].actionIcon / dashboard.widgets[].aria',
   summary:
     "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed "
-    + '(#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never '
+    + '(no renderer ever drew a per-widget action button, and widget ARIA attributes never '
     + 'reached the DOM; use header.actions[] and the widget title/description)',
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
@@ -2621,10 +2646,11 @@ const dashboardWidgetCompareToConverged: MetadataConversion = {
   id: 'dashboard-widget-compareto-converged',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dashboard.widgets[].compareTo',
   summary:
     "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract "
-    + "(#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } "
+    + "(the shape the dataset executor implements; the bare strings and { offset: '1y' } rewrite mechanically; other { offset } "
     + 'durations have no faithful target and are reported, not guessed)',
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
@@ -2695,8 +2721,9 @@ const agentKnowledgeRemoved: MetadataConversion = {
   id: 'agent-knowledge-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'agent.knowledge',
-  summary: "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+  summary: "agent key 'knowledge' removed (inert, removed under ADR-0049 enforce-or-remove: declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
   apply(stack, emit) {
     return mapCollection(stack, 'agents', (a, path) => stripKeys(a, ['knowledge'], emit, path));
   },
@@ -2712,8 +2739,9 @@ const skillTriggerPhrasesRemoved: MetadataConversion = {
   id: 'skill-trigger-phrases-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'skill.triggerPhrases',
-  summary: "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+  summary: "skill key 'triggerPhrases' removed (inert, removed under ADR-0049 enforce-or-remove: activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
   apply(stack, emit) {
     return mapCollection(stack, 'skills', (sk, path) => stripKeys(sk, ['triggerPhrases'], emit, path));
   },
@@ -2749,8 +2777,9 @@ const stackApiRequireAuthRemoved: MetadataConversion = {
   id: 'stack-api-require-auth-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'stack.api.requireAuth',
-  summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+  summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (a public form, a share link or `book.audience: 'public'`), which replaced the deployment-wide opt-out",
   apply(stack, emit) {
     const api = stack.api;
     if (!isDict(api) || !('requireAuth' in api)) return stack;
@@ -2829,10 +2858,11 @@ const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
   id: 'flow-node-wait-timeout-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'flow.node.waitEventConfig',
   summary:
     "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) " +
-    "and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+    "and 'onTimeout' (removed — zero readers, so no timeout ever fired): wait never had a timeout, so its timeout contract is withdrawn rather than built",
   apply(stack, emit) {
     return removeWaitTimeoutKeys(stack, emit);
   },
@@ -2909,8 +2939,9 @@ const datasourceInertBlocksRemoved: MetadataConversion = {
   id: 'datasource-inert-blocks-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission',
-  summary: "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
+  summary: "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody; each of those jobs already has a live mechanism)",
   apply(stack, emit) {
     return mapCollection(stack, 'datasources', (ds, path) => {
       const next = stripKeys(ds, ['retryPolicy', 'healthCheck'], emit, path);
@@ -2996,8 +3027,9 @@ const mappingInertKeysRemoved: MetadataConversion = {
   id: 'mapping-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'mapping.extractQuery / mapping.errorPolicy / mapping.batchSize',
-  summary: "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+  summary: "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
   apply(stack, emit) {
     const RETIRED = ['extractQuery', 'errorPolicy', 'batchSize'];
     // Scoped to the `mappings` collection deliberately: `batchSize` is live on
@@ -3050,8 +3082,9 @@ const bookTranslationsRemoved: MetadataConversion = {
   id: 'book-translations-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'book.translations / book.groups.translations',
-  summary: "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+  summary: "book keys 'translations' (book-level and group-level) removed (no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
   apply(stack, emit) {
     return mapCollection(stack, 'books', (book, path) => {
       const next = stripKeys(book, ['translations'], emit, path);
@@ -3111,8 +3144,9 @@ const jobIdRemoved: MetadataConversion = {
   id: 'job-id-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'job.id',
-  summary: "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+  summary: "job key 'id' removed (nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
   apply(stack, emit) {
     return mapCollection(stack, 'jobs', (job, path) => stripKeys(job, ['id'], emit, path));
   },
@@ -3167,8 +3201,9 @@ const translationValidationMessagesRemoved: MetadataConversion = {
   id: 'translation-validation-messages-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'translation.validationMessages',
-  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
+  summary: "translation key 'validationMessages' removed (no resolver read it, so a translated rule message was stored and never shown; the legacy-key table of the translation-bundle migration had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, a translation key shipped together with its reader)",
   apply(stack, emit) {
     return mapCollection(stack, 'translations', (t, path) =>
       stripKeys(t, ['validationMessages'], emit, path));
@@ -3224,8 +3259,9 @@ const datasourceCapabilitiesRemoved: MetadataConversion = {
   id: 'datasource-capabilities-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.capabilities',
-  summary: "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
+  summary: "datasource key 'capabilities' removed (eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
   apply(stack, emit) {
     return mapCollection(stack, 'datasources', (ds, path) => stripKeys(ds, ['capabilities'], emit, path));
   },
@@ -3278,8 +3314,9 @@ const datasourceReadReplicasRemoved: MetadataConversion = {
   id: 'datasource-read-replicas-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.readReplicas',
-  summary: "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+  summary: "datasource key 'readReplicas' removed (no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
   apply(stack, emit) {
     return mapCollection(stack, 'datasources', (ds, path) => stripKeys(ds, ['readReplicas'], emit, path));
   },
@@ -3333,7 +3370,7 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
   'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
   postgres: [['connectionString', 'url'], ['user', 'username']],
   mysql: [['connectionString', 'url'], ['user', 'username']],
-  // `mongodb` since #6345 — the canonical id was renamed from `mongo` so the
+  // `mongodb` since commit e2798fab7 — the canonical id was renamed from `mongo` so the
   // contract canon matches what both boot hosts, the driver package and every
   // URL scheme already said. Keyed by the CANONICAL id `resolveDriverId`
   // returns, so a stored `driver: 'mongo'` still lands here through the alias.
@@ -3376,11 +3413,12 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
   id: 'datasource-config-driver-key-aliases',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.config',
   summary:
     "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', "
     + "postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' "
-    + "and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+    + "and 'user' → 'username' (undeclared driver-factory `??` fallbacks, graduated into this layer and deleted from the reader)",
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       const kind = resolveDriverId(ds.driver);
@@ -3437,14 +3475,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, #6345).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
  *
  * ## Why a stored value has to move at all
  *
  * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
  * still are — this conversion does NOT rescue a broken boot, and a deployment
  * that never runs it keeps connecting exactly as before. What moved is the
- * CANONICAL id: #6345's ruling renamed it to `mongodb`, the spelling both boot
+ * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
  * its config contract are one string with no mapping layer between them.
@@ -3489,7 +3527,8 @@ const datasourceDriverMongoToMongodb: MetadataConversion = {
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
-    + 'package and the published DRIVER_CATALOG already used (#6345)',
+    + 'package and the published DRIVER_CATALOG already used, so the id that selects a driver '
+    + 'and the id that selects its config contract are one string with no mapping between them',
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       // Only the exact legacy canon, trimmed and lower-cased the same way
@@ -3617,6 +3656,7 @@ const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
   id: 'flow-node-script-branch-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'flow.node.script.config.actionType / flow.node.script.config.template / '
     + 'flow.node.script.config.recipients / flow.node.script.config.variables / '
@@ -3624,7 +3664,7 @@ const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
   summary:
     "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — "
     + "'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / "
-    + "'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+    + "'variables' (fed those stubs) and 'script' (inline JS the runtime never executed); script is now a pure function-call node, the only path that ran real logic",
   apply(stack, emit) {
     return removeScriptBranchKeys(stack, emit);
   },
@@ -3716,9 +3756,10 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
   id: 'object-managed-by-system-to-system-data',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'object.managedBy',
   summary:
-    "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the "
+    "object managedBy 'system' → 'system-data' (ADR-0103's residual bucket named the "
     + 'engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the '
     + 'name describing what the bucket actually holds: admin/user-writable platform data)',
   apply(stack, emit) {
@@ -3782,9 +3823,10 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
   id: 'object-enable-trash-mru-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'object.enable.trash / object.enable.mru',
   summary:
-    "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no "
+    "object capability flags 'enable.trash'/'enable.mru' removed (the last slice of the dead author-facing property removals: no "
     + 'recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)',
   apply(stack, emit) {
     return mapCollection(stack, 'objects', (obj, path) => {
@@ -3864,9 +3906,10 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
   id: 'object-index-type-partial-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'object.indexes[].type / object.indexes[].partial',
   summary:
-    "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver "
+    "object index keys 'indexes[].type'/'indexes[].partial' removed (no driver "
     + 'ever read either: the index method is the dialect\'s choice and a partial index is built '
     + 'by a database-layer migration, not declared)',
   apply(stack, emit) {
@@ -4025,7 +4068,7 @@ const retryPolicyConverged: MetadataConversion = {
   surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
     "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
-    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1: two declarations that differed only by accident became one, and retry is opt-in because a retry replays whatever the attempt already did",
   apply(stack, emit) {
     // ── 0. flows: errorHandling.retryDelayMs → errorHandling.backoffMs ─
     //
@@ -4200,9 +4243,10 @@ const hookBodyCryptoHashRemoved: MetadataConversion = {
   id: 'hook-body-crypto-hash-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'hook.body.capabilities / action.body.capabilities',
   summary:
-    "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed "
+    "script-body capability token 'crypto.hash' removed (the sandbox never installed "
     + 'ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)',
   apply(stack, emit) {
     const stripToken = (item: Dict, path: string): Dict => {
@@ -4369,9 +4413,10 @@ const datasetMeasureAggRemoved: MetadataConversion = {
   id: 'dataset-measure-array-string-agg-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dataset.measures[].aggregate',
   summary:
-    "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend "
+    "dataset measure aggregates 'array_agg' / 'string_agg' removed (no SQL backend "
     + 'compiled them and the v1 dataset runtime refused them by name, so a measure declaring '
     + 'one never produced a value; the measure is dropped, and with it any derived measure '
     + 'left referencing it)',
@@ -4493,9 +4538,10 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
   id: 'connector-rate-limit-config-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'connector.rateLimitConfig',
   summary:
-    "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; "
+    "connector key 'rateLimitConfig' removed (no outbound rate-limiting engine exists; "
     + "the runtime's only token bucket limits INBOUND requests, so every knob here was inert "
     + 'while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)',
   apply(stack, emit) {
@@ -4617,12 +4663,13 @@ const fieldMappingTransformRemoved: MetadataConversion = {
   id: 'field-mapping-transform-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform',
   summary:
-    "field-mapping key 'transform' removed (#5552 — the whole five-member "
+    "field-mapping key 'transform' removed (the whole five-member "
     + 'FieldMappingTransform union went with it: no runtime ever executed constant/cast/'
-    + 'lookup/javascript/map, and the javascript member advertised dialect="js", retired '
-    + "in #3278. The enforced transform pipeline is the import mapping's string-enum "
+    + 'lookup/javascript/map, and the javascript member advertised dialect="js", a dialect '
+    + "already retired because JavaScript belongs in a script body. The enforced transform pipeline is the import mapping's string-enum "
     + '`mapping.fieldMapping[].transform`, which is unaffected)',
   apply(stack, emit) {
     return mapCollection(stack, 'connectors', (c, path) => {
@@ -4730,6 +4777,7 @@ const themeInertTokenScalesRemoved: MetadataConversion = {
   id: 'theme-inert-token-scales-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight'
     + ' / theme.typography.letterSpacing / theme.typography.fontFamily.heading'
@@ -4737,7 +4785,7 @@ const themeInertTokenScalesRemoved: MetadataConversion = {
   summary:
     "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', "
     + "'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed "
-    + '(#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, '
+    + '(ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, '
     + '--letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono '
     + 'faithfully, and no first-party component or stylesheet has ever read one. '
     + 'Re-declare any variable you actually consume under customVars, which emits it verbatim)',
@@ -4889,7 +4937,7 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
   toMajor: 17,
   surface: 'page.component.page-header.description',
   summary:
-    "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+    "page-header component prop 'description' → 'subtitle' (the off-spec spelling a renderer tolerated through a bare `subtitle ?? description` fallback; `subtitle` is the declared key, and the fallback retires)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       const type = component.type;
@@ -5111,9 +5159,10 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
   id: 'record-picker-display-field-to-label-field',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.element:record_picker.displayField',
   summary:
-    "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+    "record-picker component prop 'displayField' → 'labelField' (the required key no renderer read; `labelField ?? 'name'` is what renders the row, so the delivered spelling became the declared one)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
@@ -5232,9 +5281,10 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
   id: 'record-picker-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple',
   summary:
-    "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+    "record-picker component props 'searchFields'/'multiple' removed (the control is a plain single-select with no search box; neither key had a reader)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
@@ -5358,9 +5408,10 @@ const pageCardBodyToChildren: MetadataConversion = {
   id: 'page-card-body-to-children',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.page:card.body',
   summary:
-    "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+    "page:card component prop 'body' → 'children' (one composition key across every container; the card renderer already reads both)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'page:card') return component;
@@ -5528,7 +5579,7 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
   toMajor: 17,
   surface: 'page.component.element:button.action.params',
   summary:
-    "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+    "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (a static payload and a parameter definition are two things, so the payload gets its own key; `params` stays the ActionParam[] definition array)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:button') return component;
@@ -5790,9 +5841,10 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
   id: 'page-tabs-type-to-tab-style',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.page:tabs.type',
   summary:
-    "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+    "page:tabs component prop 'type' → 'tabStyle' (a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'page:tabs') return component;
@@ -5977,9 +6029,10 @@ const pageStructureInertKeysRemoved: MetadataConversion = {
   id: 'page-structure-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.page:header.icon / page.component.page:card.actions',
   summary:
-    "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer "
+    "page:header prop 'icon' and page:card prop 'actions' removed (neither has a renderer "
     + 'read point in objectui; the header resolves icons per action and the card renders '
     + 'title/children/footer only)',
   apply(stack, emit) {
@@ -6142,9 +6195,10 @@ const recordDetailsLayoutRemoved: MetadataConversion = {
   id: 'record-details-layout-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.record:details.layout',
   summary:
-    "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were "
+    "record:details component prop 'layout' removed (the declared auto|custom modes were "
     + 'never implemented; the renderer branches only on inline|compact, values the schema never '
     + 'permitted, so both legal values selected nothing)',
   apply(stack, emit) {
@@ -6283,9 +6337,10 @@ const appHiddenToUnpublished: MetadataConversion = {
   id: 'app-hidden-to-unpublished',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'app.hidden',
   summary:
-    "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+    "stored app publish gate 'hidden' → '_unpublished' (ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
   apply(stack, emit) {
     return mapCollection(stack, 'apps', (app, path) => {
       if (app.hidden !== true) return app;
@@ -6395,9 +6450,10 @@ const actionGlobalNavLocationRemoved: MetadataConversion = {
   id: 'action-global-nav-location-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'action.locations[]',
   summary:
-    "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K "
+    "action location 'global_nav' removed (no running-app surface rendered it; the ⌘K "
     + 'palette reads no action metadata, while the Studio designer previewed a command-palette '
     + 'frame for it. The value is stripped and the key kept, so an action left with no location '
     + 'becomes the documented headless shape `locations: []`)',
@@ -6488,10 +6544,11 @@ const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
   id: 'field-malformed-scale-precision-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface: 'object.fields.*.scale / object.fields.*.precision',
   summary:
     "malformed field 'scale'/'precision' declarations (non-integer or negative) are removed — "
-    + 'they were silently unenforced; the schema now refuses them at authoring (#8321)',
+    + 'they were silently unenforced; the schema now refuses them at authoring',
   apply(stack, emit) {
     const MALFORMED_KEYS = ['scale', 'precision'] as const;
     const stripMalformed = (input: Dict, collection: string): Dict =>
@@ -6595,11 +6652,13 @@ const recordChatterPositionVocabulary: MetadataConversion = {
   id: 'record-chatter-position-vocabulary',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface: 'page.component.record:chatter.position / page.component.record:discussion.position',
   summary:
     "record:chatter / record:discussion 'position' respelled to the renderer's vocabulary — "
-    + "'sidebar' → 'right', 'inline' → 'bottom', 'drawer' → 'right' (#8762 — the renderer "
-    + 'compares only bottom/right/left; the old set fell through every branch)',
+    + "'sidebar' → 'right', 'inline' → 'bottom', 'drawer' → 'right' (one vocabulary, the "
+    + "renderer's, rather than a mapping layer between two: the renderer compares only "
+    + 'bottom/right/left, and the old set fell through every branch)',
   apply(stack, emit) {
     const POSITION_REWRITE: Readonly<Record<string, string>> = {
       sidebar: 'right',
@@ -6712,12 +6771,13 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
   id: 'element-input-target-variable-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface:
     'page.component.element:text_input.targetVariable / page.component.element:record_picker.targetVariable',
   summary:
-    "text-input/record-picker component prop 'targetVariable' removed (#9198 — a declarative "
-    + 'hint nothing read; the live binding resolves from the page variable whose `source` names '
-    + 'the component id)',
+    "text-input/record-picker component prop 'targetVariable' removed (retired under ADR-0049 "
+    + 'enforce-or-remove as a declarative hint nothing read; the live binding resolves from the '
+    + 'page variable whose `source` names the component id)',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:text_input' && component.type !== RECORD_PICKER_COMPONENT_TYPE) {
@@ -6836,6 +6896,96 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
 };
 
 /**
+ * A dataset `count` measure drops an empty `field` (protocol 18, #21220).
+ *
+ * A dataset measure's `field` is a column reference (`ui/dataset.zod.ts`, the
+ * one accept set in `data/analytics-column-reference.ts`), so `''` is refused
+ * at parse. On ONE sub-shape that refusal has a lossless repair: a measure
+ * with `aggregate: 'count'` and `field: ''`. The dataset's own refinement
+ * already read `''` as "no field" on a count (only `count` may omit it), the
+ * analytics dataset door never judged it (it skips an empty `field`), and the
+ * measure compiled to `sql: m.field ?? '*'` with the `''` intact — answered on
+ * SQLite's native-SQL path as `COUNT()` (its row count) and refused on the
+ * ObjectQL path. Without the key it compiles to `COUNT(*)`: the row count both
+ * meant. Its producer is named: Studio's dataset inspector seeds every new
+ * measure row with `field: ''`, so a count whose Field box was left blank was
+ * stored that way.
+ *
+ * Scope — this sub-shape and nothing else. A non-count measure with `''` (the
+ * refinement already refused it: only `count` may omit `field`), a dimension
+ * with `''` (it groups by nothing), a padded value and every expression have no
+ * working row or no mechanical rewrite; they stay as stored and the D3 entry
+ * `dataset-member-field-expression-refused` carries them.
+ *
+ * Retired from the load path: an author is refused at parse with the
+ * prescription to omit the key; data at rest and `os migrate meta` replay it.
+ */
+const datasetCountMeasureEmptyFieldRemoved: MetadataConversion = {
+  id: 'dataset-count-measure-empty-field-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'dataset.measures[].field (aggregate count, empty string)',
+  summary:
+    "a `count` dataset measure's empty `field` is removed: a count with no `field` counts rows, which "
+    + "is what the empty string compiled to, and a measure's `field` is now a column reference that "
+    + 'refuses an empty string',
+  apply(stack, emit) {
+    return mapCollection(stack, 'datasets', (dataset, path) => {
+      const measures = dataset.measures;
+      if (!Array.isArray(measures)) return dataset;
+      let changed = false;
+      const next = measures.map((m, i) => {
+        if (!isDict(m) || m.aggregate !== 'count' || m.field !== '') return m;
+        changed = true;
+        return stripKeys(m, ['field'], emit, `${path}.measures[${i}]`);
+      });
+      return changed ? { ...dataset, measures: next } : dataset;
+    });
+  },
+  fixture: {
+    before: {
+      datasets: [{
+        name: 'deal_metrics',
+        label: 'Deal Metrics',
+        object: 'deal',
+        // A dimension's empty `field` has no lossless rewrite: left as stored.
+        dimensions: [{ name: 'stage', field: 'stage' }, { name: 'blank_axis', field: '' }],
+        measures: [
+          // The Studio-seeded shape: a count whose Field box was left blank.
+          { name: 'deal_count', aggregate: 'count', field: '' },
+          { name: 'won_count', aggregate: 'count', field: '', filter: { stage: 'won' } },
+          // Untouched: a count over `*`, a count with no `field`, a count over a
+          // column, and a `sum` over `''` (refused already, no lossless rewrite).
+          { name: 'star_count', aggregate: 'count', field: '*' },
+          { name: 'row_count', aggregate: 'count' },
+          { name: 'owner_count', aggregate: 'count', field: 'owner' },
+          { name: 'blank_sum', aggregate: 'sum', field: '' },
+        ],
+      }],
+    },
+    after: {
+      datasets: [{
+        name: 'deal_metrics',
+        label: 'Deal Metrics',
+        object: 'deal',
+        dimensions: [{ name: 'stage', field: 'stage' }, { name: 'blank_axis', field: '' }],
+        measures: [
+          { name: 'deal_count', aggregate: 'count' },
+          { name: 'won_count', aggregate: 'count', filter: { stage: 'won' } },
+          { name: 'star_count', aggregate: 'count', field: '*' },
+          { name: 'row_count', aggregate: 'count' },
+          { name: 'owner_count', aggregate: 'count', field: 'owner' },
+          { name: 'blank_sum', aggregate: 'sum', field: '' },
+        ],
+      }],
+    },
+    // One per removed `field`: the two blank counts.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `element:filter` — the whole element retired (protocol 18, #9220, ADR-0049
  * enforce-or-remove at ELEMENT grain).
  *
@@ -6866,13 +7016,15 @@ const elementFilterRemoved: MetadataConversion = {
   id: 'element-filter-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface:
     'page.component.element:filter.object / page.component.element:filter.fields / '
     + 'page.component.element:filter.targetVariable / page.component.element:filter.layout / '
     + 'page.component.element:filter.showSearch / page.component.element:filter.aria',
   summary:
-    "the whole 'element:filter' element retired (#9220 — no renderer for it ever shipped in "
-    + 'any repo, so every key was a capability claim nothing kept; list surfaces own their '
+    "the whole 'element:filter' element retired (ADR-0049 enforce-or-remove at element grain, "
+    + 'not key by key — no renderer for it ever shipped in any repo, so every key was a '
+    + 'capability claim nothing kept; list surfaces own their '
     + "filtering via a view's userFilters / the list filter builder). All six props are "
     + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
     + 'the prescription to delete the component',
@@ -7018,13 +7170,15 @@ const elementFormRemoved: MetadataConversion = {
   id: 'element-form-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface:
     'page.component.element:form.object / page.component.element:form.fields / '
     + 'page.component.element:form.mode / page.component.element:form.submitLabel / '
     + 'page.component.element:form.onSubmit / page.component.element:form.aria',
   summary:
-    "the whole 'element:form' element retired (#9249 — no renderer for it ever shipped in "
-    + 'any repo, so every key was a capability claim nothing kept; use the object-bound '
+    "the whole 'element:form' element retired (ADR-0049 enforce-or-remove at element grain, "
+    + 'not key by key — no renderer for it ever shipped in any repo, so every key was a '
+    + 'capability claim nothing kept; use the object-bound '
     + "'object-form' block instead — rendered and designer-publishable). All six props are "
     + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
     + 'the prescription to delete the component',
@@ -7198,10 +7352,12 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
   id: 'translation-per-app-settings-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'stack.translations[].<locale>.settings / translation.settings',
   summary:
     "translation group 'settings' removed from both application-authored faces, the per-app bundle "
-    + 'entry (#15178) and the registered translation item (#19620). It is keyed by '
+    + 'entry and the registered translation item: settings copy belongs to the platform, and the two '
+    + 'authoring doors of one application translation type accept one shape. It is keyed by '
     + 'SettingsManifest.namespace and only platform code declares a manifest. A per-app bundle entry '
     + "could only fill gaps the platform's own bundle left in the one merged served tree, and was "
     + 'overwritten wherever both defined the key; a stored item OVERRODE the platform copy, because the '
@@ -7281,13 +7437,159 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
 };
 
 /**
+ * A `time` literal default drops a `Z` or zero-offset suffix (protocol 18).
+ *
+ * A `time` value is a zone-less wall clock (ADR-0053 D-C1), and the stored form
+ * (`ClockTimeValueSchema`) no longer admits a zone. A `Z` or a zero offset
+ * (`+00:00`, `+0000`, `-00:00`, `-0000`) names the same wall clock without it,
+ * so the suffix is dropped. A non-zero offset is left as stored and reported as
+ * a TODO: whether it meant its own digits or the UTC time is the author's call,
+ * and the parse refuses it where it lands. Only the suffixes the old stored
+ * form admitted are recognised, and `ClockTimeValueSchema` judges the rest.
+ *
+ * Reach: the literal defaults the narrowed gates judge — a `time` field's
+ * (`objects[]`, `objectExtensions[]`) and an action param typed `time`
+ * (`actions[]`, `objects[].actions[]`, an `element:button`'s inline action).
+ * Retired from the load path: an author is refused at parse, and data at rest
+ * and `os migrate meta` replay it.
+ */
+const timeDefaultUtcSuffixDropped: MetadataConversion = {
+  id: 'time-default-utc-suffix-dropped',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface:
+    'object.fields.*.defaultValue / action.params[].defaultValue / '
+    + 'page.component.element:button.action.params[].defaultValue (type time)',
+  summary:
+    "a `time` literal default's `Z` or zero-offset suffix is dropped, which names the same wall "
+    + 'clock; a default with a non-zero offset is left as stored and reported as a TODO, because '
+    + 'a `time` value carries no zone (ADR-0053 D-C1) and only its author knows which wall clock '
+    + 'it meant',
+  apply(stack, emit, context) {
+    const convert = (holder: Dict, path: string, subject: string): Dict => {
+      const value = holder.defaultValue;
+      if (typeof value !== 'string') return holder;
+      const suffix = /(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)$/.exec(value);
+      if (!suffix) return holder;
+      const wallClock = value.slice(0, suffix.index);
+      if (!ClockTimeValueSchema.safeParse(wallClock).success) return holder;
+      const at = `${path}.defaultValue`;
+      if (/[1-9]/.test(suffix[0])) {
+        context?.reportTodo?.({
+          path: at,
+          from: JSON.stringify(value),
+          reason: `${subject} is a time with no time zone, and this default carries a non-zero UTC `
+            + 'offset. Left as stored, it is refused where it is parsed. Rewrite it by hand as the wall '
+            + 'clock it meant, HH:MM or HH:MM:SS with no zone, or use a datetime field for an instant.',
+        });
+        return holder;
+      }
+      emit({ from: JSON.stringify(value), to: JSON.stringify(wallClock), path: at });
+      return { ...holder, defaultValue: wallClock };
+    };
+    const params = (action: Dict, path: string): Dict => {
+      const list = action.params;
+      if (!Array.isArray(list)) return action;
+      let changed = false;
+      const next = list.map((p, i) => {
+        if (!isDict(p) || p.type !== 'time') return p;
+        const name = typeof p.name === 'string' ? p.name : String(p.field ?? '');
+        const mapped = convert(p, `${path}.params[${i}]`, `Action param "${name}"`);
+        if (mapped !== p) changed = true;
+        return mapped;
+      });
+      return changed ? { ...action, params: next } : action;
+    };
+    const fields = (owner: Dict, path: string): Dict => {
+      const map = owner.fields;
+      if (!isDict(map)) return owner;
+      let changed = false;
+      const next: Dict = {};
+      for (const [name, def] of Object.entries(map)) {
+        next[name] = isDict(def) && def.type === 'time'
+          ? convert(def, `${path}.fields.${name}`, `Field "${name}"`)
+          : def;
+        if (next[name] !== def) changed = true;
+      }
+      return changed ? { ...owner, fields: next } : owner;
+    };
+    let next = mapCollection(stack, 'objects', (obj, path) =>
+      mapCollection(fields(obj, path), 'actions', (action, actionPath) => params(action, `${path}.${actionPath}`)));
+    next = mapCollection(next, 'objectExtensions', fields);
+    next = mapCollection(next, 'actions', params);
+    return mapPageComponents(next, (component, path) => {
+      if (component.type !== 'element:button') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !isDict(properties.action)) return component;
+      const action = params(properties.action, `${path}.properties.action`);
+      return action === properties.action ? component : { ...component, properties: { ...properties, action } };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [{
+        name: 'shift',
+        fields: {
+          starts_at: { type: 'time', defaultValue: '09:00Z' },
+          ends_at: { type: 'time', defaultValue: '17:30:00+00:00' },
+          // A non-zero offset: left as stored (a TODO, not a notice).
+          handover_at: { type: 'time', defaultValue: '08:00+08:00' },
+          label: { type: 'text', defaultValue: '09:00Z' },
+        },
+        actions: [{ name: 'reschedule', params: [{ name: 'at', type: 'time', defaultValue: '10:00-0000' }] }],
+      }],
+      objectExtensions: [{ extend: 'shift', fields: { breaks_at: { type: 'time', defaultValue: '12:00Z' } } }],
+      actions: [{ name: 'clock_in', params: [{ name: 'at', type: 'time', defaultValue: '07:45:00.500Z' }] }],
+      pages: [{
+        name: 'shift_board',
+        regions: [{
+          name: 'main',
+          components: [{
+            type: 'element:button',
+            properties: { action: { type: 'script', target: 'clockOut', params: [{ name: 'at', type: 'time', defaultValue: '18:00Z' }] } },
+          }],
+        }],
+      }],
+    },
+    after: {
+      objects: [{
+        name: 'shift',
+        fields: {
+          starts_at: { type: 'time', defaultValue: '09:00' },
+          ends_at: { type: 'time', defaultValue: '17:30:00' },
+          handover_at: { type: 'time', defaultValue: '08:00+08:00' },
+          label: { type: 'text', defaultValue: '09:00Z' },
+        },
+        actions: [{ name: 'reschedule', params: [{ name: 'at', type: 'time', defaultValue: '10:00' }] }],
+      }],
+      objectExtensions: [{ extend: 'shift', fields: { breaks_at: { type: 'time', defaultValue: '12:00' } } }],
+      actions: [{ name: 'clock_in', params: [{ name: 'at', type: 'time', defaultValue: '07:45:00.500' }] }],
+      pages: [{
+        name: 'shift_board',
+        regions: [{
+          name: 'main',
+          components: [{
+            type: 'element:button',
+            properties: { action: { type: 'script', target: 'clockOut', params: [{ name: 'at', type: 'time', defaultValue: '18:00' }] } },
+          }],
+        }],
+      }],
+    },
+    // One per dropped suffix: two object fields, the object-nested action, the
+    // extension field, the stack action and the inline action.
+    expectedNotices: 6,
+  },
+};
+
+/**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
- * key retired with its only declarer (protocol 18, #10926, ADR-0049).
+ * key retired with its only declarer (protocol 18, commit d173125fb, ADR-0049).
  *
  * The face is measured, not mirrored: each copy key exists because some
  * component in `ComponentPropsMap` declares it, and `submitLabel`'s only
  * declarer was `element:form` — retired whole by #9249 (`element-form-removed`
- * above). The maintainer ruled retire over re-anchor (#10926): the live form
+ * above). The maintainer ruled retire over re-anchor (2026-08-22, landed as commit d173125fb): the live form
  * surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`),
  * localizable at its own authoring site, so re-anchoring would have widened
  * the face for one word. The key, its `submit` alias and its
@@ -7305,12 +7607,15 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
   id: 'translation-component-submit-label-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'translation.pages.components.submitLabel',
   summary:
-    "translation component-copy key 'submitLabel' removed (#10926 — its only declared carrier, "
-    + "'element:form', retired whole in #9249, so the resolver no longer overlays it and a stored "
-    + "string was read by nothing; the live form surface's submit copy is 'object-form''s "
-    + "'submitText', localized at its own authoring site)",
+    "translation component-copy key 'submitLabel' removed (retired rather than re-anchored — its "
+    + "only declared carrier, 'element:form', retired whole because no renderer for it ever "
+    + 'shipped, so the resolver no longer '
+    + "overlays it and a stored string was read by nothing; the live form surface's submit copy "
+    + "is 'object-form''s 'submitText', localized at its own authoring site, and re-anchoring the "
+    + 'key there would only have added a second place to translate one word)',
   apply(stack, emit) {
     const stripFromData = (data: Record<string, unknown>, path: string): Record<string, unknown> => {
       const pages = data.pages;
@@ -7414,6 +7719,177 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
 };
 
 /**
+ * `element:text` `variant`'s two pre-convergence spellings become the heading
+ * levels they always rendered — `heading` → `h2`, `subheading` → `h3`
+ * (protocol 18, #21015: release 2 of objectui#7450's ruling B, maintainer
+ * 「其他同意」 2026-09-07, split across two releases 2026-09-09).
+ *
+ * Release 1 (#17108, 17.5.0) widened the enum to the nine values `ui:text`
+ * publishes — `h1`-`h6`, `body`, `caption`, `overline` — and refused nothing;
+ * 17.6.0 was the one full release in which both vocabularies parsed. This
+ * release refuses the two old spellings by name (`enumWithRetiredValues`,
+ * ui/component.zod.ts), and this entry carries the ruled migration hint as the
+ * mechanical edit.
+ *
+ * **The rewrite keeps the heading element, not the look.** Measured at the
+ * `.objectui-sha` pin `89cad75d55` (`renderers/basic/elements.tsx`), the
+ * `element:text` renderer drew `heading` as an h2 element and `subheading` as an
+ * h3 element, so the document outline a screen reader walks is unchanged. The
+ * size is not: `heading` drew `h3`'s style and `subheading` a medium-weight
+ * `text-lg`, while `h2` and `h3` draw their own, larger ones. The level IS the
+ * ruled meaning ("or pick the level you mean"), so the edit follows the
+ * element; the D3 entry `element-text-variant-heading-subheading-retired`
+ * carries the judgement the chain cannot make — whether this page wanted that
+ * level, or another.
+ *
+ * **One reach: every page component of type `element:text`**, through
+ * {@link mapPageComponents} — regions, named slots and container nesting, the
+ * positions the component-props gate judges. `variant` on any other component
+ * type is that component's own vocabulary and is never read here.
+ *
+ * `retiredFromLoadPath`: an author is refused at parse with the prescription
+ * rather than silently rewritten; stored rows replay it at rehydration
+ * (`applyConversionsToStoredItem`) and `os migrate meta` lists the edit for
+ * existing sources. Idempotent by construction: the rewrite's output is
+ * outside its own input set.
+ */
+const elementTextVariantHeadingLevels: MetadataConversion = {
+  id: 'element-text-variant-heading-levels',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'page.component.element:text.variant',
+  summary:
+    "element:text 'variant' spellings 'heading' → 'h2' and 'subheading' → 'h3' (the vocabulary converged "
+    + "on the nine values ui:text publishes; each old spelling already rendered that heading element, "
+    + 'so the outline is unchanged and the heading takes that level\'s style)',
+  apply(stack, emit) {
+    const VARIANT_REWRITE: Readonly<Record<string, string>> = { heading: 'h2', subheading: 'h3' };
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'element:text') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const variant = properties.variant;
+      if (typeof variant !== 'string' || !Object.prototype.hasOwnProperty.call(VARIANT_REWRITE, variant)) {
+        return component;
+      }
+      const to = VARIANT_REWRITE[variant]!;
+      emit({ from: variant, to, path: `${path}.properties.variant` });
+      return { ...component, properties: { ...properties, variant: to } };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'text_variant_levels',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:text', properties: { content: 'Overview', variant: 'heading', align: 'center' } },
+                { type: 'element:text', properties: { content: 'Details', variant: 'subheading' } },
+                // A published level and an absent `variant` ride through.
+                { type: 'element:text', properties: { content: 'Body copy', variant: 'h3' } },
+                { type: 'element:text', properties: { content: 'Default body' } },
+                // `variant` on another component type is that type's own
+                // vocabulary, untouched here.
+                { type: 'element:button', properties: { label: 'Go', variant: 'heading' } },
+                // Nested one container down.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Card',
+                    children: [{ type: 'element:text', properties: { content: 'In a card', variant: 'subheading' } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // A slotted page's named slot — the same component, the other authoring shape.
+        {
+          name: 'text_variant_levels_slotted',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [{ type: 'element:text', properties: { content: 'Title', variant: 'heading' } }],
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'text_variant_levels',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:text', properties: { content: 'Overview', variant: 'h2', align: 'center' } },
+                { type: 'element:text', properties: { content: 'Details', variant: 'h3' } },
+                { type: 'element:text', properties: { content: 'Body copy', variant: 'h3' } },
+                { type: 'element:text', properties: { content: 'Default body' } },
+                { type: 'element:button', properties: { label: 'Go', variant: 'heading' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Card',
+                    children: [{ type: 'element:text', properties: { content: 'In a card', variant: 'h3' } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'text_variant_levels_slotted',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [{ type: 'element:text', properties: { content: 'Title', variant: 'h2' } }],
+          },
+        },
+      ],
+    },
+    // One per rewritten `variant`: the region pair, the nested card child and
+    // the slotted one — the published level, the absent key and the
+    // other component type are untouched.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * The inline grid column's one mechanical respelling, shared by both of its
+ * carriers — a relationship field's `inlineColumns`
+ * ({@link fieldColumnListsCanonicalized}) and a form view's `subforms[].columns`
+ * ({@link formViewSubformColumnsCanonicalized}) — so the two conversions cannot
+ * drift on what they rewrite, as the two carriers cannot on what they accept
+ * (both reference `InlineGridColumnSchema`).
+ *
+ * `{ field: 'x' }` → `{ name: 'x' }`, every other key kept. An entry already
+ * carrying `name` is left alone — rewriting a live key on the strength of a
+ * stale one would guess; the parse refuses the mixed shape loudly instead.
+ * Returns the same array when nothing was respelled (copy-on-write).
+ */
+function respellInlineGridColumns(
+  columns: readonly unknown[],
+  path: string,
+  emit: (detail: ConversionApplication) => void,
+): readonly unknown[] {
+  let changed = false;
+  const next = columns.map((entry, i) => {
+    if (!isDict(entry) || typeof entry.field !== 'string' || 'name' in entry) return entry;
+    const renamed = renameKey(entry, 'field', 'name');
+    if (!renamed) return entry;
+    emit({ from: 'field', to: 'name', path: `${path}[${i}].name` });
+    changed = true;
+    return renamed;
+  });
+  return changed ? next : columns;
+}
+
+/**
  * `field.inlineColumns[]` / `field.relatedListColumns[]` — the mechanical half
  * of the #9227 strict-element narrowing (protocol 18).
  *
@@ -7446,26 +7922,21 @@ const fieldColumnListsCanonicalized: MetadataConversion = {
   id: 'field-column-lists-canonicalized',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface: 'field.inlineColumns[].field / field.relatedListColumns[] object entries',
   summary:
-    "inline-grid column entries respelled 'field' → 'name' (objectui#3951's name-keyed GridColumn) "
-    + 'and related-list column objects folded to their child field-name string (#9227 — both lists '
-    + 'were z.any(); a mis-keyed column published clean and rendered blank cells)',
+    "inline-grid column entries respelled 'field' → 'name' (the declared spelling wins, and the grid "
+    + "renderer now reads 'name' too) and related-list column objects folded to their child "
+    + 'field-name string (both lists were z.any(), so a mis-keyed column published clean and '
+    + 'rendered blank cells; inline columns now take a strict name-keyed shape and related-list '
+    + 'columns plain field names, so a mis-keyed column is refused at publish)',
   apply(stack, emit) {
     const convertFieldDef = (def: Dict, path: string): Dict => {
       let next: Dict = def;
       const inline = def.inlineColumns;
       if (Array.isArray(inline)) {
-        let changed = false;
-        const cols = inline.map((entry, i) => {
-          if (!isDict(entry) || typeof entry.field !== 'string' || 'name' in entry) return entry;
-          const renamed = renameKey(entry, 'field', 'name');
-          if (!renamed) return entry;
-          emit({ from: 'field', to: 'name', path: `${path}.inlineColumns[${i}].name` });
-          changed = true;
-          return renamed;
-        });
-        if (changed) next = { ...next, inlineColumns: cols };
+        const cols = respellInlineGridColumns(inline, `${path}.inlineColumns`, emit);
+        if (cols !== inline) next = { ...next, inlineColumns: cols };
       }
       const related = def.relatedListColumns;
       if (Array.isArray(related)) {
@@ -7580,12 +8051,13 @@ const metricFiltersRemoved: MetadataConversion = {
   id: 'metric-filters-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.1.0',
   surface: 'analyticsCubes[].measures.<metric>.filters',
   summary:
-    "cube metric key 'filters' removed (#10414, ADR-0049 — no strategy ever read it: the "
+    "cube metric key 'filters' removed (ADR-0049 — no strategy ever read it: the "
     + 'authored raw-SQL condition was parsed and dropped, and the query returned the '
-    + "unfiltered aggregate. Filter at query time with `where`, fold the condition into the "
-    + "metric's own `sql` expression, or use an ADR-0021 dataset measure's structured `filter`)",
+    + "unfiltered aggregate. Filter at query time with `where`, or use an ADR-0021 dataset "
+    + "measure's structured `filter`; a metric's own `sql` is a column reference)",
   apply(stack, emit) {
     return mapCollection(stack, 'analyticsCubes', (cube, path) => {
       const measures = cube.measures;
@@ -7611,7 +8083,6 @@ const metricFiltersRemoved: MetadataConversion = {
         measures: {
           // The card's measured shape: parsed, registered, returned unfiltered.
           closed_won_revenue: {
-            name: 'closed_won_revenue',
             label: 'Closed-Won Revenue',
             type: 'sum',
             sql: 'amount',
@@ -7620,10 +8091,10 @@ const metricFiltersRemoved: MetadataConversion = {
           // A metric WITHOUT the key rides through untouched — the strip
           // dispatches on key presence, and the copy-on-write contract keeps
           // the reference.
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+          order_count: { label: 'Orders', type: 'count', sql: 'id' },
         },
         dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7633,20 +8104,124 @@ const metricFiltersRemoved: MetadataConversion = {
         sql: 'orders',
         measures: {
           closed_won_revenue: {
-            name: 'closed_won_revenue',
             label: 'Closed-Won Revenue',
             type: 'sum',
             sql: 'amount',
           },
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+          order_count: { label: 'Orders', type: 'count', sql: 'id' },
         },
         dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
     // One notice: the single metric carrying `filters`.
     expectedNotices: 1,
+  },
+};
+
+/**
+ * `refreshKey` — a cube's refresh cadence (`every`) and data-change probe
+ * (`sql`), retired whole (#20637, ADR-0049 enforce-or-remove; maintainer ruling
+ * letter C).
+ *
+ * Nothing read either key, and there was nothing for them to key on: no
+ * analytics result is cached, so a declared cadence refreshed nothing. The
+ * tombstone on `CubeSchema` refuses the key at parse (see
+ * `CUBE_REFRESH_KEY_REMOVED` in `analytics.zod.ts`).
+ *
+ * ## Why a D2 strip
+ *
+ * The key was optional with no default, so a persisted cube carries it only
+ * where an author wrote it — as the showcase did. After the tombstone the boot
+ * door refuses such a cube (`ObjectStackDefinitionSchema` spreads
+ * `analyticsCubes: z.array(CubeSchema)`), and only the D2 table is replayed at
+ * the rehydration seams (`applyArtifactForwardConversions`,
+ * `applyConversionsToStoredItem`), so a built artifact or a stored
+ * `analytics_cube` row that carries the key loads only through this entry. The
+ * strip is lossless: a key that never had an effect has none to lose.
+ *
+ * The WHOLE block leaves, whatever it holds — `every`, `sql`, both, neither, or
+ * a value no longer an object: the tombstone refuses every value, so a partial
+ * strip would leave a cube that still cannot load. The emitted path NAMES the
+ * cube, as `cube-join-sql-and-relationship-removed` does: an index into the
+ * author's `analyticsCubes[]` is a position, not a name. The D3 record is the
+ * semantic entry `cube-refresh-key-retired`.
+ */
+const cubeRefreshKeyRemoved: MetadataConversion = {
+  id: 'cube-refresh-key-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'analyticsCubes[].refreshKey',
+  summary:
+    "cube key 'refreshKey' removed, with its 'every' and 'sql' (ADR-0049 enforce-or-remove — nothing read "
+    + 'it: no analytics result is cached, so a declared refresh cadence refreshed nothing. Delete the key; '
+    + 'a refresh cadence is declared again when a result cache exists)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      // Name the cube, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH cube lost the key.
+      const where = typeof cube.name === 'string' ? `${path}(${cube.name})` : path;
+      return stripKeys(cube, ['refreshKey'], emit, where);
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [
+        {
+          // The showcase's shape: a cadence alone.
+          name: 'delivery',
+          sql: 'task',
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+          refreshKey: { every: '1 hour' },
+        },
+        {
+          // A SECOND cube, so the notices have to distinguish two of them: both
+          // keys, the probe included.
+          name: 'billing',
+          sql: 'invoice',
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
+          refreshKey: { every: '1 day', sql: 'SELECT MAX(updated_at) FROM invoice' },
+        },
+        {
+          // Already canonical — rides through untouched. The fixture's own
+          // control: the strip dispatches on key presence, and copy-on-write
+          // keeps this reference.
+          name: 'accounts',
+          sql: 'account',
+          measures: { count: { label: 'Accounts', type: 'count', sql: 'id' } },
+          dimensions: { tier: { label: 'Tier', type: 'string', sql: 'tier' } },
+        },
+      ],
+    },
+    after: {
+      analyticsCubes: [
+        {
+          name: 'delivery',
+          sql: 'task',
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+        },
+        {
+          name: 'billing',
+          sql: 'invoice',
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
+        },
+        {
+          name: 'accounts',
+          sql: 'account',
+          measures: { count: { label: 'Accounts', type: 'count', sql: 'id' } },
+          dimensions: { tier: { label: 'Tier', type: 'string', sql: 'tier' } },
+        },
+      ],
+    },
+    // Two notices, one per STRIPPED KEY (the whole block is one key): `delivery`
+    // and `billing`, none for the canonical `accounts`.
+    expectedNotices: 2,
   },
 };
 
@@ -7671,9 +8246,10 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
   id: 'cube-sub-day-granularities-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].dimensions.<dim>.granularities',
   summary:
-    "cube dimension granularities 'second' / 'minute' / 'hour' removed (#17296, ADR-0049 — no "
+    "cube dimension granularities 'second' / 'minute' / 'hour' removed (ADR-0049 — no "
     + 'backend bucketed them and none could advertise them: `supports.queryDateGranularity` is a '
     + 'record over `DateGranularity`, which declares day, week, month, quarter, year. Offer the '
     + 'coarsest interval that still answers the question)',
@@ -7706,25 +8282,25 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
       analyticsCubes: [{
         name: 'events',
         sql: 'events',
-        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        measures: { count: { label: 'Events', type: 'count', sql: 'id' } },
         dimensions: {
           // Mixed list — the sub-day names go, the rest stays in its order.
           created_at: {
-            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            label: 'Created At', type: 'time', sql: 'created_at',
             granularities: ['hour', 'day', 'month'],
           },
           // Sub-day ONLY — the key goes rather than becoming an empty list.
           touched_at: {
-            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            label: 'Touched At', type: 'time', sql: 'touched_at',
             granularities: ['second', 'minute'],
           },
           // Neither retired member nor the key at all: both ride through, and
           // the copy-on-write contract keeps the references.
           closed_at: {
-            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            label: 'Closed At', type: 'time', sql: 'closed_at',
             granularities: ['day', 'week'],
           },
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7732,20 +8308,20 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
       analyticsCubes: [{
         name: 'events',
         sql: 'events',
-        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        measures: { count: { label: 'Events', type: 'count', sql: 'id' } },
         dimensions: {
           created_at: {
-            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            label: 'Created At', type: 'time', sql: 'created_at',
             granularities: ['day', 'month'],
           },
           touched_at: {
-            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            label: 'Touched At', type: 'time', sql: 'touched_at',
           },
           closed_at: {
-            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            label: 'Closed At', type: 'time', sql: 'closed_at',
             granularities: ['day', 'week'],
           },
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7803,9 +8379,10 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
   id: 'cube-join-sql-and-relationship-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].joins.<alias>.sql / analyticsCubes[].joins.<alias>.relationship',
   summary:
-    "cube join keys 'sql' and 'relationship' removed (#18612, ADR-0049 — neither was ever read: "
+    "cube join keys 'sql' and 'relationship' removed (ADR-0049 — neither was ever read: "
     + 'both strategies synthesise the ON clause as a foreign-key equality, so an authored join '
     + 'condition was REPLACED under a 200 and a declared cardinality changed no SQL. Keep '
     + '`joins.<alias>.name` alone; the record KEY is the foreign-key field on the base object)',
@@ -7835,8 +8412,8 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'delivery',
           sql: 'task',
-          measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: 'id' } },
-          dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
           joins: {
             // The persisted shape: `sql` was REQUIRED and `relationship` was
             // MATERIALIZED by the schema's own default, so this is what a cube
@@ -7856,9 +8433,9 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
           // A SECOND cube, so the notices have to distinguish two of them.
           name: 'billing',
           sql: 'invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
           dimensions: {
-            issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' },
+            issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' },
           },
           joins: {
             // Only the cardinality — a join whose `sql` an author already
@@ -7873,8 +8450,8 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'delivery',
           sql: 'task',
-          measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: 'id' } },
-          dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
           joins: {
             project: { name: 'showcase_project' },
             owner: { name: 'sys_user' },
@@ -7883,9 +8460,9 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'billing',
           sql: 'invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
           dimensions: {
-            issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' },
+            issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' },
           },
           joins: {
             customer: { name: 'crm_account' },
@@ -7897,6 +8474,141 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
     // `billing.customer` loses the materialized default, and `delivery.owner`
     // produces none.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `measures.<metric>.name` and `dimensions.<dimension>.name` — the inner name a
+ * cube member used to REQUIRE (#20300, ADR-0049 enforce-or-remove; triage
+ * verdict RETIRE by the maintainer's criterion: Cube.dev and LookML key a
+ * member by its declared name, with no second inner name that can disagree).
+ *
+ * `measures` and `dimensions` are RECORDS, and every consumer resolves a member
+ * by its KEY — `AnalyticsService#getMeta` and the in-memory driver publish
+ * `<cube>.<key>`, `NativeSQLStrategy#lookupMember` and the in-memory driver's
+ * `resolveMeasure` / `resolveDimension` index the bag by key. The inner `name`
+ * was a second copy of the identity that nothing read.
+ *
+ * ## Why a D2 strip, and why it strips a DISAGREEING value too
+ *
+ * The key was REQUIRED, so every cube artifact written from the old schema's
+ * parse output, and every stored `analytics_cube` row, carries it on every
+ * member — and after the tombstone the boot door refuses it
+ * (`ObjectStackDefinitionSchema` spreads `analyticsCubes: z.array(CubeSchema)`).
+ * Only the D2 table is replayed at the rehydration seams
+ * (`applyArtifactForwardConversions`, `applyConversionsToStoredItem`), so this
+ * entry is what keeps a deployed cube booting.
+ *
+ * A value EQUAL to its key is the lossless case the triage named. A value that
+ * DISAGREES is stripped as well, and that is not a guess about intent: the key
+ * already won everywhere, so the running system never saw the inner spelling,
+ * and deleting it changes no query and no discovery answer. Leaving it in place
+ * would change one — the cube would stop loading. What the strip cannot decide
+ * is which spelling the author MEANT, so the notice prints both (`from` carries
+ * the inner value, `to` names the key that stays) and the paired D3 entry
+ * `cube-member-inner-name-retired` addresses that judgement to the author.
+ *
+ * Members live one level below the collection item, in two records, so the
+ * walk runs per member — the `metric-filters-removed` shape, over both bags.
+ * The emitted path NAMES the cube, as `cube-join-sql-and-relationship-removed`
+ * does: an index into the author's `analyticsCubes[]` is a position, not a name.
+ */
+const cubeMemberInnerNameRemoved: MetadataConversion = {
+  id: 'cube-member-inner-name-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'analyticsCubes[].measures.<metric>.name / analyticsCubes[].dimensions.<dimension>.name',
+  summary:
+    "cube member key 'name' removed from measures and dimensions (ADR-0049 enforce-or-remove — nothing read it: "
+    + 'every consumer resolves a member by its record KEY, published and queried as `<cube>.<key>`. The '
+    + 'record key is the member\'s name; to rename a member, rename its key)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      const where = typeof cube.name === 'string' ? `${path}(${cube.name})` : path;
+      let next: Dict = cube;
+      for (const bag of ['measures', 'dimensions'] as const) {
+        const members = cube[bag];
+        if (!isDict(members)) continue;
+        let touched = false;
+        const nextMembers: Dict = { ...members };
+        for (const [key, member] of Object.entries(members)) {
+          if (!isDict(member) || !('name' in member)) continue;
+          const { name, ...rest } = member;
+          const at = `${where}.${bag}.${key}.name`;
+          emit(name === key
+            ? { from: 'name', to: '(removed)', path: at }
+            : { from: `name ${JSON.stringify(name)}`, to: `(removed; the record key "${key}" is the name)`, path: at });
+          nextMembers[key] = rest;
+          touched = true;
+        }
+        if (touched) next = { ...next, [bag]: nextMembers };
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [
+        {
+          name: 'orders',
+          sql: 'orders',
+          measures: {
+            // The persisted shape: `name` was REQUIRED, and every producer in
+            // the repo wrote it equal to the key it filed the member under.
+            count: { name: 'count', label: 'Orders', type: 'count', sql: '*' },
+            total_amount: { name: 'total_amount', label: 'Total', type: 'sum', sql: 'amount' },
+          },
+          dimensions: {
+            status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+          },
+        },
+        {
+          // A SECOND cube, so the notices have to distinguish two of them.
+          name: 'events',
+          sql: 'event',
+          measures: {
+            // DISAGREEING — the in-memory driver's own fixtures authored this
+            // shape and queried `events.eventCount`: the key won, the inner
+            // spelling was inert. Stripped, and the notice prints both.
+            eventCount: { name: 'event_count', label: 'Events', type: 'count', sql: '*' },
+          },
+          dimensions: {
+            // Already canonical — rides through untouched. The fixture's own
+            // control: the strip dispatches on key presence.
+            kind: { label: 'Kind', type: 'string', sql: 'kind' },
+          },
+        },
+      ],
+    },
+    after: {
+      analyticsCubes: [
+        {
+          name: 'orders',
+          sql: 'orders',
+          measures: {
+            count: { label: 'Orders', type: 'count', sql: '*' },
+            total_amount: { label: 'Total', type: 'sum', sql: 'amount' },
+          },
+          dimensions: {
+            status: { label: 'Status', type: 'string', sql: 'status' },
+          },
+        },
+        {
+          name: 'events',
+          sql: 'event',
+          measures: {
+            eventCount: { label: 'Events', type: 'count', sql: '*' },
+          },
+          dimensions: {
+            kind: { label: 'Kind', type: 'string', sql: 'kind' },
+          },
+        },
+      ],
+    },
+    // Four notices, one per STRIPPED KEY: three equal names on `orders`, one
+    // disagreeing name on `events`, and none for the canonical `events.kind`.
+    expectedNotices: 4,
   },
 };
 
@@ -7932,9 +8644,10 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
   id: 'record-highlights-field-icon-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.1.0',
   surface: 'page.component.record:highlights.fields[].icon',
   summary:
-    "record:highlights highlight-field key 'icon' removed (#10054, ADR-0049 — no render path: "
+    "record:highlights highlight-field key 'icon' removed (ADR-0049 — no render path: "
     + 'the highlight chip has no icon slot, the register hook carries field names only, and the '
     + 'Studio designer publishes the field list as plain strings, so an authored icon was '
     + 'accepted and drawn by nothing)',
@@ -8045,7 +8758,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
 };
 
 /**
- * `mapping.fieldMapping[].params` lookup keys removed (#10329, ADR-0049
+ * `mapping.fieldMapping[].params` lookup keys removed (commit 15d58dbf1, ADR-0049
  * enforce-or-remove — the sub-walk half of the 17.0.0 #4509 mapping cleanup).
  *
  * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
@@ -8055,7 +8768,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
  * `import-coerce.ts` off the TARGET FIELD's own metadata — never off these
  * keys. Implementing them (a second reference-resolution dialect on the import
  * path) is what the code comment in `packages/rest/src/import-mapping.ts`
- * declines to build, and the #10329 triage ruling confirms that posture.
+ * declines to build, and the triage ruling commit 15d58dbf1 landed confirms that posture.
  *
  * `autoCreate` was the one with teeth: it read as "create the referenced
  * record when nothing matches", and nothing was ever created — with or without
@@ -8077,12 +8790,14 @@ const mappingLookupParamsRemoved: MetadataConversion = {
   id: 'mapping-lookup-params-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'mapping.fieldMapping[].params.object / .fromField / .toField / .autoCreate',
   summary:
-    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (#10329, "
-    + 'ADR-0049 — the import path never read them: `lookup` copies the cell through and '
+    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (ADR-0049 — "
+    + 'the import path never read them: `lookup` copies the cell through and '
     + "reference resolution runs off the target field's own metadata. `autoCreate` never "
-    + 'created anything — an unresolved reference fails the row either way)',
+    + 'created anything — an unresolved reference fails the row either way. Implementing them '
+    + 'instead would have added a second reference-resolution dialect to the import path)',
   apply(stack, emit) {
     const RETIRED = ['object', 'fromField', 'toField', 'autoCreate'];
     return mapCollection(stack, 'mappings', (m, path) => {
@@ -8186,11 +8901,13 @@ const pageComponentResponsiveRemoved: MetadataConversion = {
   id: 'page-component-responsive-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'page.components[].responsive',
   summary:
-    "page component key 'responsive' removed (#11027 — no renderer ever applied per-component "
-    + 'breakpoint layout overrides, and the shared ResponsiveConfig shape leaves with its last '
-    + 'carrier; use responsiveStyles (ADR-0065) for breakpoint behaviour that IS applied)',
+    "page component key 'responsive' removed (ADR-0049 enforce-or-remove — no renderer ever "
+    + 'applied per-component breakpoint layout overrides, and the shared ResponsiveConfig shape '
+    + 'leaves with its last carrier; use responsiveStyles (ADR-0065) for breakpoint behaviour '
+    + 'that IS applied)',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) =>
       stripKeys(component, ['responsive'], emit, path));
@@ -8286,11 +9003,12 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
   id: 'object-grid-default-sort-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'page.component.object-grid.defaultSort',
   summary:
-    "object-grid component prop 'defaultSort' removed (#11805 — the legacy single-sort second "
-    + "spelling of 'sort', read only when 'sort' was absent; the pair moves to sort: [{ field, "
-    + 'order }], the array shape every read path honours)',
+    "object-grid component prop 'defaultSort' removed (retired under ADR-0049 enforce-or-remove "
+    + "as the legacy single-sort second spelling of 'sort', read only when 'sort' was absent; the "
+    + 'pair moves to sort: [{ field, order }], the array shape every read path honours)',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'object-grid') return component;
@@ -8447,12 +9165,199 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
 };
 
 /**
+ * `object-grid`'s legacy column-resize spelling leaves the contract (protocol
+ * 18, #21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A — `resizable`
+ * is canonical — with the startup rule of immediate retirement).
+ *
+ * `resizableColumns` was the second spelling of `resizable`, read only as
+ * `schema.resizable ?? schema.resizableColumns` — measured at the
+ * `.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`. One
+ * switch, two spellings, and a grid authoring both silently ignored this one.
+ *
+ * The conversion follows that precedence exactly, so it preserves what every
+ * grid has been doing. Where `resizable` is absent (or null — the `??` reads
+ * through it) the legacy value WAS the grid's setting, so it moves to
+ * `resizable` unchanged. Where `resizable` holds a value the legacy key was
+ * never read, so it strips as a lossless delete — whatever the two values
+ * were. Zero authored occurrences in either repository's corpora (the card's
+ * measurement, re-run at dispatch), so this entry exists for stored
+ * `sys_metadata` rows and for authors outside the repositories.
+ *
+ * objectui#6152 retires the renderer's `?? schema.resizableColumns` read on
+ * its own schedule, once a released spec carries this.
+ */
+const objectGridResizableColumnsRemoved: MetadataConversion = {
+  id: 'object-grid-resizable-columns-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'page.component.object-grid.resizableColumns',
+  summary:
+    "object-grid component prop 'resizableColumns' removed (the legacy second spelling of "
+    + "'resizable', read only when 'resizable' was absent, retires at once so 'resizable' is the one "
+    + "spelling; the value moves to 'resizable' when that is absent, and is deleted when it is present)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-grid') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('resizableColumns' in properties)) return component;
+      if (properties.resizable != null) {
+        // `resizable` holds a value: the legacy key was never read — a pure
+        // lossless delete, whatever it said.
+        const stripped = stripKeys(properties, ['resizableColumns'], emit, `${path}.properties`);
+        return { ...component, properties: stripped };
+      }
+      // `resizable` absent (or null, which `??` reads through): the legacy key
+      // WAS the setting. It moves, value unchanged.
+      const { resizableColumns, ...rest } = properties;
+      emit({ from: 'resizableColumns', to: 'resizable', path: `${path}.properties.resizable` });
+      return { ...component, properties: { ...rest, resizable: resizableColumns } };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'account_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The legacy key alone: it IS the setting, so it moves.
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_account', resizableColumns: false },
+                },
+                // Both spellings with DIFFERENT values: `resizable` wins (the
+                // renderer's own precedence), so the legacy key strips.
+                {
+                  type: 'object-grid',
+                  id: 'g2',
+                  properties: { objectName: 'crm_account', resizable: true, resizableColumns: false },
+                },
+                // The same key name on a component that is NOT an
+                // `object-grid` — not this entry's key. The strip is scoped
+                // by component type, never by key name.
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_account', resizableColumns: true },
+                },
+                // A grid without the key rides through untouched.
+                {
+                  type: 'object-grid',
+                  id: 'g3',
+                  properties: { objectName: 'crm_account', resizable: false },
+                },
+                // The nested position: a grid inside a card's `children`.
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-grid',
+                        id: 'g4',
+                        properties: { objectName: 'crm_contact', resizableColumns: true },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape: a grid authored into a slotted page.
+        {
+          name: 'account_desk_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-grid',
+              id: 'g5',
+              properties: { objectName: 'crm_account', resizableColumns: false },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'account_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_account', resizable: false },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g2',
+                  properties: { objectName: 'crm_account', resizable: true },
+                },
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_account', resizableColumns: true },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g3',
+                  properties: { objectName: 'crm_account', resizable: false },
+                },
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-grid',
+                        id: 'g4',
+                        properties: { objectName: 'crm_contact', resizable: true },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'account_desk_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-grid',
+              id: 'g5',
+              properties: { objectName: 'crm_account', resizable: false },
+            },
+          },
+        },
+      ],
+    },
+    // Four notices: three renames (g1, the nested g4, the slotted g5) and one
+    // strip (g2, where `resizable` already won). The kanban sibling and the
+    // grid without the key emit none.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * `object-kanban`'s per-column quick-add switch leaves the contract (protocol
  * 18, #17260, ADR-0049 enforce-or-remove; the spec half of the objectui#8285
  * director-seat ruling, decision batch #91, 2026-09-08 — ruled option B,
- * `quickAdd` is retired from the board and stays only on the `kanban-ui`
- * block, where a React host can supply the runtime function the control
- * needs).
+ * `quickAdd` is retired from the board. The ruling kept the control on the
+ * `kanban-ui` block, where a React host can supply the runtime function it
+ * needs; objectui has since retired that block (objectui#8257), so
+ * `object-kanban` offers no quick-add control and no block a document can
+ * name offers one either).
  *
  * **A pure lossless delete.** The key never had an effect to preserve.
  * Measured at the `.objectui-sha` pin (`53ded82bf`): the board FORWARDS it —
@@ -8466,12 +9371,11 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
  * `onCardClick` in the same file). So the gate was permanently false and
  * deleting the key preserves observed behaviour exactly.
  *
- * ⚠️ Scoped by component `type`, never by key name. `quickAdd` is LIVE on the
- * `kanban-ui` block — the same renderer chain, reached by a React host that
- * hands in `onQuickAdd` — and the ruling keeps it there deliberately. That
- * block is objectui-side and is not a component type this spec declares, so no
- * stack this walk reaches can carry it; the type scoping is what keeps the
- * strip from generalising into a name-keyed one if it ever is declared. The
+ * ⚠️ Scoped by component `type`, never by key name, so the strip cannot
+ * generalise into a name-keyed one: a node of any other type that authors the
+ * same key is left alone. The `kanban-ui` block the ruling kept the control on
+ * is retired (objectui#8257) and was never a component type this spec
+ * declares, so no stack this walk reaches is expected to carry it. The
  * fixture's non-carrier control is an `object-grid` authoring the same key
  * name.
  *
@@ -8489,11 +9393,13 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
   id: 'object-kanban-quick-add-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'page.component.object-kanban.quickAdd',
   summary:
-    "object-kanban component prop 'quickAdd' removed (#17260 — the affordance is gated on a "
+    "object-kanban component prop 'quickAdd' removed (retired from the board under ADR-0049 "
+    + 'enforce-or-remove — the affordance is gated on a '
     + "host-supplied 'onQuickAdd' function no producer puts on an object-kanban node, so the key "
-    + "was accepted and dropped; the quick-add control stays on the React-host 'kanban-ui' block)",
+    + "was accepted and dropped; delete the key — object-kanban offers no quick-add control)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'object-kanban') return component;
@@ -8521,7 +9427,7 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
                 // ⚠️ The same key name on a component that is NOT an
                 // `object-kanban` — not this entry's key. Untouched: the strip
                 // is scoped by component type, never by key name, which is what
-                // keeps the LIVE `kanban-ui` spelling out of its reach.
+                // keeps this key out of every other component type's reach.
                 {
                   type: 'object-grid',
                   id: 'g1',
@@ -8630,6 +9536,215 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
 };
 
 /**
+ * `page:header.breadcrumb` leaves the contract (protocol 18, #20758 —
+ * ADR-0049 enforce-or-remove, the spec half of objectui#11166; the triage
+ * ruling on the card: 「没有 ⇒ 退役」).
+ *
+ * The key switched a trail that never existed. objectui's
+ * `PageHeaderRenderer` (`containers.tsx`) reads it and, unless it is `false`,
+ * draws an EMPTY `div[data-page-breadcrumb-slot]` in both header layouts;
+ * nothing fills the slot. The console draws the navigation trail once, in the
+ * shell (`@object-ui/app-shell` `AppHeader`, inside `/apps/:appName/*`), so the
+ * retirement takes the key away rather than building a second trail. The
+ * tombstone on `PageHeaderProps` refuses it for a live author (advisory, via
+ * the props lint: `PageComponentSchema.properties` is an open bag).
+ *
+ * **A delete of both values.** `true` and `false` go alike: neither ever drew
+ * a trail, so there is no value to preserve and no rewrite target. The one
+ * thing either value changed is the empty slot itself — present for `true`
+ * (and for absence), gone for `false` — which is spacing, not content, and
+ * leaves with the slot on the objectui half. A stored page that said `false`
+ * reads as absent after this strip, so it draws the empty slot again until
+ * that half lands; the D3 entry `page-header-breadcrumb-retired` records it.
+ *
+ * Who writes the key, so who this entry is for: objectui's Studio page-block
+ * inspector publishes a `page:header` "Show breadcrumb" boolean
+ * (`previews/block-config.ts`), so stored `sys_metadata` pages can carry
+ * either value. No example app, skill or doc in this repo authors it.
+ *
+ * ⚠️ Scoped by component `type`, never by key name, as
+ * {@link pageStructureInertKeysRemoved} scoped `icon`: `breadcrumb` is an
+ * ordinary word for an open-namespace component's own prop, and the kebab
+ * `page-header` spelling is objectui's legacy registration, not a key this
+ * spec declares. `nav:breadcrumb` — a component TYPE, not this key — is
+ * untouched: the Studio palette still offers it (`previews/block-types.ts`),
+ * so it has a producer and stays.
+ */
+const pageHeaderBreadcrumbRemoved: MetadataConversion = {
+  id: 'page-header-breadcrumb-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'page.component.page:header.breadcrumb',
+  summary:
+    "page:header prop 'breadcrumb' removed, whether 'true' or 'false' (no renderer ever drew a trail for "
+    + 'it: objectui drew an empty slot and nothing filled it, and the app shell\'s header draws the '
+    + 'navigation trail)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'page:header') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('breadcrumb' in properties)) return component;
+      const stripped = stripKeys(properties, ['breadcrumb'], emit, `${path}.properties`);
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'lead_record',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                // The default value, written out: the Studio inspector's
+                // "Show breadcrumb" switch left on.
+                { type: 'page:header', properties: { title: 'Lead', breadcrumb: true } },
+                // The switch turned off, on a non-record header.
+                { type: 'page:header', properties: { title: 'Pipeline', recordChrome: false, breadcrumb: false } },
+                // A header WITHOUT the key rides through untouched — the strip
+                // dispatches on key presence, and copy-on-write keeps the reference.
+                { type: 'page:header', properties: { title: 'Settings', recordChrome: false } },
+                // ⚠️ The same key name on an open-namespace component that is
+                // NOT a page header — its own prop, not this entry's key.
+                { type: 'acme:trail_banner', properties: { breadcrumb: true } },
+                // The nested position (#6775): a header inside a card's
+                // `children` is still a page header.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Summary',
+                    children: [{ type: 'page:header', properties: { title: 'Inner', breadcrumb: true } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a header authored into a slotted page.
+        {
+          name: 'lead_record_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Lead', breadcrumb: false } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'lead_record',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                { type: 'page:header', properties: { title: 'Lead' } },
+                { type: 'page:header', properties: { title: 'Pipeline', recordChrome: false } },
+                { type: 'page:header', properties: { title: 'Settings', recordChrome: false } },
+                { type: 'acme:trail_banner', properties: { breadcrumb: true } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Summary',
+                    children: [{ type: 'page:header', properties: { title: 'Inner' } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'lead_record_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Lead' } },
+          },
+        },
+      ],
+    },
+    // Four notices, one per stripped key: the two region-level headers, the
+    // nested one and the slotted one. The header without the key and the
+    // open-namespace component emit none.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * `page.requires` removed from the page kinds whose source is never compiled at
+ * save — `react`, `full` and `slotted`, a page that omits `kind` included
+ * (protocol 18, #21459; ruling record 5964312254, letter A).
+ *
+ * `requires` is the plugin-namespace list ADR-0080 §5 derives from an html
+ * page's source at save. `PageSchema` used to admit it on every kind, yet on
+ * these three nothing derives it: the save door compiles only `html` / `jsx`
+ * (`COMPILED_PAGE_KINDS`), the Studio page editor drops the key on every save,
+ * and its one reader there was the load report's warning. The parse now refuses
+ * it on these kinds (`checkPageRequiresKind` in `ui/page.zod.ts`).
+ *
+ * **A strip — a pure lossless delete.** On these kinds the list never derived,
+ * gated or rendered anything, so deleting it changes nothing a page does; it is
+ * what a Studio save of the same page already does. The paired D3 entry is
+ * `page-requires-non-compiled-kind-refused`.
+ *
+ * Scoped by `kind`, exactly as the refusal is: the kinds stripped are
+ * `PageSchema`'s kind vocabulary minus `COMPILED_PAGE_KINDS` (pinned in
+ * `ui/page-requires-compiled-kinds.test.ts`), an absent `kind` reading as the
+ * spec default `full`. An `html` / `jsx` page keeps its list — the save door
+ * judges it — and an unknown `kind` is left as stored: that refusal is the kind
+ * enum's, not this entry's.
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}).
+ * `requires` is a top-level `PageSchema` key with no nested spelling.
+ */
+const pageRequiresNonCompiledKindRemoved: MetadataConversion = {
+  id: 'page-requires-non-compiled-kind-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'page.requires',
+  summary:
+    "page key 'requires' removed from react, full and slotted pages (a page with no kind is "
+    + 'full) — the plugin-namespace list is derived from the source at save only on html / jsx '
+    + 'pages; on the other kinds nothing derived or enforced it, and the Studio page editor drops it',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.requires === undefined) return page;
+      const kind = page.kind ?? 'full';
+      if (kind !== 'full' && kind !== 'slotted' && kind !== 'react') return page;
+      return stripKeys(page, ['requires'], emit, path);
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        // A react page whose author listed the plugins its source uses.
+        { name: 'crm_workbench', kind: 'react', source: '<Workbench />', requires: ['ui'] },
+        // A slotted record page, and a page with no kind (the `full` default).
+        { name: 'lead_record', type: 'record', kind: 'slotted', requires: ['plugin-kanban'] },
+        { name: 'team_home', label: 'Team Home', requires: [] },
+        // An html page keeps its list: the save door derives and judges it.
+        { name: 'command_center', kind: 'html', source: '<flex />', requires: ['ui'] },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'crm_workbench', kind: 'react', source: '<Workbench />' },
+        { name: 'lead_record', type: 'record', kind: 'slotted' },
+        { name: 'team_home', label: 'Team Home' },
+        { name: 'command_center', kind: 'html', source: '<flex />', requires: ['ui'] },
+      ],
+    },
+    // One per stripped key: the react, slotted and kind-less pages. The html
+    // page emits none.
+    expectedNotices: 3,
+  },
+};
+
+/**
  * Object-permission lifecycle bits `allowRestore` / `allowPurge` removed
  * (protocol 18, #12497 — ADR-0049 enforce-or-remove, maintainer ruling
  * 2026-08-26 accepting #1883's recommendation B).
@@ -8663,12 +9778,14 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
   id: 'permission-allow-restore-purge-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'permission.objects.<object>.allowRestore / permission.objects.<object>.allowPurge',
   summary:
-    "object-permission keys 'allowRestore' and 'allowPurge' removed (#12497, ADR-0049 — the "
+    "object-permission keys 'allowRestore' and 'allowPurge' removed (ADR-0049 — the "
     + '`restore`/`purge` operations they claimed to gate have never existed, so granting the '
     + 'bits delivered nothing; dispatched destructive lifecycle verbs stay denied fail-closed. '
-    + 'The keys return with the M2 lifecycle initiative, #1883)',
+    + 'The keys return with the M2 lifecycle initiative, which builds undelete and purge together '
+    + 'with the permission bits that gate them)',
   apply(stack, emit) {
     return mapCollection(stack, 'permissions', (ps, path) => {
       const objects = (ps as { objects?: unknown }).objects;
@@ -8730,7 +9847,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
 };
 
 /**
- * [#12868] The per-option `default` key leaves the FORM-VIEW options
+ * [commit c459da6bc] The per-option `default` key leaves the FORM-VIEW options
  * vocabulary (protocol 18; maintainer-ruled narrowing 2026-08-28 on the
  * objectui#6263 analysis, disposition 甲).
  *
@@ -8748,7 +9865,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
  *
  * Walks the same payloads as `view-visibleOn-to-visibleWhen` — every FORM
  * payload {@link mapViewPayloads} reaches, in all three persisted spellings
- * (#13031) — through `sections[]`/`groups[]` and top-level
+ * (commit b799ac553) — through `sections[]`/`groups[]` and top-level
  * `fields[]`, recursing into nested `fields` (composite/repeater/record rows
  * carry their own option lists). Only the exact key `default` is stripped —
  * the alias spellings `isDefault`/`selected` were never accepted on this
@@ -8759,6 +9876,7 @@ const formViewOptionDefaultRemoved: MetadataConversion = {
   id: 'form-view-option-default-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'view.form.sections[].fields[].options[].default',
   summary:
     "form-view per-option 'default' removed from the FormView vocabulary (ADR-0049 "
@@ -8979,11 +10097,13 @@ const fieldReferenceToAlias: MetadataConversion = {
   id: 'field-reference-to-alias',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'field.reference_to',
   summary:
     "field key 'reference_to' → 'reference' (the legacy objectql runtime dialect for a "
-    + "lookup/master_detail target; stored rows must serve the canonical spelling before "
-    + "objectui deletes its `reference ?? reference_to` fallback arms — ui#6837 half 1)",
+    + "lookup/master_detail target; normalising to the protocol is the server's job and the "
+    + 'renderer only executes the protocol, so stored rows must serve the canonical spelling '
+    + 'before objectui deletes its `reference ?? reference_to` fallback arms)',
   apply(stack, emit) {
     const withObjects = mapObjectFieldsKey(stack, 'objects', 'reference_to', 'reference', emit);
     return mapObjectFieldsKey(withObjects, 'objectExtensions', 'reference_to', 'reference', emit);
@@ -9037,7 +10157,7 @@ const fieldReferenceToAlias: MetadataConversion = {
 };
 
 /**
- * `connector.errorMapping` removed (protocol 18, #14676 — ADR-0049
+ * `connector.errorMapping` removed (protocol 18, commit 13c48c2a5 — ADR-0049
  * enforce-or-remove; triage ruling 2026-09-02, route: removal via the
  * `spec-property-retirement` playbook; the split condition — a downstream
  * consumer in objectui or a customer stack — measured empty at objectui
@@ -9079,11 +10199,13 @@ const connectorErrorMappingRemoved: MetadataConversion = {
   id: 'connector-error-mapping-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'connector.errorMapping',
   summary:
-    "connector key 'errorMapping' removed (#14676, ADR-0049 — no engine ever mapped an external "
+    "connector key 'errorMapping' removed (ADR-0049 — no engine ever mapped an external "
     + 'error through the rules, so the eleven nested keys configured nothing, and the rule-level '
-    + '`userMessage` shared its spelling with the live API-error channel while never being shown. '
+    + '`userMessage` shared its spelling with the live API-error channel while never being shown; '
+    + 'deleting the block resolves that collision without a rename. '
     + 'The whole ErrorMappingConfig / ErrorMappingRule shape and the ConnectorErrorCategory enum '
     + 'went with it)',
   apply(stack, emit) {
@@ -9181,6 +10303,7 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
   id: 'connector-connection-timeout-ms-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'connector.connectionTimeoutMs',
   summary:
     "connector key 'connectionTimeoutMs' removed (ADR-0049 — the platform never applied it as a "
@@ -9198,7 +10321,8 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
       connectors: [
         // Minimal by the §3 disjointness contract: the retired key and nothing
         // else this major's other `connectors[]` entries also walk
-        // (`errorMapping`, `health.circuitBreaker.monitoringWindow`,
+        // (`errorMapping`, `health` / `status` / `webhooks` — `health` once as
+        // `health.circuitBreaker.monitoringWindow` — and `triggers`, once as
         // `triggers[].interval`), so every notice here is attributable to this id.
         { name: 'ledger_api', label: 'Ledger API', type: 'api', connectionTimeoutMs: 15000 },
         // A connector that never authored the key keeps its identity — the
@@ -9214,6 +10338,163 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
     },
     // One notice: the one connector carrying the key.
     expectedNotices: 1,
+  },
+};
+
+/**
+ * `subforms[].columns[].field` → `name` on every form view — the mechanical
+ * half of the #20901 closure of the form-view carrier (protocol 18).
+ *
+ * `FormViewSchema.subforms[].columns` was `z.array(z.any())` through 17.5.0 and
+ * now references `InlineGridColumnSchema`, whose alias table refuses `field`
+ * with a prescription naming `name`. That is the break a relationship field's
+ * `inlineColumns` took in #9227, and the respelling is the same one: it runs
+ * through {@link respellInlineGridColumns}, shared with
+ * {@link fieldColumnListsCanonicalized}. ADR-0087's pre-GA policy owes a
+ * lossless break a `retiredFromLoadPath` chain step in the same release.
+ *
+ * **Its own entry, not a wider walk in `field-column-lists-canonicalized`,**
+ * because `retiredAfter` is one fact per entry (ADR-0087, amended 2026-09-30):
+ * that entry's carriers stopped accepting `field` after 17.0.0, and the census
+ * pins that published value, while this carrier accepted it through 17.5.0. The
+ * artifact-ingestion door opens its window per entry by `retiredAfter`, so under
+ * the older stamp an artifact whose declared floor is 17.5.0 would meet the
+ * refusal instead of this rewrite on a runtime still labelled 17.5.0.
+ *
+ * **Reach: every FORM payload.** {@link mapViewPayloads} reaches `form`,
+ * `formViews.*`, a form view item's `config` and a flattened form overlay — the
+ * stored-row seam wraps a `view` row as `{ views: [row] }` in any of those
+ * spellings — and the assembled-manifest `viewItems` channel
+ * ({@link ASSEMBLED_VIEW_ITEMS_KEY}) carries the last two. A list payload is
+ * never judged. `FormViewSchema` is the only schema that declares `subforms`.
+ *
+ * `retiredFromLoadPath`: the parse refuses `field` with the prescription, so a
+ * live author is taught rather than rewritten. The entry exists so stored rows
+ * and assembled artifacts replay clean, and so `os migrate meta` lists the edit.
+ * Idempotent by construction: the rewrite leaves no `field` on the entry.
+ */
+const formViewSubformColumnsCanonicalized: MetadataConversion = {
+  id: 'form-view-subform-columns-canonicalized',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'view.form.subforms[].columns[].field / view.formViews.<key>.subforms[].columns[].field',
+  summary:
+    "form-view subform grid column entries respelled 'field' → 'name', the grid's column identity "
+    + '(the carrier accepted any value until it took the inline grid column contract; a '
+    + "relationship field's inlineColumns get the same respelling from field-column-lists-canonicalized)",
+  apply(stack, emit) {
+    const respellSubforms = (form: Dict, path: string): Dict => {
+      const subforms = form.subforms;
+      if (!Array.isArray(subforms)) return form;
+      let changed = false;
+      const next = subforms.map((subform, j) => {
+        if (!isDict(subform) || !Array.isArray(subform.columns)) return subform;
+        const columns = respellInlineGridColumns(subform.columns, `${path}.subforms[${j}].columns`, emit);
+        if (columns === subform.columns) return subform;
+        changed = true;
+        return { ...subform, columns };
+      });
+      return changed ? { ...form, subforms: next } : form;
+    };
+    const withViews = mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'form' ? respellSubforms(payload, path) : payload);
+    return mapCollection(withViews, ASSEMBLED_VIEW_ITEMS_KEY, (item, path) => {
+      if (item.viewKind !== 'form') return item;
+      if (isDict(item.config)) {
+        const config = respellSubforms(item.config, `${path}.config`);
+        return config === item.config ? item : { ...item, config };
+      }
+      // A flattened form overlay — the body IS the payload. A present but
+      // malformed `config` is neither shape and is left for the parse.
+      return item.config === undefined ? respellSubforms(item, path) : item;
+    });
+  },
+  fixture: {
+    before: {
+      views: [
+        {
+          object: 'crm_invoice',
+          // A container: the default form and a named form view.
+          form: {
+            type: 'simple',
+            subforms: [{
+              childObject: 'crm_invoice_line',
+              columns: [
+                // The `field` spelling, every other key kept.
+                { field: 'product' },
+                { field: 'quantity', label: 'Qty' },
+                // Already name-keyed — untouched.
+                { name: 'unit_price' },
+                // Both keys — untouched: which column was meant is the
+                // author's call, and the parse names both keys.
+                { field: 'amount', name: 'total' },
+              ],
+            }],
+          },
+          formViews: {
+            quick: { type: 'simple', subforms: [{ childObject: 'crm_invoice_line', columns: [{ field: 'product' }] }] },
+          },
+        },
+      ],
+      viewItems: [
+        // An assembled form view item record, and a flattened form overlay.
+        {
+          name: 'crm_invoice.entry',
+          object: 'crm_invoice',
+          viewKind: 'form',
+          config: { type: 'simple', subforms: [{ childObject: 'crm_invoice_line', columns: [{ field: 'product' }] }] },
+        },
+        {
+          name: 'crm_invoice.edit',
+          object: 'crm_invoice',
+          viewKind: 'form',
+          type: 'simple',
+          subforms: [{ childObject: 'crm_invoice_line', columns: [{ field: 'product' }] }],
+        },
+      ],
+    },
+    after: {
+      views: [
+        {
+          object: 'crm_invoice',
+          form: {
+            type: 'simple',
+            subforms: [{
+              childObject: 'crm_invoice_line',
+              columns: [
+                { name: 'product' },
+                { name: 'quantity', label: 'Qty' },
+                { name: 'unit_price' },
+                { field: 'amount', name: 'total' },
+              ],
+            }],
+          },
+          formViews: {
+            quick: { type: 'simple', subforms: [{ childObject: 'crm_invoice_line', columns: [{ name: 'product' }] }] },
+          },
+        },
+      ],
+      viewItems: [
+        {
+          name: 'crm_invoice.entry',
+          object: 'crm_invoice',
+          viewKind: 'form',
+          config: { type: 'simple', subforms: [{ childObject: 'crm_invoice_line', columns: [{ name: 'product' }] }] },
+        },
+        {
+          name: 'crm_invoice.edit',
+          object: 'crm_invoice',
+          viewKind: 'form',
+          type: 'simple',
+          subforms: [{ childObject: 'crm_invoice_line', columns: [{ name: 'product' }] }],
+        },
+      ],
+    },
+    // One per respelled column: two in the container's `form`, one in its named
+    // form view, one in the assembled record and one in the assembled overlay.
+    // The name-keyed and the two-key entries emit none.
+    expectedNotices: 5,
   },
 };
 
@@ -9238,8 +10519,9 @@ const hookTimeoutToTimeoutMs: MetadataConversion = {
   id: 'hook-timeout-to-timeout-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'hook.timeout',
-  summary: "hook key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  summary: "hook key 'timeout' → 'timeoutMs' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapCollection(stack, 'hooks', (hook, path) => {
       const renamed = renameKey(hook, 'timeout', 'timeoutMs');
@@ -9278,8 +10560,9 @@ const jobTimeoutToTimeoutMs: MetadataConversion = {
   id: 'job-timeout-to-timeout-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'job.timeout',
-  summary: "job key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  summary: "job key 'timeout' → 'timeoutMs' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapCollection(stack, 'jobs', (job, path) => {
       const renamed = renameKey(job, 'timeout', 'timeoutMs');
@@ -9310,6 +10593,556 @@ const jobTimeoutToTimeoutMs: MetadataConversion = {
 };
 
 /**
+ * The two page blocks that hand their props to objectui's action runner as an
+ * action — the rows whose `endpoint` {@link actionBlockEndpointToTarget}
+ * rewrites.
+ */
+const ACTION_RUNNER_BLOCK_TYPES = new Set(['action:button', 'action:icon']);
+
+/**
+ * `action:button` / `action:icon` component prop `endpoint` → `target`
+ * (protocol 18, #21005).
+ *
+ * One concept — the endpoint an `api` action calls — with two verdicts in one
+ * release. `ActionSchema` has always refused `endpoint` with the rename
+ * "Did you mean `endpoint` → `target`?", while the two `ComponentPropsMap`
+ * rows declared it as a key of their own. The renderers forward it, and
+ * objectui's console registers its own `api` handler, which reads
+ * `action.target || action.name` and never `endpoint` — so an `api` button
+ * authored with `endpoint` passed the props gate and called nothing. The rows
+ * now refuse it with the same rename, read from the one table both files share
+ * (`ui/action-target-aliases.ts`); this entry carries the sources and stored
+ * rows that wrote it.
+ *
+ * **Scoped to `actionType: 'api'`, deliberately** — the one meaning the key
+ * declared ("API endpoint for an `api` action"). There the rename is lossless
+ * for every host: the console's handler reads `target`, and the runner's
+ * built-in `api` executor resolves `api || endpoint || target`. Anywhere else
+ * it is not, so the site is left as stored and reported as a TODO
+ * (`context.reportTodo`, ADR-0087 D3's model):
+ *
+ * - no `actionType` — the runner's legacy fallback dispatches an `endpoint`
+ *   with no type as an API call, and a `target` with no type as nothing, so a
+ *   bare rename would leave the button with no executor;
+ * - another `actionType` — that executor reads `target` as its URL, script or
+ *   flow, and never read `endpoint`, so moving the value there would make a
+ *   dead key decide what the action does;
+ * - a non-string `endpoint` — not the string the row declared, and `target`
+ *   takes a string only.
+ *
+ * Precedence is {@link renameKey}'s house rule (#4923): an already-canonical
+ * `target` WINS — a redundant twin is dropped, a DISAGREEING pair is left for
+ * the author to reconcile (and reported as a TODO, since the strict row
+ * refuses `endpoint` there). The reach is every position `mapPageComponents`
+ * visits — regions, slots, nested containers — which is the props gate's own
+ * reach. A member of `action:group` / `action:menu` is an action object, not a
+ * page component, and is not this entry's surface.
+ *
+ * **Retired from the load path from day one** — the `field-reference-to-alias`
+ * shape: the authoring door keeps teaching with the rows' rename, and this
+ * entry serves the two paths that rewrite EXISTING data, stored-row
+ * rehydration and `os migrate meta`. Census at landing (objectstack
+ * `2821e9f15b`, objectui `5262f7dd`): zero producers author `endpoint` on
+ * either block.
+ */
+const actionBlockEndpointToTarget: MetadataConversion = {
+  id: 'action-block-endpoint-to-target',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'page.component.action:button.endpoint / page.component.action:icon.endpoint',
+  summary:
+    "action:button / action:icon component prop 'endpoint' → 'target' on an `api` action — the "
+    + "rename `ActionSchema` already prescribes; the console's `api` handler reads `target` only. "
+    + 'An `endpoint` on a block with no `actionType` or another one is left as stored and reported '
+    + 'as a TODO',
+  apply(stack, emit, context) {
+    return mapPageComponents(stack, (component, path) => {
+      const type = component.type;
+      if (typeof type !== 'string' || !ACTION_RUNNER_BLOCK_TYPES.has(type)) return component;
+      const properties = component.properties;
+      if (!isDict(properties) || properties.endpoint == null) return component;
+      const endpoint = properties.endpoint;
+      const at = `${path}.properties.endpoint`;
+      const todo = (reason: string): Dict => {
+        context?.reportTodo?.({
+          path: at,
+          from: JSON.stringify(endpoint),
+          reason: `On ${describeBlock(component)}, ${reason}`,
+        });
+        return component;
+      };
+      if (typeof endpoint !== 'string') {
+        return todo('`endpoint` is not a string, so it is not the URL `target` takes. Rewrite it '
+          + 'by hand as the `target` string the `api` action should call.');
+      }
+      const actionType = properties.actionType;
+      if (actionType === undefined) {
+        return todo('there is no `actionType`, and the action runner calls an `endpoint` with no '
+          + 'type through its legacy API fallback, while a `target` with no type runs nothing. '
+          + "Set `actionType: 'api'` and rename `endpoint` to `target`.");
+      }
+      if (actionType !== 'api') {
+        return todo(`\`actionType\` is ${JSON.stringify(actionType)}, whose executor reads `
+          + '`target` and never read `endpoint`. Delete `endpoint`, or move its value to `target` '
+          + 'if that is what the action should run.');
+      }
+      const renamed = renameKey(properties, 'endpoint', 'target');
+      if (!renamed) {
+        return todo('`target` and `endpoint` name different endpoints; the console calls `target`. '
+          + 'Keep the one the button should call, as `target`, and delete `endpoint`.');
+      }
+      emit({ from: 'endpoint', to: 'target', path: `${path}.properties.target` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'ops_console',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The measured defect: an `api` button written with `endpoint`.
+                {
+                  type: 'action:button',
+                  properties: { label: 'Sync now', actionType: 'api', endpoint: '/api/v1/ops/sync', method: 'POST' },
+                },
+                // Both spellings, SAME endpoint: the redundant twin goes (#4923).
+                {
+                  type: 'action:icon',
+                  properties: { icon: 'refresh-cw', actionType: 'api', target: '/api/v1/ops/refresh', endpoint: '/api/v1/ops/refresh' },
+                },
+                // Both spellings, DIFFERENT endpoints: kept for the author.
+                {
+                  type: 'action:button',
+                  properties: { label: 'Both', actionType: 'api', target: '/api/v1/a', endpoint: '/api/v1/b' },
+                },
+                // No `actionType`: no lossless rewrite (the runner's legacy fallback) — kept.
+                { type: 'action:button', properties: { label: 'Legacy', endpoint: '/api/v1/legacy' } },
+                // Canonical already: untouched.
+                { type: 'action:icon', properties: { icon: 'play', actionType: 'api', target: '/api/v1/run' } },
+                // `endpoint` on another block is not this entry's business.
+                { type: 'element:text', properties: { endpoint: '/not/an/action' } },
+                // Nested one container down, where a toolbar button usually sits.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Integrations',
+                    children: [
+                      { type: 'action:icon', properties: { icon: 'upload', actionType: 'api', endpoint: '/api/v1/ops/push' } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // A slotted record page's named slot.
+        {
+          name: 'ops_job_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'action:button', properties: { label: 'Retry', actionType: 'api', endpoint: '/api/v1/ops/retry' } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'ops_console',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'action:button',
+                  properties: { label: 'Sync now', actionType: 'api', target: '/api/v1/ops/sync', method: 'POST' },
+                },
+                {
+                  type: 'action:icon',
+                  properties: { icon: 'refresh-cw', actionType: 'api', target: '/api/v1/ops/refresh' },
+                },
+                {
+                  type: 'action:button',
+                  properties: { label: 'Both', actionType: 'api', target: '/api/v1/a', endpoint: '/api/v1/b' },
+                },
+                { type: 'action:button', properties: { label: 'Legacy', endpoint: '/api/v1/legacy' } },
+                { type: 'action:icon', properties: { icon: 'play', actionType: 'api', target: '/api/v1/run' } },
+                { type: 'element:text', properties: { endpoint: '/not/an/action' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Integrations',
+                    children: [
+                      { type: 'action:icon', properties: { icon: 'upload', actionType: 'api', target: '/api/v1/ops/push' } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'ops_job_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'action:button', properties: { label: 'Retry', actionType: 'api', target: '/api/v1/ops/retry' } },
+          },
+        },
+      ],
+    },
+    // Sync now (rename), the redundant twin (dropped), the nested icon and the
+    // slotted header. The disagreeing pair and the type-less button are TODOs,
+    // which are not notices.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * An agent's conversation state machine — `agent.lifecycle` — leaves the spec
+ * (protocol 18, #21320; ADR-0049 enforce-or-remove, ruled D (retire) on
+ * objectstack-ai/cloud#2569).
+ *
+ * It was parsed and never read: no runtime, in this repository or in cloud's
+ * AI service (the one runtime that executes agents), moved an agent through a
+ * declared state or refused an undeclared transition. So no authored value
+ * ever changed what an agent did, and the delete is LOSSLESS. Authoring now
+ * refuses the key by name (`retiredKey`, ai/agent.zod.ts). Its value schema,
+ * the XState `StateMachineSchema` family, had no other authorable door and
+ * left the package with it.
+ *
+ * One edit: the key is deleted from each `agents[]` entry, whatever it holds.
+ * Every other key of the agent stays. One notice per agent that carried it.
+ *
+ * ⛔ What it does NOT do: rewrite the machine into a skill, a Flow or a
+ * `state_machine` validation rule. Which of the three an author meant — a
+ * conversation phase, a multi-step process, or a record's status transitions
+ * — is a judgement no mechanical rewrite can make; the D3 entry
+ * `agent-lifecycle-retired` carries it.
+ *
+ * Idempotent by construction: `stripKeys` skips an absent key and hands the
+ * input back by reference. Retired from the load path: an author is refused at
+ * parse with the prescription; data at rest (`applyConversionsToStoredItem`),
+ * built artifacts and `os migrate meta` replay it.
+ */
+const agentLifecycleRemoved: MetadataConversion = {
+  id: 'agent-lifecycle-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'agent.lifecycle',
+  summary:
+    "agent key 'lifecycle' removed: the conversation state machine was parsed and never read — no runtime "
+    + 'moved an agent through a declared state. The key is deleted; a conversation phase is a skill with '
+    + 'triggerConditions, orchestration is a Flow, record transitions are a state_machine validation rule',
+  apply(stack, emit) {
+    return mapCollection(stack, 'agents', (agent, path) => stripKeys(agent, ['lifecycle'], emit, path));
+  },
+  fixture: {
+    before: {
+      agents: [
+        {
+          // A full machine, the shape the retired schema accepted: deleted
+          // whole — no state of it ever ran.
+          name: 'intake_agent',
+          label: 'Intake',
+          lifecycle: {
+            id: 'intake',
+            initial: 'greeting',
+            states: {
+              greeting: { on: { IDENTIFIED: 'triage' } },
+              triage: { on: { RESOLVED: 'done' } },
+              done: { type: 'final' },
+            },
+          },
+        },
+        // A minimal machine.
+        { name: 'review_agent', label: 'Review', lifecycle: { id: 'review', initial: 'open', states: { open: {} } } },
+        // A non-object value a hand-edited stored row could carry: the key
+        // goes whatever it holds.
+        { name: 'stray_agent', label: 'Stray', lifecycle: 'draft' },
+        // No machine at all: rides through untouched.
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    after: {
+      agents: [
+        { name: 'intake_agent', label: 'Intake' },
+        { name: 'review_agent', label: 'Review' },
+        { name: 'stray_agent', label: 'Stray' },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    // Three: one per agent that carried the key.
+    expectedNotices: 3,
+  },
+};
+
+/**
+ * An agent's long-term memory store — `agent.memory.longTerm.store` — leaves
+ * the spec (protocol 18, #20274; ADR-0049 enforce-or-remove, ruling record
+ * 5950198150, letter A′: the `agent.memory` contract states exactly what the
+ * runtime honours).
+ *
+ * The memory store is platform infrastructure, not agent metadata. Cloud's AI
+ * service, the one runtime that executes agents, keeps long-term memory notes
+ * in its own database store; it refused `vector` — the key's old DEFAULT, so
+ * what an omitted `store` parsed to — and `redis` before an agent's first
+ * turn, and honoured `database` only because that is the store it uses anyway.
+ * Before that reader landed nothing read the block at all. So no authored
+ * value ever chose a backend, and the delete is LOSSLESS: authoring now
+ * refuses the key by name (`retiredKey`, ai/agent.zod.ts).
+ *
+ * One edit: the key is deleted from `memory.longTerm`, whatever it holds — an
+ * explicit `database`, a refused `vector` / `redis`, or the `vector` default a
+ * released toolchain materialized into a parsed agent. Every other key of the
+ * block stays. One notice per agent that carried it.
+ *
+ * ⛔ What it does NOT do: supply `maxEntries` or `reflectionInterval`. The same
+ * ruling made both REQUIRED once `longTerm.enabled` is true, with no default,
+ * so no mechanical rewrite can choose them; the D3 entry
+ * `agent-memory-store-retired-and-limits-required` carries that judgement.
+ *
+ * Idempotent by construction: `stripKeys` skips an absent key and hands the
+ * input back by reference. Retired from the load path: an author is refused at
+ * parse with the prescription; data at rest (`applyConversionsToStoredItem`),
+ * built artifacts and `os migrate meta` replay it.
+ */
+const agentMemoryLongTermStoreRemoved: MetadataConversion = {
+  id: 'agent-memory-long-term-store-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'agent.memory.longTerm.store',
+  summary:
+    "agent memory key 'longTerm.store' removed: the memory store is platform infrastructure, not agent "
+    + "metadata — the AI runtime keeps long-term memory notes in its own database store and refused the "
+    + "'vector' default and 'redis' before the first turn. The key is deleted; every other memory key stays",
+  apply(stack, emit) {
+    return mapCollection(stack, 'agents', (agent, path) => {
+      const memory = agent.memory;
+      if (!isDict(memory)) return agent;
+      const longTerm = memory.longTerm;
+      if (!isDict(longTerm)) return agent;
+      const nextLongTerm = stripKeys(longTerm, ['store'], emit, `${path}.memory.longTerm`);
+      return nextLongTerm === longTerm ? agent : { ...agent, memory: { ...memory, longTerm: nextLongTerm } };
+    });
+  },
+  fixture: {
+    before: {
+      agents: [
+        {
+          // The one value the runtime honoured: deleted all the same — the
+          // store is the platform's, whatever the agent says.
+          name: 'recall_agent',
+          label: 'Recall',
+          memory: { longTerm: { enabled: true, store: 'database', maxEntries: 20 }, reflectionInterval: 5 },
+        },
+        {
+          // The old default, as a released toolchain materialized it into a
+          // parsed agent whose author never wrote `store`.
+          name: 'paused_agent',
+          label: 'Paused',
+          memory: { longTerm: { enabled: false, store: 'vector' } },
+        },
+        {
+          // A refused backend.
+          name: 'cache_agent',
+          label: 'Cache',
+          memory: { longTerm: { enabled: true, store: 'redis', maxEntries: 50 }, reflectionInterval: 10 },
+        },
+        {
+          // Already canonical, and an agent with no memory at all: both ride
+          // through untouched.
+          name: 'notes_agent',
+          label: 'Notes',
+          memory: { longTerm: { enabled: true, maxEntries: 5 }, reflectionInterval: 3 },
+        },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    after: {
+      agents: [
+        {
+          name: 'recall_agent',
+          label: 'Recall',
+          memory: { longTerm: { enabled: true, maxEntries: 20 }, reflectionInterval: 5 },
+        },
+        { name: 'paused_agent', label: 'Paused', memory: { longTerm: { enabled: false } } },
+        {
+          name: 'cache_agent',
+          label: 'Cache',
+          memory: { longTerm: { enabled: true, maxEntries: 50 }, reflectionInterval: 10 },
+        },
+        {
+          name: 'notes_agent',
+          label: 'Notes',
+          memory: { longTerm: { enabled: true, maxEntries: 5 }, reflectionInterval: 3 },
+        },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    // Three: one per agent whose `longTerm` carried the key.
+    expectedNotices: 3,
+  },
+};
+
+/**
+ * The members of an agent's `structuredOutput` the runtime refused — the
+ * `regex`, `grammar` and `xml` formats and the `coerce_types` transform step —
+ * leave the spec (protocol 18, #21277; ADR-0049 enforce-or-remove, ruling
+ * record 5945617233, letter A).
+ *
+ * Cloud's AI service, the one runtime that executes agents, enforces
+ * `structuredOutput` on every final answer and refuses each of these four,
+ * typed, before an agent's first turn: the spec never had a key to carry the
+ * pattern or grammar a `regex` / `grammar` answer would be checked against, a
+ * final answer is checked only as JSON, and no coercion engine exists. Before
+ * that reader landed nothing read the block at all. So no authored value of
+ * any of the four ever produced the behaviour it named, and authoring now
+ * refuses them by name (`enumWithRetiredValues`, ai/agent.zod.ts).
+ *
+ * Three edits, each the least that leaves a parseable agent:
+ *
+ * - **A retired `format`** — the format is REQUIRED, so stripping it alone
+ *   would hand back a block that cannot parse, and no mechanical rewrite can
+ *   say which JSON contract the author wanted instead. The whole
+ *   `structuredOutput` block is deleted: the agent's answer was never checked
+ *   against a regex, grammar or XML shape, so what goes is a contract that was
+ *   never kept. One notice, at the block's `format`, naming the value; the D3
+ *   entry `agent-structured-output-refused-members-retired` carries the
+ *   judgement left — whether the agent needs a `json_schema` contract.
+ * - **A retired `fallbackFormat`** — optional, so the key alone is deleted;
+ *   the primary format and every other key stay.
+ * - **`coerce_types` in `transformPipeline`** — the step alone is filtered out
+ *   and the other steps keep their order. The key stays even when the list
+ *   empties, as `hook-body-crypto-hash-removed` keeps an empty grant set:
+ *   deleting the key would change what the author declared about the steps
+ *   that remain.
+ *
+ * A block deleted for its `format` emits only that one notice — the retired
+ * members inside it go with it. Idempotent by construction: a second pass
+ * finds no retired member and returns the input reference.
+ *
+ * Retired from the load path: an author is refused at parse with the
+ * prescription; data at rest (`applyConversionsToStoredItem`) and
+ * `os migrate meta` replay it.
+ */
+const agentStructuredOutputRefusedMembersRemoved: MetadataConversion = {
+  id: 'agent-structured-output-refused-members-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface:
+    'agent.structuredOutput.format / agent.structuredOutput.fallbackFormat / '
+    + 'agent.structuredOutput.transformPipeline',
+  summary:
+    "agent structured-output formats 'regex' / 'grammar' / 'xml' and the transform step 'coerce_types' "
+    + 'removed: the AI runtime refused each before the first turn, because structured output is checked '
+    + 'only as JSON and no coercion engine exists. A block whose format was retired is deleted, a retired '
+    + 'fallback format is deleted, and the coerce step is dropped from the pipeline',
+  apply(stack, emit) {
+    const RETIRED_FORMATS: ReadonlySet<unknown> = new Set(['regex', 'grammar', 'xml']);
+    return mapCollection(stack, 'agents', (agent, path) => {
+      const block = agent.structuredOutput;
+      if (!isDict(block)) return agent;
+      const where = `${path}.structuredOutput`;
+      if (RETIRED_FORMATS.has(block.format)) {
+        emit({ from: String(block.format), to: '(removed)', path: `${where}.format` });
+        const next: Dict = { ...agent };
+        delete next.structuredOutput;
+        return next;
+      }
+      let nextBlock: Dict = block;
+      if (RETIRED_FORMATS.has(block.fallbackFormat)) {
+        emit({ from: String(block.fallbackFormat), to: '(removed)', path: `${where}.fallbackFormat` });
+        nextBlock = { ...nextBlock };
+        delete nextBlock.fallbackFormat;
+      }
+      const steps = block.transformPipeline;
+      if (Array.isArray(steps) && steps.includes('coerce_types')) {
+        emit({ from: 'coerce_types', to: '(removed)', path: `${where}.transformPipeline` });
+        nextBlock = { ...nextBlock, transformPipeline: steps.filter((s) => s !== 'coerce_types') };
+      }
+      return nextBlock === block ? agent : { ...agent, structuredOutput: nextBlock };
+    });
+  },
+  fixture: {
+    before: {
+      agents: [
+        {
+          // A retired primary format: the whole block goes, its other keys with it.
+          name: 'pattern_agent',
+          label: 'Pattern',
+          structuredOutput: { format: 'regex', maxRetries: 2, transformPipeline: ['trim', 'coerce_types'] },
+        },
+        {
+          // A JSON format with a retired fallback and the coerce step: both are
+          // dropped surgically, and the order of the surviving steps is kept.
+          name: 'invoice_agent',
+          label: 'Invoice',
+          structuredOutput: {
+            format: 'json_schema',
+            schema: { type: 'object', properties: { total: { type: 'number' } } },
+            fallbackFormat: 'xml',
+            transformPipeline: ['trim', 'coerce_types', 'parse_json', 'validate'],
+          },
+        },
+        {
+          // Only the coerce step: the key stays, now an empty list.
+          name: 'coerce_agent',
+          label: 'Coerce',
+          structuredOutput: { format: 'json_object', transformPipeline: ['coerce_types'] },
+        },
+        {
+          // Already canonical, and an agent with no block at all: both ride
+          // through untouched — the walk dispatches on a retired MEMBER, never
+          // on the block's presence.
+          name: 'json_agent',
+          label: 'JSON',
+          structuredOutput: { format: 'json_object', fallbackFormat: 'json_schema', transformPipeline: ['parse_json'] },
+        },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    after: {
+      agents: [
+        { name: 'pattern_agent', label: 'Pattern' },
+        {
+          name: 'invoice_agent',
+          label: 'Invoice',
+          structuredOutput: {
+            format: 'json_schema',
+            schema: { type: 'object', properties: { total: { type: 'number' } } },
+            transformPipeline: ['trim', 'parse_json', 'validate'],
+          },
+        },
+        {
+          name: 'coerce_agent',
+          label: 'Coerce',
+          structuredOutput: { format: 'json_object', transformPipeline: [] },
+        },
+        {
+          name: 'json_agent',
+          label: 'JSON',
+          structuredOutput: { format: 'json_object', fallbackFormat: 'json_schema', transformPipeline: ['parse_json'] },
+        },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    // Four: the deleted block (one, though it held a retired step too), the
+    // invoice agent's fallback and its step, and the coerce agent's step.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * `apis[].cacheTtl` → `apis[].cacheTtlSeconds` (protocol 18, #15677 for #14478)
  * — the `api` half of the same rename `hookTimeoutToTimeoutMs` and
  * `jobTimeoutToTimeoutMs` document, and the ONE key of that card's twelve that
@@ -9331,8 +11164,9 @@ const apiEndpointCacheTtlToCacheTtlSeconds: MetadataConversion = {
   id: 'api-endpoint-cache-ttl-to-cache-ttl-seconds',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'apis[].cacheTtl',
-  summary: "api endpoint key 'cacheTtl' \u2192 'cacheTtlSeconds' (#14478 \u2014 the unit lived only in the description; the value, seconds, is unchanged, and the key stays GET-only)",
+  summary: "api endpoint key 'cacheTtl' \u2192 'cacheTtlSeconds' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, seconds, is unchanged, and the key stays GET-only)",
   apply(stack, emit) {
     return mapCollection(stack, 'apis', (endpoint, path) => {
       const renamed = renameKey(endpoint, 'cacheTtl', 'cacheTtlSeconds');
@@ -9399,8 +11233,9 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
   id: 'dashboard-refresh-interval-to-refresh-interval-seconds',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'dashboard.refreshInterval',
-  summary: "dashboard key 'refreshInterval' → 'refreshIntervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged)",
+  summary: "dashboard key 'refreshInterval' → 'refreshIntervalSeconds' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, seconds, is unchanged)",
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (dashboard, path) => {
       const renamed = renameKey(dashboard, 'refreshInterval', 'refreshIntervalSeconds');
@@ -9427,114 +11262,309 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
   },
 };
 
-/**
- * The two connector duration keys whose name carried no unit → suffixed
- * (protocol 18, #15680 for #14478): `health.circuitBreaker.monitoringWindow` →
- * `monitoringWindowMs`, and `triggers[].interval` → `intervalSeconds`.
+/*
+ * ABSORBED — `connector-health-and-trigger-durations-unit-in-key` (protocol 18,
+ * #15680 for #14478). It renamed the two connector durations whose names carried
+ * no unit: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` and
+ * `triggers[].interval` → `intervalSeconds` (the bare token `interval` means
+ * MILLISECONDS elsewhere in this spec, while a trigger interval meant SECONDS).
+ * Both halves were then removed with the block each key lived in, inside the
+ * same unreleased protocol step: the breaker half by
+ * `connector-resilience-keys-removed` (the whole `health` block), and the trigger
+ * half by `connector-triggers-removed` below (the whole `triggers` array).
+ * Composed, a rename followed by a strip of its container is unobservable — any
+ * pre-18 `health` or `triggers` ends deleted regardless of its inner spelling —
+ * and the table's disjoint-fixture contract cannot hold a fixture whose
+ * container another entry deletes (`spec-property-retirement` §0, the
+ * `agent-knowledge-topics-to-sources` precedent above). So the entry left the
+ * table. Each removal's prescription names the pre-rename spelling it absorbed;
+ * the retired-key rows `integration/CircuitBreakerConfig:monitoringWindow` and
+ * `integration/ConnectorTrigger:interval` stay as the record that the bare
+ * spellings were retired.
  *
- * One entry because they are one authored document and one authoring session —
- * a connector and the resilience block that guards it. The circuit-breaker case
- * is the sharpest in this card: `monitoringWindow` (ms) sat ONE key below
- * `resetTimeoutMs`, which already spelled its unit, so a single six-key shape
- * carried both conventions and a reader had no rule to apply, only two examples
- * that disagreed. The trigger case is the widest: the bare token `interval`
- * means MILLISECONDS elsewhere in this same spec, so the identical spelling
- * carried two units a thousandfold apart.
- *
- * A published connector row lands whole in `sys_metadata` (`ConnectorSchema`'s
- * own docblock says so, which is why #7990 forbids inline secrets on it), so
- * the chain has a seam that sees both keys — hence a conversion rather than the
- * semantic entries this card's two runtime-emitted keys took.
- *
- * The two are walked in one pass but emit SEPARATELY: a connector may author
- * either, both, or neither, and an operator reading the notice list needs to see
- * which of its own keys moved. Retired from the load path, tombstoned at the
- * schema, replayable here.
+ * ⚠️ The id was PUBLISHED: the 17.4.0 and 17.5.0 tarballs carry it retired
+ * (`retired-after.census.json`), and the 17.4.0 changelog names it. Measured
+ * before it left: no code outside this package named the id, and the chain
+ * replays only the ids a step lists — so an upgrading reader who greps it finds
+ * this note and the two removals it points at, and a stored row or artifact
+ * holding either old spelling meets the removal that deletes its container.
  */
-const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
-  id: 'connector-health-and-trigger-durations-unit-in-key',
+
+/**
+ * `connector.health`, `connector.status` and `connector.webhooks` removed
+ * (protocol 18 — ADR-0049 enforce-or-remove, one batch for the family: the
+ * mainstream connector surface offers none of the three as author metadata, and
+ * what it does offer is already delivered here by other keys).
+ *
+ * Sixteen authorable keys, measured with zero reads outside `packages/spec`:
+ * the `health.healthCheck` probe (eight keys) and `health.circuitBreaker` (six)
+ * had no engine — nothing polled, counted consecutive failures or tripped a
+ * breaker; `status` was read by nothing (the runtime publishes a COMPUTED
+ * `state`, and participation is `enabled`); and a webhook nested in a
+ * connector was never registered as a `webhook` item, so it was never
+ * materialized into `sys_webhook` or delivered.
+ *
+ * A pure lossless delete, one notice per stripped key: none of the three ever
+ * had an effect to preserve. In particular the nested `webhooks` are STRIPPED,
+ * never MOVED to the top-level `webhooks:` collection — moving them would start
+ * deliveries this connector never made, which is an author's decision, not a
+ * mechanical repair (the family's D3 entry, `connector-resilience-keys-retired`,
+ * carries that judgement). The whole `health` block goes as one key, so this
+ * entry also serves an author still holding the pre-rename
+ * `circuitBreaker.monitoringWindow` spelling — the rename's breaker half was
+ * absorbed here (see the ABSORBED note for
+ * `connector-health-and-trigger-durations-unit-in-key` above, whose trigger half
+ * `connector-triggers-removed` absorbed in turn).
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones all three keys
+ * (`retiredKey`, tsc `never` + the parse-time prescription), so a live parse
+ * refuses loudly. This entry exists because a stored connector row CAN carry
+ * them — the `PUT /meta/connector/:name` door persisted what it parsed,
+ * including the materialized `status: 'inactive'` default — and the
+ * rehydration seam `applyConversionsToStoredItem('connector', row)` is live for
+ * this type; so 17.x rows replay clean, and `os migrate meta --from 17` lists
+ * the mechanical edits for author sources.
+ */
+const connectorResilienceKeysRemoved: MetadataConversion = {
+  id: 'connector-resilience-keys-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
-  surface: 'connector.health.circuitBreaker.monitoringWindow, connector.triggers[].interval',
-  summary: "connector keys 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs' and 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; both values are unchanged)",
+  retiredAfter: '17.4.0',
+  surface: 'connector.health / connector.status / connector.webhooks',
+  summary:
+    "connector keys 'health', 'status' and 'webhooks' removed (ADR-0049 — no connector health "
+    + 'probe or circuit breaker ever ran, nothing read an authored status (the runtime reports a '
+    + 'computed `state`), and a webhook nested in a connector was never registered or delivered. '
+    + 'The ConnectorHealth / HealthCheckConfig / CircuitBreakerConfig, ConnectorStatus and '
+    + 'WebhookConfig / WebhookEvent / WebhookSignatureAlgorithm shapes went with them)',
   apply(stack, emit) {
-    return mapCollection(stack, 'connectors', (connector, path) => {
-      let next = connector;
-
-      const health = next.health;
-      if (isDict(health)) {
-        const breaker = health.circuitBreaker;
-        if (isDict(breaker)) {
-          const renamedBreaker = renameKey(breaker, 'monitoringWindow', 'monitoringWindowMs');
-          if (renamedBreaker) {
-            emit({
-              from: 'monitoringWindow',
-              to: 'monitoringWindowMs',
-              path: `${path}.health.circuitBreaker.monitoringWindowMs`,
-            });
-            next = { ...next, health: { ...health, circuitBreaker: renamedBreaker } };
-          }
-        }
-      }
-
-      const triggers = next.triggers;
-      if (Array.isArray(triggers)) {
-        let triggersChanged = false;
-        const nextTriggers = triggers.map((trigger, i) => {
-          if (!isDict(trigger)) return trigger;
-          const renamed = renameKey(trigger, 'interval', 'intervalSeconds');
-          if (!renamed) return trigger;
-          emit({
-            from: 'interval',
-            to: 'intervalSeconds',
-            path: `${path}.triggers[${i}].intervalSeconds`,
-          });
-          triggersChanged = true;
-          return renamed;
-        });
-        if (triggersChanged) next = { ...next, triggers: nextTriggers };
-      }
-
-      return next;
-    });
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['health', 'status', 'webhooks'], emit, path));
   },
   fixture: {
     before: {
       connectors: [
         {
-          name: 'billing_api',
-          label: 'Billing API',
-          type: 'rest',
+          name: 'erp_gateway',
+          label: 'ERP Gateway',
+          type: 'api',
+          // The measured shape: both resilience blocks, including the
+          // pre-rename `monitoringWindow` spelling this removal absorbed.
           health: {
-            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindow: 120000 },
+            healthCheck: { enabled: true, intervalMs: 30000, endpoint: '/health', method: 'GET' },
+            circuitBreaker: { enabled: true, failureThreshold: 5, monitoringWindow: 120000, fallbackStrategy: 'cache' },
           },
-          triggers: [
-            { key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60 },
-            // A webhook trigger authors no interval and keeps its identity.
-            { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
-          ],
+          status: 'active',
+          webhooks: [{
+            name: 'erp_order_created',
+            url: 'https://example.invalid/erp/orders',
+            object: 'order',
+            triggers: ['create'],
+            events: ['sync.completed'],
+            signatureAlgorithm: 'hmac_sha512',
+          }],
         },
-        // A connector that authored neither key keeps its identity (copy-on-write).
-        { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
+        // A stored 17.x row: the parse that wrote it materialized the
+        // `'inactive'` default, and nothing else of this family.
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas', status: 'inactive' },
+        // A connector that never authored any of the three keeps its identity —
+        // the copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_directory', label: 'CRM Directory', type: 'saas' },
       ],
     },
     after: {
       connectors: [
+        { name: 'erp_gateway', label: 'ERP Gateway', type: 'api' },
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas' },
+        { name: 'crm_directory', label: 'CRM Directory', type: 'saas' },
+      ],
+    },
+    // Three from `erp_gateway` (health, status, webhooks — the nested keys
+    // leave with their block and are not counted), one from `hr_feed`.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * `connector.syncConfig` and `connector.fieldMappings` removed (protocol 18 —
+ * ADR-0049, the ENFORCE route by ruling: connector-attached sync is a
+ * mainstream capability, so it is built once, on the mainstream shape, and
+ * that shape binds a sync to its TARGET — a `mapping` whose `connectorSource`
+ * names the connector, with a `job` for the cadence — never to the
+ * connection).
+ *
+ * Fourteen authorable keys measured with no reader: the eight `DataSyncConfig`
+ * keys (`strategy`, `direction`, `realtimeSync`, `timestampField`,
+ * `conflictResolution`, `batchSize`, `deleteMode`, `filters`) and the six live
+ * `ConnectorFieldMapping` keys (`source`, `target`, `defaultValue`,
+ * `dataType`, `required`, `syncMode`). The automation service's
+ * declared-connector item and its re-materialization fingerprint carry neither
+ * key, the registered def is the provider's own, and no engine ran a sync.
+ *
+ * A pure lossless delete, one notice per stripped key: neither key ever had an
+ * effect to preserve. Both are STRIPPED, never MOVED into a `mapping` — a
+ * mapping that is pulled STARTS writes into a table that never received them,
+ * and its target object, match key and cadence are the author's (the family's
+ * D3 entry, `connector-sync-keys-retired`, carries that judgement).
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones both keys (`retiredKey`,
+ * tsc `never` + the parse-time prescription), so a live parse refuses loudly.
+ * This entry exists because a stored connector row CAN carry them — the
+ * `PUT /meta/connector/:name` door persisted what it parsed — and the
+ * rehydration seam `applyConversionsToStoredItem('connector', row)` is live for
+ * this type; so 17.x rows replay clean, and `os migrate meta --from 17` lists
+ * the mechanical edits for author sources.
+ */
+const connectorSyncKeysRemoved: MetadataConversion = {
+  id: 'connector-sync-keys-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'connector.syncConfig / connector.fieldMappings',
+  summary:
+    "connector keys 'syncConfig' and 'fieldMappings' removed (ADR-0049 — no engine ever ran a "
+    + 'connector-attached sync or moved a value through a connector field mapping, so the '
+    + '`latest_wins` and `soft_delete` defaults resolved and deleted nothing. The DataSyncConfig, '
+    + 'SyncStrategy, ConnectorConflictResolution and ConnectorFieldMapping shapes went with them. '
+    + 'A sync is defined on its target instead: a `mapping` whose `connectorSource` names the '
+    + 'connector it pulls from, with a `job` for the cadence)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['syncConfig', 'fieldMappings'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        // Minimal by the §3 disjointness contract: the two retired keys and
+        // nothing else this major's other `connectors[]` entries walk. The
+        // documented shape, with the two defaults that read as policy.
+        {
+          name: 'erp_orders',
+          label: 'ERP Orders',
+          type: 'api',
+          syncConfig: {
+            strategy: 'incremental',
+            direction: 'import',
+            timestampField: 'updated_at',
+            conflictResolution: 'latest_wins',
+            deleteMode: 'soft_delete',
+          },
+          fieldMappings: [
+            { source: 'order_no', target: 'order_number', dataType: 'string', required: true, syncMode: 'read_only' },
+          ],
+        },
+        // A stored 17.x row carrying only the field map.
+        {
+          name: 'hr_feed',
+          label: 'HR Feed',
+          type: 'saas',
+          fieldMappings: [{ source: 'emp_id', target: 'employee_id' }],
+        },
+        // A connector that never authored either key keeps its identity — the
+        // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_catalog', label: 'CRM Catalog', type: 'saas' },
+      ],
+    },
+    after: {
+      connectors: [
+        { name: 'erp_orders', label: 'ERP Orders', type: 'api' },
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas' },
+        { name: 'crm_catalog', label: 'CRM Catalog', type: 'saas' },
+      ],
+    },
+    // Two from `erp_orders` (the nested keys leave with their block and are
+    // not counted), one from `hr_feed`.
+    expectedNotices: 3,
+  },
+};
+
+/**
+ * `connector.triggers` removed (protocol 18 — ADR-0049 enforce-or-remove, by
+ * ruling on the maintainer's criterion for a declared-but-unenforced family;
+ * ADR-0041 keeps connector-event triggers in its third tier, as their own
+ * trigger package).
+ *
+ * The whole `ConnectorTrigger` array — `key`, `label`, `description`,
+ * `type: 'polling' | 'webhook'`, `intervalSeconds` — measured with no reader:
+ * `AutomationEngine.registerConnector` walks a connector's `actions` only, the
+ * engine's trigger registry holds FLOW trigger kinds that no connector trigger
+ * ever entered, no polling loop read an interval and no receiver was driven by
+ * a `webhook` trigger. No connector package, provider or example declared one.
+ *
+ * A pure lossless delete, one notice per connector carrying the key: a trigger
+ * never started anything, so there is no behaviour to preserve. The array is
+ * STRIPPED, never turned into flows — what replaces a trigger is an `api` flow
+ * (an external event) or a `schedule` flow (a scheduled pull) calling the
+ * connector's action, and which of those should exist, with what cadence and
+ * which action, is the author's call (the family's D3 entry,
+ * `connector-triggers-retired`, carries it). The whole array goes as one key, so
+ * this entry also serves an author still holding the pre-rename
+ * `triggers[].interval` spelling: that rename was absorbed here (see the
+ * ABSORBED note for `connector-health-and-trigger-durations-unit-in-key` above).
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones the key (`retiredKey`,
+ * tsc `never` + the parse-time prescription), so a live parse refuses loudly.
+ * This entry exists because a stored connector row CAN carry it — the
+ * `PUT /meta/connector/:name` door persisted what it parsed, and a descriptor's
+ * `triggers` parsed clean there — and the rehydration seam
+ * `applyConversionsToStoredItem('connector', row)` is live for this type; so
+ * 17.x rows replay clean, and `os migrate meta --from 17` lists the mechanical
+ * edits for author sources.
+ */
+const connectorTriggersRemoved: MetadataConversion = {
+  id: 'connector-triggers-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'connector.triggers',
+  summary:
+    "connector key 'triggers' removed (ADR-0049 — a connector trigger never started anything: "
+    + 'the automation engine registered a connector\'s actions only, no polling loop read an '
+    + 'interval and no receiver was driven by a webhook trigger. The ConnectorTrigger shape went '
+    + 'with it, including the `interval` spelling renamed to `intervalSeconds` earlier in this '
+    + 'step. Start the work from a flow that calls the connector\'s action instead: an `api` flow '
+    + 'for an external event, a `schedule` flow for a scheduled pull)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['triggers'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        // Minimal by the §3 disjointness contract: the retired key and nothing
+        // else this major's other `connectors[]` entries walk. The measured
+        // shape — a polling and a webhook trigger.
         {
           name: 'billing_api',
           label: 'Billing API',
-          type: 'rest',
-          health: {
-            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindowMs: 120000 },
-          },
+          type: 'api',
           triggers: [
             { key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 },
             { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
           ],
         },
-        { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
+        // A stored row written before the unit rename: the absorbed
+        // `interval` spelling ends with the whole array gone, in one notice.
+        {
+          name: 'crm_feed',
+          label: 'CRM Feed',
+          type: 'saas',
+          triggers: [{ key: 'new_lead', label: 'New lead', type: 'polling', interval: 300 }],
+        },
+        // A connector that never authored the key keeps its identity — the
+        // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_catalog', label: 'CRM Catalog', type: 'saas' },
       ],
     },
+    after: {
+      connectors: [
+        { name: 'billing_api', label: 'Billing API', type: 'api' },
+        { name: 'crm_feed', label: 'CRM Feed', type: 'saas' },
+        { name: 'crm_catalog', label: 'CRM Catalog', type: 'saas' },
+      ],
+    },
+    // One per connector carrying the key; the triggers inside the array leave
+    // with it and are not counted.
     expectedNotices: 2,
   },
 };
@@ -9564,8 +11594,9 @@ const memoryPersistenceAutoSaveIntervalToMs: MetadataConversion = {
   id: 'memory-persistence-auto-save-interval-to-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'datasource.config.persistence.autoSaveInterval',
-  summary: "memory datasource key 'config.persistence.autoSaveInterval' → 'autoSaveIntervalMs', on both the file and auto arms (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  summary: "memory datasource key 'config.persistence.autoSaveInterval' → 'autoSaveIntervalMs', on both the file and auto arms (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       if (resolveDriverId(ds.driver) !== 'memory') return ds;
@@ -9623,6 +11654,144 @@ const memoryPersistenceAutoSaveIntervalToMs: MetadataConversion = {
 };
 
 /**
+ * `translation.dashboards.<name>.widgets.<id>.subCaption` — the metric
+ * sub-caption, retired at both ends (protocol 18, #21257; ruling C on
+ * objectui#11389, which reverses #5428 item 4; ADR-0049).
+ *
+ * The key overlaid the widget's `options.description` from `translateDashboard`
+ * (#7862). The dashboard schema never declared `options.description` and no
+ * authored widget wrote it (0 producers measured in either repository), so the
+ * string existed in the served document only when this key put it there. The
+ * overlay is gone and a widget keeps ONE authored description,
+ * `widget.description`, translated by the widget node's own `description` key;
+ * the schema refuses `subCaption` with the prescription.
+ *
+ * Pure lossless delete in what it SERVES — nothing reads the key any more —
+ * and a drop of translation work in what it STORES, which is why the family
+ * also has a D3 entry (`translation-widget-sub-caption-retired`). Both
+ * authored shapes are walked, exactly as
+ * {@link translationComponentSubmitLabelRemoved} walks its key: a bundle entry
+ * (locale → data, `stack.translations`' declared shape) and a bare data/item
+ * entry (groups at the top level — the shape stored `translation` items replay
+ * through, which `authored-translation-sync` does before it merges a row).
+ */
+const translationWidgetSubCaptionRemoved: MetadataConversion = {
+  id: 'translation-widget-sub-caption-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'translation.dashboards.widgets.subCaption',
+  summary:
+    "translation widget key 'subCaption' removed: the metric sub-caption it overlaid onto the "
+    + "widget's 'options.description' is retired at both ends — the dashboard schema never "
+    + 'declared that key and no authored widget wrote it, so the overlay was its only writer. A '
+    + "widget keeps one authored description, 'widget.description', translated by the widget "
+    + "node's 'description' key",
+  apply(stack, emit) {
+    const stripFromData = (data: Record<string, unknown>, path: string): Record<string, unknown> => {
+      const dashboards = data.dashboards;
+      if (!isDict(dashboards)) return data;
+      let dashboardsChanged = false;
+      const nextDashboards: Record<string, unknown> = { ...dashboards };
+      for (const [dashboardName, dashboard] of Object.entries(dashboards)) {
+        if (!isDict(dashboard) || !isDict(dashboard.widgets)) continue;
+        let widgetsChanged = false;
+        const nextWidgets: Record<string, unknown> = { ...dashboard.widgets };
+        for (const [id, entry] of Object.entries(dashboard.widgets)) {
+          if (!isDict(entry)) continue;
+          const stripped = stripKeys(entry, ['subCaption'], emit, `${path}.dashboards.${dashboardName}.widgets.${id}`);
+          if (stripped === entry) continue;
+          nextWidgets[id] = stripped;
+          widgetsChanged = true;
+        }
+        if (!widgetsChanged) continue;
+        nextDashboards[dashboardName] = { ...dashboard, widgets: nextWidgets };
+        dashboardsChanged = true;
+      }
+      return dashboardsChanged ? { ...data, dashboards: nextDashboards } : data;
+    };
+    return mapCollection(stack, 'translations', (entry, path) => {
+      // Bare data/item shape: the groups sit at the entry's top level.
+      let next = stripFromData(entry, path);
+      // Bundle shape: locale code → data, judged structurally (a dict whose
+      // `dashboards` is a dict) because `LocaleSchema` is an open string. A
+      // strip-only walk makes a false positive a no-op: it removes nothing
+      // unless the exact `dashboards.<name>.widgets.<id>.subCaption` path is
+      // present.
+      for (const [locale, data] of Object.entries(next)) {
+        if (!isDict(data) || !isDict(data.dashboards)) continue;
+        const stripped = stripFromData(data, `${path}.${locale}`);
+        if (stripped === data) continue;
+        next = next === entry ? { ...entry } : next;
+        next[locale] = stripped;
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      translations: [
+        {
+          // The bundle shape `stack.translations` declares.
+          'zh-CN': {
+            dashboards: {
+              sales_pulse: {
+                label: '销售脉搏',
+                widgets: {
+                  won_revenue: { title: '赢单收入', description: '本季度已赢单', subCaption: '较上季度' },
+                  // A neighbouring widget with live keys only rides through untouched.
+                  open_pipeline: { title: '在途商机' },
+                },
+              },
+            },
+          },
+        },
+        {
+          // The bare item shape stored `translation` rows replay through.
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          dashboards: {
+            sales_pulse: {
+              widgets: { won_revenue: { subCaption: '前四半期比' } },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      translations: [
+        {
+          'zh-CN': {
+            dashboards: {
+              sales_pulse: {
+                label: '销售脉搏',
+                widgets: {
+                  won_revenue: { title: '赢单收入', description: '本季度已赢单' },
+                  open_pipeline: { title: '在途商机' },
+                },
+              },
+            },
+          },
+        },
+        {
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          dashboards: {
+            sales_pulse: {
+              widgets: { won_revenue: {} },
+            },
+          },
+        },
+      ],
+    },
+    // One per stripped key instance: one in the bundle-shaped entry, one in
+    // the item-shaped entry. The emptied widget entry stays — the conversion
+    // strips KEYS, and deleting the entry would be a second, unprescribed edit.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `datasources[].config.timeout` → `timeoutMs` for the turso driver (protocol
  * 18, #15680 for #14478).
  *
@@ -9649,8 +11818,9 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   id: 'turso-config-timeout-to-timeout-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'datasource.config.timeout (turso)',
-  summary: "turso datasource key 'config.timeout' → 'config.timeoutMs' (#14478 — the unit lived only in the description and a .meta() title no parse reads; the value, milliseconds, is unchanged)",
+  summary: "turso datasource key 'config.timeout' → 'config.timeoutMs' (a duration key carries its unit in its name, and this one's unit lived only in the description and a .meta() title no parse reads; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       if (resolveDriverId(ds.driver) !== 'turso') return ds;
@@ -9737,11 +11907,12 @@ const viewPageMountRemoved: MetadataConversion = {
   id: 'view-page-mount-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: "view.list / view.listViews.* — the list-view type 'page' and its pageName binding",
   summary:
-    "list-view type 'page' and its `pageName` binding removed (#17063 — the delegating render half "
-    + 'was never built, so a page view fell through to the grid branch and drew an empty table; '
-    + 'ADR-0049 enforce-or-remove)',
+    "list-view type 'page' and its `pageName` binding removed (retired rather than finished: the "
+    + 'delegating render half was never built, so a page view fell through to the grid branch and '
+    + 'drew an empty table; ADR-0049 enforce-or-remove)',
   apply(stack, emit) {
     const stripMount = (payload: Dict, path: string): Dict => {
       const hasPageType = payload.type === 'page';
@@ -9841,11 +12012,12 @@ const listViewSortStringClauseToArray: MetadataConversion = {
   id: 'list-view-sort-string-clause-to-array',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.list.sort / view.listViews.*.sort — the bare string sort clause',
   summary:
-    'the bare string list-view `sort` clause becomes the `{ field, order }[]` array (#17053 — '
-    + 'one sort orthography platform-wide, so the schema stops minting documents its own '
-    + 'consumer refuses; objectui#8221 decision batch #77 option B)',
+    'the bare string list-view `sort` clause becomes the `{ field, order }[]` array (one sort '
+    + 'orthography platform-wide, the array: objectui already refuses the string, so the schema '
+    + 'stops minting documents its own consumer refuses)',
   apply(stack, emit) {
     /** `'a desc, b'` -> `[{field:'a',order:'desc'},{field:'b',order:'asc'}]`, or `null`. */
     const lower = (clause: string): Array<{ field: string; order: 'asc' | 'desc' }> | null => {
@@ -9940,6 +12112,7 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
   id: 'page-assigned-profiles-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'page.assignedProfiles',
   summary:
     "page key 'assignedProfiles' removed (ADR-0090 D2 deleted the Profile concept it was named "
@@ -10015,6 +12188,7 @@ const chartConfigAriaRemoved: MetadataConversion = {
   id: 'chart-config-aria-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface:
     'dashboard.widgets[].chartConfig.aria / report.chart.aria / report.blocks[].chart.aria',
   summary:
@@ -10118,6 +12292,94 @@ const chartConfigAriaRemoved: MetadataConversion = {
 };
 
 /**
+ * `action.aria` removed (ADR-0049 enforce-or-remove; triage record 5860351140
+ * on #20323, following the `ChartConfig.aria` retirement `2bf6ef18d`).
+ *
+ * A pure lossless delete. Measured at the `.objectui-sha` pin `f8a9d0fb05`, no
+ * surface that renders an action reads the action's `aria` — every one of them
+ * derives the accessible name from the action's required `label` (visible
+ * text, or `aria-label` on the icon-only renderer and the overflow trigger), so
+ * the rendered DOM is byte-for-byte the same with or without the block. What
+ * the author meant by it is the paired D3 entry `action-aria-retired`'s
+ * business; this entry only removes the key.
+ *
+ * ⚠️ Coverage boundary — TWO authored sites, because `ActionSchema` is authored
+ * both as a stack collection and nested under its object (the walk
+ * `action-execute-to-target` established):
+ *
+ *   - `actions[]`
+ *   - `objects[].actions[]`
+ *
+ * Both are registered metadata kinds stored as `sys_metadata` rows, so the
+ * stored-row seams replay this entry too. A plugin's type-level
+ * `MetadataTypeRegistryEntry.actions` is code, not a stack source, and no
+ * walker reaches it; the tombstone refuses it at parse instead.
+ *
+ * A SEPARATE family rather than more coordinates on `chart-config-aria-removed`:
+ * that entry's identity is the chart config's measurement, and folding a
+ * differently-evidenced removal into it would misattribute this one in
+ * `spec-changes.json` and the upgrade guide — the reason that entry itself gave
+ * for not joining `dashboard-widget-action-aria-removed`.
+ */
+const actionAriaRemoved: MetadataConversion = {
+  id: 'action-aria-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'action.aria / object.actions[].aria',
+  summary:
+    "action key 'aria' removed (ADR-0049 enforce-or-remove — no action surface ever applied it; "
+    + "every renderer takes the accessible name from the action's required 'label', and the "
+    + "placing node's own 'aria' block names the region)",
+  apply(stack, emit) {
+    const strip = (action: Dict, path: string): Dict => stripKeys(action, ['aria'], emit, path);
+    const withTopLevel = mapCollection(stack, 'actions', strip);
+    return mapCollection(withTopLevel, 'objects', (obj, path) =>
+      mapCollection(obj, 'actions', (action, actionPath) => strip(action, `${path}.${actionPath}`)),
+    );
+  },
+  fixture: {
+    before: {
+      actions: [
+        {
+          name: 'escalate_case',
+          label: 'Escalate',
+          type: 'script',
+          icon: 'arrow-up',
+          aria: { ariaLabel: 'Escalate this case', role: 'button' },
+        },
+        // An action without the key passes through untouched.
+        { name: 'close_case', label: 'Close', type: 'script' },
+      ],
+      objects: [{
+        name: 'support_case',
+        label: 'Case',
+        actions: [{
+          name: 'reopen_case',
+          label: 'Reopen',
+          type: 'script',
+          aria: { ariaDescribedBy: 'reopen_help' },
+        }],
+      }],
+    },
+    after: {
+      actions: [
+        { name: 'escalate_case', label: 'Escalate', type: 'script', icon: 'arrow-up' },
+        { name: 'close_case', label: 'Close', type: 'script' },
+      ],
+      objects: [{
+        name: 'support_case',
+        label: 'Case',
+        actions: [{ name: 'reopen_case', label: 'Reopen', type: 'script' }],
+      }],
+    },
+    // One notice per stripped action — top-level and object-nested — and none
+    // for `close_case`.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `dashboard.widgets[].chartConfig` loses its four STRUCTURE keys (ADR-0021;
  * maintainer ruling 2026-09-12, decision batch #121 item 1, verbatim 「同意」).
  *
@@ -10139,6 +12401,7 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
   id: 'dashboard-widget-chart-config-structure-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface:
     'dashboard.widgets[].chartConfig.type / dashboard.widgets[].chartConfig.xAxis / '
     + 'dashboard.widgets[].chartConfig.yAxis / dashboard.widgets[].chartConfig.series',
@@ -10211,6 +12474,208 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
 };
 
 /**
+ * `object-master-detail-form`'s detail entry `sortField` leaves the contract
+ * (protocol 18, #21589 — ADR-0049 enforce-or-remove; the spec half of
+ * objectui#11070 round 9, the direction recorded on #21220's landing and
+ * mirrored on objectui#11396 ③: tombstone plus ADR-0087).
+ *
+ * **A pure lossless delete.** The console stopped reading the authored
+ * override at objectui `0a3e5409f`, and the `.objectui-sha` pin
+ * (`89cad75d5570`) is past it: `MasterDetailDetailConfig` has no `sortField`
+ * member (`plugin-form/src/MasterDetailForm.tsx:83`), and the field the line
+ * grid stamps with each line's position is the one `deriveDetail` derives from
+ * the child object (`deriveMasterDetail.ts:540`), handed to the grid as
+ * `sort_field` (`:874`). An authored value changed nothing on that console, so
+ * deleting it preserves observed behaviour exactly; the line order is kept by
+ * the child object's own field, which the entry's tombstone names. The
+ * tombstone refuses the key for a live author (advisory, via the props lint:
+ * `PageComponentSchema.properties` is an open bag).
+ *
+ * ⚠️ Scoped by component `type` and by POSITION — `properties.details[]` of an
+ * `object-master-detail-form` — never by key name: `sortField` is an ordinary
+ * name for an open-namespace component's own prop, and the fixture's
+ * non-carrier control is such a component authoring the same shape. A
+ * `details` entry that is not an object rides through untouched (the props
+ * gate reports it; it is not this entry's to fix).
+ *
+ * Zero authored occurrences in this repo's corpora at the retirement — no
+ * detail entry under `examples/`, `apps/`, `packages/`, `skills/` or
+ * `content/docs/` writes the key (control: the sibling detail-entry key
+ * `addLabel`, authored on the showcase project workspace's entry, same
+ * instrument, origin/main 9a4182a752) — so this entry exists for stored
+ * `sys_metadata` rows and for authors outside the repo, which the census could
+ * not measure.
+ */
+const objectMasterDetailFormDetailSortFieldRemoved: MetadataConversion = {
+  id: 'object-master-detail-form-detail-sort-field-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'page.component.object-master-detail-form.details[].sortField',
+  summary:
+    "object-master-detail-form detail entry prop 'sortField' removed (the console reads no authored "
+    + 'value: the line grid stamps the field it derives from the child object, so the key was '
+    + "accepted and dropped; delete the key — the child object's own position field keeps the line order)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-master-detail-form') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !Array.isArray(properties.details)) return component;
+      const details = properties.details as unknown[];
+      let changed = false;
+      const nextDetails = details.map((entry, i) => {
+        if (!isDict(entry) || !('sortField' in entry)) return entry;
+        changed = true;
+        return stripKeys(entry, ['sortField'], emit, `${path}.properties.details[${i}]`);
+      });
+      if (!changed) return component;
+      return { ...component, properties: { ...properties, details: nextDetails } };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'invoice_entry',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The carrier: a detail entry authoring the retired override,
+                // beside an entry WITHOUT it, which rides through untouched.
+                {
+                  type: 'object-master-detail-form',
+                  id: 'm1',
+                  properties: {
+                    objectName: 'crm_invoice',
+                    details: [
+                      { childObject: 'crm_invoice_line', title: 'Lines', sortField: 'line_no' },
+                      { childObject: 'crm_invoice_payment', title: 'Payments' },
+                    ],
+                  },
+                },
+                // ⚠️ The same shape on a component that is NOT an
+                // `object-master-detail-form` — its own prop, not this entry's
+                // key. Untouched: the strip is scoped by component type.
+                {
+                  type: 'acme:line_editor',
+                  id: 'x1',
+                  properties: { details: [{ childObject: 'crm_invoice_line', sortField: 'position' }] },
+                },
+                // A block whose entries carry no `sortField`, and one with a
+                // non-object entry: both ride through untouched, by reference.
+                {
+                  type: 'object-master-detail-form',
+                  id: 'm2',
+                  properties: { objectName: 'crm_order', details: [{ childObject: 'crm_order_line' }, 'crm_order_note'] },
+                },
+                // The nested position (#6775's lesson): a block inside a
+                // card's `children` is still a component.
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-master-detail-form',
+                        id: 'm3',
+                        properties: {
+                          objectName: 'crm_quote',
+                          details: [{ childObject: 'crm_quote_line', sortField: 'position' }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): the block authored into a slotted page.
+        {
+          name: 'invoice_entry_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-master-detail-form',
+              id: 'm4',
+              properties: {
+                objectName: 'crm_invoice',
+                details: [{ childObject: 'crm_invoice_line', sortField: 'sequence' }],
+              },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'invoice_entry',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-master-detail-form',
+                  id: 'm1',
+                  properties: {
+                    objectName: 'crm_invoice',
+                    details: [
+                      { childObject: 'crm_invoice_line', title: 'Lines' },
+                      { childObject: 'crm_invoice_payment', title: 'Payments' },
+                    ],
+                  },
+                },
+                {
+                  type: 'acme:line_editor',
+                  id: 'x1',
+                  properties: { details: [{ childObject: 'crm_invoice_line', sortField: 'position' }] },
+                },
+                {
+                  type: 'object-master-detail-form',
+                  id: 'm2',
+                  properties: { objectName: 'crm_order', details: [{ childObject: 'crm_order_line' }, 'crm_order_note'] },
+                },
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-master-detail-form',
+                        id: 'm3',
+                        properties: { objectName: 'crm_quote', details: [{ childObject: 'crm_quote_line' }] },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'invoice_entry_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-master-detail-form',
+              id: 'm4',
+              properties: { objectName: 'crm_invoice', details: [{ childObject: 'crm_invoice_line' }] },
+            },
+          },
+        },
+      ],
+    },
+    // Three notices: the region-level entry, the nested one and the slotted
+    // one. The open-namespace sibling and the entries without the key emit none.
+    expectedNotices: 3,
+  },
+};
+
+/**
  * `object.tenancy.organizationField` leaves the authorable surface (protocol
  * 18, #19054 — ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18,
  * verbatim and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
@@ -10249,9 +12714,10 @@ const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
   id: 'object-tenancy-organization-field-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'object.tenancy.organizationField',
   summary:
-    'object `tenancy.organizationField` removed (#19054, ADR-0049 — the stamp-only column '
+    'object `tenancy.organizationField` removed (ADR-0049 — the stamp-only column '
     + 'declaration was authorable by every application and declared exactly once in the whole '
     + 'protocol, on the platform\'s own credential table; the divergence moves to a '
     + 'platform-internal table in @objectstack/metadata-core and stops being a knob)',
@@ -10358,9 +12824,10 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
   id: 'view-item-owner-hidden-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.owner / view.hidden — on the view item record ({ name, object, viewKind, config })',
   summary:
-    "view item keys 'owner'/'hidden' removed (#20085, ADR-0049 — declared on the view item record "
+    "view item keys 'owner'/'hidden' removed (ADR-0049 — declared on the view item record "
     + 'and stored verbatim, read by nothing: no view switcher ever filtered on `hidden`, and no '
     + 'per-user scope ever read `owner`, so a view marked as one user\'s was listed for everyone)',
   apply(stack, emit) {
@@ -10501,10 +12968,12 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
   id: 'view-overlay-owner-hidden-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.owner / view.hidden — on a flattened view overlay ({ name, object, viewKind, …, no config })',
   summary:
-    "flattened view overlay keys 'owner'/'hidden' removed (#20230, ADR-0049 — the view item's pair on "
-    + 'the overlay door: declared, accepted by the write door and stored verbatim, read by nothing, so a '
+    "flattened view overlay keys 'owner'/'hidden' removed (ADR-0049 — the view item's pair on "
+    + 'the overlay door, retired the same way: declared, accepted by the write door and stored '
+    + 'verbatim, read by nothing, so a '
     + '`hidden: true` overlay hid no view and an `owner` scoped none)',
   apply(stack, emit) {
     const stripFromOverlay = (view: Dict, path: string): Dict => {
@@ -10567,6 +13036,115 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
 };
 
 /**
+ * The list view's own `tabs` leaves the authorable surface (protocol 18,
+ * #20301 — ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+ * maintainer's #18900 criterion: mainstream named-view switching is already
+ * delivered here, by `listViews`).
+ *
+ * `ListViewSchema.tabs` parsed, was stored, and drew nothing. A list view's
+ * own `tabs` has no reader, and objectui's `TabBar` — the one component that
+ * would draw it — has zero production mounts at the pinned objectui sha. The
+ * tab strip above an object's records is the saved-view switcher
+ * (`ViewTabBar`), which renders one tab per NAMED LIST VIEW and reads no `tabs`
+ * key. `userFilters.tabs`, a different key of the same element type, is read
+ * and rendered (the page preset bar) and stays. The measurement, with lit
+ * controls, is on the ledger row (`liveness/view.json`,
+ * `/props/list/children/tabs`).
+ *
+ * **Retired from the load path** — the key is a `retiredKey()` tombstone on the
+ * list-view shape, so a live author is refused at parse with the prescription
+ * (which also says how to move each tab to a `listViews` entry — that move is
+ * an authoring decision, never this conversion's). The entry exists because a
+ * stored `view` row CAN carry the key: every list-view door accepted and
+ * persisted it until this release, and `applyConversionsToStoredItem` replays
+ * the chain over stored `view` rows as `{ views: [row] }`. Without it such a
+ * row would carry the retired key back to the strict write door, which refuses
+ * it on the next save, over a key that never had an effect. It also lets
+ * `os migrate meta --from 17` list the mechanical edits for existing sources.
+ *
+ * The delete is lossless in pixels: no renderer ever drew the tabs, so
+ * removing them changes no screen. `stripKeys` deletion is idempotent by
+ * construction (a second replay finds nothing to remove).
+ *
+ * ⚠️ Coverage boundary, stated rather than left to be discovered: this walks
+ * `stack.views[]` in all three persisted spellings ({@link mapViewPayloads}) —
+ * the same reach `view-page-mount-removed`, `list-view-sort-string-clause-to-array`
+ * and `view-export-options-pdf-removed` have. `objects[].listViews.*` is NOT
+ * reached by any conversion in this registry, so an object body carrying the
+ * key is refused at its own door rather than converted. Measured population
+ * for both: zero authored list-view `tabs` in this tree's examples or platform
+ * sources (the in-tree hits are test fixtures of two author-time reference
+ * walks, which read raw input and never parse it); the one published skill
+ * example that taught it is corrected in the same change.
+ */
+const viewListTabsRemoved: MetadataConversion = {
+  id: 'view-list-tabs-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'view.list.tabs / view.listViews.*.tabs — the list view\'s own tab definitions',
+  summary:
+    "list-view key 'tabs' removed (ADR-0049 enforce-or-remove — parsed and stored, drawn by nothing: no "
+    + 'renderer ever mounted a tab bar for it, and the tab strip above an object\'s records is the '
+    + 'saved-view switcher, which renders one tab per `listViews` entry; move each tab you want to a '
+    + 'named list view)',
+  apply(stack, emit) {
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'list' ? stripKeys(payload, ['tabs'], emit, path) : payload);
+  },
+  fixture: {
+    before: {
+      views: [
+        // A container: the default `list` and one named entry carry the key,
+        // the other named entry does not and rides through by reference.
+        {
+          object: 'crm_ticket',
+          list: {
+            type: 'grid',
+            columns: ['subject'],
+            tabs: [{ name: 'mine', label: 'Mine', filter: [{ field: 'status', operator: 'equals', value: 'open' }] }],
+          },
+          listViews: {
+            triage: { type: 'grid', columns: ['subject'], tabs: [{ name: 'urgent', label: 'Urgent' }] },
+            all: { type: 'grid', columns: ['subject'] },
+          },
+        },
+        // A ViewItem record: the payload hangs off `config`.
+        {
+          name: 'crm_ticket.queue',
+          object: 'crm_ticket',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['subject'], tabs: [] },
+        },
+        // A form payload has no `tabs` key to strip — untouched.
+        { name: 'crm_ticket.intake', object: 'crm_ticket', viewKind: 'form', config: { type: 'simple' } },
+      ],
+    },
+    after: {
+      views: [
+        {
+          object: 'crm_ticket',
+          list: { type: 'grid', columns: ['subject'] },
+          listViews: {
+            triage: { type: 'grid', columns: ['subject'] },
+            all: { type: 'grid', columns: ['subject'] },
+          },
+        },
+        {
+          name: 'crm_ticket.queue',
+          object: 'crm_ticket',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['subject'] },
+        },
+        { name: 'crm_ticket.intake', object: 'crm_ticket', viewKind: 'form', config: { type: 'simple' } },
+      ],
+    },
+    // One notice per key removed: `list`, `listViews.triage`, the record's `config`.
+    expectedNotices: 3,
+  },
+};
+
+/**
  * The page-component types whose `properties.filter` is a converged rule-array
  * door: every `ComponentPropsMap` row whose `filter` answers the record form
  * with `ruleArrayFilterError`'s prescription (`ui/filter-rule-array.ts`).
@@ -10613,9 +13191,11 @@ interface MappedFilterRule {
  * door runs on `operator` — to a canonical `VIEW_FILTER_OPERATORS` member.
  * That maps the fourteen comparison, set, range and text operators
  * (`$gt` → `greater_than`, `$nin` → `not_in`, `$notContains` → `not_contains`,
- * …) and declines the two whose meaning lives in their VALUE (`$null`,
- * `$exists`); the lowering of every mapped rule back to the same `$` operator
- * is pinned per operator against `parseFilterAST` by the test.
+ * …) and declines the three whose meaning lives in their VALUE (`$null`,
+ * `$exists`, and — in `FILTER_OPERATORS` since #20446 — `$empty`, whose
+ * `true` / `false` is `is_empty` / `is_not_empty`); the lowering of every
+ * mapped rule back to the same `$` operator is pinned per operator against
+ * `parseFilterAST` by the test.
  */
 function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefined {
   if (!(FILTER_OPERATORS as readonly string[]).includes(op)) return undefined;
@@ -10681,11 +13261,22 @@ function dollarKeysReason(keys: readonly string[]): string {
  * — `$and` / `$or` / `$not` above all — is not a field, so its record is left
  * alone; that is the ruled boundary, and flattening a combinator into the AND
  * list is exactly the silent selection change it excludes. A `null` value is
- * declined too, and not for a schema reason: the renderer at the
- * `.objectui-sha` pin (`convertFiltersToAST`) SKIPS a record key whose value is
- * null, so that key constrains nothing today, while an `equals null` rule would
- * test IS NULL. An empty operator object is declined for the same reason — it
- * constrains nothing, and no rule says "nothing".
+ * declined too, and not for a schema reason: at the `.objectui-sha` pin the key
+ * selects different rows on different blocks, so no one rule keeps it. Where a
+ * block queries an object, `convertFiltersToAST` SKIPS a record key whose value
+ * is null, so the key constrains nothing; where a block's rows are inline,
+ * `ValueDataSource.find` matches the record through `comparandEquals`, so the
+ * key selects the rows whose value is null. This entry never reads where a
+ * block's rows come from, so its reason states both and advises neither
+ * rewrite: it names the `is_null` rule for the rows with no value, and leaves
+ * which rows the filter should select to the author. An empty operator object
+ * is declined for a different reason: it names a field and no operator, so no
+ * rule spells it. At the same pin the renderer refuses it rather than ignoring
+ * it — where a block queries an object, `convertFiltersToAST` throws through
+ * `refuseEmptyOperatorMap` (`INVALID_FILTER`, 400); where a block's rows are
+ * inline, `ValueDataSource.find` answers no rows through
+ * `zeroKeyConditionRefusal`. Its reason says both and keeps the renderer's own
+ * remedy, dropping the key.
  *
  * Every top-level `$` key is judged before any field key, so the reason names
  * the combinator even when a field key beside it would decline as well. The
@@ -10703,10 +13294,15 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
       continue;
     }
     if (value === null) {
+      const isNull = 'is_null' satisfies ViewFilterOperator;
       return {
-        declined: `has the key \`${field}\` set to null: the renderer skips a null-valued key, so `
-          + `today it constrains nothing, while an \`${equals}\` rule would test for null. Drop the `
-          + 'key, or write a rule that tests for null if that is what it should select',
+        declined: `has the key \`${field}\` set to null, and what that key selects depends on where `
+          + 'the block\'s rows come from, so no one rule keeps it: where the block queries an object, '
+          + 'the renderer skips a null-valued key, so it constrains nothing; where its rows are inline '
+          + '(`data: { provider: \'value\' }` or `staticData`), it selects the rows whose '
+          + `\`${field}\` is null. Decide which rows it should select: the rows with no \`${field}\` `
+          + `value are the rule \`${JSON.stringify({ field, operator: isNull })}\`, and a filter that `
+          + `leaves \`${field}\` unconstrained has no rule for it`,
       };
     }
     if (!isRecordForm(value)) {
@@ -10719,8 +13315,10 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
     const operators = Object.entries(value);
     if (operators.length === 0) {
       return {
-        declined: `has the key \`${field}\` set to an empty operator object, which constrains `
-          + 'nothing — and no rule says "nothing". Drop the key',
+        declined: `has the key \`${field}\` set to an empty operator object, which names the field `
+          + 'and no operator, so no rule spells it. The renderer does not ignore it today: where the '
+          + 'block queries an object, it refuses the filter (`INVALID_FILTER`, 400); where its rows '
+          + 'are inline, it answers no rows. Drop the key',
       };
     }
     for (const [op, comparand] of operators) {
@@ -10859,50 +13457,6 @@ function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
   return mapping;
 }
 
-/**
- * Does this component render INLINE rows — rows carried on the node — rather
- * than query an object? Then none of its filters is rewritten.
- *
- * Measured at the `.objectui-sha` pin `f8a9d0fb`: `object-map`
- * (`ObjectMap.tsx:831-833`), `object-tree` (`ObjectTree.tsx:835-837`),
- * `object-calendar` (`ObjectCalendar.tsx:645-647`) and `object-gantt`
- * (`resolveDataSource.ts:70`, then `ObjectGantt.tsx:865`) hand `schema.filter`
- * UNLOWERED to an in-memory `ValueDataSource` when their rows are inline, and
- * `ValueDataSource.find` (`ValueDataSource.ts:1093-1105`) reads an OBJECT
- * `$filter` in the record dialect but an ARRAY one as an AST, whose matcher
- * refuses a rule object (`:564-597`, `:70-73`) and so excludes EVERY row. A
- * converted filter there would take a block from its filtered rows to none —
- * the silent selection change the ruling excluded. The binding goes with its
- * component: `ElementDataSourceGate` composes `dataSource.filter` into that
- * same `schema.filter` (`plugin-map/src/index.tsx:38-41`, `filter: true`).
- *
- * Read by SHAPE, on every component type, rather than by the four types
- * measured: the other inline-row renderers at the pin ignore `filter` for
- * inline rows (`object-grid`, `object-kanban`) or issue no query at all
- * (`object-timeline`), so leaving their filter as stored changes nothing they
- * select, and a type list would go stale the day a fifth renderer starts
- * filtering its own rows. The three shapes are the record-source ladder's
- * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
- * `data` the spec declares on the kanban, calendar and timeline blocks:
- * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
- *
- * Answers with the shape it found, spelled for the TODO that names why the
- * node's filters were left as stored, or `undefined` for an object-bound node.
- *
- * ⚠️ A fact about the RENDERER AT THE PIN, not about the protocol — and the TODO
- * says so in those terms. objectui#10767 taught the inline-row matcher the rule
- * array upstream, but the `.objectui-sha` pin this decline was measured at does
- * not carry it, so the decline stands. Retiring it is owed once the pin moves
- * past that fix, as its own change — never assumed from the upstream merge.
- */
-function rendersInlineRows(properties: unknown): string | undefined {
-  if (!isDict(properties)) return undefined;
-  const { data, staticData } = properties;
-  if (Array.isArray(data)) return 'a `data` array';
-  if (isDict(data) && data.provider === 'value') return "`data: { provider: 'value' }`";
-  return staticData ? '`staticData`' : undefined;
-}
-
 /** How a TODO names the page component a filter sits on: its type, and its `id` when it has one. */
 function describeBlock(component: Dict): string {
   const type = typeof component.type === 'string' ? `the \`${component.type}\` block` : 'this component';
@@ -10936,13 +13490,11 @@ function describeBlock(component: Dict): string {
  *
  * A record carrying `$and` / `$or` / `$not` (or any top-level `$` key), an AST
  * `and` / `or` group, an operator the rule vocabulary does not spell (`$null`,
- * `$exists`, `like`, …), a `null` value (the renderer skips that key today),
+ * `$exists`, `like`, …), a `null` value (skipped where a block queries an
+ * object, matched where its rows are inline — no one rule keeps both),
  * an array or object comparand in equality position, and any rule the door
  * would refuse. All-or-nothing per filter: converting part of an AND-list
- * widens it. And every filter of a component that renders INLINE rows
- * ({@link rendersInlineRows}): the pin's in-memory `ValueDataSource` matches
- * the record form and excludes every row for a rule array, so there the
- * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
+ * widens it. ⛔ A combinator is never flattened into the AND list — for `$or`
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
  * does not validate), and its door's schema refuses the form — but WHERE that
@@ -10975,6 +13527,20 @@ function describeBlock(component: Dict): string {
  * The `filter` of any other component type is not this entry's surface and is
  * never touched.
  *
+ * Where a component's rows come from does not move the verdict. A block whose
+ * rows ride on the node (`data: { provider: 'value' }`, a `data` array,
+ * `staticData`) is rewritten exactly as a block that queries an object:
+ * measured at the `.objectui-sha` pin `dd3f7e1be356`, the renderers that match
+ * inline rows in memory (`object-map`, `object-tree`, `object-calendar`,
+ * `object-gantt`, through `ValueDataSource.find`) take those rows from
+ * `data: { provider: 'value' }` or `staticData`, lower a rule array through
+ * the grid's own sink before matching, and select the same rows for it as for
+ * the stored form — every mapped operator, against a control where the
+ * lowering is absent and the rule array selects none. A bare `data` array
+ * reaches none of them: `object-calendar` draws it as pre-fetched rows with no
+ * filter applied, and `object-map` / `object-gantt` do not take it as a record
+ * source.
+ *
  * ## Why `retiredFromLoadPath`
  *
  * The ruling is `Clause-②: no` — no accept-set change. Replayed on the
@@ -10988,6 +13554,7 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
   id: 'page-component-filter-record-to-rule-array',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface:
     'page.component.dataSource.filter / page.component.properties.filter (the object-* blocks, '
     + 'element:number, element:record_picker) / page.component.properties.defaultFilters '
@@ -10996,16 +13563,14 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     'a record-form or single-level AST filter at a converged rule-array door becomes the '
     + '`[{ field, operator, value }]` rule array wherever the mapping is lossless (flat keys → '
     + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
-    + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
-    + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
-    + 'array, `staticData`) is left exactly as stored — reported as a TODO, which `os migrate meta '
+    + 'filter carrying `$and` / `$or` / `$not` or any part with no lossless rule spelling is '
+    + 'left exactly as stored — reported as a TODO, which `os migrate meta '
     + '--stored` lists — and is not the form its door declares (one filter '
-    + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
+    + 'orthography platform-wide, the rule array; the migration converts only what maps '
+    + 'losslessly and names the rest, because flattening a combinator would silently change '
+    + 'what a page selects)',
   apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
-      // Inline rows: every filter of this node stays as stored, the binding's
-      // included. Its children are separate nodes and are judged on their own.
-      const inline = rendersInlineRows(component.properties);
       const block = describeBlock(component);
 
       const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
@@ -11016,26 +13581,17 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         // on its own): neither converted nor reported.
         if (!mapping) return holder;
         const at = `${basePath}.${key}`;
-        // The filter's own blocker first — it would decline on an object-bound
-        // block too, and it is what names the combinator — then the node's.
-        let declined: string;
         if ('declined' in mapping) {
-          declined = mapping.declined;
-        } else if (inline) {
-          declined = `sits on a block whose rows are inline (${inline}), and the objectui renderer `
-            + 'this release pins cannot match a rule array against inline rows — it would exclude '
-            + 'every row — so no rewrite here is lossless yet';
-        } else {
-          emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
-          return { ...holder, [key]: mapping.rules };
+          context?.reportTodo?.({
+            path: at,
+            from: JSON.stringify(value),
+            reason: `On ${block}, this filter ${mapping.declined}. Left as stored, it keeps loading unchanged, `
+              + 'but it is not the rule-array form its door declares — rewrite it by hand.',
+          });
+          return holder;
         }
-        context?.reportTodo?.({
-          path: at,
-          from: JSON.stringify(value),
-          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged, `
-            + 'but it is not the rule-array form its door declares — rewrite it by hand.',
-        });
-        return holder;
+        emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
+        return { ...holder, [key]: mapping.rules };
       };
 
       let next = component;
@@ -11094,9 +13650,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                     filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
                   },
                 },
-                // Inline rows: a mappable filter, left byte-identical, because
-                // the renderer matches it against those rows in the record
-                // dialect and would exclude every row for a rule array.
+                // Inline rows convert like any other block: the renderer
+                // lowers the rule array before matching those rows.
                 {
                   type: 'object-map',
                   properties: {
@@ -11177,7 +13732,7 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   properties: {
                     objectName: 'deal',
                     data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
-                    filter: { stage: 'open' },
+                    filter: [{ field: 'stage', operator: 'equals', value: 'open' }],
                   },
                 },
                 {
@@ -11209,8 +13764,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
       ],
     },
     // One per converted door: the binding, the grid filter, the grid
-    // defaultFilters, the nested element:number.
-    expectedNotices: 4,
+    // defaultFilters, the inline-row map's filter, the nested element:number.
+    expectedNotices: 5,
   },
 };
 
@@ -11259,10 +13814,11 @@ const reportJoinedChartRemoved: MetadataConversion = {
   id: 'report-joined-chart-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'report.blocks[].chart / report.chart on a joined report',
   summary:
-    "a joined report's 'chart' removed from its blocks and refused on the container (#20161 — "
-    + 'ADR-0049 enforce-or-remove: the joined renderer draws each block as a table and never read '
+    "a joined report's 'chart' removed from its blocks and refused on the container (ADR-0049 "
+    + 'enforce-or-remove: the joined renderer draws each block as a table and never read '
     + 'either, so the chart parsed and nothing was plotted; a non-joined report keeps its live '
     + "'chart')",
   apply(stack, emit) {
@@ -11338,6 +13894,143 @@ const reportJoinedChartRemoved: MetadataConversion = {
 };
 
 /**
+ * [#21180] The form field's `publicPicker` block leaves the FormField
+ * vocabulary (protocol 18, ADR-0087 D2 — the maintainer's ruling E on #21079,
+ * comment 5933054144, which reverses the #7467 ruling that had declared it).
+ *
+ * The block opted a lookup / `master_detail` / `user` field on an ANONYMOUS
+ * public form into a record-search picker served by an unauthenticated route.
+ * The ruling retired the capability: anonymous public forms no longer take
+ * those three field types, the route (`GET /forms/:slug/lookup/:field`) is
+ * deleted, and the public-form resolve route now leaves them off the anonymous
+ * rendering unconditionally. The schema tombstones the key with the
+ * prescription (`FORM_FIELD_PUBLIC_PICKER_RETIRED`, `ui/view.zod.ts`); this
+ * entry strips it from stored sources.
+ *
+ * A pure delete, and lossless in effect: the only reader of the block was the
+ * deleted route, and the resolve route no longer consults it — the field is
+ * left off the anonymous rendering whether or not a stored row still carries
+ * the key. There is no conversion TO anything: an anonymous form that needs a
+ * choice uses a `select` field with static `options`, and one that needs an
+ * existing record goes behind sign-in — a judgement the semantic entry
+ * `form-field-public-picker-retired` asks the upgrader to make.
+ *
+ * Walks the same payloads as `form-view-option-default-removed` — every FORM
+ * payload {@link mapViewPayloads} reaches, in all three persisted spellings —
+ * through `sections[]` / `groups[]` and top-level `fields[]`, recursing into
+ * nested `fields`. Only the exact key `publicPicker` is stripped; a
+ * string-shorthand field entry carries no keys and rides through untouched.
+ */
+const formFieldPublicPickerRemoved: MetadataConversion = {
+  id: 'form-field-public-picker-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'view.form.sections[].fields[].publicPicker',
+  summary:
+    "form field 'publicPicker' removed (ADR-0087 D2 — the anonymous public-form record-search "
+    + 'picker is retired: an anonymous public form no longer takes lookup, master_detail or user '
+    + 'fields, and the anonymous lookup route is gone. Use a select field with static options, or '
+    + 'put the form behind sign-in)',
+  apply(stack, emit) {
+    const mapFields = (fields: unknown, path: string): unknown => {
+      if (!Array.isArray(fields)) return fields;
+      let changed = false;
+      const next = fields.map((field, i) => {
+        if (!isDict(field)) return field;
+        let dict: Dict = stripKeys(field, ['publicPicker'], emit, `${path}[${i}]`);
+        const nested = mapFields(dict.fields, `${path}[${i}].fields`);
+        if (nested !== dict.fields) dict = { ...dict, fields: nested };
+        if (dict !== field) changed = true;
+        return dict;
+      });
+      return changed ? next : fields;
+    };
+    const mapSections = (sections: unknown, path: string): unknown => {
+      if (!Array.isArray(sections)) return sections;
+      let changed = false;
+      const next = sections.map((section, i) => {
+        if (!isDict(section)) return section;
+        let dict: Dict = section;
+        const fields = mapFields(dict.fields, `${path}[${i}].fields`);
+        if (fields !== dict.fields) dict = { ...dict, fields };
+        if (dict !== section) changed = true;
+        return dict;
+      });
+      return changed ? next : sections;
+    };
+    const mapForm = (form: unknown, path: string): unknown => {
+      if (!isDict(form)) return form;
+      let dict: Dict = form;
+      for (const key of ['sections', 'groups'] as const) {
+        const mapped = mapSections(dict[key], `${path}.${key}`);
+        if (mapped !== dict[key]) dict = { ...dict, [key]: mapped };
+      }
+      const fields = mapFields(dict.fields, `${path}.fields`);
+      if (fields !== dict.fields) dict = { ...dict, fields };
+      return dict;
+    };
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'form' ? (mapForm(payload, path) as Dict) : payload);
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_inquiry',
+        formViews: {
+          contact: {
+            sections: [{
+              label: 'About you',
+              fields: [
+                // A string-shorthand entry carries no keys and rides through.
+                'subject',
+                // The measured authored shape: a lookup field opted into the
+                // anonymous picker. The block goes whole, whatever it held.
+                {
+                  field: 'account',
+                  publicPicker: { displayFields: ['name'], maxResults: 10, object: 'crm_account' },
+                },
+                // A nested row — the strip recurses through `fields`.
+                {
+                  field: 'details',
+                  type: 'composite',
+                  fields: [{ field: 'owner', publicPicker: { displayFields: ['name'] } }],
+                },
+              ],
+            }],
+            sharing: { allowAnonymous: true, publicLink: '/forms/contact' },
+          },
+        },
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_inquiry',
+        formViews: {
+          contact: {
+            sections: [{
+              label: 'About you',
+              fields: [
+                'subject',
+                { field: 'account' },
+                {
+                  field: 'details',
+                  type: 'composite',
+                  fields: [{ field: 'owner' }],
+                },
+              ],
+            }],
+            sharing: { allowAnonymous: true, publicLink: '/forms/contact' },
+          },
+        },
+      }],
+    },
+    // One per stripped field entry — the top-level row's block and the nested one's.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * Form `layout` sheds its `inline` and `grid` arms (protocol 18, #20221 —
  * ADR-0049 enforce-or-remove; triage direction under the maintainer's #18900
  * family criterion: the capability exists under another key, so the two arms
@@ -11386,9 +14079,10 @@ const formLayoutInlineGridToVertical: MetadataConversion = {
   id: 'form-layout-inline-grid-to-vertical',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'page.component.object-form.layout / view.form.layout / view.formViews.*.layout',
   summary:
-    "form 'layout' arms 'inline' and 'grid' rewritten to 'vertical' (#20221, ADR-0049 — no renderer "
+    "form 'layout' arms 'inline' and 'grid' rewritten to 'vertical' (ADR-0049 — no renderer "
     + "ever gave either a behaviour of its own: every form presentation folded both to 'vertical'. "
     + "Multi-column is 'columns', honoured under either layout, and is left untouched)",
   apply(stack, emit) {
@@ -11541,9 +14235,10 @@ const currencyConfigPrecisionRemoved: MetadataConversion = {
   id: 'currency-config-precision-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'object.fields.*.currencyConfig.precision',
   summary:
-    "currency field key 'currencyConfig.precision' removed (#19992, ADR-0049 — no renderer or "
+    "currency field key 'currencyConfig.precision' removed (ADR-0049 — no renderer or "
     + 'runtime ever read it: an amount\'s decimal places are its currency\'s ISO 4217 minor unit, '
     + 'derived from the currency itself. Its ISO 4217 contradiction check and the default `2` '
     + 'baked into parse output went with it; the field-level `precision` is a total digit count '
@@ -11616,6 +14311,528 @@ const currencyConfigPrecisionRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * RLS-policy `tags` removed (protocol 18, #20321 — ADR-0049 enforce-or-remove,
+ * graded RETIRE by the maintainer's criterion for declared-but-unenforced
+ * families: does a mainstream platform have the capability?).
+ *
+ * The key promised "categorization and reporting" for governance and
+ * compliance, and nothing ever read it: the RLS compiler reads a policy's
+ * `name`, `object`, `operation`, `positions`, `enabled` and predicates, and
+ * nothing else acts on its tags (objectui's permission preview renders the
+ * policy COUNT; its policy editor neither seeds nor reads the key). No
+ * mainstream platform tags a row-level policy — Salesforce sharing rules,
+ * Dataverse security roles and PostgreSQL RLS policies carry no such
+ * attribute. So the delete is lossless: no access decision changes, and
+ * nothing that consumes a policy loses an input. Sibling of `permission-rls-priority-removed` (one
+ * major earlier, same carrier, same walk).
+ *
+ * `retiredFromLoadPath`: the schema tombstones the key (`retiredKey`, tsc
+ * `never` + the parse-time prescription), so a live author is refused at parse
+ * rather than silently rewritten. The entry exists so a stored permission row
+ * that still carries the key replays clean through
+ * `applyConversionsToStoredItem`, and so `os migrate meta --from 17` lists the
+ * mechanical edits for author sources. `stripKeys` deletion is idempotent by
+ * construction.
+ */
+const permissionRlsTagsRemoved: MetadataConversion = {
+  id: 'permission-rls-tags-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'permission.rowLevelSecurity[].tags',
+  summary:
+    "RLS-policy key 'tags' removed (ADR-0049 — nothing ever read a policy's tags and no "
+    + 'mainstream platform tags a row-level policy; dropping it changes no access decision)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      const rls = (ps as { rowLevelSecurity?: unknown }).rowLevelSecurity;
+      if (!Array.isArray(rls)) return ps;
+      let touched = false;
+      const next = rls.map((policy, i) => {
+        if (!isDict(policy)) return policy;
+        const stripped = stripKeys(policy, ['tags'], emit, `${path}.rowLevelSecurity[${i}]`);
+        if (stripped !== policy) touched = true;
+        return stripped;
+      });
+      return touched ? { ...ps, rowLevelSecurity: next } : ps;
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [{
+        name: 'compliance_reviewer',
+        label: 'Compliance Reviewer',
+        rowLevelSecurity: [
+          {
+            name: 'reviewed_cases',
+            object: 'crm_case',
+            operation: 'select',
+            using: "status == 'closed'",
+            tags: ['compliance', 'gdpr'],
+          },
+          // A policy WITHOUT the key rides through untouched — the strip
+          // dispatches on key presence.
+          {
+            name: 'own_cases',
+            object: 'crm_case',
+            operation: 'select',
+            using: 'owner == current_user.id',
+          },
+        ],
+      }],
+    },
+    after: {
+      permissions: [{
+        name: 'compliance_reviewer',
+        label: 'Compliance Reviewer',
+        rowLevelSecurity: [
+          {
+            name: 'reviewed_cases',
+            object: 'crm_case',
+            operation: 'select',
+            using: "status == 'closed'",
+          },
+          {
+            name: 'own_cases',
+            object: 'crm_case',
+            operation: 'select',
+            using: 'owner == current_user.id',
+          },
+        ],
+      }],
+    },
+    // One notice: the one policy carrying the key.
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `decision` edge branching became EXCLUSIVE — first match in declaration
+ * order — and taking every true branch is now the declared `mode: 'inclusive'`
+ * (protocol 18, #15429; maintainer ruling 「跟主流对齐」, 2026-09-23).
+ *
+ * Until this change an edge-branched decision (no `config.conditions`) took
+ * EVERY out-edge whose condition held, one after another, while its schema,
+ * its docs and the engine's own comment all called it an exclusive gateway. The
+ * traversal now takes the FIRST conditioned out-edge that holds, in the order
+ * the flow's `edges` array declares them — the BPMN exclusive gateway,
+ * Salesforce Flow's Decision, n8n's Switch default — and `mode: 'inclusive'`
+ * is what an author writes to take every one (the BPMN inclusive gateway).
+ *
+ * ## What this rewrites, and the one thing it does not infer
+ *
+ * A decision with no `conditions` list (absent or empty), no `mode` of its
+ * own, and TWO OR MORE out-edges carrying a `condition` (a `fault` edge is
+ * error routing, not a branch) gets `mode: 'inclusive'` written explicitly, so
+ * a flow written while every true branch ran keeps that behaviour under the
+ * exclusive traversal. One conditioned edge plus a default is left alone:
+ * first-match and every-true-edge cannot differ there, so there is nothing to
+ * preserve. A decision whose author already wrote `mode` — either member — has
+ * spoken and is left alone, which is also what makes a second replay a no-op.
+ *
+ * ⛔ No smarter inference: a pair of conditions that PROVABLY partition
+ * (`x == 'a'` beside `x != 'a'`) is rewritten too. First-match equals
+ * every-true-edge only when the conditions are exclusive, and the ruling's
+ * predicate is the count, not a decision procedure over CEL — the author then
+ * deletes the key where the branches partition, and the `os migrate meta` diff
+ * is where that judgment is made (the paired D3 entry
+ * `flow-decision-edge-branching-first-match` says how).
+ *
+ * Reaches the nodes inside ADR-0031 regions (`loop.config.body`,
+ * `parallel.config.branches[]`, `try_catch.config.try` / `.catch`) through the
+ * shared slot table, judging each region's decisions against ITS OWN edges —
+ * a nested gate's out-edges live in the region, not in `flow.edges`.
+ *
+ * ## Where it replays — `os migrate meta --from 17`, and no load seam
+ *
+ * This is a DEFAULT FLIP, not a rename or a delete: the old shape (no `mode`)
+ * still parses and now MEANS exclusive, and the rewrite changes what it means.
+ * Such an entry is sound only where "this source predates the flip" is a fact,
+ * and that is the D3 chain alone — the operator asserts the source's age with
+ * `--from`. `retiredFromLoadPath: true` keeps it off the authoring funnel
+ * (`normalizeStackInput`), where an author who wrote two branches today, against
+ * the contract that says an omitted `mode` is exclusive, must not be rewritten
+ * into an inclusive gateway. The flag's jurisdiction ends there — its own
+ * docblock on `MetadataConversion` says so, and ADR-0087's 2026-07-31 addendum
+ * is why: data-at-rest seams replay retired entries on purpose — so every
+ * data-at-rest seam that opens the retired window has to refuse this id by
+ * name, on the artifact door's precedent for `app-hidden-to-unpublished`
+ * (#17885, `DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `@objectstack/metadata-core`):
+ * the automation engine's flow rehydration seam does
+ * (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in `service-automation/src/engine.ts`:
+ * `registerFlow` serves code-shipped flows, REST bodies and Studio saves alike,
+ * none of them dated), and the artifact-ingestion door does
+ * (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `metadata-core/src/artifact-forward-conversion.ts`:
+ * a scaffolded `^17.0.0` floor is a dependency range, not an age). ⛔ Not replayed over stored `sys_metadata`
+ * flows either, by maintainer ruling (letter C on #15429): a stored row takes
+ * the first-match meaning on upgrade — BREAKING, stated in the D3 entry and the
+ * changeset with the one-line fix `mode: 'inclusive'` — with no stored-row
+ * rewrite, no cutoff and no read-path completion. `os migrate meta --stored`
+ * runs this entry's `apply` over each stored flow body only to LIST the nodes
+ * it would write (`collectDecisionModeReview` in
+ * `@objectstack/metadata-protocol`), discarding the result, so the review list
+ * and this predicate are one and the same.
+ */
+const flowDecisionModeInclusiveExplicit: MetadataConversion = {
+  id: 'flow-decision-mode-inclusive-explicit',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'flow.nodes[].config.mode (decision)',
+  summary:
+    "edge-branched decision with two or more conditioned out-edges and no `mode`: `mode: 'inclusive'` written "
+    + 'explicitly (the traversal became exclusive, first match in declaration order, as mainstream engines '
+    + 'treat a decision, and taking every true edge must now be declared; the key keeps the '
+    + 'every-true-edge behaviour those nodes had, and the author deletes it where the branches partition)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'flows', (flow, path) => rewriteDecisionModesInGraph(flow, path, emit, 0));
+  },
+  fixture: {
+    // DISJOINT from every other flow fixture: only `start` / `decision` / `end`
+    // / `loop` nodes, no key another entry rewrites, so the whole table hits
+    // only this one.
+    before: {
+      flows: [
+        {
+          name: 'lead_verdict',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            // The hotcrm#1555 shape: two conditioned out-edges that can BOTH
+            // hold for a confirmed record. Rewritten — every true branch ran.
+            { id: 'verdict', type: 'decision', label: 'Verdict?' },
+            { id: 'refuse', type: 'end', label: 'Refuse' },
+            { id: 'convert', type: 'end', label: 'Convert' },
+            // One guarded branch plus the default: first-match and
+            // every-true-edge agree, so there is nothing to preserve. Left alone.
+            { id: 'converted', type: 'decision', label: 'Already converted?' },
+            { id: 'abort', type: 'end', label: 'Abort' },
+            { id: 'proceed', type: 'end', label: 'Proceed' },
+            // The author already spoke. Left alone (and a second replay is a no-op).
+            { id: 'spoken', type: 'decision', label: 'Spoken', config: { mode: 'exclusive' } },
+            { id: 'a', type: 'end', label: 'A' },
+            { id: 'b', type: 'end', label: 'B' },
+            // A `conditions` list is first-match on its own and refuses `mode`. Left alone.
+            {
+              id: 'listed', type: 'decision', label: 'Listed',
+              config: { conditions: [{ label: 'Hot', expression: 'lead.score > 80' }] },
+            },
+            { id: 'hot', type: 'end', label: 'Hot' },
+            // The same two-branch shape inside a loop body, judged against the
+            // region's own edges. Rewritten.
+            {
+              id: 'sweep', type: 'loop', label: 'Sweep',
+              config: {
+                collection: '{leads}',
+                iteratorVariable: 'lead',
+                body: {
+                  nodes: [
+                    { id: 'gate', type: 'decision', label: 'Gate' },
+                    { id: 'x', type: 'end', label: 'X' },
+                    { id: 'y', type: 'end', label: 'Y' },
+                  ],
+                  edges: [
+                    { id: 'g1', source: 'gate', target: 'x', condition: "lead.status != 'suspected'" },
+                    { id: 'g2', source: 'gate', target: 'y', condition: { dialect: 'cel', source: "lead.status == 'confirmed'" } },
+                  ],
+                },
+              },
+            },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'verdict' },
+            { id: 'e2', source: 'verdict', target: 'refuse', condition: "lead.status != 'suspected'", label: 'Refuse' },
+            { id: 'e3', source: 'verdict', target: 'convert', condition: "lead.status == 'confirmed'", label: 'Convert' },
+            { id: 'e4', source: 'converted', target: 'abort', condition: "lead.status == 'converted'" },
+            { id: 'e5', source: 'converted', target: 'proceed', isDefault: true },
+            { id: 'e6', source: 'spoken', target: 'a', condition: 'x > 1' },
+            { id: 'e7', source: 'spoken', target: 'b', condition: 'x > 2' },
+            { id: 'e8', source: 'listed', target: 'hot', label: 'Hot' },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'lead_verdict',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'verdict', type: 'decision', label: 'Verdict?', config: { mode: 'inclusive' } },
+            { id: 'refuse', type: 'end', label: 'Refuse' },
+            { id: 'convert', type: 'end', label: 'Convert' },
+            { id: 'converted', type: 'decision', label: 'Already converted?' },
+            { id: 'abort', type: 'end', label: 'Abort' },
+            { id: 'proceed', type: 'end', label: 'Proceed' },
+            { id: 'spoken', type: 'decision', label: 'Spoken', config: { mode: 'exclusive' } },
+            { id: 'a', type: 'end', label: 'A' },
+            { id: 'b', type: 'end', label: 'B' },
+            {
+              id: 'listed', type: 'decision', label: 'Listed',
+              config: { conditions: [{ label: 'Hot', expression: 'lead.score > 80' }] },
+            },
+            { id: 'hot', type: 'end', label: 'Hot' },
+            {
+              id: 'sweep', type: 'loop', label: 'Sweep',
+              config: {
+                collection: '{leads}',
+                iteratorVariable: 'lead',
+                body: {
+                  nodes: [
+                    { id: 'gate', type: 'decision', label: 'Gate', config: { mode: 'inclusive' } },
+                    { id: 'x', type: 'end', label: 'X' },
+                    { id: 'y', type: 'end', label: 'Y' },
+                  ],
+                  edges: [
+                    { id: 'g1', source: 'gate', target: 'x', condition: "lead.status != 'suspected'" },
+                    { id: 'g2', source: 'gate', target: 'y', condition: { dialect: 'cel', source: "lead.status == 'confirmed'" } },
+                  ],
+                },
+              },
+            },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'verdict' },
+            { id: 'e2', source: 'verdict', target: 'refuse', condition: "lead.status != 'suspected'", label: 'Refuse' },
+            { id: 'e3', source: 'verdict', target: 'convert', condition: "lead.status == 'confirmed'", label: 'Convert' },
+            { id: 'e4', source: 'converted', target: 'abort', condition: "lead.status == 'converted'" },
+            { id: 'e5', source: 'converted', target: 'proceed', isDefault: true },
+            { id: 'e6', source: 'spoken', target: 'a', condition: 'x > 1' },
+            { id: 'e7', source: 'spoken', target: 'b', condition: 'x > 2' },
+            { id: 'e8', source: 'listed', target: 'hot', label: 'Hot' },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * The ruling's predicate, as a number: an edge-branched decision is rewritten
+ * when at least this many of its out-edges carry a `condition`. Below it,
+ * first-match and every-true-edge cannot differ.
+ */
+const DECISION_MODE_INCLUSIVE_MIN_CONDITIONED_EDGES = 2;
+
+/**
+ * Depth ceiling for the region recursion — mirrors the walkers' ceiling
+ * (`walk.ts`, `control-flow.zod.ts`): a self-referencing region in a
+ * hand-built stack must not recurse without bound.
+ */
+const DECISION_MODE_REGION_DEPTH_CEILING = 32;
+
+/** An edge whose `condition` carries a predicate — bare text, or the parsed `{ dialect, source }` envelope. */
+function edgeCarriesCondition(edge: Record<string, unknown>): boolean {
+  const c = edge.condition;
+  if (typeof c === 'string') return c.trim() !== '';
+  if (isDict(c)) return typeof c.source === 'string' && c.source.trim() !== '';
+  return false;
+}
+
+/**
+ * One graph — a flow, or one ADR-0031 region — for
+ * {@link flowDecisionModeInclusiveExplicit}: rewrite its own decisions against
+ * its own `edges`, then descend into each node's region slots. Copy-on-write:
+ * the same reference comes back when nothing under it changed.
+ */
+function rewriteDecisionModesInGraph(
+  graph: Record<string, unknown>,
+  path: string,
+  emit: (detail: ConversionApplication) => void,
+  depth: number,
+): Record<string, unknown> {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return graph;
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isDict) : [];
+  let changed = false;
+  const nextNodes = nodes.map((node, i) => {
+    if (!isDict(node)) return node;
+    const nodePath = `${path}.nodes[${i}]`;
+    let next = node;
+
+    if (node.type === 'decision') {
+      const cfg = isDict(node.config) ? node.config : {};
+      const declaresBranches = Array.isArray(cfg.conditions) && cfg.conditions.length > 0;
+      if (!declaresBranches && !('mode' in cfg)) {
+        const conditioned = edges.filter(
+          (e) => e.source === node.id && e.type !== 'fault' && edgeCarriesCondition(e),
+        ).length;
+        if (conditioned >= DECISION_MODE_INCLUSIVE_MIN_CONDITIONED_EDGES) {
+          next = { ...node, config: { ...cfg, mode: 'inclusive' } };
+          emit({
+            from: `mode unset (${conditioned} conditioned out-edges; every one whose condition held was taken)`,
+            to: 'inclusive',
+            path: `${nodePath}.config.mode`,
+          });
+        }
+      }
+    }
+
+    if (depth < DECISION_MODE_REGION_DEPTH_CEILING) {
+      const slots = typeof next.type === 'string' ? FLOW_REGION_SLOTS_BY_TYPE.get(next.type) : undefined;
+      if (slots && isDict(next.config)) {
+        let nextConfig = next.config;
+        for (const slot of slots) {
+          const raw = nextConfig[slot.key];
+          if (slot.arity === 'many') {
+            if (!Array.isArray(raw)) continue;
+            let branchesChanged = false;
+            const nextBranches = raw.map((branch, bi) => {
+              if (!isDict(branch)) return branch;
+              const mapped = rewriteDecisionModesInGraph(branch, `${nodePath}.config.${slot.key}[${bi}]`, emit, depth + 1);
+              if (mapped !== branch) branchesChanged = true;
+              return mapped;
+            });
+            if (branchesChanged) nextConfig = { ...nextConfig, [slot.key]: nextBranches };
+          } else {
+            if (!isDict(raw)) continue;
+            const mapped = rewriteDecisionModesInGraph(raw, `${nodePath}.config.${slot.key}`, emit, depth + 1);
+            if (mapped !== raw) nextConfig = { ...nextConfig, [slot.key]: mapped };
+          }
+        }
+        if (nextConfig !== next.config) next = { ...next, config: nextConfig };
+      }
+    }
+
+    if (next !== node) changed = true;
+    return next;
+  });
+  return changed ? { ...graph, nodes: nextNodes } : graph;
+}
+
+/**
+ * One conversion of an OPEN major, with its place in that major's application
+ * order (#20574).
+ *
+ * A major's list is APPLICATION order — the loader runs the conversions in
+ * sequence — but the major that retirements still add to is authored as
+ * entries, because a list appended at its end does not merge: every retirement
+ * PR inserted into the same gap, so any two in flight conflicted.
+ */
+interface OrderedConversion {
+  /** The conversion. Its IDENTIFIER is the key the list is kept sorted by. */
+  readonly conversion: MetadataConversion;
+  /** Where it applies within its major: ascending `order`, ties broken by the conversion's `id`. */
+  readonly order: number;
+}
+
+/** A major's conversions in application order: ascending `order`, ties by the conversion's `id`. */
+function inApplicationOrder(entries: readonly OrderedConversion[]): readonly MetadataConversion[] {
+  return [...entries]
+    .sort((a, b) => a.order - b.order || (a.conversion.id < b.conversion.id ? -1 : a.conversion.id > b.conversion.id ? 1 : 0))
+    .map((e) => e.conversion);
+}
+
+/**
+ * Major 18's conversions, one entry per conversion.
+ *
+ * ⚠️ SORTED BY THE CONVERSION'S IDENTIFIER, NOT BY APPLICATION ORDER — that is
+ * the point of the shape. Git reports a conflict whenever two branches insert
+ * into the SAME gap between two unchanged lines, whatever they insert, and
+ * GitHub's server-side merge runs no driver that could say otherwise. A list
+ * appended at its end is one gap, so any two retirements in flight conflicted
+ * here. Kept sorted by identifier, two retirements insert into different gaps
+ * and merge clean — one existing entry between them is enough. `order`, not the
+ * position in this list, says where a conversion applies: `ALL_CONVERSIONS`,
+ * which the loader runs in sequence, and step 18's `conversionIds` both read
+ * `CONVERSIONS_BY_MAJOR[18]`, which is this list in `order`.
+ *
+ * To add a conversion:
+ * - Insert `{ conversion: <identifier>, order: <n> }` where its identifier
+ *   sorts (code-unit order, as `<` compares two strings) — never at the end.
+ * - `order` is one more than the highest here. Two retirements in flight may
+ *   take the same number; they then apply in `id` order. One that must apply
+ *   BEFORE an existing entry takes a number between its neighbours' (`23.5`)
+ *   instead of renumbering them.
+ * - DEFINE it directly above the definition of the entry that follows it in
+ *   this list, so the conversion defined next after it is that entry. One that
+ *   sorts last is defined after every other conversion, directly above
+ *   `OrderedConversion`. The end of the definitions is one gap too: defining
+ *   every new conversion there conflicts exactly as appending here did.
+ *
+ * `scripts/conversions-major18-merge.test.ts` holds both rules for every entry
+ * added after this shape, and proves the merge.
+ */
+const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: actionAriaRemoved, order: 43 },
+  { conversion: actionBlockEndpointToTarget, order: 52 },
+  { conversion: agentLifecycleRemoved, order: 57 },
+  { conversion: agentMemoryLongTermStoreRemoved, order: 56 },
+  { conversion: agentStructuredOutputRefusedMembersRemoved, order: 55 },
+  { conversion: apiEndpointCacheTtlToCacheTtlSeconds, order: 23 },
+  { conversion: chartConfigAriaRemoved, order: 32 },
+  { conversion: connectorConnectionTimeoutMsRemoved, order: 20 },
+  { conversion: connectorErrorMappingRemoved, order: 19 },
+  // The connector duration rename that applied just before these two
+  // (`connector-health-and-trigger-durations-unit-in-key`, between orders 24
+  // and 25) was absorbed by the two removals below, each of which strips the
+  // container a renamed key lived in — see its ABSORBED note.
+  { conversion: connectorResilienceKeysRemoved, order: 25 },
+  { conversion: connectorSyncKeysRemoved, order: 50 },
+  { conversion: connectorTriggersRemoved, order: 26 },
+  { conversion: cubeJoinSqlAndRelationshipRemoved, order: 9 },
+  { conversion: cubeMemberInnerNameRemoved, order: 44 },
+  { conversion: cubeRefreshKeyRemoved, order: 47 },
+  { conversion: cubeSubDayGranularitiesRemoved, order: 8 },
+  { conversion: currencyConfigPrecisionRemoved, order: 41 },
+  { conversion: dashboardRefreshIntervalToRefreshIntervalSeconds, order: 24 },
+  { conversion: dashboardWidgetChartConfigStructureRemoved, order: 33 },
+  { conversion: datasetCountMeasureEmptyFieldRemoved, order: 54 },
+  { conversion: elementFilterRemoved, order: 4 },
+  { conversion: elementFormRemoved, order: 5 },
+  { conversion: elementInputTargetVariableRemoved, order: 3 },
+  { conversion: elementTextVariantHeadingLevels, order: 59 },
+  { conversion: fieldColumnListsCanonicalized, order: 6 },
+  { conversion: fieldMalformedScalePrecisionRemoved, order: 1 },
+  { conversion: fieldReferenceToAlias, order: 18 },
+  { conversion: flowDecisionModeInclusiveExplicit, order: 45 },
+  { conversion: formFieldPublicPickerRemoved, order: 53 },
+  { conversion: formLayoutInlineGridToVertical, order: 40 },
+  { conversion: formViewOptionDefaultRemoved, order: 17 },
+  { conversion: formViewSubformColumnsCanonicalized, order: 51 },
+  { conversion: hookTimeoutToTimeoutMs, order: 21 },
+  { conversion: jobTimeoutToTimeoutMs, order: 22 },
+  { conversion: listViewSortStringClauseToArray, order: 30 },
+  { conversion: mappingLookupParamsRemoved, order: 11 },
+  { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
+  { conversion: metricFiltersRemoved, order: 7 },
+  { conversion: objectGridDefaultSortRemoved, order: 14 },
+  { conversion: objectGridResizableColumnsRemoved, order: 57 },
+  { conversion: objectKanbanQuickAddRemoved, order: 15 },
+  { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
+  { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
+  { conversion: pageAssignedProfilesRemoved, order: 31 },
+  { conversion: pageComponentFilterRecordToRuleArray, order: 36 },
+  { conversion: pageComponentResponsiveRemoved, order: 13 },
+  { conversion: pageHeaderBreadcrumbRemoved, order: 49 },
+  { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
+  { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
+  { conversion: permissionRlsTagsRemoved, order: 42 },
+  { conversion: recordChatterPositionVocabulary, order: 2 },
+  { conversion: recordHighlightsFieldIconRemoved, order: 10 },
+  { conversion: reportJoinedChartRemoved, order: 38 },
+  { conversion: timeDefaultUtcSuffixDropped, order: 48 },
+  { conversion: translationComponentSubmitLabelRemoved, order: 12 },
+  { conversion: translationPerAppSettingsRemoved, order: 34 },
+  { conversion: translationWidgetSubCaptionRemoved, order: 55 },
+  { conversion: tursoConfigTimeoutToTimeoutMs, order: 28 },
+  { conversion: viewItemOwnerHiddenRemoved, order: 37 },
+  { conversion: viewListTabsRemoved, order: 46 },
+  { conversion: viewOverlayOwnerHiddenRemoved, order: 39 },
+  { conversion: viewPageMountRemoved, order: 29 },
+];
+
+/**
+ * Every conversion, grouped by the major that introduced its canonical shape
+ * (`toMajor`), each major's list in APPLICATION order: {@link ALL_CONVERSIONS}
+ * concatenates them by ascending major and the loader runs it in sequence.
+ *
+ * A released major's list is a plain array, closed with its release. The major
+ * that retirements still add to is authored as sorted entries with an explicit
+ * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
+ * conflict here; the next major takes the same shape when it opens.
+ */
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -11687,48 +14904,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     appHiddenToUnpublished,
     actionGlobalNavLocationRemoved,
   ],
-  18: [
-    fieldMalformedScalePrecisionRemoved,
-    recordChatterPositionVocabulary,
-    elementInputTargetVariableRemoved,
-    elementFilterRemoved,
-    elementFormRemoved,
-    fieldColumnListsCanonicalized,
-    metricFiltersRemoved,
-    cubeSubDayGranularitiesRemoved,
-    cubeJoinSqlAndRelationshipRemoved,
-    recordHighlightsFieldIconRemoved,
-    mappingLookupParamsRemoved,
-    translationComponentSubmitLabelRemoved,
-    pageComponentResponsiveRemoved,
-    objectGridDefaultSortRemoved,
-    objectKanbanQuickAddRemoved,
-    permissionAllowRestorePurgeRemoved,
-    formViewOptionDefaultRemoved,
-    fieldReferenceToAlias,
-    connectorErrorMappingRemoved,
-    connectorConnectionTimeoutMsRemoved,
-    hookTimeoutToTimeoutMs,
-    jobTimeoutToTimeoutMs,
-    apiEndpointCacheTtlToCacheTtlSeconds,
-    dashboardRefreshIntervalToRefreshIntervalSeconds,
-    connectorHealthAndTriggerDurationsUnitInKey,
-    memoryPersistenceAutoSaveIntervalToMs,
-    tursoConfigTimeoutToTimeoutMs,
-    viewPageMountRemoved,
-    listViewSortStringClauseToArray,
-    pageAssignedProfilesRemoved,
-    chartConfigAriaRemoved,
-    dashboardWidgetChartConfigStructureRemoved,
-    translationPerAppSettingsRemoved,
-    objectTenancyOrganizationFieldRemoved,
-    pageComponentFilterRecordToRuleArray,
-    viewItemOwnerHiddenRemoved,
-    reportJoinedChartRemoved,
-    viewOverlayOwnerHiddenRemoved,
-    formLayoutInlineGridToVertical,
-    currencyConfigPrecisionRemoved,
-  ],
+  18: inApplicationOrder(MAJOR_18_CONVERSIONS),
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */

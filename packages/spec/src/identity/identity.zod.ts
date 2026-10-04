@@ -227,7 +227,7 @@ export const VerificationTokenSchema = lazySchema(() => z.object({
 export type VerificationToken = z.input<typeof VerificationTokenSchema>;
 
 /*
- * `ApiKey` / `ApiKeySchema` / `ApiKeyParsed` are NOT declared here (#8715,
+ * `ApiKey` / `ApiKeySchema` / `ApiKeyParsed` are NOT declared here (commit 2c86fe3ea,
  * maintainer-ruled DELETE 2026-08-15; ADR-0049 enforce-or-remove).
  *
  * The schema that stood here documented better-auth's `apiKey` PLUGIN shape —

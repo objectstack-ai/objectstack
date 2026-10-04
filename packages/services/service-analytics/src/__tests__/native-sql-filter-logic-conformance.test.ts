@@ -50,14 +50,14 @@ const CUBE: Cube = {
   name: 'logic',
   title: 'Logic',
   sql: 't',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: Object.fromEntries(
     ['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'].map((n) => [
       n,
-      { name: n, label: n, type: 'string', sql: n },
+      { label: n, type: 'string', sql: n },
     ]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */
@@ -107,6 +107,10 @@ describe('NativeSQLStrategy — filter logic conformance', () => {
 
     ctx = {
       getCube: (name: string) => (name === 'logic' ? CUBE : undefined),
+      // [#20444] The fixture's columns, declared: every one a `text` field.
+      // The table's `$empty` rows are answered by the field's DECLARED row,
+      // which this strategy reads from this hook and refuses without.
+      declaredValueShape: () => ({ type: 'text' }),
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
       // The strategy binds `$1`-style placeholders in ascending order, each
       // pushed immediately before it is referenced, so a positional rewrite to

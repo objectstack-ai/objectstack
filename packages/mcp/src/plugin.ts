@@ -5,7 +5,7 @@ import {
   assembleExecutionContext,
   resolveAuthzContext,
   resolveLocalizationContext,
-  // [#15348 / #16013 / #17114] The two symbols this door's tenancy-posture
+  // [#15348 / #16013 / commit 4af758d47] The two symbols this door's tenancy-posture
   // read is built from. `classifyAdmissionTenancyPosture` is the ONE shared
   // classification decision 1 option A requires (#13906) — branded "never
   // registered" ⇒ quiet `undefined`, every other rejection ⇒ the loud
@@ -23,9 +23,17 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import { createStdioDataBridge, enforceApiExposure, GATED_ACTIONS } from './stdio-data-bridge.js';
+import {
+  createStdioDataBridge,
+  enforceApiExposure,
+  GATED_ACTIONS,
+  serveStoredMetadataHashes,
+  serveStoredMetadataRow,
+  type StoredHashDigest,
+} from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
 
@@ -64,7 +72,7 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  *    admitting on it is exactly the permissive-on-failure defect #13906 exists
  *    to repair, and the reason this seam is not a one-liner.
  *
- * [#17114] That classification is no longer hand-written here — it is
+ * [commit 4af758d47] That classification is no longer hand-written here — it is
  * `classifyAdmissionTenancyPosture` (`@objectstack/core`), the shared function
  * #16013 extracted and which this seam was one of the two left outside. ⛔ The
  * RESOLUTION is NOT shared: which of this door's two accessors may be asked is
@@ -123,7 +131,7 @@ async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPo
  * call is scoped exactly like the same identity over REST (RLS / FLS / tenant).
  *
  * [#7279] Assembled by the SHARED `assembleExecutionContext` rather than by
- * hand. This face was the last hand-written assembly left after #6216 converged
+ * hand. This face was the last hand-written assembly left after commit f586f1a89 converged
  * the dispatcher / REST / share-link sites, and hand assembly is what let it
  * fall behind the envelope twice over: it dropped `tabPermissions`, and it
  * resolved no localization at all. The assembler's field set is CLOSED, so the
@@ -258,7 +266,7 @@ export class MCPServerPlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['mcp'];
-  version = '1.0.0';
+  version = PACKAGE_VERSION;
   type = 'standard' as const;
   dependencies: string[] = [];
 
@@ -272,7 +280,7 @@ export class MCPServerPlugin implements Plugin {
   async init(ctx: PluginContext): Promise<void> {
     const config: MCPServerRuntimeConfig = {
       name: readEnvWithDeprecation('OS_MCP_SERVER_NAME', 'MCP_SERVER_NAME', { silent: true }) ?? this.options.name ?? 'objectstack',
-      version: this.options.version ?? '1.0.0',
+      version: this.options.version ?? DEFAULT_SERVER_VERSION,
       transport: (readEnvWithDeprecation('OS_MCP_SERVER_TRANSPORT', 'MCP_SERVER_TRANSPORT', { silent: true }) as 'stdio' | 'http') ?? this.options.transport ?? 'stdio',
       instructions: this.options.instructions,
       logger: ctx.logger,
@@ -372,7 +380,14 @@ export class MCPServerPlugin implements Plugin {
     let dataBridge: McpDataBridge | undefined;
     if (shouldStart) {
       const apiKey = readEnvWithDeprecation('OS_MCP_STDIO_API_KEY', [], { silent: true });
-      let ql: (IDataEngine & { find: (object: string, opts: unknown) => Promise<unknown> }) | undefined;
+      let ql:
+        | (IDataEngine & {
+            find: (object: string, opts: unknown) => Promise<unknown>;
+            // [#21207] The engine's keyed-digest accessor (objectql), probed
+            // per call: an engine without it serves no content hash.
+            getKeyedDigest?: () => StoredHashDigest | undefined;
+          })
+        | undefined;
       try {
         ql = ctx.getService('objectql');
       } catch {
@@ -541,6 +556,10 @@ export class MCPServerPlugin implements Plugin {
       // wall that changed mid-session must take effect on the next call rather
       // than at the next process restart. See `resolveStdioTenancyPosture` for
       // why this is not hoisted next to the localization memo.
+      // [#21207] The crypto provider's keyed digest, read at each use — the
+      // host registers the provider after the kernel starts.
+      const storedHashDigest = (): StoredHashDigest | undefined =>
+        typeof scopedQl.getKeyedDigest === 'function' ? scopedQl.getKeyedDigest() : undefined;
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
         const ec = await resolveStdioExecutionContext(
           scopedQl,
@@ -556,6 +575,7 @@ export class MCPServerPlugin implements Plugin {
           engine: scopedQl,
           metadataService,
           resolvePrincipal,
+          keyedDigest: storedHashDigest,
         });
       } else {
         // Functional degradation, said once and naming the remedy: two of the
@@ -601,7 +621,17 @@ export class MCPServerPlugin implements Plugin {
         })) as unknown;
         const rows = res && (res as { value?: unknown }).value ? (res as { value: unknown }).value : res;
         const row = Array.isArray(rows) ? rows[0] : rows;
-        return (row ?? null) as Record<string, unknown> | null;
+        // [#21207] The stored-metadata-body family's one projection, applied by
+        // the same helper `bridge.get` serves through: a `sys_metadata` /
+        // `sys_metadata_history` row's body reaches this resource as its type's
+        // read projection, never as the stored bytes — so the tool and the
+        // resource cannot disagree about what a stored credential is.
+        // [#21207] …and its stored content hash keyed, or not served at all.
+        return serveStoredMetadataHashes(
+          objectName,
+          serveStoredMetadataRow(objectName, (row ?? null) as Record<string, unknown> | null),
+          storedHashDigest(),
+        );
       };
       ctx.logger.info(
         `[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity ${initial.userId} (RLS/FLS/tenant applied)`,

@@ -35,7 +35,7 @@ export const entry: SemanticMigration = {
     + 'expression slots. So an author — very often an AI reading the generated reference page, '
     + 'ADR-0033 — who wrote `successCriteria: \'p95 < 300ms\'` got a green parse and no signal, '
     + 'indistinguishable from a predicate that ran and answered. ADR-0049 enforce-or-remove, '
-    + 'ruled A by the maintainer on 2026-09-18 (director decision batch #160 item 3): by the '
+    + 'ruled A by the maintainer on 2026-09-18: by the '
     + 'standing criterion that a declared-but-unread capability is kept only when mainstream '
     + 'platforms in the domain have it, application platforms do not carry SLI success criteria '
     + 'or trace-sampling conditions as authorable application metadata — that lives in '

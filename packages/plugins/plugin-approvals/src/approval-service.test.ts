@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
-import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS } from './approval-service.js';
+import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 
 interface FakeRow { [k: string]: any }
@@ -746,9 +746,9 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
   });
 
-  // ── the #8710 carve-out, asserted on THIS side (#8863) ──────────────────
+  // ── the commit 04d03c3a0 carve-out, asserted on THIS side (commit d200b016b) ──
   //
-  // Maintainer ruling, 2026-08-15 (#8710, inheriting #8613), verbatim:
+  // Maintainer ruling, 2026-08-15 (commit 04d03c3a0, inheriting #8613), verbatim:
   //
   //   > Access-conferring paths filter deactivated positions; addressing
   //   > paths do not.
@@ -1310,7 +1310,9 @@ describe('ApprovalService (node era)', () => {
       { id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' },
     ];
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    // Decided by u9 THEMSELF: `actor_id` records the person the context
+    // vouches for (#21411), and a bare system context vouches for nobody.
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, asUser('u9'));
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.map(a => (a as any).actor_name)).toEqual(['Ada Lovelace', 'Grace Hopper']);
   });
@@ -1679,15 +1681,19 @@ describe('ApprovalService (node era)', () => {
     expect(emitted.map(e => e.topic)).toEqual(['approval.sla_breached', 'approval.sla_breached']);
     expect(emitted[0].audience).toEqual(['u9', 'boss']);
     expect(emitted[1].audience).toEqual(['u1']); // submitter
+    // ADR-0118 D1: the sweep is no user, so neither the row nor the
+    // notifications name an actor. The row's KIND says the SLA acted.
+    expect(emitted.every(e => !('actorId' in e))).toBe(true);
     const actions = await svc.listActions(req.id, SYS);
-    expect(actions.at(-1)).toMatchObject({ action: 'escalate', actor_id: 'system:sla', comment: 'notify → boss' });
+    expect(actions.at(-1)).toMatchObject({ action: 'escalate', comment: 'notify → boss' });
+    expect(actions.at(-1)?.actor_id).toBeUndefined();
     // Single-shot: second sweep is a no-op.
     const second = await svc.runEscalations();
     expect(second.escalated).toBe(0);
     expect(emitted).toHaveLength(2);
   });
 
-  it('runEscalations: auto_approve decides as system:sla and resumes the flow', async () => {
+  it('runEscalations: auto_approve decides as the SLA sweep, records no person, and resumes the flow', async () => {
     const resumed: any[] = [];
     svc.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
     const req = await svc.openNodeRequest(
@@ -1701,10 +1707,13 @@ describe('ApprovalService (node era)', () => {
     expect(resumed[0]).toMatchObject({ runId: 'run_1', signal: { branchLabel: 'approve' } });
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.map(a => a.action)).toEqual(['submit', 'escalate', 'approve']);
-    expect(actions.at(-1)?.actor_id).toBe('system:sla');
+    // The escalate row right before it names the policy that decided; the
+    // decision itself records no person (ADR-0118 D1).
+    expect(actions[1]?.comment).toBe('auto_approve');
+    expect(actions.slice(1).map(a => a.actor_id)).toEqual([undefined, undefined]);
   });
 
-  it('runEscalations: auto_reject decides as system:sla', async () => {
+  it('runEscalations: auto_reject decides as the SLA sweep', async () => {
     const req = await svc.openNodeRequest(
       openInput(['u9'], {}, { escalation: { timeoutHours: 1, action: 'auto_reject', notifySubmitter: false } }), CTX,
     );
@@ -2558,9 +2567,12 @@ describe('ApprovalService — dead-run release (#3456)', () => {
   it('audits the release as a dead-run abandonment, not a submitter recall', async () => {
     withRunStatus('failed');
     await svc.releaseDeadRunRequests();
-    const action = engine._tables['sys_approval_action'].find((a: any) => a.actor_id === 'system:dead-run');
+    const action = engine._tables['sys_approval_action'].find((a: any) => a.action === 'recall');
     expect(action).toBeTruthy();
-    expect(action.action).toBe('recall');
+    // ADR-0118 D1: a sweep is no user — no person, never a sentinel. What sets
+    // it apart from a submitter's recall (which records the submitter) is that
+    // it records nobody and names the dead run and its status.
+    expect(action.actor_id).toBeNull();
     expect(action.comment).toMatch(/run_1/);
     expect(action.comment).toMatch(/failed/);
   });
@@ -3162,7 +3174,7 @@ describe('ApprovalService — queue approver is unresolved (#3508)', () => {
     // No queue expansion exists: the slot is the raw `type:value` literal,
     // which matches no real user id — the request routes to nobody.
     expect(req.pending_approvers).toEqual(['queue:q_west']);
-    expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('#3508'))).toBe(true);
+    expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('no ownership queue to expand it from'))).toBe(true);
   });
 });
 
@@ -3215,7 +3227,7 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(req.pending_approvers).toEqual([`${type}:${value}`]);
     const hit = warnings.find(([msg]) => String(msg).includes('expanded to nobody'));
     expect(hit, `no warning for ${type}`).toBeTruthy();
-    expect(String(hit[0])).toContain('#3807');
+    expect(String(hit[0])).toContain('cannot advance until someone is added or the approver is re-pointed');
     expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
   });
 
@@ -3587,6 +3599,555 @@ describe('ApprovalService — participant visibility (#3590)', () => {
   });
 });
 
+// ── "My Pending" reads the acting path's position addresses (#21350) ───
+//
+// A request routed to a position nobody held when it opened keeps the literal
+// `position:<p>` slot (a 15.x-era one reads `role:<p>`), and the console asks
+// "My Pending" under `role:<p>`. `resolveActor` has always admitted a holder of
+// `p` under either spelling, but the list filter matched the caller's
+// `approverId` literally and the participant gate keyed on the user id alone —
+// so the request was missing from the inbox of the very user who could decide
+// it. All three now read ONE equivalence (`approver-address.ts`).
+describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+  };
+  /** A signed-in caller whose server-resolved `positions` are `positions`. */
+  const holding = (userId: string, positions: unknown[]) =>
+    ({ userId, tenantId: 't1', positions, permissions: [] }) as any;
+  /** Staffed into the routed position; neither the submitter nor an admin. */
+  const REVIEWER = holding('u_reviewer', ['sales_manager']);
+  /** Holds a position — just not the routed one. */
+  const BYSTANDER = holding('u_bystander', ['finance']);
+  const SPELLINGS = ['role:sales_manager', 'position:sales_manager'] as const;
+
+  /** Routed to a position the fake directory staffs with nobody → a literal slot. */
+  const routedTo = (type: 'position' | 'role', value = 'sales_manager') => ({
+    object: 'opportunity', recordId: 'opp1', runId: 'run_1', nodeId: 'approve_step',
+    flowName: 'deal_approval',
+    config: { approvers: [{ type: type as any, value }], behavior: 'first_response' as const },
+    record: { id: 'opp1', amount: 100 },
+  });
+  /** Open the scene. An empty slate under the default policy still opens a row; an auto-approval is a broken scene. */
+  const open = async (svc: ApprovalService, input: ReturnType<typeof routedTo>) => {
+    const out = await svc.openNodeRequest(input, CTX);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
+
+  it('a holder of the position finds the request under EITHER spelling — list, count and the request itself', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position')); // submitter u1
+    expect(req.pending_approvers).toEqual(['position:sales_manager']);
+
+    for (const spelling of SPELLINGS) {
+      // The console's own identity list: user id, then the position address.
+      const filter = { status: 'pending' as const, approverId: ['u_reviewer', spelling] };
+      const listed = await svc.listRequests(filter, REVIEWER);
+      expect(listed.map(r => r.id), `listed under '${spelling}'`).toEqual([req.id]);
+      expect(await svc.countRequests(filter, REVIEWER), `counted under '${spelling}'`).toBe(1);
+    }
+    expect(await svc.getRequest(req.id, REVIEWER)).not.toBeNull();
+  });
+
+  it('a 15.x-era `role:` slot is found under the `position:` spelling too', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    // `role` is the deprecated approver type; its literal keeps the authored spelling.
+    const req = await open(svc, routedTo('role'));
+    expect(req.pending_approvers).toEqual(['role:sales_manager']);
+
+    for (const spelling of SPELLINGS) {
+      const listed = await svc.listRequests({ status: 'pending', approverId: ['u_reviewer', spelling] }, REVIEWER);
+      expect(listed.map(r => r.id), `listed under '${spelling}'`).toEqual([req.id]);
+    }
+  });
+
+  it('negative control: a user who does not hold the position sees nothing, under either spelling', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position'));
+
+    for (const spelling of SPELLINGS) {
+      const filter = { status: 'pending' as const, approverId: ['u_bystander', spelling] };
+      expect(await svc.listRequests(filter, BYSTANDER), `listed under '${spelling}'`).toEqual([]);
+      expect(await svc.countRequests(filter, BYSTANDER), `counted under '${spelling}'`).toBe(0);
+    }
+    expect(await svc.listRequests(undefined, BYSTANDER)).toEqual([]);
+    expect(await svc.getRequest(req.id, BYSTANDER)).toBeNull();
+  });
+
+  it('negative control: a spelling the acting path does not admit folds onto nothing', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position'));
+
+    // SYS sees every row, so a miss here is the FILTER's verdict alone.
+    expect((await svc.listRequests({ approverId: 'role:sales_manager' }, SYS)).map(r => r.id)).toEqual([req.id]);
+    for (const address of ['team:sales_manager', 'org_membership_level:sales_manager', 'sales_manager']) {
+      expect(await svc.listRequests({ approverId: address }, SYS), `'${address}' must not fold`).toEqual([]);
+    }
+  });
+
+  it('the acting path is unchanged: the holder decides under the stored spelling, the bystander is refused', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position'));
+
+    await expect(
+      svc.decideNode(req.id, { decision: 'approve', actorId: 'position:sales_manager' }, BYSTANDER),
+    ).rejects.toThrow(/^FORBIDDEN: cannot act as 'position:sales_manager'/);
+
+    const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'position:sales_manager' }, REVIEWER);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+  });
+
+  // `resolveActor` must admit EXACTLY what it admitted before the equivalence
+  // moved into `approver-address.ts`. The oracle is the pre-extraction
+  // predicate, verbatim; the matrix crosses both spellings with near misses and
+  // with position names that contain a prefix themselves.
+  it('resolveActor admits exactly the identities the pre-extraction predicate admitted', async () => {
+    const svc = svcFor(makeFakeEngine());
+    const preExtraction = (named: string, positions: unknown[]) =>
+      positions.some((position) => named === `position:${position}` || named === `role:${position}`);
+    const NAMED = [
+      'position:cfo', 'role:cfo', 'team:cfo', 'org_membership_level:cfo', 'positions:cfo', 'Position:cfo',
+      'cfo', 'position:', 'role:', 'position:role:cfo', 'role:position:cfo', 'position:cfo ', 'u_other',
+    ];
+    const POSITION_SETS: unknown[][] = [[], ['cfo'], ['finance', 'cfo'], ['role:cfo'], ['position:cfo'], [''], [7]];
+    let admittedCount = 0;
+    for (const positions of POSITION_SETS) {
+      for (const named of NAMED.concat(['position:7', 'role:7'])) {
+        const admitted = await (svc as any).resolveActor(named, holding('u_caller', positions)).then(
+          (actor: string) => { expect(actor).toBe(named); return true; },
+          (err: Error) => { expect(err.message).toMatch(/^FORBIDDEN: cannot act as /); return false; },
+        );
+        expect(admitted, `named '${named}' with positions ${JSON.stringify(positions)}`)
+          .toBe(preExtraction(named, positions));
+        if (admitted) admittedCount++;
+      }
+    }
+    // Both arms of the matrix are exercised — not a sweep of refusals only.
+    expect(admittedCount).toBeGreaterThan(5);
+  });
+});
+
+// ── Every slot reader takes the caller's acting addresses (#21379) ─────
+//
+// #21350 moved the position-address equivalence into `approver-address.ts`
+// and pointed the list filter and the participant gate at it. Four readers
+// still keyed a slot on the bare user id: `can_act`, the decision methods'
+// slot test, the already-acted probe and — for a `user` approver authored as
+// an email — the participant gate's email half. A holder of a position whose
+// slot reads `position:<p>` therefore saw the request with `can_act: false`,
+// was refused with the default actor and with the console's `role:<p>`,
+// could decide it only by naming `position:<p>`, and lost sight of it after.
+// One pin per reader below; `approver-address-readers.test.ts` enumerates
+// them and fails on a slot-against-caller comparison written anywhere else.
+describe('ApprovalService — every slot reader takes the acting addresses (#21379)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+  };
+  const holding = (userId: string, positions: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ userId, tenantId: 't1', positions, permissions: [], ...extra }) as any;
+  /** Staffed into the routed position; neither the submitter nor an admin. */
+  const HOLDER = holding('u_holder', ['sales_manager']);
+  /** Holds a position — just not the routed one. */
+  const BYSTANDER = holding('u_bystander', ['finance']);
+  /** `CTX` (u1) submits every request here and holds no position. */
+  const SUBMITTER = CTX;
+  /** A platform admin who holds no slot — the #3424 override, not a slot holder. */
+  const ADMIN = holding('root', [], { permissions: ['admin_full_access'] });
+  const SLOT = 'position:sales_manager';
+
+  let recordSeq = 0;
+  /** Open one request routed by `approvers`, each on its own record. */
+  const open = async (svc: ApprovalService, approvers: any[], behavior = 'first_response') => {
+    const recordId = `opp_${++recordSeq}`;
+    const out = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_${recordSeq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval',
+      config: { approvers, behavior: behavior as any },
+      record: { id: recordId, amount: 100 },
+    }, SUBMITTER);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
+  const toPosition = [{ type: 'position', value: 'sales_manager' }];
+  const actionsOf = (engine: any, requestId: string, action: string) =>
+    (engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === requestId && a.action === action);
+  /** `can_act` as `attachViewers` serves it to `ctx` — for a caller the participant gate hides it from too. */
+  const servedCanAct = async (svc: ApprovalService, row: any, ctx: any) => {
+    const copy = { ...row };
+    (svc as any).attachViewers([copy], ctx, await (svc as any).actingCaller(ctx));
+    return copy.viewer.can_act as boolean;
+  };
+
+  it('can_act: the default actor\'s decision answer, as a table — holder, bystander, submitter, admin', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const rows: Array<[string, any, { canAct: boolean; canOverride: boolean; decides: 'slot' | 'override' | 'refused' }]> = [
+      ['holder', HOLDER, { canAct: true, canOverride: false, decides: 'slot' }],
+      ['bystander', BYSTANDER, { canAct: false, canOverride: false, decides: 'refused' }],
+      ['submitter', SUBMITTER, { canAct: false, canOverride: false, decides: 'refused' }],
+      ['admin', ADMIN, { canAct: false, canOverride: true, decides: 'override' }],
+    ];
+    for (const [label, ctx, want] of rows) {
+      const req = await open(svc, toPosition);
+      expect(req.pending_approvers, label).toEqual([SLOT]);
+      // Served to whoever may read it; the bystander may not, so the flag is
+      // read off the same `attachViewers` call the read path makes.
+      const served = await svc.getRequest(req.id, ctx);
+      if (label === 'bystander') expect(served, 'the bystander is no participant').toBeNull();
+      else {
+        expect(served?.viewer?.can_act, `${label}: served can_act`).toBe(want.canAct);
+        expect(served?.viewer?.can_override, `${label}: served can_override`).toBe(want.canOverride);
+      }
+      expect(await servedCanAct(svc, req, ctx), `${label}: can_act`).toBe(want.canAct);
+
+      // The decision with the DEFAULT actor (no `actorId`, what the REST
+      // route passes when the body names nobody).
+      const decided = await svc.decideNode(req.id, { decision: 'approve' } as any, ctx).then(
+        () => (actionsOf(engine, req.id, 'approve')[0]?.via_override ? 'override' : 'slot'),
+        (err: Error) => { expect(err.message, label).toMatch(/^FORBIDDEN: actor '.+' is not a pending approver$/); return 'refused'; },
+      );
+      expect(decided, `${label}: decision`).toBe(want.decides);
+      // ⭐ The rule the docblock states: can_act IS "admitted as a slot holder".
+      expect(want.canAct, label).toBe(decided === 'slot');
+    }
+  });
+
+  it('decision slot test: the default actor and BOTH spellings take the position slot; the decision records the person in actor_id and the slot\'s stored spelling in acted_as', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    for (const actorId of [undefined, 'role:sales_manager', 'position:sales_manager']) {
+      const req = await open(svc, toPosition);
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId } as any, HOLDER);
+      expect(out.finalized, `actor ${actorId ?? '(default)'}`).toBe(true);
+      expect(out.request.status).toBe('approved');
+      const [act] = actionsOf(engine, req.id, 'approve');
+      // #21411: two facts, two columns — whoever named what.
+      expect(
+        [act.actor_id, act.acted_as, act.via_override],
+        `recorded for actor ${actorId ?? '(default)'}`,
+      ).toEqual(['u_holder', SLOT, false]);
+    }
+    // A 15.x-era slot keeps its own spelling, under the default actor too.
+    const legacy = await open(svc, [{ type: 'role', value: 'sales_manager' }]);
+    expect(legacy.pending_approvers).toEqual(['role:sales_manager']);
+    await svc.decideNode(legacy.id, { decision: 'reject' } as any, HOLDER);
+    const [rejected] = actionsOf(engine, legacy.id, 'reject');
+    expect([rejected.actor_id, rejected.acted_as]).toEqual(['u_holder', 'role:sales_manager']);
+
+    // This widens nobody: holding A position is not holding THIS one.
+    const req = await open(svc, toPosition);
+    await expect(svc.decideNode(req.id, { decision: 'approve' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'role:sales_manager' }, BYSTANDER))
+      .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
+  });
+
+  it('decision slot test, the siblings: send back, request info, comment and reassign admit the holder\'s default actor and refuse the bystander', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+    // Send back's slot test runs before it looks for the flow's revise edge,
+    // so the holder gets PAST it (to the missing-flow refusal) and the
+    // bystander does not.
+    await expect(svc.sendBack(req.id, { comment: 'rework' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+    await expect(svc.sendBack(req.id, { comment: 'rework' } as any, HOLDER))
+      .rejects.toThrow(/^VALIDATION_FAILED: send-back requires the owning flow definition/);
+
+    await expect(svc.requestInfo(req.id, { comment: 'why?' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+    await svc.requestInfo(req.id, { comment: 'why?' } as any, HOLDER);
+    const [asked] = actionsOf(engine, req.id, 'request_info');
+    expect([asked.actor_id, asked.acted_as]).toEqual(['u_holder', SLOT]);
+
+    await expect(svc.comment(req.id, { comment: 'hi' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not on this request");
+    await svc.comment(req.id, { comment: 'hi' } as any, HOLDER);
+    const [said] = actionsOf(engine, req.id, 'comment');
+    expect([said.actor_id, said.acted_as]).toEqual(['u_holder', SLOT]);
+
+    await expect(svc.reassign(req.id, { to: 'u_next' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: 'u_bystander' is not a pending approver on this request");
+    // With `from` unnamed, the slot handed over is the one the holder takes.
+    const moved = await svc.reassign(req.id, { to: 'u_next' } as any, HOLDER);
+    expect(moved.request.pending_approvers).toEqual(['u_next']);
+    const [reassigned] = actionsOf(engine, req.id, 'reassign');
+    // `reassign_from` still holds the slot handed over: that column is #21455's.
+    expect([reassigned.actor_id, reassigned.acted_as, reassigned.reassign_from, reassigned.via_override])
+      .toEqual(['u_holder', SLOT, SLOT, false]);
+  });
+
+  it('decision slot test feeds the multi-approver tally: a default-actor approval consumes exactly the position slot', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, [...toPosition, { type: 'user', value: 'u9' }], 'unanimous');
+    expect(req.pending_approvers).toEqual([SLOT, 'u9']);
+
+    const first = await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    expect(first.finalized).toBe(false);
+    expect(first.request.pending_approvers).toEqual(['u9']);
+    const second = await svc.decideNode(req.id, { decision: 'approve' } as any, asUser('u9'));
+    expect(second.finalized).toBe(true);
+  });
+
+  it('already-acted probe: the holder keeps sight of a request they decided under the position slot', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+    await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+
+    expect(await svc.getRequest(req.id, HOLDER), 'the holder, after deciding').not.toBeNull();
+    expect((await svc.listRequests(undefined, HOLDER)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.getRequest(req.id, BYSTANDER), 'the bystander').toBeNull();
+    // The flip side is the POSITION's: a decision recorded under
+    // `position:<p>` stays visible to whoever holds `p`.
+    expect(await svc.getRequest(req.id, holding('u_successor', ['sales_manager']))).not.toBeNull();
+  });
+
+  it('the email-keyed slot (a `user` approver authored as an email): listed, served with can_act, decided by the default actor, and kept in sight', async () => {
+    const engine = makeFakeEngine();
+    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    await engine.insert('sys_user', { id: 'u_other', email: 'other@example.com' });
+    const svc = svcFor(engine);
+    const MAIL = holding('u_mail', []);
+    const OTHER = holding('u_other', []);
+    const req = await open(svc, [{ type: 'user', value: 'mail.reviewer@example.com' }]);
+    expect(req.pending_approvers).toEqual(['mail.reviewer@example.com']);
+
+    // The console's identity list: user id, then email.
+    const filter = { status: 'pending' as const, approverId: ['u_mail', 'mail.reviewer@example.com'] };
+    expect((await svc.listRequests(filter, MAIL)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.countRequests(filter, MAIL)).toBe(1);
+    expect((await svc.getRequest(req.id, MAIL))?.viewer?.can_act).toBe(true);
+
+    // Control: another account's email is not this slot.
+    expect(await svc.getRequest(req.id, OTHER)).toBeNull();
+    expect(await servedCanAct(svc, req, OTHER)).toBe(false);
+    await expect(svc.decideNode(req.id, { decision: 'approve' } as any, OTHER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_other' is not a pending approver");
+
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, MAIL);
+    expect(out.finalized).toBe(true);
+    const [act] = actionsOf(engine, req.id, 'approve');
+    expect([act.actor_id, act.acted_as]).toEqual(['u_mail', 'mail.reviewer@example.com']);
+    expect(await svc.getRequest(req.id, MAIL), 'after deciding').not.toBeNull();
+  });
+
+  it('the default actor takes a user-id slot before a position slot it could also take', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, [{ type: 'user', value: 'u_holder' }, ...toPosition], 'unanimous');
+    expect(req.pending_approvers).toEqual(['u_holder', SLOT]);
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    expect(out.request.pending_approvers).toEqual([SLOT]);
+    const [act] = actionsOf(engine, req.id, 'approve');
+    expect([act.actor_id, act.acted_as]).toEqual(['u_holder', 'u_holder']);
+  });
+});
+
+// ── The person in `actor_id`, the slot in `acted_as` (#21411) ──────────
+//
+// `actor_id` is a `sys_user` lookup (ADR-0118 D1: an id or nothing), but a
+// slot-gated action recorded the SLOT it took there — a `position:<p>` literal,
+// an email. Measured on a booted app, not one of the rows a position-slot
+// decision writes named the person who decided. Triage ruled the person into
+// `actor_id` and the slot into a column of its own; these pin the three slot
+// kinds through every door that decides, what the readers then read, and the
+// two doors that record nobody.
+describe('ApprovalService — actor_id records the person, acted_as the slot (#21411)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1757500000000 + (n++) * 1000) } });
+  };
+  const holding = (userId: string, positions: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ userId, tenantId: 't1', positions, permissions: [], ...extra }) as any;
+  const HOLDER = holding('u_holder', ['sales_manager']);
+  const BYSTANDER = holding('u_bystander', ['finance']);
+  const ADMIN = holding('root', ['sales_manager'], { permissions: ['admin_full_access'] });
+  const SLOT = 'position:sales_manager';
+  const toPosition = [{ type: 'position', value: 'sales_manager' }];
+
+  let recordSeq = 0;
+  const open = async (svc: ApprovalService, approvers: any[], behavior = 'first_response') => {
+    const recordId = `deal_${++recordSeq}`;
+    const out = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_a${recordSeq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval',
+      config: { approvers, behavior: behavior as any },
+      record: { id: recordId, amount: 100 },
+    }, CTX);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
+  const actionsOf = (engine: any, requestId: string, action: string) =>
+    (engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === requestId && a.action === action);
+  const recorded = (row: any) => [row.actor_id ?? null, row.acted_as ?? null];
+
+  it('the three slot kinds, through the session door: position, email and user id', async () => {
+    const engine = makeFakeEngine();
+    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    const svc = svcFor(engine);
+
+    // Position — named, exactly the card's call.
+    const pos = await open(svc, toPosition);
+    await svc.decideNode(pos.id, { decision: 'approve', actorId: SLOT }, HOLDER);
+    expect(recorded(actionsOf(engine, pos.id, 'approve')[0])).toEqual(['u_holder', SLOT]);
+
+    // Email — the default actor takes the slot its own account's email keys.
+    const mail = await open(svc, [{ type: 'user', value: 'mail.reviewer@example.com' }]);
+    await svc.decideNode(mail.id, { decision: 'approve' } as any, holding('u_mail', []));
+    expect(recorded(actionsOf(engine, mail.id, 'approve')[0])).toEqual(['u_mail', 'mail.reviewer@example.com']);
+
+    // User id — the slot IS the person's id, so both columns carry it.
+    const user = await open(svc, [{ type: 'user', value: 'u9' }]);
+    await svc.decideNode(user.id, { decision: 'approve' } as any, asUser('u9'));
+    expect(recorded(actionsOf(engine, user.id, 'approve')[0])).toEqual(['u9', 'u9']);
+  });
+
+  it('the action link: a user-id token records that user, an email-bound token the one account carrying it — or nobody', async () => {
+    const engine = makeFakeEngine();
+    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    const svc = svcFor(engine);
+
+    const user = await open(svc, [{ type: 'user', value: 'u9' }]);
+    await svc.redeemActionToken((await svc.issueActionTokens(user.id, 'u9')).approve);
+    expect(recorded(actionsOf(engine, user.id, 'approve')[0])).toEqual(['u9', 'u9']);
+
+    const mail = await open(svc, [{ type: 'user', value: 'mail.reviewer@example.com' }]);
+    const out = await svc.redeemActionToken((await svc.issueActionTokens(mail.id, 'mail.reviewer@example.com')).approve);
+    expect(out).toMatchObject({ ok: true, action: 'approve' });
+    expect(recorded(actionsOf(engine, mail.id, 'approve')[0])).toEqual(['u_mail', 'mail.reviewer@example.com']);
+
+    // No account carries the email: the slot is still taken (the token admits
+    // it), and the person is unknown — `null`, ADR-0118's value, never the email.
+    const stranger = await open(svc, [{ type: 'user', value: 'outside@example.com' }]);
+    await svc.redeemActionToken((await svc.issueActionTokens(stranger.id, 'outside@example.com')).approve);
+    const [act] = actionsOf(engine, stranger.id, 'approve');
+    expect(recorded(act)).toEqual([null, 'outside@example.com']);
+    expect(act.via_override).toBe(false);
+  });
+
+  it('an override records the admin and NO slot — even when the admin named a position address', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    // The admin holds the position, but the slate keys a user id instead, so
+    // the named address misses it and the override admits the call. This
+    // recorded the NAMED literal before: measured on a booted app (#21411).
+    const req = await open(svc, [{ type: 'user', value: 'u9' }]);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: SLOT }, ADMIN);
+    const [act] = actionsOf(engine, req.id, 'approve');
+    expect([...recorded(act), act.via_override]).toEqual(['root', null, true]);
+  });
+
+  it('a system context that vouches for nobody records nobody — the SLA sweep\'s acting identity included', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const named = await open(svc, [{ type: 'user', value: 'u9' }]);
+    await svc.decideNode(named.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    // The slot test still runs on the named address; the PERSON is the context's.
+    expect(recorded(actionsOf(engine, named.id, 'approve')[0])).toEqual([null, 'u9']);
+
+    // ADR-0118 D1: the sweep's acting identity admits the call and is never
+    // recorded — a machine has no `sys_user` id, so the lookup holds null.
+    const sla = await open(svc, [{ type: 'user', value: 'u9' }]);
+    await svc.decideNode(sla.id, { decision: 'approve', actorId: SLA_ACTOR_ID }, SYS);
+    expect(recorded(actionsOf(engine, sla.id, 'approve')[0])).toEqual([null, null]);
+  });
+
+  it('the multi-approver tally and decision_progress count SLOTS from acted_as, never actor_id', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, [
+      { type: 'position', value: 'sales_manager', group: 'mgmt' },
+      { type: 'user', value: 'u9', group: 'ops' },
+    ], 'per_group');
+    expect(req.pending_approvers).toEqual([SLOT, 'u9']);
+
+    const first = await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    expect(first.finalized).toBe(false);
+    expect(first.request.pending_approvers).toEqual(['u9']);
+    // The person is `u_holder`, a key of no group: only the slot can satisfy `mgmt`.
+    const progress = (await svc.getRequest(req.id, SYS) as any)?.decision_progress;
+    expect(progress).toMatchObject({ behavior: 'per_group', got: 1, need: 2 });
+    expect(progress.groups).toEqual([
+      { group: 'mgmt', got: 1, need: 1, satisfied: true },
+      { group: 'ops', got: 0, need: 1, satisfied: false },
+    ]);
+
+    const second = await svc.decideNode(req.id, { decision: 'approve' } as any, asUser('u9'));
+    expect(second.finalized).toBe(true);
+  });
+
+  it('already acted: the PERSON keeps sight of what they decided, the slot\'s holders do too, the bystander never', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+    await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+
+    expect(await svc.getRequest(req.id, HOLDER), 'the person who decided').not.toBeNull();
+    expect(await svc.getRequest(req.id, holding('u_successor', ['sales_manager'])), 'the slot\'s holder').not.toBeNull();
+    expect(await svc.getRequest(req.id, BYSTANDER), 'the bystander').toBeNull();
+    // The person half: the holder later loses the position and still sees what
+    // they decided (#21411 Q3 = A — the one widening, by ruling).
+    expect(await svc.getRequest(req.id, holding('u_holder', [])), 'the person, position lost').not.toBeNull();
+  });
+
+  it('the action log shows the person by name and the slot beside it — and a backfilled row the slot alone', async () => {
+    const engine = makeFakeEngine();
+    await engine.insert('sys_user', { id: 'u_holder', name: 'Hana Holder', email: 'hana@example.com' });
+    const svc = svcFor(engine);
+    const req = await open(svc, [...toPosition, { type: 'user', value: 'u9' }], 'unanimous');
+    await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    // A row as the boot-time backfill leaves a pre-acted_as slot literal: the
+    // slot kept, the person unknown.
+    await engine.insert('sys_approval_action', {
+      id: 'aact_backfilled', request_id: req.id, step_index: 0, action: 'comment',
+      actor_id: null, acted_as: SLOT, comment: 'older note', created_at: '2099-01-01T00:00:00.000Z',
+    });
+
+    const log = await svc.listActions(req.id, SYS);
+    const approve = log.find((a) => a.action === 'approve')!;
+    expect([approve.actor_id, approve.actor_name, approve.acted_as]).toEqual(['u_holder', 'Hana Holder', SLOT]);
+    // The submitter's own action took no slot: no acted_as member at all.
+    const submit = log.find((a) => a.action === 'submit')!;
+    expect(submit.actor_id).toBe('u1');
+    expect('acted_as' in submit && submit.acted_as !== undefined).toBe(false);
+    const backfilled = log.find((a) => a.id === 'aact_backfilled')!;
+    expect([backfilled.actor_id, backfilled.actor_name, backfilled.acted_as]).toEqual([undefined, undefined, SLOT]);
+  });
+
+  it('already acted: a row written before acted_as existed is found by its person, and a slot is never matched against actor_id', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const old = await open(svc, [{ type: 'user', value: 'u_old' }]);
+    const legacy = await open(svc, toPosition);
+    // Both finished: neither is anyone's current slot any more, so only the
+    // already-acted probe can make either visible.
+    for (const r of [old, legacy]) {
+      await engine.update('sys_approval_request', { id: r.id, status: 'approved', pending_approvers: null });
+    }
+    engine._tables['sys_approval_approver'] = (engine._tables['sys_approval_approver'] ?? [])
+      .filter((row: any) => row.request_id !== old.id && row.request_id !== legacy.id);
+    // The pre-acted_as shapes: a user-id slot vote (the person), and a slot
+    // literal still sitting in actor_id (as if the backfill had not run).
+    await engine.insert('sys_approval_action', { id: 'aact_old', request_id: old.id, step_index: 0, action: 'approve', actor_id: 'u_old' });
+    await engine.insert('sys_approval_action', { id: 'aact_lit', request_id: legacy.id, step_index: 0, action: 'approve', actor_id: SLOT });
+
+    expect(await svc.getRequest(old.id, asUser('u_old')), 'found by its person').not.toBeNull();
+    // A literal left in actor_id is NOT read as a slot — the backfill moves it.
+    expect(await svc.getRequest(legacy.id, holding('u_successor', ['sales_manager']))).toBeNull();
+  });
+});
+
 // ── The ordering invariant the dead-run sweep rests on (#3456) ─────────
 //
 // `releaseDeadRunRequests` recalls a PENDING request whose owning run has
@@ -3832,8 +4393,8 @@ describe('status mirror identity (#3783)', () => {
     raw.created_at = new Date(baseTime - 3 * 60 * 60 * 1000).toISOString();
     await svc.runEscalations();
     expect(engine._tables['opportunity'][0].approval_status).toBe('approved');
-    // `system:sla` is a reserved audit actor, not a user — it must never be
-    // presented as one. The cascade stays user-less on purpose; a flow that
+    // The sweep's acting identity (`system:sla`) is not a user — it must never
+    // be presented as one. The cascade stays user-less on purpose; a flow that
     // wants to react to an SLA auto-decision declares runAs:'system'.
     expect(mirrorContext()?.userId).toBeUndefined();
     expect(mirrorContext()).toMatchObject({ isSystem: true });

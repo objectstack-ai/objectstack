@@ -45,7 +45,7 @@ export const EMPTY_IF_MATCH_REFUSAL =
  * `os meta delete <type> <name>` hands the SDK the same argument list it has
  * always handed it and the request stays byte-identical.
  *
- * ⛔ `?dropStorage` is NOT here and gets no flag. #12181 shipped two of the
+ * ⛔ `?dropStorage` is NOT here and gets no flag. Commit cf71d73f8 shipped two of the
  * door's three carriers on purpose: the third ADDS destructive reach (it drops
  * the object's physical table), no caller was measured needing it, and the
  * door's repeated-parameter refusal exists because of that destructiveness.

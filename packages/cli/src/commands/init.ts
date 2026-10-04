@@ -17,6 +17,7 @@ import {
   printAuthoringAdvisories,
   printAuthoringRuleErrors,
   AUTHORING_ADVISORY_PRINT_LIMIT,
+  isExitSignal,
 } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
@@ -135,7 +136,7 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    the correct remedy, not pinning our own declaration back to 12.
  *
  *    RE-MEASURED on the pinned 1.7.2 (#16813). The original reading was taken
- *    on 1.7.1 (#10326) and was behavioural: better-auth's own Kysely dialect —
+ *    on 1.7.1 (commit 675ab574e) and was behavioural: better-auth's own Kysely dialect —
  *    migrations, sign-up, sign-in, adapter find/update/delete — behaves
  *    identically on better-sqlite3 13.0.3 and on 12.11.1. 1.7.2 makes that
  *    structural instead of empirical: of the 464 files in the published
@@ -605,9 +606,10 @@ export const SCAFFOLD_WIRED_BARRELS: readonly { type: string; dir: string; stack
 /**
  * The union of the capability tokens the scaffolds need to run — today the
  * `flow` scaffold's pair. Declared by every template that wires the `flows`
- * barrel: without `triggers` a record-change flow makes `defineStack` refuse
- * the config, so the first `os g flow` would break the project, and without
- * `automation` the server loads the flow and never runs it.
+ * barrel: without `triggers` or without `automation` a record-change flow
+ * makes `defineStack` refuse the config (#20332: the trigger installs into the
+ * automation service, so neither token alone installs it), and the first
+ * `os g flow` would break the project.
  */
 export const SCAFFOLD_WIRED_REQUIRES: readonly string[] = [
   ...new Set(GENERATOR_SCAFFOLD_TARGETS.flatMap((t) => t.requires)),
@@ -647,9 +649,8 @@ function renderWiredStackKeys(): string {
   return [
     `  // What the files \`objectstack generate\` writes need in order to run. A`,
     `  // flow that starts on a record change is fired by 'triggers' and run by`,
-    `  // 'automation': without 'triggers' this config stops loading once it holds`,
-    `  // such a flow, and without 'automation' the server loads the flow and never`,
-    `  // runs it. Both can go if this project will never hold a flow.`,
+    `  // 'automation': without either one this config stops loading once it`,
+    `  // holds such a flow. Both can go if this project will never hold a flow.`,
     `  requires: [${requires}],`,
     '',
     `  // Every directory \`objectstack generate\` writes into is wired here: its`,
@@ -786,15 +787,28 @@ ${renderWiredStackKeys()}
 const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
+  // Field groups: the sections an item's form and detail page draw, top to
+  // bottom in this order. A field joins one by naming its \`key\` in \`group\`.
+  // That placement is what displays \`description\` and \`status\`.
+  // \`objectstack validate\` and \`objectstack lint\` report a field that
+  // nothing displays or reads (\`field-no-consumers\`) once the project holds
+  // a view, flow, dashboard or anything else that could read it, so give each
+  // field you add a \`group\` as well. Field groups versus a view's own form
+  // sections: https://objectstack.ai/docs/ui/field-grouping-and-order
+  fieldGroups: [
+    { key: 'details', label: 'Details' },
+  ],
   fields: {
     name: {
       type: 'text',
       label: 'Name',
       required: true,
+      group: 'details',
     },
     description: {
       type: 'textarea',
       label: 'Description',
+      group: 'details',
     },
     status: {
       type: 'select',
@@ -805,6 +819,7 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
         { label: 'Archived', value: 'archived' },
       ],
       defaultValue: 'draft',
+      group: 'details',
     },
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
@@ -975,7 +990,7 @@ function printWarning(msg: string) {
  * files" list). Reuses `create-objectstack`'s `created-summary.ts` (see its
  * header for the reachability measurement that made a hand-accumulated
  * list untenable for that scaffolder) instead of a second copy of the same
- * renderer — the two scaffold paths already drifted once (#10499) from
+ * renderer — the two scaffold paths already drifted once (closed by commit 6d441e41f) from
  * carrying separate implementations of the same list.
  *
  * Called once, after the install attempt (success OR failure) has run its
@@ -1133,10 +1148,18 @@ export default class Init extends Command {
     const startCwd = process.cwd();
     const template = TEMPLATES[flags.template];
 
+    // Every refusal in this command renders its sentence ONCE: the `✗` line it
+    // prints itself, with the hint under it, and then `this.exit(2)`. It used to
+    // end in `this.error(<the same sentence>)`, which hands oclif's entry point
+    // the sentence to render a second time as an `Error:` block on stderr — one
+    // refusal read twice across two streams. `this.exit(n)` raises the same
+    // signal and renders nothing, and `2` is the status `this.error` raised, so
+    // the exit status is unchanged. That is the split `isReportedError` guards
+    // (`utils/format.ts`): one rendering per refusal.
     if (!template) {
       printError(`Unknown template: ${flags.template}`);
       console.log(chalk.dim(`  Available: ${Object.keys(TEMPLATES).join(', ')}`));
-      this.error(`Unknown template: ${flags.template}`);
+      this.exit(2);
     }
 
     // Resolve target directory + project name.
@@ -1154,7 +1177,7 @@ export default class Init extends Command {
       const nameError = validateProjectName(args.name);
       if (nameError) {
         printError(nameError);
-        this.error(nameError);
+        this.exit(2);
       }
       projectName = args.name;
       targetDir = path.resolve(startCwd, args.name);
@@ -1164,7 +1187,7 @@ export default class Init extends Command {
           const msg = `Target directory ${targetDir} is not empty`;
           printError(msg);
           console.log(chalk.dim('  Choose a different name or remove the existing directory first.'));
-          this.error(msg);
+          this.exit(2);
         }
       } else {
         fs.mkdirSync(targetDir, { recursive: true });
@@ -1176,7 +1199,7 @@ export default class Init extends Command {
       if (nameError) {
         printError(`Current directory name "${projectName}" is not a valid project name. ${nameError}`);
         console.log(chalk.dim('  Re-run with an explicit name: `objectstack init my-app`'));
-        this.error(nameError);
+        this.exit(2);
       }
     }
 
@@ -1184,7 +1207,7 @@ export default class Init extends Command {
     if (fs.existsSync(path.join(targetDir, 'objectstack.config.ts'))) {
       printError(`objectstack.config.ts already exists in ${targetDir}`);
       console.log(chalk.dim('  Use `objectstack generate` to add metadata to an existing project'));
-      this.error('objectstack.config.ts already exists');
+      this.exit(2);
     }
 
     // Convert the npm-name (which allows hyphens, dots, scopes) into a
@@ -1342,7 +1365,7 @@ export default class Init extends Command {
 
         if (scaffoldRejected) {
           console.log(chalk.dim('  This is a CLI bug — please report it at https://github.com/objectstack-ai/objectstack/issues'));
-          this.error('Scaffold validation failed');
+          this.exit(2);
         }
       }
 
@@ -1371,12 +1394,16 @@ export default class Init extends Command {
         }
         console.log(chalk.dim(`    ${chosenPm} install`));
         console.log('');
-        this.error('Dependency installation failed');
+        this.exit(2);
       }
 
     } catch (error: any) {
+      // The two refusals above (scaffold self-test, dependency install) already
+      // printed their `✗` line and raised the exit signal with `this.exit(2)`.
+      // Re-reporting it here printed the refusal a second time.
+      if (isExitSignal(error)) throw error;
       printError(error.message || String(error));
-      this.error(error.message || String(error));
+      this.exit(2);
     }
   }
 }

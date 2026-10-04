@@ -19,6 +19,7 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below: this is
 // the surface the migration actually needs, which is wider than the `objectql`
 // slot contract by exactly one member (`getOwnedSummaryDescriptors`). Naming it
@@ -78,7 +79,8 @@ async function confirm(question: string): Promise<boolean> {
 export default class MigrateSummaryNulls extends Command {
   static override description =
     'Backfill roll-up count/sum summary columns still stored as NULL on parent rows created before the ' +
-    'insert-time seed (#5749). Dry-run by default; --apply recomputes and writes each affected row.';
+    'insert-time seed, which now writes 0 for an empty child set. ' +
+    'Dry-run by default; --apply recomputes and writes each affected row.';
 
   static override examples = [
     '$ os migrate summary-nulls',
@@ -103,7 +105,9 @@ export default class MigrateSummaryNulls extends Command {
       default: false,
     }),
     object: Flags.string({
-      description: 'Restrict to this object (repeatable; default: every object owning a count/sum roll-up)',
+      description:
+        'Restrict to this object (repeatable; default: every object owning a count/sum roll-up). A name the ' +
+        'deployment does not declare is refused',
       multiple: true,
     }),
     'recompute-undefined-on-empty': Flags.string({
@@ -189,10 +193,15 @@ export default class MigrateSummaryNulls extends Command {
 
     let stack;
     try {
+      // [#21391] The dry run boots READ-ONLY, the boot `os migrate plan`
+      // takes: `deferSchemaDdl` holds schema DDL back on every SQL datasource,
+      // and `readOnlyProbe` keeps a missing sqlite file from being created.
+      // `--apply` keeps the plain boot: the tables must exist before it writes.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins(),
+        ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -218,6 +227,10 @@ export default class MigrateSummaryNulls extends Command {
             'Run "os build" in your project root first (the migration reads dist/objectstack.json), then re-run.',
         );
       }
+      // [#21644] The walk keeps only the candidates owning a roll-up, so a name
+      // this registry does not declare would be dropped without a word and the
+      // run would report "nothing to backfill". Refused before any row is read.
+      refuseUndeclaredObjects(flags.object, loadedObjects);
 
       const { backfillSummaryNulls, formatSummaryBackfillReport } = await import('@objectstack/objectql');
 

@@ -241,7 +241,7 @@ describe('readonlyWhen strips CALLER-submitted values only (#9107)', () => {
     //    frozen paid-invoice lines). That same blindness would let this exact
     //    line — or a normalisation that is the identity for canonical input —
     //    hand the CALLER's value hook ownership and silently unlock the lock.
-    //    So this seam keeps VALUE EQUALITY, on purpose. Measured on #14472's
+    //    So this seam keeps VALUE EQUALITY, on purpose. Measured on commit 00ff228fe's
     //    branch: threading the record into `isCallerSuppliedValue` turned this
     //    very test red (`closed_note` committed the forgery where the lock had
     //    stripped it to `null`).

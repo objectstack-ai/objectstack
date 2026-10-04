@@ -25,6 +25,12 @@ import {
 } from './action-activation.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import {
+  collectManifestPicklistExtensions,
+  collectManifestPicklistNames,
+  collectManifestPicklistReferences,
+  describeUnresolvedPicklistReferences,
+} from './picklist-resolution.js';
 
 export type { Plugin, PluginContext };
 
@@ -262,6 +268,14 @@ export class ObjectQLPlugin implements Plugin {
    * the fix off in marketplace install-local's primary home.
    */
   private bridgeLateManifests = false;
+
+  /**
+   * Set at `kernel:ready`, once the boot audit has found every picklist a
+   * field names: from then on an artifact registered through the `manifest`
+   * service is judged before it registers (AGENTS.md, startup registry reads:
+   * seal the vocabulary, then judge).
+   */
+  private picklistVocabularySealed = false;
   /** Unsubscribe handles for metadata-event subscriptions (ADR-0008 PR-7). */
   private metadataUnsubscribes: Array<() => void> = [];
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
@@ -454,6 +468,25 @@ export class ObjectQLPlugin implements Plugin {
             .filter((id): id is string => id !== undefined),
         };
 
+        // Once the boot has sealed the picklist vocabulary (`kernel:ready`,
+        // below), an artifact arriving later is judged BEFORE anything of it
+        // registers: every field it brings that names a picklist must resolve
+        // against the registry or against a list the artifact itself declares.
+        // A refused install registers nothing.
+        if (this.picklistVocabularySealed) {
+          const declared = new Set<string>();
+          for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
+          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
+          const unresolved = ordered
+            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
+            .filter((ref) => !known(ref.picklist));
+          const orphans = ordered
+            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
+            .filter((ext) => !known(ext.picklist));
+          const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
+          if (refusal) throw refusal;
+        }
+
         for (const manifest of ordered) {
           ql.registerApp(manifest, scope);
           ctx.logger.debug('Manifest registered via manifest service', {
@@ -495,7 +528,7 @@ export class ObjectQLPlugin implements Plugin {
       });
       this.subscribeMetadataRebind(ctx, protocolShim);
     } else {
-      ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2, #2462)');
+      ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2)');
     }
 
     // ADR-0057: the platform-owned LifecycleService. Registered from the
@@ -565,6 +598,20 @@ export class ObjectQLPlugin implements Plugin {
     // Idempotent: the bind fully replaces the 'metadata-service' package
     // set, so edited hooks re-bind and deleted hooks tear down.
     ctx.hook('kernel:ready', async () => {
+        // A field naming a picklist no package declares fails the boot, naming
+        // the field and the package — never served as a select with nothing to
+        // choose — and so does an extension of such a list, whose values would
+        // otherwise go nowhere. Judged HERE because every package has registered by now, so
+        // "not declared" is final; a list a later package declares would
+        // otherwise read as missing (AGENTS.md, startup registry reads). From
+        // here on the vocabulary is sealed and each late artifact is judged as
+        // it arrives (the `manifest` service above).
+        const unresolvedPicklists = describeUnresolvedPicklistReferences(
+            this.ql?.registry.findUnresolvedPicklistReferences() ?? [],
+            this.ql?.registry.findOrphanPicklistExtensions() ?? [],
+        );
+        if (unresolvedPicklists) throw unresolvedPicklists;
+        this.picklistVocabularySealed = true;
         // #7737 — FIRST, before anything that might read data: bind every
         // declared federated object to its remote table now that every
         // plugin's `start()` (including the declared-datasource auto-connect
@@ -1077,6 +1124,7 @@ export class ObjectQLPlugin implements Plugin {
       objectName: string,
       session: any,
       isInsert: boolean,
+      seedReplay: boolean,
     ) => {
       const now = stamp();
       // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
@@ -1098,9 +1146,19 @@ export class ObjectQLPlugin implements Plugin {
       // the same payload were taken. Under `preserveAudit` the preservation is
       // DECLARED, so the same keep is the ruled historical-import channel and
       // stays — which is why the fix is this ternary and not a bare `= now`.
+      //
+      // [#21646] A SEED write keeps an authored `created_at` on insert too —
+      // the same `?? now` — because a seed is a snapshot of established facts
+      // (`ExecutionContext.seedReplay`), and the replay of the same row on a
+      // later boot already writes that value through the update path, which
+      // never touches `created_at`. Keyed on `seedReplay` alone: ⛔ not on
+      // `isSystem` (a system clone could carry its source row's `created_at`),
+      // and ⛔ the seed context gains no `preserveAudit` (the 2026-08-08 ruling
+      // keeps that flag's readonly exemption UPDATE-only). Every other caller
+      // — REST included — still stamps now.
       const preserveAudit = session?.preserveAudit === true;
       if (isInsert) {
-        record.created_at = preserveAudit ? (record.created_at ?? now) : now;
+        record.created_at = preserveAudit || seedReplay ? (record.created_at ?? now) : now;
       }
       record.updated_at = preserveAudit ? (record.updated_at ?? now) : now;
       // [#16311] `created_by` takes the SAME SHAPE as `updated_by`, one field
@@ -1143,17 +1201,32 @@ export class ObjectQLPlugin implements Plugin {
       objectName: string,
       session: any,
       isInsert: boolean,
+      seedReplay: boolean,
     ) => {
       if (Array.isArray(data)) {
         for (const row of data) {
           if (row && typeof row === 'object') {
-            applyToRecord(row as Record<string, any>, objectName, session, isInsert);
+            applyToRecord(row as Record<string, any>, objectName, session, isInsert, seedReplay);
           }
         }
       } else if (data && typeof data === 'object') {
-        applyToRecord(data as Record<string, any>, objectName, session, isInsert);
+        applyToRecord(data as Record<string, any>, objectName, session, isInsert, seedReplay);
       }
     };
+
+    /**
+     * [#21646] Whether this `beforeInsert` is a SEED write
+     * (`ExecutionContext.seedReplay`, set through `SEED_WRITE_EXECUTION_CONTEXT`
+     * by every seeder). Read from `input.options.context`, not `session`: the
+     * engine's `buildSession` copies `isSystem`, the skip flags and
+     * `preserveAudit` onto the hook session, never `seedReplay`, while a
+     * `before*` envelope's `input.options` IS the caller's own options bag
+     * (HookContext `input` PHASE contract), so its `context` is the write's
+     * ExecutionContext as the seeder built it. Server-constructed, like
+     * `isSystem`: no transport entry point assembles it from a request.
+     */
+    const isSeedReplay = (hookCtx: any): boolean =>
+      hookCtx?.input?.options?.context?.seedReplay === true;
 
     const builtinHooks: any[] = [
       {
@@ -1164,7 +1237,7 @@ export class ObjectQLPlugin implements Plugin {
         description: 'Auto-stamp created_by / updated_by / created_at / updated_at / tenant_id on insert (only when the field exists on the object schema)',
         handler: async (hookCtx: any) => {
           if (hookCtx.input?.data) {
-            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, true);
+            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, true, isSeedReplay(hookCtx));
           }
         },
       },
@@ -1176,7 +1249,8 @@ export class ObjectQLPlugin implements Plugin {
         description: 'Auto-stamp updated_by / updated_at on update (only when the field exists on the object schema)',
         handler: async (hookCtx: any) => {
           if (hookCtx.input?.data) {
-            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, false);
+            // `seedReplay` is moot here: the update stamp never writes `created_at`.
+            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, false, false);
           }
         },
       },
@@ -1493,7 +1567,7 @@ export class ObjectQLPlugin implements Plugin {
    * hides all of it behind a dialect-local bind-safety net, which is why the
    * SQLite/Turso suites never saw it.
    *
-   * The split is the same ruling #7737/#10629 made for federated objects —
+   * The split is the same ruling #7737 made for federated objects (commit 199ec4712) —
    * that flag is about DDL, and a binding that is DDL-free must not ride on it
    * — applied to the managed ones.
    */
@@ -2587,14 +2661,14 @@ export class ObjectQLPlugin implements Plugin {
       if (meta && typeof loadMany === 'function') {
         loadStandaloneActions = () => loadMany.call(meta, 'action');
       }
-      // [#14423] The KEYED plural read, preferred over `loadMany` — see
+      // [commit a56baa2bd] The KEYED plural read, preferred over `loadMany` — see
       // `collectEngineActionDeclarations`. A plane that predates it (or a test
       // double) simply does not offer it and the unkeyed read above stands.
       const loadManyKeyed = meta?.loadManyKeyed;
       if (meta && typeof loadManyKeyed === 'function') {
         loadStandaloneActionsKeyed = () => loadManyKeyed.call(meta, 'action');
       }
-      // [#14423] The router's THIRD rung, injected the same way its second one
+      // [commit a56baa2bd] The router's THIRD rung, injected the same way its second one
       // is. `resolveRouteActionDeclaration` prefers `loadDiagnosed` and falls
       // back to `load`; this mirrors that branch and unwraps, so the audit
       // receives a declaration-or-nothing exactly like `lookupRegistryAction`.

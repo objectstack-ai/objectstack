@@ -1,5 +1,989 @@
 # @objectstack/plugin-audit
 
+## 17.6.0
+
+### Minor Changes
+
+- 6f57888: fix(plugin-audit)!: an engine read of `sys_activity` returns only the rows whose parent record the caller can read, the same way an engine read of `sys_comment` is narrowed
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a narrowing of what a READ returns, on one platform object, decided at request time: an activity row is served to a caller exactly when the record it names (object_name, record_id) is one that caller can read. No authorable key, spelling, value domain, export or stored metadata shape moves: the sys_activity object definition is byte-identical, every query shape parses as before, the package barrel exports nothing new and nothing less, and no stored row is rewritten. There is therefore nothing for an author to convert and nothing for `objectstack migrate meta` to reach. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a read-visibility rule and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a published TypeScript declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what an engine read of `sys_activity` returns to a caller that is not system context. It ships as `minor` under the repo's launch-window convention for narrowings.
+  
+  **What changes.** `AuditPlugin` now mounts a read gate on `sys_activity`, beside the one `sys_comment` already has. It is an engine middleware, so it narrows what passes through the engine: `find`, `findOne`, `count` and `aggregate`, which on the generic data doors are the list, its `total`, the by-id read and both query shapes. There a row is returned only when the caller can read the record it is about. That answer is the one the comment gate asks: the caller's own engine read of the parent record, so the parent object's sharing, RLS and object-level permissions decide. Parent reads are batched, one per parent object.
+  
+  **Rows that are left out**, failing closed exactly as the comment gate does for its threads:
+  
+  - a row about a record the caller cannot read;
+  - a row about a record that no longer exists;
+  - a row that names no record, or names an object the engine does not know;
+  - a row that names `sys_activity` itself.
+  
+  **Unchanged.** A caller who can read every record (an admin) keeps every row about a record that exists. System-context reads, including the audit writer's own, are not narrowed. The object, its fields and what the CRUD mirror writes are unchanged, and nothing stored is rewritten.
+- 336e191: fix(security)!: stored metadata bodies are projected or refused at the audit, analytics, realtime and data-door filter/sort exits too
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) further read/copy/evaluate exits for a stored metadata body (sys_metadata / sys_metadata_history), each routed through the one shared redactor or refused: the audit/activity write-time copy is projected, a data-door filter or sort on the body column is refused (the sibling of the already-registered-as-not-required groupBy refusal), an analytics query member on the body column is refused, and a data.record.* realtime event body is projected. No authorable key, spelling, export or stored shape moves, and no stored row is read differently by any metadata consumer; the published surfaces gain and lose nothing. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter/sort target, an analytics member or an event body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what three doors accept or serve for the two stored-metadata tables — the generic data door refuses a filter or sort on the body column, the analytics door refuses it as a dimension / measure / filter / sort member, and the realtime event and the audit/activity copy now carry the body as its type's read projection instead of the stored bytes. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changes.**
+  
+  - **Audit / activity copy (`@objectstack/plugin-audit`).** The audit writer copies a `sys_metadata` / `sys_metadata_history` row into `sys_audit_log.new_value` / `old_value` and `sys_activity.metadata`. That copy now projects the body through the shared redactor, so stored credential material is withheld from the second store too. A new `os migrate audit-metadata-bodies` command rewrites the copies already at rest (dry run by default, `--apply` to write, idempotent).
+  - **Analytics (`@objectstack/service-analytics`).** A query naming the stored body column of these objects as a dimension, measure, filter or sort is refused with `400 INVALID_FIELD`, before any strategy runs — the posture analytics already takes for a member it will not evaluate.
+  - **Realtime (`@objectstack/objectql`).** A `data.record.*` event projects its `after` / `changes` body through the same redactor, so a subscriber to these objects' events receives no stored credential.
+  - **Data door filter / sort (`@objectstack/metadata-protocol`).** A filter or sort on the body column is refused with `400 INVALID_FIELD`, the same family and shape as the existing groupBy refusal.
+  
+  **What stays answerable.** Every scalar column of these objects — `type`, `name`, `scope`, `state`, timestamps — is still grouped, filtered, sorted, counted and served; only the body column is affected. Every other object is unchanged.
+- 1ecb871: fix(plugin-audit,plugin-approvals)!: a query over the activity stream's value-bearing columns, the compliance ledger's before/after snapshots, or an approval request's snapshot is refused for a reader withheld a field of the objects the query can reach — the one parent object it names, or every object when it names none (#21154)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling, type or shape: no packages/spec schema, object definition, export or stored metadata moves, and neither package's public exports change. What changes is which READ queries three engine middlewares answer: a filter, sort, search, grouping or aggregation that names a value-bearing column of sys_activity or sys_audit_log, or the snapshot column of sys_approval_request, is refused with 403 PERMISSION_DENIED for a non-system reader withheld a field of the objects the query can reach (the one parent object it names, or every registered object when it names none). objectstack migrate meta has nothing to rewrite: which object a caller meant to query is the caller's decision. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a query refusal and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: an accept-set narrowing on three engine read middlewares, shipped as `minor` under the launch-window convention.
+  
+  **What was wrong.** An activity row carries field values of the record it is about in three columns: its one-line summary, its record label and its recorded change. A compliance-ledger row carries them in its before and after snapshots. An approval request carries the submitted record's snapshot. A read-time redaction narrows such values on the rows a reader is SERVED, after the driver has answered. A filter over the same columns was evaluated at rest, before that, so row presence answered whether the stored text held a value the reader is served masked or not at all, one guess at a time. A grouping by one of them handed the stored text back as the group key.
+  
+  **What is refused now.** For a non-system caller, on every door that reaches these objects through the engine (the list and query doors, record export, and any other `find` / `count` / `aggregate`), a query that filters, searches, sorts, groups or aggregates by one of those columns is refused with `403 PERMISSION_DENIED`, in the engine's own words for a field the caller may not query, unless the caller is served every field, as the security service answers it, of the objects the query can reach:
+  
+  - when the query names exactly one parent object, by equality on the column that names it, at the root of its filter (or inside a root `$and`): that object;
+  - when it names none: every object registered in the deployment, the set these rows can concern, read from metadata and never from the rows.
+  
+  A grouping or aggregation by such a column answers the engine's aggregate refusal; every other position answers its predicate refusal. Both are followed by one sentence naming the remedy.
+  
+  **Who is affected.** A caller withheld any field of the parent object (served masked, gated by a capability it does not hold, or not granted by its permission sets) can no longer filter, search, sort or group by those columns of that object's activity rows, ledger rows or approval requests. A caller withheld any field of any registered object can no longer do so in a query that names no parent object, or names one only inside an alternative — that includes a free-text search over the activity stream or the compliance ledger, whose searched sets include those columns. A caller served every field of the parent it names, or, for a query naming none, of every object (an administrator in a stock deployment), queries as before; the latter costs three security-service calls per registered object per such query.
+  
+  **One-line fix:** a caller withheld some field names one parent object it is served in full, by equality in the query's filter; for a parent it is withheld a field of, it reads the rows unfiltered by those columns.
+  
+  **Unchanged.** A query that names none of those columns answers as before, for every caller. System-context reads are not judged. A deployment without the security service answers as before: the columns are served whole there, so a filter over them discloses nothing the rows do not. The approvals service door's own search keeps its own rule for the snapshot.
+- 30c530e: fix(plugin-audit)!: a read of the compliance ledger returns only the rows about records the caller can read, the same way a read of the activity stream is narrowed (#21175)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a narrowing of what a READ returns, on one platform object, decided at request time: a sys_audit_log row that names a record (object_name, record_id) is served to a caller exactly when that caller's own engine read of the record finds it. No authorable key, spelling, value domain, export or stored metadata shape moves: the sys_audit_log object definition is byte-identical, every query shape parses as before, the package barrel exports nothing new and nothing less, and no stored row is rewritten. There is therefore nothing for an author to convert and nothing for `objectstack migrate meta` to reach. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a read-visibility rule and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a published TypeScript declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what a read of `sys_audit_log` returns to every caller that is not system context, admins included. Some rows an admin was served before are no longer served. It ships as `minor` under the repo's launch-window convention for narrowings.
+  
+  **What changes.** `AuditPlugin` now mounts the activity stream's parent-record read gate on the compliance ledger. It is an engine middleware, so it narrows `find`, `findOne`, `count` and `aggregate`, which on the generic data doors are the list, its `total`, the by-id read and both query shapes. A ledger row that names a record (`object_name`, `record_id`) is returned only when the caller's own engine read of that record finds it, so the parent object's sharing, RLS and object-level permissions decide. Parent reads are batched, one per parent object. The gate's mechanism is one module shared with the activity stream's gate.
+  
+  **Rows no longer served:**
+  
+  - to a caller who cannot read the record a row is about: that row;
+  - to every caller that is not system context, admins included, because the gate has no readable record to judge them by:
+    - a row about a record that no longer exists: every `delete` row, and every other row about a deleted record;
+    - a sign-out row, and a sign-in row whose session has since been removed (sign-out removes the session the row names);
+    - a create, read, update or delete row that names no record, a row naming an object the engine does not know, and a row naming the ledger itself.
+  
+  **Unchanged.** The rows stay stored, and system-context reads still return every row. Rows about no record are served as before, under the ledger's own grant: `config_change` rows, the run-level user-import row, the platform-admin standing rows, and an auth event that carried no session id. A caller who can read a record keeps every row about it, and the field-level redaction of the before/after snapshots applies to the rows that are served, as before. A broad read whose pre-scan reaches the gate's 2,000-row bound fails closed and logs a warning, as the activity stream's does.
+  
+  **Migration.** No metadata, code or configuration change is needed. A view or report that lists deletions or sign-outs from `sys_audit_log` through the data API now shows fewer rows. A server-side job that must read every ledger row reads it under system context, which this gate does not narrow.
+
+### Patch Changes
+
+- fa0a4b6: fix(platform-objects,plugin-audit): Setup and Studio navigation entries for the console's Audit Log and Integrations & APIs pages (#20142)
+  
+  The console retired its System Hub card wall and its Developer Hub, which had been the only in-app links to several pages, and registered each page under a component-registry key instead. Framework navigation reaches a console page only through a `type: 'component'` item that names such a key, and no item named them, so each page was reachable only by a typed URL. Two entries now name the pages whose capability ships in the open framework:
+  
+  | Entry | App / group | `componentRef` | Contributed by | Gate |
+  | --- | --- | --- | --- | --- |
+  | `nav_audit_log_browser` ("Audit Log Browser") | Setup / Diagnostics, directly under Audit Logs | `audit:log` | `@objectstack/plugin-audit` | none: it lives and dies with the plugin that owns `sys_audit_log` |
+  | `nav_integrations` ("Integrations & APIs") | Studio / Developer, after Public Forms | `developer:integrations` | `@objectstack/platform-objects` | none beyond Studio's own `studio.access` |
+  
+  **Two audit entries, on purpose.** The existing Audit Logs entry (the `sys_audit_log` object view) stays. It carries the named list views, search, and the actor and tenant rendered as resolved lookups. The new page adds one filterable table whose detail drawer pretty-prints a change's before and after JSON, where the record page shows `old_value` / `new_value` as raw text. Neither surface replaces the other.
+  
+  **No entry for the console's AI Approvals page (`ai:approvals`) here.** Under ADR-0029 D7, each capability plugin contributes its own navigation entries into a Setup slot, and the Setup shell does not enumerate capability objects. The AI pending-action queue belongs to the AI capability, whose provider (`@objectstack/service-ai`) ships in Cloud/Enterprise, not in the open framework. Its entry is therefore that capability's to contribute.
+  
+  The keys are the ones the console registers at the objectui commit this release's console is built from. Labels ship in all four locales (en, zh-CN, ja-JP, es-ES), with their source hashes recorded. Nothing is removed or renamed, and there is nothing to migrate.
+- ba4648d: `sys_comment.reactions` and `sys_comment.mentions` now describe the shape they actually store (#20558)
+  
+  The two field descriptions are served metadata (field help in the console, and what an AI client reads before it seeds a comment), and both named a shape no producer writes:
+  
+  | Field | Description was | Description is now | Stored value |
+  | --- | --- | --- | --- |
+  | `reactions` | `JSON array of emoji reaction objects` | `JSON object mapping each emoji to the list of user ids who reacted` | `{"👍":["usr_1","usr_2"]}` |
+  | `mentions` | `JSON array of @mention objects` | `JSON array of the user ids @mentioned in the comment` | `["usr_1","usr_2"]` |
+  
+  The console's record discussion panel reads and writes `reactions` as that map, and writes `mentions` as that list of ids; the `collab.mention` notification hook reads the ids.
+  
+  Description text only: no stored value, validation rule or hook changes, and nothing to migrate. The English translation bundle is regenerated from the source description, and the zh-CN, ja-JP and es-ES help texts for both fields are rewritten to match (values only, no key added or dropped).
+- 4dfff17: Provenance comments in `plugin-audit` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no type, schema, export, log or refusal text, or runtime behaviour changes.
+- 7184436: fix(plugin-webhooks,plugin-audit,plugin-security): the ja-JP, es-ES and zh-CN object help, descriptions and labels that contradicted their current English source are re-translated (#20653)
+  
+  Clause-②: no
+  
+  A translated object leaf that a translator wrote by hand is kept as written
+  when its English source changes later, so some leaves went on saying what the
+  old source said. On a ja-JP, es-ES or zh-CN console the `sys_webhook` record
+  page told an admin that `definition_json` carries the full headers / auth /
+  retry / payload configuration, where the English help says credentials are not
+  stored there: the signing secret and the custom headers live in the encrypted
+  `signing_secret` and `headers_secret` fields.
+  
+  Eighteen leaves (six paths, in all three locales) whose meaning contradicted
+  the current English now match it:
+  
+  - `@objectstack/plugin-webhooks`: the `sys_webhook.definition_json` help (no
+    credentials in the JSON) and the `sys_webhook` description (dispatched by the
+    webhook auto-enqueuer onto the shared HTTP outbox, not executed by an HTTP
+    connector plugin; declared through `defineStack({ webhooks })` too);
+  - `@objectstack/plugin-audit`: the `sys_activity.environment_id` label and help
+    (Environment, not Project), and the `sys_audit_log.user_id` label (User: the
+    object's separate `actor` field is the actor);
+  - `@objectstack/plugin-security`: the `sys_position` description (positions
+    distribute capability, not definitions for RBAC access control).
+  
+  Leaves whose English source only gained detail, was reworded, or was
+  title-cased (the `@objectstack/plugin-approvals` status and action options)
+  are unchanged. Values only: no key is added or removed, and no provenance
+  table changes.
+- 2488b98: fix(plugin-audit): an activity row serves a parent field's value only to a reader the security service serves that field (#21081)
+  
+  Clause-②: no
+  
+  The activity stream's CRUD mirror composes each row once, at write time, as the system. The row's summary, its record label and its recorded change can carry the values of the parent record's fields. The activity read gate keeps a row for every reader who can read the parent record, so a reader who may not read one of that record's fields was served the field's stored value through the row. This held for a field served masked to the reader, a field gated by `requiredPermissions` the reader does not hold, and a field a permission set the reader holds marks non-readable. The data plane answered the same reader masked or without the key.
+  
+  The rows are now redacted at read time, keyed on the reading caller, through the security service's own answer: the read projection intersected with the query-side answer, whose difference the contract defines as exactly the fields served masked. The recorded change drops every key the reader is not served. The summary and the record label are each served whole or dropped whole: the mirror now declares, in the row, which parent fields each was composed from, and a text composed from a field the reader is not served is dropped. A text composed only from served fields is kept. The full row stays at rest, and system reads are unchanged.
+  
+  Rows written before this release carry no such declaration. Their summary and record label are served only to a reader who is served every field of the parent record, until the rows age out with the stream's retention. Rows an app writes itself are served as written, except that a recorded change in the mirror's shape is narrowed the same way.
+- fbcc05f: fix(plugin-audit): the compliance ledger's before/after snapshots serve a parent field's value only to a reader the security service serves that field (#21155)
+  
+  Clause-②: no
+  
+  The CRUD mirror writes one `sys_audit_log` row per record write, once, as the system. A create row's after-snapshot, an update row's before/after snapshots of each changed field, and a delete row's before-snapshot carry the parent record's stored field values. The ledger is read through the generic data doors under its own object grant and tenant wall, so a reader whose permission sets grant the ledger read was served every snapshot key. This held for a field served masked to the reader, a field gated by `requiredPermissions` the reader does not hold, and a field a permission set the reader holds marks non-readable. The data plane answered the same reader masked or without the key.
+  
+  Ledger readers are not field-unrestricted by default. The snapshots of create, update and delete rows are now narrowed at read time, keyed on the reading caller, through the security service's own answer: the read projection intersected with the query-side answer, whose difference the contract defines as exactly the fields served masked. Every key the reader is not served is dropped. A reader served every field reads the snapshots byte-identical to the row at rest, and system reads are unchanged. An auditor who must see every field is granted that by a permission set that unmasks those fields.
+  
+  Rows of other actions are served as written: their snapshot columns are empty, a settings digest, or the administrator roster, and none of them is a parent record's field map. A create, update or delete row whose snapshot cannot be judged key by key (not a JSON object, or no parent object named) loses that snapshot. The activity stream's redaction and this one now share one served-fields helper.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [5a23096]
+- Updated dependencies [a94f3ba]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [97005ae]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [4bf4e7e]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [157baa7]
+- Updated dependencies [ca5408c]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [8460592]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d67b942]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [657b6b7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [c35436c]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/objectql@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/types@17.6.0
+
+## 17.5.0
+
+### Minor Changes
+
+- 271d6bb: Record the acting agent on the audit row — ADR-0090 D10 rule 4 dual attribution
+  
+  A `sys_audit_log` row written by an MCP OAuth client acting for a human used to
+  be byte-identical to a row that human wrote in the Console. The envelope carried
+  the delegation (`principalKind: 'agent'` + `onBehalfOf`), the row did not, and
+  nothing in between copied it: `assembleExecutionContext` consumed the OAuth
+  `azp` as a boolean and dropped the value, so the acting client did not exist
+  downstream of the door at all.
+  
+  The delegation now travels the whole way and lands on the row:
+  
+  - `ExecutionContext.performedBy` (`{ clientId }`) — decided at the `/mcp` OAuth
+    door, on the same branch that already decides `principalKind: 'agent'` and
+    `onBehalfOf`; a member of the closed entry field set like every other.
+  - `HookContext.provenance.performedByClientId` — the hook-layer carrier, beside
+    `flowRunId` and `attributedUserId`. Provenance, not `session`: no
+    caller-gating hook may read the client as the caller.
+  - `sys_audit_log.metadata` gains `{ performed_by, on_behalf_of }` on a delegated
+    write, and nothing at all on a personal one — the two shapes are told apart by
+    absence rather than by guesswork.
+  
+  Additive, and attribution only. `user_id` stays the human, so owner-stamping,
+  `current_user.*` RLS and the `sys_user` join are untouched (ADR-0073 D3 —
+  attribution is not ownership). `actor` is untouched too: ADR-0118 D1/D5 keeps
+  that column two-valued — a user id, or `null` for the system — and answers
+  "which non-user acted" with an added attribution field rather than a second
+  actor vocabulary. No existing row changes meaning, and no historical row is
+  rewritten.
+  
+  Rule 4's third element, the run id, is NOT delivered here and is not declared
+  either: nothing on the request path mints one today (`ExecutionContext.traceId`
+  is declared but resolved by no transport entry point), and declaring a carrier
+  nothing populates is the defect this change exists to close.
+- 877dc03: The walled boot records platform-admin standing on the existing audit ledger, so «who held administrator standing, and from when» survives the move off the stored grant row (#18412).
+  
+  Platform-admin standing moved from a **stored grant row** to **config-derived, request-time resolution** (#11663 re-anchor, ADR-0131). The row carried its own history; config carries none. After the migration the only trace of a grant or a revocation was a change to `OS_PLATFORM_OWNER_EMAIL` plus a restart — the product keeps no environment-variable history and an auditor cannot read one. `sys_audit_log` recorded the ACTIONS all along; what had no writer at all was the **basis** of the authority behind them.
+  
+  The answer was already being computed and thrown away: `resolvePlatformAdminStanding` builds the per-entry summary at every walled boot and the bootstrap logs it at `info`.
+  
+  - **`@objectstack/plugin-audit`** — `sys_audit_log.action` declares one new value, `platform_admin_standing_change`, WRITER-FIRST (the only way a value is allowed onto that enum). Its rows appear on the shipped, unfiltered `recent` and `all_events` views; ⛔ no new list view, ⛔ no new object, ⛔ no new configuration key.
+  - **`@objectstack/plugin-security`** — the walled bootstrap compares the resolved standing against the last snapshot already on the ledger and writes **one entry per CHANGE of standing**, plus the **first-boot baseline**. A restarted rig writes nothing. Each row carries, per declared entry, the declared spelling, whether an account exists, whether it is verified, and which user id holds standing; `old_value` and `new_value` state both sides of the delta, and `old_value` is null on the baseline row and only there.
+  - **The `single` posture is untouched.** It still promotes the first registrant and still writes a durable grant row, so the durability this restores is walled-posture-specific.
+  - ⭐ **`organization_id` is NULL on this row, deliberately and by maintainer ruling** (2026-09-18, director batch #153 item 2). The record is deployment-level by construction: ADR-0131 §1.5 rejects inventing a platform organization in its own words («it is the natural repair and the wrong one … exists only to give NULL a new name»), a tenant id would file a whole-deployment fact behind one tenant's wall, and the first-boot baseline is written before any `sys_organization` row exists at all. This follows the tree's four existing deployment-level audit writers, and is the shape ADR-0131 D7 will later make structural by dropping the column. The exception is recorded beside the write, on the card, and in a pin — ⛔ it is not a gap waiting to be repaired.
+  - **Nothing here widens who holds standing or what standing permits.** The derivation site is untouched; this adds a RECORD of authority, never a grant of it.
+  - **Best-effort, and never fatal to boot.** A deployment that never mounted the optional `@objectstack/plugin-audit` skips silently — an unmounted ledger is a composition choice, not a fault. A ledger read that is REFUSED writes nothing and says so: «cannot tell» is not «first boot», and reading it that way would file a fresh baseline on every restart. A mounted ledger whose insert fails reports a durability degradation on the `error` channel.
+
+### Patch Changes
+
+- a6a1de4: **The read-audit failure report now speaks once per CAUSE instead of once per PROCESS, and prints the telemetry-datasource remedy only for the cause it is the remedy for.**
+  
+  `installReadAuditWriter`'s `reportReadAuditWriteFailure` (`read-audit.ts`) carried its own process-level `failureReported` boolean and its own fixed message literal — the third independent copy of the pair #15166 fixed in `audit-writers.ts` and #17452 fixed in `auth-event-audit.ts`. Both defects were live on a seam the repo has already declared durability-critical (`persistReadAuditRows` is registered in `DURABILITY_CRITICAL_CALLEES`):
+  
+  - **The first failure of any cause silenced every later failure of every other cause for the life of the process.** A server could keep losing record-view batches for hours to a second, unrelated fault with one `error` line at the top of the log describing the first — and record-view rows are written from a buffer off the request path, so no in-flight request is left to notice. The dedupe key is now the failure's identity, `auditFailureCauseKey`, imported from `audit-writers.ts` rather than re-spelled. A repeat of an already-reported cause still degrades to `debug`; a NEW cause gets its own `error` line, once.
+  - **The ADR-0057 §3.6 / `OS_TELEMETRY_DB` datasource guidance printed unconditionally**, so a fault with nothing to do with datasource routing (an `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` refusal, say) sent the operator to check something that was working. The guidance is not deleted and not weakened — it is asked for through the shared `isMissingTableError` predicate and printed for exactly the missing-table cause it was written for; every other cause now gets the driver's own verdict quoted at the head of the line plus the fix that matches it.
+  
+  **Behaviour that deliberately does not change:** the once-per-degradation anti-noise rule itself (a repeat of the same cause is still one line), the `error`-then-`warn` sink fallback (#9657), and the rule that an audit failure never reaches the read.
+  
+  No API, option or type moves; nothing an author writes changes.
+  
+  Clause-②: no
+- 5636641: The activity-timeline summary resolves a reference field's target through `referenceTargetOf` instead of the materialized `reference` carrier, so a `trackHistory`'d `{ type: 'user' }` field authored without one is planned, read and rendered as a name instead of silently showing the raw id (#19264).
+  
+  `audit-writers.ts` admitted `user` as a reference type and then required an EXPLICIT `reference` on it. The spec declares exactly the opposite for that type: `IMPLICIT_REFERENCE_TARGETS` (`@objectstack/spec/data`) says a `user` field's target is "a CONSTANT OF THE TYPE, so `reference` on a `user` field materializes that constant; it does not supply it. Metadata authored without it (hand-written JSON, an AI author, a Studio form) is **fully specified, not under-specified**." So the one spelling the contract calls complete was the one the reader refused — and it refused it **silently**: the field was simply absent from the read plan, and the timeline rendered `usr_1` where every other reference field showed a name.
+  
+  - **Four sites, not two.** The target is the key of the `id → title` map, so it has two ends: the two read planners (`planTrackedLookupReads`, `planMilestoneTokenReads`) build the plan under it and the two renderers (`renderTrackedChangeSummary`, `renderMilestoneSummary`) look the resolved titles back up under it. All four now ask one helper, so repairing the plan alone cannot pay for a read whose result the renderer then fails to find.
+  - **Nothing else widens.** The admitted types are unchanged (`lookup`, `master_detail`, `user`), so a `lookup` / `master_detail` whose author-chosen target is absent still names nothing, is still left out, and still issues no read — `tree` is deliberately not added.
+  - **A padded carrier can no longer split the key.** The planners used to `trim()` and the renderers did not, so `reference: ' crm_account '` produced two keys and no title; one helper trims once for both ends.
+  - **The unreadable-carrier behaviour is unchanged.** `referenceTargetOf` reads the carrier through `referenceCarrierOf`, which throws for an object- or array-valued `reference`; that throw is caught at the helper because this code runs inside `writeAudit`'s summary composition, which is not inside the `try` that guards the audit row write — an escaping `TypeError` would turn a display-enrichment miss into a failure on the audited write's own path. Such a carrier is left out exactly as it was before.
+  - **No authoring change.** Metadata that already spells `reference: 'sys_user'` resolves to the same target it always did; nobody has to restate the constant.
+- ab48938: A lost audit row is reported once per failure CAUSE, not once per process, and the first line names the cause instead of a fixed remedy.
+  
+  `reportAuditWriteFailure` — the best-effort catch around `persistAuditTrailRow` — deduped on a single process-wide boolean. After the first failure of any cause, every later failure of every *other* cause degraded to `debug` for the life of the process, so a long-running server could keep losing compliance rows for hours to a second, unrelated fault with one `error` line at the top of the log describing the first. `persistAuditTrailRow` is registered in the durability-degradation vocabulary precisely because a lost audit row must be reported at `error`.
+  
+  The dedupe key is now the failure's identity — the error `code` (or its absence) together with the object being audited. A repeat of an already-reported cause still degrades to `debug`, exactly as before; a new cause reports at `error`, once. The key is built from the `code` and **never** the message: a driver names the offending row in its message, so a message-keyed dedupe would grow one `error` line per failed write. Keyed on the code, the reported-cause set is bounded by the boot-declared object registry and the driver's code vocabulary and does not grow with traffic — measured at 65 lines for 6,500 failed writes and the same 65 for 26,000.
+  
+  The first `error` line now leads with the underlying code and message, which were already computed at the call site and passed only into the `debug` payload. The ADR-0057 §3.6 telemetry-datasource guidance is kept — it is the correct remedy for the "no such table" cause it was written for — but is now printed only for that cause, decided by the shared `isMissingTableError` predicate for both tables this writer writes. Previously it was printed unconditionally, so an organization refusal was answered with "check the datasource", sending the operator to inspect something that was working.
+  
+  `@objectstack/types` is added as a dependency for that predicate, rather than hand-rolling a second driver-error vocabulary.
+- cb648cb: A lost auth-event row is reported once per failure CAUSE, not once per process, and the first line names the cause instead of a fixed remedy.
+  
+  `auth-event-audit.ts` — the writer behind the `login` / `logout` rows in `sys_audit_log` — carried its own, independent copy of both defects the record-level audit writer was fixed for. `reportAuthEventWriteFailure` deduped on a single process-wide boolean, so after the first failure of any cause, every later failure of every *other* cause degraded to `debug` for the life of the process: a long-running server could keep losing sign-in and sign-out rows for hours to a second, unrelated fault, with one `error` line at the top of the log describing the first. `persistAuthEventAuditRow` is registered in the durability-degradation vocabulary precisely because a lost audit row must be reported at `error`.
+  
+  The dedupe key is now the failure's identity — the error `code` (or its absence) together with the object the rows are about. A repeat of an already-reported cause still degrades to `debug`, exactly as before; a new cause reports at `error`, once. The key is built from the `code` and **never** the message: a driver names the offending row in its message, so a message-keyed dedupe would grow one `error` line per lost row. Keyed on the code, the reported-cause set is bounded by the driver's code vocabulary and does not grow with traffic — measured at one `error` line for 200 failed sign-ins carrying 200 distinct messages under one code, and the same one line for 200 carrying no code at all.
+  
+  The first `error` line now leads with the underlying code and message, which were already computed at the call site and passed only into the `debug` payload. The ADR-0057 §3.6 telemetry-datasource guidance is kept — it is the correct remedy for the "no such table" cause it was written for — but is now printed only for that cause, decided by the shared `isMissingTableError` predicate for the one table this writer writes. Previously it was printed unconditionally, so an organization refusal was answered with "check the datasource", sending the operator to inspect something that was working.
+  
+  The cause-key helpers are imported from the record-level writer in this same package rather than re-spelled here: a second copy of that key is how these defects reached this file, so a third spelling would repeat the mistake. No published export is added or changed.
+- 8d4690b: fix(plugin-audit): record-view rows keep the VIEW instant instead of the buffer-drain instant (#16829)
+  
+  `sys_audit_log`'s `record_views` rows answer "when did this user look at this record?". Read auditing batches its INSERTs off the request path by design, so `buildRow` writes `created_at: event.viewedAt` rather than letting the column's `NOW()` default stamp a whole batch with one flush timestamp — up to `flushIntervalMs` after the fact, with read order inside the window destroyed.
+  
+  `persistReadAuditRows` wrote that row under `{ context: { isSystem: true } }`, and the module's comment cited that flag as what carried the view instant through. It never was. `isSystem` exempts a write from the readonly strip; the layer that decides `created_at` on an insert is the audit stamp hook `sys_stamp_audit_insert`, which reads `session.preserveAudit` and has never read `isSystem`. What was actually carrying the value was that hook's pre-#15964 line, `record.created_at = record.created_at ?? now` — client-preferred on every insert, with no flag and no privilege required. #15964 closed that accident (maintainer ruling 2026-09-06), and the ordinary branch has stamped `now` since: on this path, the flush instant.
+  
+  The write now declares both context keys, for two different layers:
+  
+  ```ts
+  await engine.insert(
+    'sys_audit_log',
+    rows as any,
+    { context: { isSystem: true, preserveAudit: true } } as any,
+  );
+  ```
+  
+  `isSystem` still carries the readonly-strip exemption the row needs; `preserveAudit` is the one the stamp hook reads. `preserveAudit` is the ruled historical-import channel (#3493, reaffirmed by #15964's ruling) — the door audit left open for reinstating an original timeline — and a view row's original timeline is the moment of the view, so this use is inside its declared purpose rather than a bypass of it.
+  
+  **What changes for a deployment.** Only for deployments that opted objects in to record-view auditing (`AuditPlugin`'s `readAudit.objects`). Rows written from now on carry the view instant. ⛔ Rows already written under the flattened behaviour are not repaired by this change: their `created_at` is the drain time of the batch they were in, and the view instant they should have carried was never persisted anywhere else, so it cannot be recovered. Only builds cut from `main` after #15964 are affected — the objectql half has not shipped in a published version.
+  
+  **No exported symbol, schema, route or config key moves.** The only observable change is that a `created_at` this writer already intended to write now survives.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [305e7fc]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [63b6818]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [6d2571f]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [17005cc]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [922c755]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [ef67b47]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [cd5fdaa]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [a675ad4]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [1f05ea4]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [4fef271]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [875e9ad]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [74fb2f7]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [c736eaa]
+- Updated dependencies [4d0bd23]
+- Updated dependencies [4045781]
+- Updated dependencies [ecf56e7]
+- Updated dependencies [0e658fb]
+- Updated dependencies [9529989]
+- Updated dependencies [236cec1]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [eec56c3]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [8cbc3c0]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [5dba7f3]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [afc3b64]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [2bbb462]
+- Updated dependencies [90ff10a]
+- Updated dependencies [3bd221d]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [8490127]
+- Updated dependencies [6aa3188]
+- Updated dependencies [a34c27c]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [ae0c90c]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [a9fb83e]
+- Updated dependencies [0b866bf]
+- Updated dependencies [c839986]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [009da14]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [aa04ea2]
+- Updated dependencies [172b4cf]
+- Updated dependencies [4463966]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [b373596]
+- Updated dependencies [7465eeb]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [d624002]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [a08e059]
+- Updated dependencies [fe677ae]
+- Updated dependencies [fc646cf]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [949e99b]
+- Updated dependencies [16c5a33]
+- Updated dependencies [16c5a33]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [16c5a33]
+- Updated dependencies [437bb0d]
+- Updated dependencies [49144fc]
+- Updated dependencies [e2c4e12]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [cfe2387]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [e5cf27d]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [615c468]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [89f87f2]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [a78f731]
+- Updated dependencies [3062e50]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [c74de10]
+- Updated dependencies [db74b16]
+- Updated dependencies [2b24b8b]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [c5d6b2b]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [2f122b6]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [4a1df19]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [9801da1]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [9bf5e67]
+- Updated dependencies [8255a51]
+- Updated dependencies [b2b6a06]
+- Updated dependencies [8538edf]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [6427e2c]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [f6ceddc]
+- Updated dependencies [92ea760]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [72eeabd]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [0780e88]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [706ad0f]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [a016f08]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [9cc5010]
+- Updated dependencies [6e3462d]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [6af2901]
+- Updated dependencies [96451ec]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [980dc78]
+- Updated dependencies [5c8f5af]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [576d5df]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [8c9bd8f]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [029d8a4]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/metadata-core@17.5.0
+  - @objectstack/objectql@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

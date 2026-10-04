@@ -5,6 +5,8 @@ import { MongoDBDriver } from './mongodb-driver.js';
 export { MongoDBDriver };
 export type { MongoDBDriverConfig } from './mongodb-driver.js';
 export { translateFilter } from './mongodb-filter.js';
+// [#20444] `translateFilter`'s third parameter: the declared value shape `$empty` reads.
+export type { ValueShapeResolver } from './mongodb-filter.js';
 export {
   buildAggregationPipeline,
   postProcessAggregation,

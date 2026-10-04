@@ -81,6 +81,11 @@ export default defineStack({
 
 - **No raw SQL, no hand-authored joins.** The author declares *which*
   relationships to include; the compiler derives the join from the object graph.
+- **`field` is a column reference.** A dimension's `field` names a field of the
+  base object or a `relationship.field` path; a measure's may also be `'*'` (or
+  be omitted) for a count. A SQL expression there is refused at parse: a
+  conditional count or sum is a measure with its own `filter`, and a ratio is a
+  `derived` measure.
 - **Metric certification** — a `certified` flag that marks a measure as a
   human-blessed governance checkpoint — is a design goal of ADR-0021 but is **not
   yet implemented**; `DatasetMeasureSchema` has no `certified` field today.

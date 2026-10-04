@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #6640 — the historical import, end to end, through the REAL write path.
+ * Commit 2ab1257c9 — the historical import, end to end, through the REAL write path.
  *
  * `runImport` with `treatAsHistorical: true` puts `preserveAudit: true` on the
  * write context (pinned next door in `import-runner-historical.test.ts`) and
@@ -30,7 +30,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from '@objectstack/objectql';
-import { runImport, type ImportProtocolLike } from './import-runner';
+import { runImport, type ImportProtocolLike } from '@objectstack/core';
 import type { ExportFieldMeta } from './export-format.js';
 
 const TICKET = {

@@ -4,7 +4,7 @@
  * # Flow clone — whole-definition copy under a new machine name (ADR-0126 §7.1)
  *
  * The copy half of ADR-0126's packaged-metadata customization model, shaped on
- * the landed permission-set clone (`sys-permission-set.object.ts`, #11513): an
+ * the landed permission-set clone (`sys-permission-set.object.ts`, commit e170b0ae5): an
  * admin who cannot edit a packaged flow in place gets an ordinary,
  * org-authored sibling to edit instead.
  *
@@ -18,7 +18,7 @@
  * to `FlowSchema` must never require an edit here.
  *
  * That is not stylistic. The permission-set clone this is shaped on assembles
- * its payload from an enumerated param list, and #11703 measured what an
+ * its payload from an enumerated param list, and commit 5cb62d88b records what an
  * enumerated list costs: three of the six facets (`system_permissions`,
  * `row_level_security`, `tab_permissions`) were simply not listed, so cloning a
  * set carrying system permissions or RLS produced a clone with NONE of them —
@@ -31,7 +31,7 @@
  * grows next — so the enumerated shape is not merely riskier here, it is
  * unmaintainable. ADR-0126 §7.1 rules it out by name.
  *
- * `flow-clone.test.ts` asserts this as the #11703 counter-example: deep
+ * `flow-clone.test.ts` asserts this as the counter-example of commit 5cb62d88b: deep
  * equality of the cloned definition against the source, minus the three
  * mutated fields. A dropped facet fails that test rather than shipping.
  *
@@ -64,9 +64,16 @@
  * literal list here — an envelope key added to the spec is stripped by this
  * module the day it lands, with no edit and no second list to drift.
  *
- * ⚠️ This is the one place the implementation reads more into ADR-0126 than the
- * card spelled out; it is flagged on the PR for the reviewer. Everything else
- * below is the ADR verbatim.
+ * [#20761] What was once the one place this module read more into ADR-0126
+ * than its card spelled out is now the rule itself: a flow written through an
+ * authoring door is tenant-authored, and the one authoring rule every door asks
+ * (`tenantAuthoredWriteRefusal` in `@objectstack/metadata-protocol`) refuses a
+ * definition whose stamps claim a package for a name no package ships — so a
+ * copy that carried the base's envelope would be refused, not saved. The clone
+ * door asks that rule of the copy this module builds and then saves it as an
+ * ordinary tenant row. Pinned in `domains/automation-flow-clone.test.ts` (the
+ * envelope drop) and `domains/automation-tenant-authored-write.test.ts` (the
+ * rule and the save).
  *
  * ## 3. REFERENCES ARE NOT RE-POINTED
  *
@@ -78,7 +85,7 @@
  * rather than only in an ADR.
  */
 
-import { METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
+import { getMetadataTypeRedactor, METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
 
 /**
  * The deployment status a clone is created with.
@@ -110,7 +117,7 @@ export const FLOW_CLONE_STATUS = 'draft' as const;
  *
  * Exported so the test asserts the mutation set from the same constant the
  * implementation applies, rather than restating it (a second list here is the
- * #11703 mechanism in miniature).
+ * facet-drop mechanism of commit 5cb62d88b in miniature).
  */
 export const FLOW_CLONE_MUTATED_FIELDS = ['name', 'label', 'status'] as const;
 
@@ -147,14 +154,24 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
  *     record-change flow and walks away has two flows running on one trigger,
  *     and the only thing standing between them and that surprise is this
  *     sentence.
+ *
+ * [#20726, ADR-0126 §7.2] The off-switch it names is the CLONE's own: its
+ * `status`, published through `PUT /:name`. A clone carries no package
+ * envelope (see {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in
+ * this deployment, and the activation toggle — which switches packaged flows
+ * only — refuses it. That holds whatever the clone was copied from: the clone
+ * door takes any registered flow as its source, packaged or not, so the
+ * notice makes no claim about the source's provenance.
  */
 export const FLOW_CLONE_NOTICE =
     'References are not re-pointed: this clone calls exactly what the original called '
     + '(subflows, actions and objects are unchanged). It is created with status `draft`, '
     + 'which is a lifecycle label and NOT an off-switch — a cloned record-change or schedule '
     + 'flow is bound to its trigger and will run alongside the flow it was copied from. '
-    + 'Disable it (`POST /api/v1/automation/<name>/toggle` with `{"enabled": false}`) if that '
-    + 'is not what you want.';
+    + 'If that is not what you want, switch the clone off through its own status: send its '
+    + 'complete definition with `status: \'obsolete\'` to `PUT /api/v1/automation/<name>`. '
+    + 'The activation toggle (`POST /api/v1/automation/<name>/toggle`) switches packaged flows '
+    + 'only and refuses the clone.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;
@@ -227,4 +244,90 @@ export function cloneFlowDefinition(
     copy.label = target.label;
     copy.status = FLOW_CLONE_STATUS;
     return copy;
+}
+
+// ---------------------------------------------------------------------------
+// [#20790] C1 — a source that holds a credential is never cloned in one step
+// ---------------------------------------------------------------------------
+
+/**
+ * One credential the clone's source holds, by class — never the value. The
+ * automation engine answers it (`AutomationEngine.flowCredentialHoldings`):
+ * a literal in the definition (a packaged flow's source), or one the
+ * write-only flow credential channel holds for a position of it.
+ */
+export interface FlowCloneCredentialHolding {
+    /** The node config key (`secret`, `signingSecret`). */
+    readonly key: string;
+    /** What an administrator is told the credential is; the key's spelling when absent. */
+    readonly label?: string;
+    readonly held: 'literal' | 'channel';
+}
+
+/** The slice of the automation service the clone door asks about credentials. */
+export interface FlowCloneCredentialSource {
+    flowCredentialHoldings?(name: string): readonly FlowCloneCredentialHolding[];
+}
+
+/** ADR-0112 pair for the credential refusal: the source's state forbids the copy. */
+export const FLOW_CLONE_CREDENTIAL_REFUSAL_STATUS = 409;
+export const FLOW_CLONE_CREDENTIAL_REFUSAL_CODE = 'RESOURCE_CONFLICT';
+
+/**
+ * The literal credentials a definition carries, through the `flow` redactor
+ * the automation plugin registers in `@objectstack/spec/kernel` — the
+ * projection of the platform's one credential-location table. The clone
+ * door's answer when the automation service does not report holdings itself
+ * (a host that composes another engine); it cannot see a channel-held one,
+ * because such a host has no channel.
+ */
+export function literalFlowCredentialHoldings(source: unknown): FlowCloneCredentialHolding[] {
+    const redactor = getMetadataTypeRedactor('flow');
+    if (!redactor || !source || typeof source !== 'object' || Array.isArray(source)) return [];
+    return redactor(source as Record<string, unknown>).redactedKeys.map((path) => ({
+        key: path.slice(path.lastIndexOf('.') + 1),
+        held: 'literal' as const,
+    }));
+}
+
+/**
+ * The clone door's credential refusal (#20790 C1, Q2 A), or `undefined` when
+ * the source holds none.
+ *
+ * A flow's credentials are its own: an inbound hook's secret authenticates
+ * posts to THAT hook, an `http` node's signing secret proves a delivery came
+ * from THAT flow. A whole-definition copy (§1 above) would carry a literal
+ * one across, and the metadata save door would then store it as the copy's
+ * own — two flows sharing one secret, which is never allowed. A secret the
+ * write-only channel holds is not in the definition at all, so the copy would
+ * arrive without it: an inbound copy refused at registration, an outbound
+ * copy delivering unsigned. Both are refused here instead, with the remedy:
+ * the administrator authors the copy with its own secret.
+ *
+ * ⚠️ So a PACKAGED inbound flow (the ADR-0126 §7.1 customization path) can no
+ * longer be cloned in one step — a cost the ruling accepted. The positions are
+ * named by class only, never by value, node or path.
+ */
+export function flowCloneCredentialRefusal(
+    sourceName: string,
+    holdings: readonly FlowCloneCredentialHolding[],
+): (Error & { code: string; status: number; statusCode: number }) | undefined {
+    if (holdings.length === 0) return undefined;
+    const classes = [...new Set(holdings.map((h) => h.label ?? `the credential at \`${h.key}\``))].sort().join(' and ');
+    const keys = new Set(holdings.map((h) => h.key));
+    const remedies = [
+        keys.has('secret') ? 'a new `config.secret` on its start node' : undefined,
+        keys.has('signingSecret') ? 'a new `config.signingSecret` on each http node that signs' : undefined,
+        [...keys].some((k) => k !== 'secret' && k !== 'signingSecret') ? 'a new value for each credential' : undefined,
+    ].filter((s): s is string => s !== undefined);
+    const err = new Error(
+        `Flow '${sourceName}' cannot be cloned in one step: it holds ${classes}, and a copy would share it — two `
+            + 'flows never share a secret. Author the copy with its own instead: read this flow\'s definition (its '
+            + 'credentials are withheld from it), create a new flow under a new machine name with that definition, '
+            + `and set ${remedies.join(' and ')}.`,
+    ) as Error & { code: string; status: number; statusCode: number };
+    err.code = FLOW_CLONE_CREDENTIAL_REFUSAL_CODE;
+    err.status = FLOW_CLONE_CREDENTIAL_REFUSAL_STATUS;
+    err.statusCode = FLOW_CLONE_CREDENTIAL_REFUSAL_STATUS;
+    return err;
 }

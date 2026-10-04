@@ -110,4 +110,30 @@ describe('os test — suite load is schema-checked (#6247)', () => {
     const file = suiteFile('not-json.test.json', '{ "name": ');
     expect(() => loadTestSuite(file)).toThrow(/not-json\.test\.json/);
   });
+
+  // The `qa-runner` family's `requires` key, ruled B: `requires.plugins` is a
+  // tombstone. A suite still carrying it is refused before anything runs, and
+  // the refusal is the retirement prescription — located at the scenario and
+  // naming the replacement — rather than the key being stripped in silence.
+  it('refuses the retired `requires.plugins`, located, with the prescription naming `requires.services`', () => {
+    const retired = structuredClone(VALID_SUITE) as Record<string, any>;
+    retired.scenarios[0].requires = { plugins: ['@objectstack/plugin-auth'] };
+    const file = suiteFile('retired-plugins.test.json', JSON.stringify(retired));
+    let message = '';
+    try {
+      loadTestSuite(file);
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toContain('retired-plugins.test.json');
+    expect(message).toContain('scenarios.0.requires.plugins');
+    expect(message).toMatch(/`scenarios\[\]\.requires\.plugins` was removed.*`requires\.services`/s);
+  });
+
+  it('loads `requires.params` and `requires.services` unchanged — CONTROL', () => {
+    const gated = structuredClone(VALID_SUITE) as Record<string, any>;
+    gated.scenarios[0].requires = { params: ['OS_TEST_QA_TOKEN'], services: ['auth'] };
+    const suite = loadTestSuite(suiteFile('gated.test.json', JSON.stringify(gated)));
+    expect(suite.scenarios[0].requires).toEqual({ params: ['OS_TEST_QA_TOKEN'], services: ['auth'] });
+  });
 });

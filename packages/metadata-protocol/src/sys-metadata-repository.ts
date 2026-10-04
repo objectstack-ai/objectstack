@@ -83,6 +83,7 @@ import type { IObjectQLEngine } from '@objectstack/core';
 // lifecycle gate read, so a third read-only signal added there reaches this
 // door too (that shared-rule argument is the module's whole reason to exist).
 import { isWritablePackage } from './package-writability.js';
+import { packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -132,7 +133,7 @@ import { isWritablePackage } from './package-writability.js';
  * because a guard on some arms and not others re-opens the drift the single
  * spelling closed.
  *
- * Reachability is MEASURED, not assumed (#14409, landed `3ecb7dc1a`): mysql2
+ * Reachability is MEASURED, not assumed (commit `3ecb7dc1a`): mysql2
  * 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero
  * `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in
  * 275760..294276 — years Postgres itself stores. Unguarded,
@@ -144,7 +145,7 @@ import { isWritablePackage } from './package-writability.js';
  * The terminal value is chosen **per call site**, and this one's is
  * `undefined`: every caller already carries such a chain — `getByHash` and
  * `rowToItem` end in `?? new Date(...).toISOString()`, `rowToEvent` (#16422)
- * in `?? new Date(0).toISOString()`, `listDrafts` (#14938) in `?? null` —
+ * in `?? new Date(0).toISOString()`, `listDrafts` (commit c383352cb) in `?? null` —
  * the branch an absent column takes at each of them today.
  * The ruling assigns `undefined` exactly where "the field is optional and the
  * caller already carries a `?? default` chain". ⛔ NOT the visible text
@@ -365,7 +366,7 @@ export function resetEnvWritableMetadataTypes(): void {
  * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
  * of event sinks can only express shutdown as "send an event", and an event is
  * precisely what a filtered or numeric-`since` subscriber is entitled to drop
- * (#11021).
+ * (commit 7d81c889f).
  */
 interface WatchSubscription {
   /** Receives every broadcast event; applies this subscriber's own filters. */
@@ -529,7 +530,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // resolution below) on purpose — `undefined` means "the caller named no
     // base", which is the ordinary env-local overlay and must keep the
     // type-door codes; `?? null` there is a ROW-KEY default, a different fact.
-    this.assertAllowed(ref.type, opts.intent, opts.packageId);
+    this.assertAllowed(ref, 'save', opts.intent, opts.packageId);
 
     const state: OverlayState = opts.state ?? 'active';
     const body = (spec ?? {}) as Record<string, unknown>;
@@ -766,7 +767,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // [#6960] The DELETE verb's own gate — see {@link assertDeleteAllowed}.
     // `put` keeps calling `assertAllowed` directly; the ruling moved removal
     // only.
-    this.assertDeleteAllowed(ref.type, opts.intent);
+    this.assertDeleteAllowed(ref, opts.intent);
 
     const state: OverlayState = opts.state ?? 'active';
     const result = await this.withTxn(async (ctx) => {
@@ -908,6 +909,20 @@ export class SysMetadataRepository implements MetadataRepository {
        * answering `success: true`. Which row won was driver-order dependent.
        */
       packageId?: string | null;
+      /**
+       * [#20312] The body the ACTIVE row stores, derived from the draft body
+       * this promotion read — applied to the row actually promoted, inside the
+       * same call, so the derivation and the write read one row rather than
+       * two. The protocol passes the derivations its save door applies to an
+       * active body (ADR-0080 §5: an html page's `requires` re-stamped from its
+       * source), so a publish stores what an active save of the same body
+       * would. Return the argument unchanged when there is nothing to derive.
+       *
+       * Omitted → the draft body is promoted byte for byte, as before. The
+       * draft row is still drained by its OWN hash: the derivation changes
+       * what lands in `active`, never which draft is consumed.
+       */
+      deriveActiveBody?: (draftBody: unknown) => unknown;
     },
   ): Promise<{
     version: string;
@@ -953,7 +968,8 @@ export class SysMetadataRepository implements MetadataRepository {
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)
     const currentActive = await this.get(ref, { state: 'active', packageId: draftPackageId });
-    const result = await this.put(ref, draft.body, {
+    const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(draft.body) : draft.body;
+    const result = await this.put(ref, activeBody, {
       parentVersion: currentActive?.hash ?? null,
       actor: opts.actor,
       source: opts.source ?? 'sys-metadata-repo.publish',
@@ -1007,7 +1023,25 @@ export class SysMetadataRepository implements MetadataRepository {
   async restoreVersion(
     ref: MetaRef,
     targetVersion: number,
-    opts: { actor: string | null; source?: string; message?: string; intent?: MetadataWriteIntent },
+    opts: {
+      actor: string | null;
+      source?: string;
+      message?: string;
+      intent?: MetadataWriteIntent;
+      /**
+       * [#20790] The body the ACTIVE row stores, derived from the history body
+       * this restore read — the shape {@link promoteDraft}'s `deriveActiveBody`
+       * has, applied the same way: to the row actually restored, inside the
+       * same call, before the put hashes it. The protocol passes the type's
+       * write-only credential channel strip (R2), so restoring a version
+       * written before a credential moved out of the body never puts the
+       * credential back at rest, nor appends a history copy of it. Return the
+       * argument unchanged when there is nothing to derive.
+       *
+       * Omitted → the history body is restored byte for byte, as before.
+       */
+      deriveRestoredBody?: (historyBody: unknown) => unknown;
+    },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
     const full = this.fullRef(ref);
@@ -1036,7 +1070,8 @@ export class SysMetadataRepository implements MetadataRepository {
       err.status = 409;
       throw err;
     }
-    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+    const historyBody = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+    const body = opts.deriveRestoredBody ? opts.deriveRestoredBody(historyBody) : historyBody;
     // ADR-0048 / #6215 — read the RAW active row, not just its body, and carry
     // its `package_id` into the write. `put` upserts exactly ONE row and scopes
     // its optimistic-lock lookup by package; an unstated `packageId` resolves to
@@ -1149,7 +1184,7 @@ export class SysMetadataRepository implements MetadataRepository {
       name: row.name,
       organizationId: row.organization_id ?? null,
       packageId: row.package_id ?? null,
-      // [#14938] `updated_at` / `created_at` are the BUILTIN audit columns,
+      // [commit c383352cb] `updated_at` / `created_at` are the BUILTIN audit columns,
       // and on Postgres and MySQL they used to arrive here as a JS `Date`:
       // the audit repair and the declared-datetime fold both sat inside
       // `SqlDriver#formatOutput`'s `if (this.isSqlite)` arm. #13973
@@ -1294,7 +1329,7 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    * ## `since` — invariant 6, both halves
    *
-   * **Numeric `since`** (#10842): every logged event with `seq > since` is
+   * **Numeric `since`** (commit f334d662e): every logged event with `seq > since` is
    * replayed out of `sys_metadata_history` before any live event is yielded.
    * `since` used to be nothing but a DROP filter on live events, so an event
    * that had already committed was unreachable through `watch()` however low
@@ -1330,7 +1365,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * it and {@link close} runs the identical routine. Either settles a parked
    * `next()` with `{ done: true }` and no value. A consumer therefore never
    * has to recognise a shutdown *event* — there is not one to recognise, which
-   * is the #11021 repair; see `close()` for what modelling it as an event cost.
+   * is the repair in commit 7d81c889f; see `close()` for what modelling it as an event cost.
    * Anything still queued or unreplayed at that point is dropped, on both
    * paths alike.
    */
@@ -1443,7 +1478,7 @@ export class SysMetadataRepository implements MetadataRepository {
   /**
    * Shut down every live `watch()` iterator.
    *
-   * **Shutdown is not a metadata event** — #11021, and the reason this method
+   * **Shutdown is not a metadata event** — commit 7d81c889f, and the reason this method
    * no longer broadcasts anything. It used to push a synthetic
    * `{ seq: -1, ref: { org: '', type: 'view', name: '_close' } }` through the
    * same `dispatch` closure real events pass, then clear the registry. Both of
@@ -1586,10 +1621,12 @@ export class SysMetadataRepository implements MetadataRepository {
    *    purpose and warns against symmetrising either way.
    */
   private assertAllowed(
-    type: string,
+    ref: { type: string; name: string },
+    operation: 'save' | 'delete',
     intent: MetadataWriteIntent = 'override-artifact',
     packageId?: string | null,
   ): void {
+    const { type } = ref;
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const allowedByRegistry = OVERLAY_ALLOWED_TYPES.has(singular) || OVERLAY_ALLOWED_TYPES.has(type);
     if (allowedByRegistry) return;
@@ -1631,6 +1668,24 @@ export class SysMetadataRepository implements MetadataRepository {
     // [#8146] The hatch unlocks the TYPE — for a write that named no base, or
     // named a writable one. It never reaches the package dimension.
     if (hatchOpen) return;
+
+    // [#20910, ADR-0126 §2] An item a code package ships, of a type with a
+    // Regime C row, is refused with the row-built sentence — the SAME one the
+    // protocol's package door answers on an environment-scoped kernel, which
+    // never reaches here for this write — naming the type's sanctioned path. A
+    // locked Regime C base is customized by its clone or switched off, never by
+    // opening this hatch, so the list-and-hatch sentence below would prescribe
+    // the wrong door. Reached only with the hatch CLOSED (it returned above).
+    // Every type with no regime row keeps that sentence, byte for byte.
+    if (intent !== 'runtime-only') {
+      const regimeSentence = packagedBaseRegimeSentence(singular, ref.name, operation);
+      if (regimeSentence !== undefined) {
+        const err: any = new Error(regimeSentence);
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        throw err;
+      }
+    }
 
     const allowed = [
       ...OVERLAY_ALLOWED_TYPES,
@@ -1744,8 +1799,20 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    const err: any = new Error(
-      `Cannot overlay '${type}' in package '${packageId}': that package is read-only `
+    // [#20910, ADR-0126 §2] With the hatch CLOSED, a type with a Regime C row is
+    // told its row's sanctioned path — not the hatch: a locked Regime C base is
+    // customized by its clone or switched off, and the hatch is not that type's
+    // sanctioned path. The opener is shortened to the lock, so the prescription
+    // and its ADR-0126 citation arrive whole inside the REST door's
+    // 500-character bound (pinned with a long package id). The hatch-OPEN
+    // remedy, the code, the status, `lockSource`, `packageId` and `docs` are
+    // the same for every type; every type with no regime row keeps both
+    // remedies below, byte for byte.
+    const regimePrescription = hatchOpen ? undefined : packagedBaseRegimePrescription(singular);
+    const err: any = new Error(regimePrescription !== undefined
+      ? `Cannot overlay '${type}' in package '${packageId}': that package is read-only, and its packaged base `
+        + `is locked against in-place edits. ${regimePrescription}`
+      : `Cannot overlay '${type}' in package '${packageId}': that package is read-only `
       + `(provided by code or an installed app) and the type has no per-org overlay channel `
       + `(allowOrgOverride=false), so this item is locked against runtime edits. `
       // [#8146] The prescription is chosen by whether the hatch is ALREADY
@@ -1761,8 +1828,7 @@ export class SysMetadataRepository implements MetadataRepository {
         : `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE=${singular} `
           + `to grant a runtime escape hatch on this TYPE (it does not unlock package writability, `
           + `so pair it with a package-less write).`)
-      + ` See docs/adr/0010-metadata-protection-model.md.`,
-    );
+      + ` See docs/adr/0010-metadata-protection-model.md.`);
     err.code = 'ITEM_LOCKED';
     err.status = 403;
     err.lockSource = 'package';
@@ -1782,7 +1848,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * kernel (`environmentId === undefined`) skips the protocol's own two-tier
    * block entirely and lands here instead. That made it the second of the two
    * refusal points #6960 measured: on an environment carrying an overlay row
-   * authored BEFORE #6483 / PR #6608 rolled `allowOrgOverride` back to
+   * authored BEFORE commit ee58392e1 rolled `allowOrgOverride` back to
    * `false`, the row kept merging overlay-wins at read time while the ordinary
    * "Reset to package default" answered 403 — the removal reachable only
    * through `OS_METADATA_WRITABLE`. Maintainer ruling, 2026-08-10: the delete
@@ -1797,7 +1863,7 @@ export class SysMetadataRepository implements MetadataRepository {
    *  - `supportsOverlay: true` — the loader merges the row, so a row under
    *    this name really is a customization sitting on top of a code-declared
    *    default, and subtracting it restores that default. This is the tier
-   *    #6483 rolled back (`permission` / `position` / `page` / `app` /
+   *    commit ee58392e1 rolled back (`permission` / `position` / `page` / `app` /
    *    `dataset` / `book`).
    *  - `supportsOverlay: false` — `object` above all, whose overlay registers
    *    as its own contributor LAYER (ADR-0029 D9) rather than merging, and
@@ -1810,21 +1876,22 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    *  - It does not touch `put`. Create and update on such an item stay refused
    *    exactly as today; the asymmetry is the ruling, not an oversight, and
-   *    "restoring symmetry" here re-opens the write door #6483 closed.
+   *    "restoring symmetry" here re-opens the write door commit ee58392e1 closed.
    *  - It does not widen `runtime-only`. That intent means "no artifact under
    *    this name", which the `allowRuntimeCreate` tier already governs — so
    *    the carve-out is scoped to the `override-artifact` intent, which is
    *    precisely the artifact-backed case the ruling names.
    */
   private assertDeleteAllowed(
-    type: string,
+    ref: { type: string; name: string },
     intent: MetadataWriteIntent = 'override-artifact',
   ): void {
+    const { type } = ref;
     if (intent !== 'runtime-only') {
       const singular = PLURAL_TO_SINGULAR[type] ?? type;
       if (OVERLAY_CAPABLE_TYPES.has(singular) || OVERLAY_CAPABLE_TYPES.has(type)) return;
     }
-    this.assertAllowed(type, intent);
+    this.assertAllowed(ref, 'delete', intent);
   }
 
   private whereFor(
@@ -2017,9 +2084,20 @@ export class SysMetadataRepository implements MetadataRepository {
     subject: string,
   ): 1 {
     // Benign — and only benign: a fresh DB has no row to be inconsistent with.
-    // [#13324] Both callers read `this.historyTable`, so a failure naming any
+    // [commit 4cda78c9b] Both callers read `this.historyTable`, so a failure naming any
     // other relation is not evidence that THIS one is empty.
     if (isMissingTableError(error, this.historyTable)) return 1;
+    // [#21516] The same emptiness in a composition that does not register the
+    // history object at all (a lean embedding, a bare-kernel test): the
+    // engine's in-process verbs now refuse an unresolved name with
+    // `OBJECT_NOT_FOUND` before any driver is asked, rather than reaching a
+    // table by that raw name. It is the not-provisioned case the missing-table
+    // arm above already covers — there is no history object here, so no
+    // lineage to collide with and 1 really is the next number. Attributed on
+    // the error's own `object`, like the relation check above: a refusal
+    // naming a different object is not evidence about `this.historyTable`.
+    const refused = error as { code?: unknown; object?: unknown } | null | undefined;
+    if (refused?.code === 'OBJECT_NOT_FOUND' && refused.object === this.historyTable) return 1;
 
     if (!this.historyCounterFailureReported) {
       this.historyCounterFailureReported = true;
@@ -2027,7 +2105,7 @@ export class SysMetadataRepository implements MetadataRepository {
         `[SysMetadataRepository] Could not read \`${this.historyTable}\` to determine the next ` +
           `\`${counter}\` (${subject}) — the metadata write is being ABORTED and the enclosing ` +
           `transaction rolled back, so nothing is committed and the caller sees the failure. ` +
-          `Before #4867 this path answered \`${counter} = 1\` instead: against a table that ` +
+          `This path used to answer \`${counter} = 1\` instead, taking a failed read for an empty table: against a table that ` +
           `already has rows that number COLLIDES with an existing row, while the insert SUCCEEDS ` +
           `and not one line is logged — leaving version ordering untrustworthy and rollback ` +
           `targets ambiguous (a rollback can then resolve to a different record's same-numbered ` +

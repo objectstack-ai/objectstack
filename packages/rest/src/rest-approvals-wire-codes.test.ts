@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8885] The approvals routes' wire codes are REGISTERED vocabulary — pins
+ * [commit 30b1c636a] The approvals routes' wire codes are REGISTERED vocabulary — pins
  * for the population the card's sweep found.
  *
- * The #8885 sweep measured 9 codes reaching the wire from `packages/rest` that
+ * The sweep behind commit 30b1c636a measured 9 codes reaching the wire from `packages/rest` that
  * were in neither `StandardErrorCode` nor `ERROR_CODE_LEDGER`, all in one
  * family and all with the same cause: the approvals route factories spell the
  * terminal 500 catch's code as a TEMPLATE
@@ -29,12 +29,12 @@
  *    (single-occurrence `.replace('-', '_')` included), so a route name the
  *    template would mangle into an invalid code also fails here.
  * [#14573] The file has since become the home for the approvals door's
- * live-emission pins generally, not only the #8885 population: the
+ * live-emission pins generally, not only the population commit 30b1c636a registered: the
  * `FORBIDDEN` → 403 case below pins a row that is registered vocabulary and
  * whose emission was — contrary to that card's premise — already observed
  * elsewhere. See its own comment for where, and why it is pinned here too.
  *
- * [#14849] Six more rows joined that home: VALIDATION_FAILED, DUPLICATE_REQUEST,
+ * [commit 226e72443] Six more rows joined that home: VALIDATION_FAILED, DUPLICATE_REQUEST,
  * INVALID_STATE, REQUEST_NOT_FOUND, RESUME_TARGET_LOST and RESUME_FAILED had no
  * live-emission pin ANYWHERE — established by ablating each row and running the
  * whole `packages/rest` suite, not by grepping this file. The per-row results and
@@ -191,7 +191,7 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         ).toBe(true);
     });
 
-    // [#13182] `READ_BACK_FAILED` is a NAMED wire row (the RESUME_FAILED
+    // [commit 5b3ff63cc] `READ_BACK_FAILED` is a NAMED wire row (the RESUME_FAILED
     // precedent: a genuine server-side inconsistency, but named): the write is
     // recorded and NOT rolled back, the read-back is org-filtered, and the
     // 500 semantics stay. Pinned here so the prefix→code mapping and ledger
@@ -216,7 +216,7 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         ).toBe(true);
     });
 
-    // ── [#14849] The six rows that had NO live-emission pin ──────────────
+    // ── [commit 226e72443] The six rows that had NO live-emission pin ──────────────
     //
     // Method first, because this card exists BECAUSE a grep got this wrong
     // once already: every one of the nine rows was confirmed by ABLATION, not
@@ -237,7 +237,7 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
     // the three reds the #14573 correction measured, two of them in a file
     // whose declared subject is a DIFFERENT contract — precisely the pin a
     // file-scoped grep cannot see. Same instrument, zero reds for the six ⇒
-    // they were genuinely uncovered, not covered somewhere unobvious. #14849
+    // they were genuinely uncovered, not covered somewhere unobvious. The card behind commit 226e72443
     // predicted at least one of the six would turn out already pinned; it did
     // not, and that prediction is now answered by measurement rather than
     // carried forward as a caveat.

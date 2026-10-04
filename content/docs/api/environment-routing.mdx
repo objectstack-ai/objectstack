@@ -72,9 +72,10 @@ declared stack key, so `defineStack()` rejects it as an unrecognized key.
 <Callout type="info">
 `api` is a declared top-level field on `ObjectStackDefinitionSchema`, so it
 survives `defineStack`'s strict parsing — you can pass it directly inside the
-`defineStack({ ... })` call as shown above. (Older stacks that instead spread
-it onto the exported config object, e.g. `export default { ...stack, api: {...} }`,
-still work the same way.) The CLI reads the resolved value from the exported
+`defineStack({ ... })` call as shown above — and keep it there. Spreading it onto
+a copy of the built stack instead, e.g. `export default { ...stack, api: {...} }`,
+exports an object `defineStack` did not return, which `os validate` and `os build`
+refuse (`STACK_PROVENANCE_MISSING`). The CLI reads the resolved value from the exported
 config (`config.api`) when registering the REST and dispatcher plugins — but it
 reads it *after* the boot result has been merged in, which is why the standalone
 path forwards the boot builder's scoping decision rather than the author's.

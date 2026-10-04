@@ -222,9 +222,9 @@ function toLoggableError(thrown: unknown): Error {
  * The measured motivating path: `service-datasource`'s `requireDatasourceAdmin`
  * re-raises `AuthzStoreUnavailableError` (declared `status: 503` / `code:
  * SERVICE_UNAVAILABLE`) on an unreadable authorization store, deliberately and
- * per the #13279 ruling — and the caller was told `500 INTERNAL_ERROR "No
+ * per the ruling commit 6a180e42d landed — and the caller was told `500 INTERNAL_ERROR "No
  * response from handler"`. The declared code never reached the caller and the
- * message named the wrong component. Only the RENDERING moves here; #13279's
+ * message named the wrong component. Only the RENDERING moves here; commit 6a180e42d's
  * discipline (an unreadable authz store licenses no verdict) is untouched.
  *
  * ## Why this is a GATE and not `sendThrownError`
@@ -305,7 +305,7 @@ function declaredEnvelopeForThrow(thrown: unknown): {
                 code: resolved.code,
                 message,
                 // The producer's structured context and its END-USER-addressed
-                // refusal text (#9934), forwarded exactly as the REST twin
+                // refusal text (commit 79c46da90), forwarded exactly as the REST twin
                 // forwards them. Both are absent unless the producer declared
                 // them, so a throw that carried neither renders the same two
                 // keys it always did.
@@ -346,7 +346,7 @@ function readRouteParams(c: any): Record<string, string> {
  * therefore had two answers depending on which server booted, which is what
  * #6878 measured and what the cli-lane seat ruled (2026-08-10) to resolve in
  * this direction — the handler must be able to SEE the ambiguity in order to
- * reject it, per #6307's landed `readSingleQueryValue` direction.
+ * reject it, per the `readSingleQueryValue` direction commit 293476148 landed.
  *
  * ⚠️ The normalisation is NOT optional. `c.req.queries()` returns an array for
  * EVERY key, single-valued ones included (measured on hono@4.12.x:

@@ -70,7 +70,9 @@
  * `AnalyticsService` in `analytics-automation-json-erasure.test.ts`, where
  * `analytics` is the SERVICE, not the client. That is a producer call and no
  * part of the SDK caller population, so every row carries its receiver and the
- * ledger classifies it `NOT_SDK`.
+ * ledger classifies it `NOT_SDK`. [#20897] driver-memory's refusal suite does
+ * the same on its own cube service (`MemoryAnalyticsService` bound to
+ * `analytics`), so it carries a `NOT_SDK` row too.
  *
  * ## The verdicts
  *
@@ -473,6 +475,30 @@ const LEDGER: readonly LedgerRow[] = [
         method: 'analytics.query', receiver: 'service', count: 1, verdict: 'NOT_SDK',
         why: 'the real AnalyticsService, called to assert the SDK value equals what the producer returned',
     },
+    // ── the nested-relation pin in `@objectstack/rest`: producer reads only ──
+    {
+        file: 'packages/rest/src/analytics-nested-relation-filter.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 5, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService (the cube read), called to compare its answer for the nested-relation filter with the engine\'s',
+    },
+    // ── a producer face outside the SDK: driver-memory's cube service ────────
+    {
+        file: 'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 2, verdict: 'NOT_SDK',
+        why: 'a MemoryAnalyticsService bound to `analytics`, called directly (no HTTP, no dispatcher envelope) to assert the cube face refuses a non-boolean $exists and answers find()\'s rows for true / false',
+    },
+    // ── [#21441] the ObjectQL face's date-bucket echo pin: producer reads only ──
+    {
+        file: 'packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 1, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService that AnalyticsServicePlugin registers over a live engine, called directly (no HTTP, no dispatcher envelope) to read the ObjectQL face\'s rows and the echoed `sql` it runs against them',
+    },
+    // ── [#21647] the bucket echo's driver x timezone x granularity enumeration: producer reads only ──
+    {
+        file: 'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 2, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService that AnalyticsServicePlugin registers over an ObjectQL engine with the driver\'s data doors spied, called directly (no HTTP, no dispatcher envelope) to read whether the ObjectQL face\'s answer carries an echoed `sql`, and its rows',
+    },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
         method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
@@ -670,8 +696,27 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
         // method, so a literal-embedded site lands HERE first, as a phantom
         // producer call. That makes this the assertion most likely to break
         // for a reason that has nothing to do with receivers.
-        expect(service.length, literalNote()).toBe(1);
-        expect(service[0]?.file).toBe('packages/client/src/analytics-automation-json-erasure.test.ts');
+        // [#20897] Three producer faces call `analytics.query` bare: the real
+        // AnalyticsService behind the SDK, the same service in `@objectstack/rest`'s
+        // nested-relation pin, and driver-memory's cube service
+        // (`MemoryAnalyticsService`) in its own refusal suite. None of the
+        // receivers is the client, and every file is pinned.
+        // [#21441] A fourth: `service-analytics`' date-bucket echo pin calls
+        // the real AnalyticsService that `AnalyticsServicePlugin` registers
+        // over a live engine, to read the ObjectQL face's rows beside its
+        // echoed `sql`. Its receiver is that service, not the client.
+        // [#21647] A fifth, two sites: the bucket echo's enumeration pin calls
+        // the same plugin-registered AnalyticsService, over an engine with the
+        // driver's data doors spied, to read whether the answer carries `sql`.
+        expect(service.length, literalNote()).toBe(11);
+        expect([...new Set(service.map((s) => s.file))].sort()).toEqual([
+            'packages/client/src/analytics-automation-json-erasure.test.ts',
+            'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+            'packages/rest/src/analytics-nested-relation-filter.test.ts',
+            'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts',
+            'packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts',
+        ]);
+        expect(service.every((s) => s.method === 'analytics.query')).toBe(true);
     });
 });
 
@@ -716,10 +761,12 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(production, literalNote()).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 1 not-SDK', () => {
+    it('records the split: 18 payload pins, 10 result-insensitive, 11 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
-        expect(verdictTotal('NOT_SDK')).toBe(1);
+        // [#21441] 8 -> 9: the date-bucket echo pin's producer call (§2).
+        // [#21647] 9 -> 11: the bucket echo enumeration's two producer calls (§2).
+        expect(verdictTotal('NOT_SDK')).toBe(11);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         expect(sdkSites.length, literalNote()).toBe(28);

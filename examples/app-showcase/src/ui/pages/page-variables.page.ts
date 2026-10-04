@@ -87,7 +87,7 @@ export const PageVariablesPage = definePage({
           visibleWhen: "page.selectedProjectId != ''",
           properties: {
             content: '✓ Project selected',
-            variant: 'subheading',
+            variant: 'h3',
           },
         },
         {

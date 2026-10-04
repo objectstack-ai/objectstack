@@ -15,7 +15,7 @@ import {
 } from '@objectstack/core';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
-// the posture rule and the #10243 measurement behind it.
+// the posture rule and the measurement behind it (commit 02b41232d).
 import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
 // [#19874] What the run-lifecycle refusal names as the remedy is read off the
 // SAME inputs the platform-admin derivation reads — the requested posture, the
@@ -47,12 +47,22 @@ import {
 // not carry forward, the same-name refusal and the references notice.
 import {
     cloneFlowDefinition,
+    flowCloneCredentialRefusal,
+    literalFlowCredentialHoldings,
+    type FlowCloneCredentialSource,
     flowCloneNameTakenMessage,
     FLOW_CLONE_NAME_TAKEN_STATUS,
     FLOW_CLONE_NOTICE,
 } from '../flow-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#20552] The per-type credential redaction every metadata read exit applies,
+// and its write-path inverse — reused, never restated, for the definitions this
+// domain serves and overwrites.
+import { carryForwardRedactedValues, redactMetadataItem } from '@objectstack/metadata-protocol';
+// [#20679] Only the verdict's SIGNATURE — the locked-base refusal is asked of
+// the `protocol` service at request time, never re-derived here.
+import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 /**
  * Translate a trigger request body into the canonical `AutomationContext` the
@@ -360,7 +370,7 @@ const FLOW_WRITE_DENY_MESSAGE =
  * same `code` and the same `status` as {@link FLOW_WRITE_DENY_MESSAGE}, and a
  * different sentence, because a different operation was attempted.
  *
- * ⛔ Copy, not policy. [#10243]'s ruling put `POST /:name/toggle` into the
+ * ⛔ Copy, not policy. The ruling commit 266436a7f landed put `POST /:name/toggle` into the
  * authoring write set and that classification is untouched here: the same
  * callers are refused, with the same `PERMISSION_DENIED` and the same 403.
  * What moves is only what a refused caller is TOLD. Switching a shipped flow
@@ -389,7 +399,7 @@ const FLOW_ENABLEMENT_DENY_MESSAGE =
  * sentence the refusal carries — and this file's own rule is that a question
  * spelled at two call sites is two questions that happen to agree today.
  *
- * ⛔ The truth table is [#10243]'s, moved nowhere: the exclusion of
+ * ⛔ The truth table is commit 266436a7f's, moved nowhere: the exclusion of
  * `parts[0] === 'trigger'` and the absence of any depth bound are that arm's,
  * for that arm's reasons, restated below where they are read.
  */
@@ -402,15 +412,18 @@ function isFlowEnablementWrite(parts: string[], method: string): boolean {
  *
  * One predicate, for the reason {@link isRunStateRead} is one predicate: this
  * domain gets one policy per data class, and a policy spelled at three call
- * sites is three policies that happen to agree today. [#10243] That is why the
+ * sites is three policies that happen to agree today. [commit 266436a7f] That is why the
  * toggle ruling below was one arm here rather than a fourth copy of the policy.
  *
  *   `POST   /`             → registerFlow    (create)
  *   `PUT    /:name`        → registerFlow    (update)
  *   `DELETE /:name`        → unregisterFlow  (deregister)
- *   `POST   /:name/toggle` → toggleFlow      (enablement — #10243, see below)
+ *   `POST   /:name/toggle` → toggleFlow      (enablement — commit 266436a7f, see below;
+ *                                             PACKAGED flows only, #20726: a customer
+ *                                             flow's switch is its `status`, via
+ *                                             `PUT /:name`)
  *
- * ## [#10243] Why `toggle` joins them — ruled, not inferred
+ * ## [commit 266436a7f] Why `toggle` joins them — ruled, not inferred
  *
  * #10145 left it out and said so in the open, because whether disabling a flow
  * is authoring or operating is a product call rather than a code call. It was
@@ -455,7 +468,7 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
     // domain root, so `POST /trigger/:name` (parts `['trigger', name]`) and
     // `POST /:name/trigger` cannot reach this arm.
     if (method === 'POST' && parts.length === 0) return true;
-    // [#10243] `POST /automation/:name/toggle` — the enablement door.
+    // [commit 266436a7f] `POST /automation/:name/toggle` — the enablement door.
     //
     // Matched exactly as the ROUTER matches it, not approximately, because a
     // gate narrower than its route is a bypass and a gate wider than its route
@@ -577,7 +590,7 @@ function isFlowActivationWrite(parts: string[], method: string): boolean {
  * clause ({@link FLOW_ACTIVATION_SUBJECT}), which is the only part that ever
  * differed. The shared module's header carries the full rationale: why the
  * operator test is a POSITION, why an absent posture fails open, and what
- * #10243 measured.
+ * commit 02b41232d measured.
  */
 const refuseUngrantedFlowActivationWrite = (
     deps: DomainHandlerDeps,
@@ -625,13 +638,13 @@ const RUN_RESTORE_SEGMENT = 'restore-suspension';
  * gate narrower than its route is a bypass; a gate wider than its route is an
  * over-block.
  *
- * ⛔ `parts[0] === 'trigger'` is excluded, exactly as the toggle (#10243) and
+ * ⛔ `parts[0] === 'trigger'` is excluded, exactly as the toggle (commit 266436a7f) and
  * clone (#12156) arms exclude it, and the ROUTE ARMS carry the same exclusion
  * so the two spellings stay byte-identical. `POST /automation/trigger/:name`
  * is the LEGACY EXECUTION door, answered ABOVE the flow-scoped block, so for a
  * flow literally named `runs` the path `/automation/trigger/runs/x/cancel`
  * RUNS that flow. Gating it would over-block an execution door — the one thing
- * the #10243 ruling did not do — and dispatching a cancel from it would be the
+ * the ruling commit 266436a7f landed did not do — and dispatching a cancel from it would be the
  * mirror bypass.
  *
  * No upper bound on depth, for the reason the toggle arm documents: the arms
@@ -833,7 +846,7 @@ function refuseUngrantedRunLifecycleWrite(
  * [#13953] The CLOSED body envelope both lifecycle doors accept — exactly one
  * optional key, `reason`.
  *
- * Shaped on the resume door's own envelope discipline (#8796 / #9416), for the
+ * Shaped on the resume door's own envelope discipline (commit a4331227b / #9416), for the
  * same reason and with the same three refusals: the body itself must be a JSON
  * object (a string / number / boolean / array body used to normalise to `{}`
  * there and reach the engine as an empty signal, answered 200), an unknown
@@ -1291,6 +1304,60 @@ async function refuseUnrelatedResume(
 }
 
 /**
+ * [#20552] The metadata type a flow definition is redacted as — the key of the
+ * `flow` entry the automation plugin registers in the per-type redactor
+ * registry (`@objectstack/spec/kernel`).
+ */
+const FLOW_METADATA_TYPE = 'flow';
+
+/**
+ * [#20552] What every exit of this domain that answers with a flow DEFINITION
+ * serves: the definition with its credentials withheld — today the inbound
+ * hook's HMAC secret on the start node (ADR-0041), which any authenticated
+ * caller of `GET /:name` used to read back verbatim.
+ *
+ * It is the SAME redaction the metadata plane applies to the same flow
+ * (`redactMetadataItem`, resolving the registry's `flow` entry), so the two
+ * doors onto one definition cannot disagree about what is withheld; this
+ * function holds no opinion of its own about what a credential is.
+ *
+ * Applied at the four exits — `GET /:name`, the `POST /` and `PUT /:name`
+ * write answers (#12206: a write answers what the subsequent read serves) and
+ * the clone answer — and NOT to `automationService.getFlow` itself: that is the
+ * in-process read the clone copies a WHOLE definition through (ADR-0126 §7.1),
+ * secret included, and redaction is a serving act.
+ */
+function servedFlowDefinition<T>(flow: T): T {
+    return redactMetadataItem(FLOW_METADATA_TYPE, flow);
+}
+
+/**
+ * [#20552] The write-path inverse for the two doors that overwrite a flow by
+ * name (`POST /` onto an existing name, `PUT /:name`): a body that carries the
+ * projected form — no secret where the read served none — keeps the secret the
+ * engine holds, so a read → edit → republish round trip never wipes it; an
+ * explicit value replaces it. The metadata plane's own save door applies the
+ * same inverse (`carryForwardRedactedValues`), so both authoring surfaces keep
+ * one rule.
+ *
+ * The comparison runs against the definition the ENGINE holds (`getFlow`, the
+ * raw in-process read), not a served copy. A service without the optional
+ * `getFlow`, or a name it does not hold, carries nothing — the body is
+ * registered as written, and a missing secret is refused by the engine's own
+ * registration gate, loudly.
+ */
+async function keepStoredFlowCredentials(
+    automationService: Pick<IAutomationService, 'getFlow'>,
+    name: string,
+    definition: unknown,
+): Promise<unknown> {
+    if (typeof automationService.getFlow !== 'function') return definition;
+    const stored = await automationService.getFlow(name);
+    if (!stored) return definition;
+    return carryForwardRedactedValues(FLOW_METADATA_TYPE, definition, stored);
+}
+
+/**
  * [#8055] A refusal thrown by `registerFlow` is the CALLER's metadata being
  * wrong — serve it as one.
  *
@@ -1383,6 +1450,241 @@ function flowDefinitionRefusal(err: any): unknown {
 }
 
 /**
+ * [#20679, ADR-0126 §2] THE LOCKED BASE at this domain's definition-write and
+ * removal doors — `PUT /:name`, `DELETE /:name`, and `POST /` onto a name the
+ * engine already holds (a create onto an existing name is an overwrite).
+ *
+ * ADR-0126 §2 puts a packaged flow in Regime C: "the packaged base is locked —
+ * in-place edit refused loudly at the write door". The metadata door kept that
+ * promise (`PUT /meta/flow/:name` on a flow a code package ships answers `403`
+ * `NOT_OVERRIDABLE`) and these doors did not: behind the `manage_metadata`
+ * authoring gate they went straight to the engine's `registerFlow` /
+ * `unregisterFlow`, which hold no lock and must not grow one — the boot pull
+ * registers every packaged flow through that same method. So an administrator
+ * refused at one door onto the artifact could rewrite, or remove, the same
+ * packaged flow in the live engine through another.
+ *
+ * ## One predicate, asked of its owner
+ *
+ * The verdict is the metadata protocol's, and it is ASKED, never re-derived
+ * here: `packagedBaseRefusal` answers with the same predicate (is the name
+ * artifact-backed, does the type have an overlay channel) and the same
+ * emitter `saveMetaItem` / `deleteMetaItem` use, so the two doors cannot
+ * disagree about which flows are locked or what the refusal says. The refusal
+ * is relayed as the producer built it — code, status and sentence — so this
+ * domain stamps no code of its own. What stays open is exactly what the ADR
+ * keeps open: a flow no code package ships (the customer's own) is written and
+ * removed as before; `POST /:name/clone` authors a sibling under a new name
+ * (§7.1); `POST /:name/toggle` is the activation switch (§7.2), not a
+ * definition write.
+ *
+ * ## Refuse first, then mutate
+ *
+ * Asked before the engine is called, so a refused write registers nothing and
+ * a refused removal unregisters nothing. On `DELETE` that also places it ahead
+ * of the engine's own ADR-0126 §7.3 refusal (`DELETE_RESTRICTED` / 409, a
+ * packaged subflow a packaged caller still reaches): a packaged base is locked
+ * whoever calls it, so that refusal is reached at this door only where this one
+ * admits the removal — with `OS_METADATA_WRITABLE` opening the `flow` type.
+ *
+ * ## Resolved as an authorization FACT
+ *
+ * `resolveServiceOrLoud`, not the `resolveService` probe: a `protocol` slot
+ * that is WIRED and failed to resolve is re-raised, so the write fails rather
+ * than proceeding as though nothing were locked. A composition with no metadata
+ * protocol at all — or one whose protocol brings no locked-base verdict — has
+ * no metadata door to be at parity with and no packaged base it can name, and
+ * keeps today's behaviour. Unscoped, exactly as the `/meta` domain resolves
+ * the slot, so both doors ask the SAME protocol instance about one artifact.
+ */
+async function refusePackagedFlowBaseChange(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: string,
+    operation: 'save' | 'delete',
+): Promise<HttpDispatcherResult | undefined> {
+    const protocol: Partial<Pick<ObjectStackProtocolImplementation, 'packagedBaseRefusal'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    if (typeof protocol?.packagedBaseRefusal !== 'function') return undefined;
+    const refusal = protocol.packagedBaseRefusal({ type: FLOW_METADATA_TYPE, name, operation });
+    if (!refusal) return undefined;
+    return { handled: true, response: deps.errorFromThrown(refusal) };
+}
+
+/**
+ * [#20761, ADR-0126 §2, ADR-0131 D6] THE AUTHORING RULE at this domain's
+ * definition-write doors — `POST /`, `PUT /:name` and the copy
+ * `POST /:name/clone` writes: a flow written through an authoring door is
+ * tenant-authored, no exception.
+ *
+ * Asked of the metadata protocol's `tenantAuthoredWriteRefusal` — the ONE
+ * function `/meta`'s flow write asks too — and relayed verbatim, so no door
+ * re-derives it and this domain stamps no code of its own:
+ *
+ *  - a name the loader's set holds is a locked base: `packagedBaseRefusal`'s
+ *    answer, which this door asked directly before (#20679) and now reaches
+ *    through the rule that reuses it — so a round trip of a shipped flow is
+ *    refused as a locked base;
+ *  - any other name, with a definition whose provenance stamps would classify
+ *    it as code-shipped, is refused loudly (`INVALID_METADATA` / 422): which
+ *    flows a package ships is the loader's fact, never the caller's claim;
+ *  - everything else — a customer flow's own round trip included — proceeds.
+ *
+ * Asked before the engine is called, so a refused write registers nothing.
+ * A protocol that brings the locked-base verdict but not this rule keeps
+ * #20679's lock, asked as before; a composition with no protocol keeps
+ * today's behaviour, exactly as {@link refusePackagedFlowBaseChange} states —
+ * and the engine classifies no flow as packaged from a definition's stamps
+ * either way, so nothing a caller sends here can make it count as one.
+ */
+async function refuseUnauthoredFlowWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: string,
+    definition: unknown,
+): Promise<HttpDispatcherResult | undefined> {
+    const protocol: Partial<Pick<ObjectStackProtocolImplementation, 'tenantAuthoredWriteRefusal'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    if (typeof protocol?.tenantAuthoredWriteRefusal !== 'function') {
+        return refusePackagedFlowBaseChange(deps, context, name, 'save');
+    }
+    const refusal = await protocol.tenantAuthoredWriteRefusal({ type: FLOW_METADATA_TYPE, name, item: definition });
+    if (!refusal) return undefined;
+    return { handled: true, response: deps.errorFromThrown(refusal) };
+}
+
+/** The engine methods {@link registerAndSaveFlow} drives. */
+type FlowRegistrationService =
+    Required<Pick<IAutomationService, 'registerFlow'>> & Pick<IAutomationService, 'unregisterFlow' | 'getFlow'>;
+
+/**
+ * Put the engine back where it was before this request touched `name`: the
+ * definition it held re-registered, or — when it held none — the name
+ * withdrawn. The one undo every definition door here shares, so a write the
+ * store refused leaves no registration of its own behind, and a refused update
+ * does not take the flow it was updating down with it.
+ */
+function restoreFlowRegistration(automationService: FlowRegistrationService, name: string, held: unknown): void {
+    if (held) automationService.registerFlow(name, held);
+    else automationService.unregisterFlow?.(name);
+}
+
+/**
+ * [#20862, #20761, ADR-0126 §2, ADR-0131 D6] THE ONE PERSISTENCE PATH for this
+ * domain's definition writes — `POST /`, `PUT /:name` and the copy
+ * `POST /:name/clone` writes: register the definition in the engine, then save
+ * it as a tenant row through the metadata protocol's own `saveMetaItem`.
+ *
+ * Registered in the engine alone, a definition was a process-local fact: the
+ * next boot binds flows from the stored metadata, so a flow created here was
+ * gone after a restart, and an update to a flow stored through `/meta` was
+ * overwritten by the stored definition — a `200` for a change the platform
+ * did not keep, while the same act through `/meta` was durable.
+ *
+ *  - **One save, the metadata door's.** `saveMetaItem` env-wide — no
+ *    organization (a flow has no per-org channel) and no package — so the row
+ *    is an ordinary tenant row the boot binds, `/meta` reads back, and the
+ *    same authoring rule and publish gates judge. No second persistence path.
+ *    The default save mode is the live one (`active`), which is what the
+ *    engine registration already is: a draft row would leave the engine
+ *    running a flow the next boot does not bind.
+ *  - **Engine first, store second.** The engine's registration is the
+ *    stricter validation (strict parse, cycles, regions, node config keys,
+ *    predicates), so a definition it refuses is never stored; that refusal is
+ *    answered as a 400 by {@link flowDefinitionRefusal}.
+ *  - **A save that fails undoes the registration** and relays the store's own
+ *    failure, so no answer reports a write that will not survive: a new name
+ *    is withdrawn, and a name the engine already held gets that definition
+ *    back ({@link restoreFlowRegistration}).
+ *  - **The protocol is resolved before anything is registered**, loudly, so a
+ *    slot that fails to resolve cannot leave a registered-but-unsaved flow.
+ *    A composition with no metadata store to save into keeps the engine-only
+ *    registration it always had — there is nothing to persist into.
+ *
+ * What is saved is the definition as the caller's door built it — never the
+ * engine's parsed copy, whose materialized schema defaults would freeze on
+ * disk (the save canonicalizes it the way it does every `/meta` flow write).
+ */
+async function registerAndSaveFlow(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: FlowRegistrationService,
+    name: string,
+    definition: unknown,
+): Promise<{ registered: unknown } | { refused: HttpDispatcherResult }> {
+    const store: Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    let registered: unknown;
+    try {
+        registered = automationService.registerFlow(name, definition);
+    } catch (e) {
+        return {
+            refused: { handled: true, response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS) },
+        };
+    }
+    if (typeof store?.saveMetaItem === 'function') {
+        try {
+            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition });
+        } catch (e) {
+            restoreFlowRegistration(automationService, name, held);
+            return { refused: { handled: true, response: deps.errorFromThrown(e) } };
+        }
+    }
+    return { registered };
+}
+
+/** The engine methods {@link unregisterAndDeleteFlow} drives. */
+type FlowRemovalService =
+    Required<Pick<IAutomationService, 'unregisterFlow'>> & Pick<IAutomationService, 'registerFlow' | 'getFlow'>;
+
+/**
+ * [#20862] The removal half of {@link registerAndSaveFlow}, for
+ * `DELETE /:name`: unregister the flow in the engine, then delete its tenant
+ * row through the metadata protocol's own `deleteMetaItem`, env-wide.
+ *
+ * Needed because the create door now saves: a flow created and then removed
+ * here would otherwise keep its row, and the next boot would bind it again —
+ * a `200 {deleted: true}` for a removal the platform does not keep, the same
+ * defect in the other direction. The same order and the same undo as the
+ * write path:
+ *
+ *  - **Engine first.** The engine's own refusal (ADR-0126 §7.3's
+ *    `DELETE_RESTRICTED`, a packaged subflow a packaged caller still reaches)
+ *    is raised before the store is touched, so a refused removal deletes
+ *    nothing.
+ *  - **A name with no row is not a failure** — `deleteMetaItem` answers it as
+ *    "nothing to delete" (a flow registered before its door saved, or in a
+ *    composition with no store).
+ *  - **A delete that fails puts the definition back** in the engine and
+ *    relays the store's own failure, so no answer reports a removal that will
+ *    not survive. A composition with no metadata store keeps the engine-only
+ *    removal it always had.
+ *
+ * Returns the failure to answer, or nothing when the removal landed.
+ */
+async function unregisterAndDeleteFlow(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: FlowRemovalService,
+    name: string,
+): Promise<HttpDispatcherResult | undefined> {
+    const store: Partial<Pick<ObjectStackProtocolImplementation, 'deleteMetaItem'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    automationService.unregisterFlow(name);
+    if (typeof store?.deleteMetaItem === 'function') {
+        try {
+            await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+        } catch (e) {
+            if (held) automationService.registerFlow?.(name, held);
+            return { handled: true, response: deps.errorFromThrown(e) };
+        }
+    }
+    return undefined;
+}
+
+/**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
  * `client.automation.trigger()` calls. Extracted rather than written twice:
@@ -1459,7 +1761,7 @@ function flowDefinitionRefusal(err: any): unknown {
  * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
  * stamps `'FLOW_NO_START_NODE'`, and the arms below read those. #10025
  * repeated the same shape for the definition-level input-schema refusal —
- * spec seat first (#11504 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
+ * spec seat first (commit f90e82024 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
  * engine's non-retryable short-circuit stamps it — so its 422 is read here
  * through the same shared table, again never minted at this call site.
  *
@@ -1834,10 +2136,14 @@ export async function classifyResumeResult(
  *   GET    /:name                → getFlow
  *   POST   /                     → createFlow (registerFlow)
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — as `PUT /:name`
  *   PUT    /:name                → updateFlow
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — the `/meta` door's
+ *                                    `403` refusal, ADR-0126 §2 (#20679)
  *   DELETE /:name                → deleteFlow (unregisterFlow)
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — as `PUT /:name`
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, node config
@@ -1846,8 +2152,13 @@ export async function classifyResumeResult(
  *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
  *                                  a run that PAUSED → 200 with `runId` / `screen`,
  *                                  on whichever attempt it paused — #9510)
- *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
- *                                  ⚑ authoring write — `manage_metadata` (#10243):
+ *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535). Switches
+ *                                  PACKAGED flows only — it writes the ADR-0126 §7.2
+ *                                  activation ledger. A flow no package ships → 409
+ *                                  `RESOURCE_CONFLICT` naming that flow's own switch,
+ *                                  its `status` ('obsolete' / 'active') published
+ *                                  through `PUT /:name`; nothing changes (#20726)
+ *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
  *                                    ⚑ refused with its OWN sentence (#11666) —
@@ -1966,7 +2277,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // whether automation is mounted here. Ahead of every body check too — a
     // refused caller writes nothing and learns nothing about the definition
     // contract. Which routes: `isFlowAuthoringWrite` above, one predicate, with
-    // the execution surfaces deliberately outside it — [#10243] `POST
+    // the execution surfaces deliberately outside it — [commit 266436a7f] `POST
     // /:name/toggle` moved INSIDE it by ruling, and moved by editing that one
     // predicate rather than by adding a check here.
     if (isFlowAuthoringWrite(parts, m)) {
@@ -2068,6 +2379,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // what the ruling forbids. Flow definitions are metadata and are governed
     // on the metadata plane (`/meta`, ADR-0106); if their read posture should
     // narrow, that is a metadata-plane decision and belongs to its own card.
+    //
+    // [#20552] What that audit did not weigh is CREDENTIAL material inside a
+    // definition: an `api` flow's start node carries its inbound hook's HMAC
+    // secret, and `GET /:name` served it to every authenticated caller. Who
+    // may read a definition is unchanged; what a definition read SERVES is
+    // not — every exit here answers `servedFlowDefinition(…)`, the metadata
+    // plane's own `flow` redaction, so the secret is withheld on both planes.
 
     // POST / → createFlow
     if (parts.length === 0 && m === 'POST') {
@@ -2100,16 +2418,27 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // `edge.condition` strings lowered to their envelopes) — the same
             // shape `GET /automation/:name` serves — never an echo of the
             // caller's own pre-parse bytes.
-            let registered;
-            try {
-                registered = automationService.registerFlow(body.name, body);
-            } catch (e) {
-                return {
-                    handled: true,
-                    response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
-                };
-            }
-            return { handled: true, response: deps.success(registered) };
+            // [#20679, ADR-0126 §2] Creating onto a name the engine already
+            // holds is an overwrite (below), so a packaged flow's name is
+            // locked here exactly as on `PUT /:name` — the same verdict, asked
+            // before anything is read or registered. A name no code package
+            // ships is created as before.
+            // [#20761] …through the one authoring rule, which reuses that
+            // verdict and also refuses a definition claiming a package's
+            // provenance for a name no package ships — see
+            // `refuseUnauthoredFlowWrite`.
+            const locked = await refuseUnauthoredFlowWrite(deps, context, body.name, body);
+            if (locked) return locked;
+            // [#20552] Creating onto a name the engine already holds is an
+            // overwrite, so the round-trip rule applies here as on `PUT /:name`.
+            const definition = await keepStoredFlowCredentials(automationService, body.name, body);
+            // [#20862] Registered AND saved as a tenant row, so the flow this
+            // answers `200` for survives a restart — see `registerAndSaveFlow`.
+            const written = await registerAndSaveFlow(
+                deps, context, automationService as FlowRegistrationService, body.name, definition,
+            );
+            if ('refused' in written) return written.refused;
+            return { handled: true, response: deps.success(servedFlowDefinition(written.registered)) };
         }
     }
 
@@ -2302,7 +2631,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // name (ADR-0126 §7.1). The copy itself, the fields it mutates, the
         // keys it must not carry forward and the notice it returns all live in
         // `../flow-clone.ts` — see that module's header for the ADR and for
-        // #11703, the measurement that decides the copy's SHAPE.
+        // commit 5cb62d88b, the measurement that decides the copy's SHAPE.
         //
         // Built out of `getFlow` + `registerFlow`, not a new contract method:
         // `IAutomationService` lives in `packages/spec`, and this door needs
@@ -2332,7 +2661,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a clone field — the clone body is { name, label }' })),
                     );
                 }
-                // The NEW MACHINE NAME IS MANDATORY (ADR-0126 §7.1, the #11513
+                // The NEW MACHINE NAME IS MANDATORY (ADR-0126 §7.1, commit e170b0ae5's
                 // shape exactly). Refused here rather than defaulted, because
                 // every default a clone could pick is either the source's own
                 // name — the same-name clone the ADR bans outright — or a name
@@ -2371,6 +2700,17 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     return { handled: true, response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS) };
                 }
 
+                // [#20790] C1 — a source that holds a credential at ANY position
+                // (a literal, or one the write-only channel holds) is refused,
+                // with the prescription: a copy would share it. See
+                // `flowCloneCredentialRefusal`.
+                const credentialSource = automationService as FlowCloneCredentialSource;
+                const holdings = typeof credentialSource.flowCredentialHoldings === 'function'
+                    ? credentialSource.flowCredentialHoldings(name)
+                    : literalFlowCredentialHoldings(source);
+                const credentialRefusal = flowCloneCredentialRefusal(name, holdings);
+                if (credentialRefusal) return { handled: true, response: deps.errorFromThrown(credentialRefusal) };
+
                 // ⛔ SAME-NAME REFUSAL, loudly, naming the sanctioned path.
                 // Checked against the same probe, so "already exists" means the
                 // same thing here as everywhere else on this domain. This also
@@ -2387,20 +2727,34 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
 
                 const clone = cloneFlowDefinition(source, { name: targetName, label: targetLabel });
-                // Engine verdicts are answered as a 400, not rethrown — the
-                // create arm's reasoning (`flowDefinitionRefusal`) applies
-                // verbatim, and it matters more here: a clone that the engine
-                // refuses must not leave a half-registered flow behind, and it
-                // must not read as a server fault when the source definition is
-                // simply one this deployment can no longer register.
-                try {
-                    automationService.registerFlow(targetName, clone);
-                } catch (e) {
-                    return {
-                        handled: true,
-                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
-                    };
-                }
+                // [#20761, ADR-0126 §7.1] The copy is TENANT-AUTHORED, stated by
+                // the server: `cloneFlowDefinition` drops the base's whole
+                // protection envelope, so the one authoring rule every door
+                // asks admits it — and would refuse it, loudly, if the base's
+                // provenance ever rode across. Asked before the engine is
+                // called, like every other definition write here. The
+                // metadata protocol is resolved before anything is registered
+                // (by the rule here, and again by `registerAndSaveFlow` below),
+                // so a slot that fails to resolve cannot leave a
+                // registered-but-unsaved clone behind.
+                const authored = await refuseUnauthoredFlowWrite(deps, context, targetName, clone);
+                if (authored) return authored;
+                // [#20761, ADR-0126 §7.1] …and SAVED as a tenant row. Registered
+                // in the engine alone the clone was a process-local fact: the
+                // metadata door read its name as absent, and the next boot did
+                // not know it, so the copy an administrator made to customize a
+                // locked flow vanished at the first restart. [#20862] Through the
+                // one persistence path the create and update doors share —
+                // `registerAndSaveFlow` — so the three cannot drift. Engine
+                // verdicts are answered as a 400 there, not rethrown, which
+                // matters most here: a clone the engine refuses must not read as
+                // a server fault when the source definition is simply one this
+                // deployment can no longer register. The target name is new (the
+                // collision probe above), so a save that fails withdraws it.
+                const written = await registerAndSaveFlow(
+                    deps, context, automationService as FlowRegistrationService, targetName, clone,
+                );
+                if ('refused' in written) return written.refused;
                 // ⛔ NO ANCESTRY on the way out either (ADR-0126 amendment
                 // ruling 2, §9): the response names the flow that was created
                 // and says nothing about what it was copied from. There is no
@@ -2408,7 +2762,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // cheapest place for ancestry to reappear, and a UI that reads
                 // one starts displaying a lineage the platform has ruled it
                 // does not track.
-                return { handled: true, response: deps.success({ flow: clone, notice: FLOW_CLONE_NOTICE }) };
+                // [#20552] The ANSWER is a served definition like any other. A
+                // source holding a credential never reaches this line (#20790
+                // C1, above), so the clone carries none.
+                return { handled: true, response: deps.success({ flow: servedFlowDefinition(clone), notice: FLOW_CLONE_NOTICE }) };
             }
         }
 
@@ -2417,7 +2774,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // values, applied as bare flow variables; `output`/`branchLabel` also
         // forwarded for approval-style resumes. The outer envelope is a CLOSED
         // set — exactly the four keys below — and an unknown top-level key is
-        // refused (#8796); since #9416 so is an accepted key carrying a value
+        // refused (commit a4331227b); since #9416 so is an accepted key carrying a value
         // of the wrong TYPE, and a body that is not a JSON object at all.
         // Returns the next paused `{ screen }` (multi-screen) or the completed
         // result.
@@ -2475,7 +2832,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // below, because its indices read as unknown keys) — so those
                 // reached the engine as an empty signal and answered 200
                 // `success:true` with the submission treated as EMPTY: the
-                // #8796 failure shape, reached without misspelling anything.
+                // failure shape commit a4331227b closed, reached without misspelling anything.
                 // `undefined` / `null` stay the legal bodyless resume (an
                 // empty submission is legal — a screen whose declared fields
                 // are all optional), which is why the normalisation survives
@@ -2498,7 +2855,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     );
                 }
                 const b = rawBody as Record<string, unknown>;
-                // [#8796] The outer envelope is a CLOSED SET (maintainer ruling
+                // [commit a4331227b] The outer envelope is a CLOSED SET (maintainer ruling
                 // 2026-08-15, Option A): an unknown top-level key is refused,
                 // located, naming the offending key(s) AND the accepted set —
                 // the closed-parameter-set policy (Route & surface ownership
@@ -2543,7 +2900,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         })),
                     );
                 }
-                // [#9416] VALUE SHAPES — the same silent-drop family as #8796,
+                // [#9416] VALUE SHAPES — the same silent-drop family commit a4331227b closed,
                 // one axis over: a key that IS accepted, carrying a value the
                 // engine contract excludes. The assembly below used to
                 // type-guard each key and skip what failed the guard, so
@@ -2553,7 +2910,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // submission — the caller told its screen input landed when
                 // nothing did. Ruled Option A (maintainer, on this card): 400,
                 // located, naming the key and the expected type, inheriting
-                // #8796's ruling together with its reason plus #3899's toggle
+                // the ruling commit a4331227b landed together with its reason plus #3899's toggle
                 // arm (a truthy non-boolean `enabled` is refused there, never
                 // coerced or dropped).
                 //
@@ -2573,7 +2930,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //
                 // Ordering: after the unknown-key refusal, so a body that is
                 // both misspelled and mis-shaped still reports the misspelling
-                // #8796 pinned; before `resume()`, so nothing reaches the
+                // commit a4331227b pinned; before `resume()`, so nothing reaches the
                 // engine until the body is legal and the suspension stays
                 // intact for a corrected retry.
                 const valueFailures: Array<{ field: string; code: 'invalid_type'; message: string }> = [];
@@ -2958,7 +3315,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             if (typeof automationService.getFlow === 'function') {
                 const flow = await automationService.getFlow(name);
                 if (!flow) return { handled: true, response: deps.error('Flow not found', 404) };
-                return { handled: true, response: deps.success(flow) };
+                // [#20552] Served with its credentials withheld.
+                return { handled: true, response: deps.success(servedFlowDefinition(flow)) };
             }
         }
 
@@ -2978,6 +3336,15 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
                     ]);
                 }
+                // [#20679, ADR-0126 §2] A packaged flow's base is locked: the
+                // metadata protocol's own verdict, asked before anything is
+                // read or registered — see `refusePackagedFlowBaseChange`.
+                // After the envelope check, as on `/meta` (a missing body is
+                // refused before the lock is consulted there too).
+                // [#20761] Through the one authoring rule, which reuses that
+                // verdict — see `refuseUnauthoredFlowWrite`.
+                const locked = await refuseUnauthoredFlowWrite(deps, context, name, definition);
+                if (locked) return locked;
                 // [#8123] Same class as POST /: the engine's verdict on the
                 // definition is served as a 400, not a 500 — reusing the
                 // same route-agnostic `flowDefinitionRefusal` helper POST
@@ -2988,23 +3355,35 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // caller's echo. This also closes the old PUT quirk where the
                 // echoed `definition` could lack `name` (the name rode the
                 // path) — the parsed flow always carries it.
-                let registered;
-                try {
-                    registered = automationService.registerFlow(name, definition);
-                } catch (e) {
-                    return {
-                        handled: true,
-                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
-                    };
-                }
-                return { handled: true, response: deps.success(registered) };
+                // [#20552] A body that round-trips the served (projected) form
+                // keeps the secret the engine holds; an explicit one replaces it.
+                const toRegister = await keepStoredFlowCredentials(automationService, name, definition);
+                // [#20862] Registered AND saved as a tenant row, so the update
+                // survives a restart instead of losing to the stored
+                // definition; a save that fails puts back the definition the
+                // engine held — see `registerAndSaveFlow`.
+                const written = await registerAndSaveFlow(
+                    deps, context, automationService as FlowRegistrationService, name, toRegister,
+                );
+                if ('refused' in written) return written.refused;
+                return { handled: true, response: deps.success(servedFlowDefinition(written.registered)) };
             }
         }
 
         // DELETE /:name → deleteFlow
         if (parts.length === 1 && m === 'DELETE') {
             if (typeof automationService.unregisterFlow === 'function') {
-                automationService.unregisterFlow(name);
+                // [#20679, ADR-0126 §2] …and removed only if it is not a
+                // packaged base — refused before the engine is asked.
+                const locked = await refusePackagedFlowBaseChange(deps, context, name, 'delete');
+                if (locked) return locked;
+                // [#20862] …and removed from the store as well as the engine,
+                // so a flow the create door now saves does not come back at
+                // the next boot — see `unregisterAndDeleteFlow`.
+                const failed = await unregisterAndDeleteFlow(
+                    deps, context, automationService as FlowRemovalService, name,
+                );
+                if (failed) return failed;
                 return { handled: true, response: deps.success({ name, deleted: true }) };
             }
         }

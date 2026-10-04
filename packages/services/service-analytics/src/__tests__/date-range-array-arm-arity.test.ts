@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17124] Every face in this package that reads `dateRange`'s ARRAY arm gives
+ * [commit 86c505286] Every face in this package that reads `dateRange`'s ARRAY arm gives
  * an odd-sized array ONE answer — the ADR-0112 refusal — and gives a
  * two-element window exactly the answer it gave before.
  *
@@ -140,10 +140,10 @@ async function nativeSql(range: readonly unknown[]): Promise<{ where: string; pa
 const PREVIEW_CUBE = {
   name: 'events', sql: 'events',
   dimensions: {
-    id: { name: 'id', type: 'string', sql: 'id' },
-    created_at: { name: 'created_at', type: 'time', sql: 'created_at' },
+    id: { type: 'string', sql: 'id' },
+    created_at: { type: 'time', sql: 'created_at' },
   },
-  measures: { count: { name: 'count', type: 'count', sql: '*' } },
+  measures: { count: { type: 'count', sql: '*' } },
 } as unknown as Cube;
 
 /**

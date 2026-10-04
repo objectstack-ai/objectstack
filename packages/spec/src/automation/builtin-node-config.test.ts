@@ -52,7 +52,7 @@ function unknownKeyMessage(schema: Parseable, value: unknown): string | undefine
   return result.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message;
 }
 
-describe('CRUD config contracts — strict as of #4001 批 9', () => {
+describe('CRUD config contracts — an unknown key is refused, not stripped', () => {
   it('accepts every declared key on each of the four', () => {
     expect(GetRecordConfigSchema.parse({
       objectName: 'lead', filter: { status: 'new' }, fields: ['id'], limit: 5, outputVariable: 'leads',
@@ -85,7 +85,7 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
     ['update_record', UpdateRecordConfigSchema, { objectName: 'lead' }],
     ['delete_record', DeleteRecordConfigSchema, { objectName: 'lead' }],
   ] as ReadonlyArray<[string, Parseable, Record<string, unknown>]>)(
-    '%s: prescribes `filter` for the retired `filters` spelling, and names the #3810 hazard',
+    '%s: prescribes `filter` for the retired `filters` spelling, and names the match-everything-write hazard',
     (_nodeType, schema, base) => {
       const message = unknownKeyMessage(schema, { ...base, filters: { status: 'stale' } })!;
       expect(message).toContain('flow-node-crud-filter-alias');
@@ -204,7 +204,7 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
   });
 });
 
-describe('ScreenConfigSchema / ScreenFieldConfigSchema — strict as of #4001 批 9', () => {
+describe('ScreenConfigSchema / ScreenFieldConfigSchema — an unknown key is refused, not stripped', () => {
   it('accepts the flat and object-form shapes in full', () => {
     expect(ScreenConfigSchema.safeParse({
       title: 'Details', description: 'Fill this in', waitForInput: true,
@@ -249,7 +249,7 @@ describe('ScreenConfigSchema / ScreenFieldConfigSchema — strict as of #4001 �
   });
 });
 
-describe('ScreenFieldConfigSchema — the bound pair, help text and lookup target (#17306)', () => {
+describe('ScreenFieldConfigSchema — the bound pair, help text and lookup target', () => {
   const BASE = { name: 'discount', type: 'number' };
 
   // ── Direction 1: the three intents are now expressible ──────────────────
@@ -397,7 +397,7 @@ describe('ScreenFieldConfigSchema — the bound pair, help text and lookup targe
   });
 });
 
-describe('MapConfigSchema — strict as of #4001 批 9', () => {
+describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
   it('accepts every declared key', () => {
     expect(MapConfigSchema.parse({
       collection: '{tasks}', flowName: 'one_task_signoff', iteratorVariable: 'item',
@@ -430,7 +430,7 @@ describe('MapConfigSchema — strict as of #4001 批 9', () => {
 
 // ─── assignment (#14149) ─────────────────────────────────────────────
 
-describe('assignment value contract — a CEL envelope beside `{token}` interpolation (#14149)', () => {
+describe('assignment value contract — a CEL envelope beside `{token}` interpolation', () => {
   const DIGEST_SOURCE = 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")';
   const DIGEST_ENVELOPE = { dialect: 'cel', source: DIGEST_SOURCE };
 
@@ -568,7 +568,7 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
  * registered, and faulted at run time (the `ast`-only one with the engine's
  * own prescription; the blank one with a parse error on `"   "`).
  */
-describe('assignment value envelope — an evaluated slot requires what the engine can evaluate (#15430)', () => {
+describe('assignment value envelope — an evaluated slot requires what the engine can evaluate', () => {
   const AST_ONLY = { dialect: 'cel', ast: { kind: 'const', value: 1 } };
   const BLANK_SOURCE = { dialect: 'cel', source: '   ' };
 
@@ -627,7 +627,7 @@ describe('assignment value envelope — an evaluated slot requires what the engi
  * same structural reason as the sibling slot: `z.record()`'s open-key branch
  * skips it before any key schema — including `.min(1)` — ever runs.
  */
-describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, constructor/prototype UNCHANGED (#17852 / #18847)', () => {
+describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, constructor/prototype UNCHANGED', () => {
   it('refuses `assignments` carrying a `__proto__` own key, named at `assignments.__proto__`', () => {
     // `JSON.parse` is what makes `__proto__` an OWN enumerable key — an
     // object literal's `{ __proto__: ... }` sets the actual prototype
@@ -688,7 +688,7 @@ describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, cons
  * `__proto__` must be refused LOUDLY — told apart here from the two silent
  * outcomes it could otherwise have (silently dropped, silently kept).
  */
-describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall (#19151)', () => {
+describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall', () => {
   /**
    * The three outcomes an authored key can meet, discriminated by one
    * function so a test cannot accidentally assert the wrong one. A bare
@@ -807,7 +807,7 @@ describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall
  * CEL value envelope), the edge #14149 accepted on `assignments.*`. Everything
  * else parses exactly as before.
  */
-describe('CRUD `fields` value contract — the CEL value envelope beside `{token}` templates (#19938)', () => {
+describe('CRUD `fields` value contract — the CEL value envelope beside `{token}` templates', () => {
   const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
   const configs = [
     ['create_record', CreateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', fields })],

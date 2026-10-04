@@ -18,6 +18,48 @@ onlyBuiltDependencies:
   - msw
   - sharp
 
+# Patched dependencies. Written with `pnpm patch` / `pnpm patch-commit`, never
+# by hand. `patch-commit` writes this key into package.json's `pnpm` field;
+# move it here, beside `overrides` and `onlyBuiltDependencies`, then run
+# `pnpm install`.
+#   - tsup@8.5.1: its bundled rollup-plugin-dts gave every DTS entry its own
+#     ts.Program. tsup always passes the tsconfig path, and on that path a
+#     config-cache hit keyed each later entry by its own directory. The patch
+#     keys every entry by the tsconfig's directory, so all entries share one
+#     program. The same code is in rollup-plugin-dts 6.5.1. Twelve packages
+#     here have more than one DTS entry; @objectstack/spec had 18 programs
+#     and now has one, and its DTS pass went from 4997 MB to 882 MB of live
+#     heap. Every one of the twelve emits the same types as before.
+#     The key names the exact version. When the installed tsup is any other
+#     version, the patch goes unused and `pnpm install` fails
+#     (ERR_PNPM_UNUSED_PATCH), so a tsup upgrade cannot drop the patch
+#     silently. Re-derive the patch, or retire it, on every tsup bump.
+#   - tsx@4.23.15: this release moved its ESM-API registration out of a
+#     dist/ chunk and into dist/esm/api/index.cjs, two directories deeper,
+#     without rebasing three file-relative specifiers. The one that bites is
+#     the module.register() hooks URL: it now names
+#     dist/esm/api/esm/index.mjs, which does not exist. So a CommonJS caller
+#     of `tsx/esm/api` gets ERR_MODULE_NOT_FOUND from register() on every
+#     Node that lacks tsx's registerHooks path (below 22.22.3 on the 22
+#     line, below 24.11.1 on the 24 line, and 25.0.x). The caller here is
+#     @oclif/core's ts-path. It swallows the error, logs "Could not find tsx"
+#     at debug level, and stays on dist/. Two things break on such a Node.
+#     packages/cli/bin/run-dev.js, the SOURCE entry that the CLI's spawning
+#     tests run, silently loads dist/commands instead of src/commands. And
+#     the CONTROL leg of
+#     packages/cli/test/published-entry-node-env-source-reroute.test.ts
+#     cannot arm, so that file's absence legs stay green with the guard
+#     they pin deleted. The patch points the three specifiers back at the
+#     files 4.23.14 resolved: dist/esm/index.mjs (two of them) and
+#     dist/loader.mjs. Nothing else in the file changes. It ships nowhere:
+#     a published @objectstack/cli install resolves an unpatched tsx, and
+#     its bin/run.js never lets oclif register tsx. Retire the patch when a
+#     tsx release resolves those three paths itself. Until then the same
+#     exact-version rule as tsup's applies on every tsx bump.
+patchedDependencies:
+  tsup@8.5.1: patches/tsup@8.5.1.patch
+  tsx@4.23.15: patches/tsx@4.23.15.patch
+
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all
 # pins must live here (previously orphaned in package.json: minimatch, tar).
@@ -85,6 +127,10 @@ onlyBuiltDependencies:
 #     is exactly the point: the next 7.x advisory will now catch it. jsdom's
 #     8.9.0 is a different major and stays outside, unaffected. Kept as
 #     defense-in-depth on the same reasoning as form-data above.
+#     2026-09-29: GHSA-3wwx-pv8p-q78v (5.9) flags BOTH remaining copies —
+#     7.29.0 (fixed 7.29.1) and jsdom's 8.9.0 (fixed 8.10.2) — so the 7.x
+#     target lifts to ^7.29.1 and the 8.x line gets its own selector; see the
+#     OSV 2026-09-29 note at the foot of the overrides block.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
 #     takeover, patched only in >=1.7.0-beta.4. The pin sat on the 1.7.0-rc.1
 #     PRE-RELEASE while stable 1.7.x shipped the rc.2 REWRITE (no
@@ -173,7 +219,8 @@ overrides:
   'minimatch@<11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
-  'undici@>=7.23.0 <8.0.0': '^7.29.0'
+  'undici@>=7.23.0 <8.0.0': '^7.29.1'
+  'undici@>=8.1.0 <9.0.0': '^8.10.2'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   # Off the 1.7.0-rc.2 prerelease and onto the stable line (#3002). Bounds sit
   # at the MAJOR boundary, so a future advisory lift moves only the TARGET.
@@ -273,7 +320,12 @@ overrides:
   # declaration is now in the selector's scope and the lockfile records ^2.0.10 as its
   # specifier — the resolved version is unchanged at 2.0.12, because the ^2.0.10 target
   # floats to the newest 2.x (measured, #6095).
-  'brace-expansion@>=5.0.0 <6.0.0': '^5.0.9'
+  # brace-expansion, 2026-09-30 (#20769): three MORE advisories, GHSA-6j4f-fj2g-mc7p,
+  # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr, fixed in 5.0.12 — target lifted from
+  # ^5.0.9, selector stays at the <6.0.0 major boundary. This floor keeps THIS
+  # workspace's resolution from re-locking 5.0.9; overrides do not reach downstream
+  # installs, so a consumer's own brace-expansion copy is theirs to lift.
+  'brace-expansion@>=5.0.0 <6.0.0': '^5.0.12'
   'sharp@>=0.34.0 <0.36.0': '^0.35.4'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
@@ -289,6 +341,11 @@ overrides:
   #     high each), fixed in 3.1.6 — target lifted from ^3.1.5, selector stays
   #     at the 4.0.0 boundary. ajv@8.20.0's ^3.0.1 already admits 3.1.6, so
   #     this is a dedupe onto the patched line, not a forced upgrade.
+  #     2026-09-30 (#20769): GHSA-hrr3-gc8f-f4qj, fixed in 3.1.8 — target lifted
+  #     from ^3.1.6, selector stays at the 4.0.0 boundary. ajv@8.20.0's ^3.0.1
+  #     admits 3.1.8, so this is again a dedupe onto the patched line. The floor
+  #     binds this workspace's resolution only; overrides do not reach downstream
+  #     installs.
   #   hono GHSA-8j4g-w8fx-2239 (5.3) — the one entry here that is NOT
   #     transitive-only: two versions resolved, 4.12.32 from our own packages
   #     and 4.12.33 pulled by @modelcontextprotocol/sdk. The override moves the
@@ -316,7 +373,7 @@ overrides:
   #     The declared ranges go to ^4.13.5 in lockstep for the downstream-install
   #     reason above; the @objectstack/hono PEER range stays ^4.12.8, unchanged,
   #     for the reason above it.
-  'fast-uri@<4.0.0': '^3.1.6'
+  'fast-uri@<4.0.0': '^3.1.8'
   'hono@<5.0.0': '^4.13.5'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:
@@ -335,7 +392,16 @@ overrides:
   #     Bound at the 4.0.0 major boundary per this block's header rule — never
   #     `<3.4.13`, which would self-invalidate the day 3.4.13 is itself flagged
   #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
-  'dompurify@<4.0.0': '^3.4.13'
+  #     2026-10-01 (#21055): that day came. GHSA-p98j-92pf-mc4p (2.3 low) — an
+  #     IN_PLACE node-removing afterSanitize hook leaves the detached subtree's
+  #     event handlers armed (DOM XSS); range introduced:3.4.13 → fixed:3.4.16,
+  #     read from the OSV offline npm database the scanner downloads. Target
+  #     lifted from ^3.4.13, selector unchanged at the 4.0.0 boundary — the
+  #     target-only lift that boundary exists to allow. mermaid@11.16.1's
+  #     ^3.3.3 admits 3.4.16, so this is again a dedupe onto the patched line.
+  #     The floor binds this workspace's resolution only; overrides do not
+  #     reach downstream installs.
+  'dompurify@<4.0.0': '^3.4.16'
   # OSV 2026-08-08 (#6529) — same "it names a fixed version, so take the fix"
   # disposition as the two batches above; no exemption is involved.
   #   nanoid GHSA-2v37-7h3g-55p8 / CVE-2026-67213 (8.2 high) — a custom
@@ -429,3 +495,44 @@ overrides:
   #     container's egress proxy, so the severity and the fixed version above
   #     are read off the scanner's own output line and nothing else.
   'devalue@<6.0.0': '^5.9.2'
+  # OSV 2026-09-29 (#20561, scan run 36510180397) — seven Medium findings,
+  # every one naming a fixed version, so this is the "take the fix" path
+  # osv-scanner.toml's header prescribes and NOT an exemption; that ledger
+  # stays at ZERO entries. Advisory ranges below are read from the OSV
+  # offline npm database the scanner itself downloads; nodemailer (the one
+  # DIRECT dependency flagged) is taken in plugin-email's declared range and
+  # needs no pin here.
+  #   ip-address GHSA-2vr4-cq9g-pvrc (6.9; NAT64 local-use 64:ff9b:1::/48
+  #     classified as global, affected >=10.2.0) and GHSA-rpw4-54j3-4h4q
+  #     (6.3; isLinkLocal() checks fe80::/64 instead of fe80::/10, affected
+  #     from 0) — both fixed in 10.5.1. Flagged at TWO resolved copies:
+  #     10.4.0 <- express-rate-limit@8.6.1 (^10.2.0) <- @modelcontextprotocol/sdk,
+  #     and 10.5.0 <- socks@2.8.9 (^10.1.1) <- mongodb. Both declared ranges
+  #     already admit 10.5.1, so this is a dedupe onto the patched line rather
+  #     than a forced upgrade past what a dependent supports (the dompurify /
+  #     nanoid shape above); both copies sat below it purely through lockfile
+  #     inertia, the mechanism the devalue note records. Transitive-only: no
+  #     workspace manifest declares ip-address, so there is no published
+  #     declared range for check-override-consistency's manifest rule to hold
+  #     in lockstep with the target (it has none to cross-check, and says
+  #     nothing about this entry). GHSA-rpw4's range starts at 0, so
+  #     the selector's floor is the package floor and only the upper bound is
+  #     stated (the dompurify shape); the bound sits at the 11.0.0 major
+  #     boundary per this block's header rule, never `<10.5.1`.
+  #   undici GHSA-3wwx-pv8p-q78v (5.9; a malformed permessage-deflate frame
+  #     past the size limit crashes the process from the WebSocket client) —
+  #     three affected lines, >=6.25.0 <6.28.1, >=7.28.0 <7.29.1 and
+  #     >=8.1.0 <8.10.2.
+  #     Two are live here, one copy each: 7.29.0 <- @ai-sdk/provider-utils
+  #     (^7.28.0), and 8.9.0 <- jsdom@30.0.1 (^8.9.0). The 7.x copy is already
+  #     inside the existing `>=7.23.0 <8.0.0` selector, so that entry is a
+  #     TARGET-ONLY lift to ^7.29.1 — exactly the edit its major-boundary
+  #     bound exists to allow. The 8.x copy sat OUTSIDE every selector (the
+  #     undici note at the head of this file recorded it as a different,
+  #     unaffected major), so it gets its own entry, floored at the
+  #     advisory's 8.1.0 and bounded at the 9.0.0 major boundary. Both
+  #     dependents' ranges admit their fixed version, so both are dedupes
+  #     onto the patched line. No 6.x copy resolves anywhere, so no 6.x pin is
+  #     written. Transitive-only and dev-only: nothing publishable declares
+  #     undici, and both paths reach the tree through devDependencies.
+  'ip-address@<11.0.0': '^10.5.1'

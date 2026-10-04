@@ -55,13 +55,14 @@ import {
   ObjectListViewSchema,
   checkListViewCalendarVisualization,
 } from './view.zod';
-import { PageSchema, checkPageSourceCompleteness } from './page.zod';
+import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind } from './page.zod';
 import {
   GlobalFilterSchema,
   checkGlobalFilterDateDefaultValue,
   DashboardWidgetSchema,
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
+  checkDashboardWidgetChartMeasureArity,
 } from './dashboard.zod';
 import * as ui from './index';
 
@@ -220,6 +221,22 @@ const pageSourceFixtures: Fixture[] = [
   { label: 'a page with no `kind` (the `full` default)', value: { ...PAGE_BASE }, refusesAt: [] },
 ];
 
+// `requires` only on the compiled kinds (#21459). A `react` page carries a
+// `source` throughout so the source-completeness sibling stays silent and each
+// fixture exercises THIS check alone; the kind-less fixture is the one whose
+// direct call sees no `kind` while the parse sees the applied `full` default,
+// so it also pins that the two read the same answer.
+const pageRequiresFixtures: Fixture[] = [
+  { label: '`requires` on a `react` page', value: { ...PAGE_BASE, kind: 'react', source: 'Card', requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: '`requires` on a `full` page', value: { ...PAGE_BASE, kind: 'full', requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: '`requires` on a `slotted` page', value: { ...PAGE_BASE, kind: 'slotted', requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: '`requires` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: 'an EMPTY `requires` on a `react` page — the key is refused, not its contents', value: { ...PAGE_BASE, kind: 'react', source: 'Card', requires: [] }, refusesAt: ['requires'] },
+  { label: '`requires` on an `html` page', value: { ...PAGE_BASE, kind: 'html', source: 'Card', requires: ['ui'] }, refusesAt: [] },
+  { label: '`requires` on a `jsx` page (the deprecated `html` alias)', value: { ...PAGE_BASE, kind: 'jsx', source: 'Card', requires: ['ui'] }, refusesAt: [] },
+  { label: 'a `react` page with no `requires`', value: { ...PAGE_BASE, kind: 'react', source: 'Card' }, refusesAt: [] },
+];
+
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
 
 const dateDefaultFixtures: Fixture[] = [
@@ -334,6 +351,84 @@ const metricMeasureArityFixtures: Fixture[] = [
   },
 ];
 
+/**
+ * objectui#8894 ruling D's principle on the chart families — a widget with NO
+ * dimension takes two or more measures only on a type in
+ * `DASHBOARD_WIDGET_MULTI_MEASURE_TYPES` (the dimensionless arm), and a
+ * single-series type — `pie` / `donut` / `funnel` / `treemap` / `sankey` —
+ * takes one WITH a dimension too (the single-series arm, #21293).
+ *
+ * Its own base, WITHOUT `dimensions`: `WIDGET` above carries one, and the
+ * dimension is the variable this check turns. No stage-order or metric fixture
+ * reaches it (every one of those carries one measure, or a metric-family type),
+ * and no fixture here carries `options.stageOrder`, which keeps the three
+ * exports' vectors separable for leg 2's bijection. The two metric-family rows
+ * are ACCEPTING paths of THIS export: that refusal is the sibling's, and the
+ * parse leg reads it from the sibling's direct call.
+ */
+const DIMLESS_WIDGET = { id: 'stage_widget', dataset: 'contracts' } as const;
+
+const chartMeasureArityFixtures: Fixture[] = [
+  ...(['pie', 'donut', 'funnel', 'scatter', 'radar', 'treemap', 'sankey'] as const).map((type) => ({
+    label: `two measures on a dimensionless \`${type}\``,
+    value: { ...DIMLESS_WIDGET, type, values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  })),
+  {
+    label: 'three measures on a `donut` whose `dimensions` is an EMPTY array',
+    value: { ...DIMLESS_WIDGET, type: 'donut', dimensions: [], values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: ['values'],
+  },
+  // [#21293] This row read "out of this rule" and accepted until the
+  // single-series arm landed; it is that arm's subject now, and the two types
+  // the ruling left out are the accepting rows beside it.
+  ...(['pie', 'donut', 'funnel', 'treemap', 'sankey'] as const).map((type) => ({
+    label: `two measures on a \`${type}\` WITH a dimension — the single-series arm`,
+    value: { ...DIMLESS_WIDGET, type, dimensions: ['status'], values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  })),
+  {
+    label: 'two measures on a `scatter` WITH a dimension — outside the single-series arm',
+    value: { ...DIMLESS_WIDGET, type: 'scatter', dimensions: ['status'], values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+  {
+    label: 'two measures on a `radar` WITH a dimension — likewise',
+    value: { ...DIMLESS_WIDGET, type: 'radar', dimensions: ['status'], values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+  {
+    label: 'ONE measure on a `pie` WITH a dimension',
+    value: { ...DIMLESS_WIDGET, type: 'pie', dimensions: ['status'], values: ['amount_sum'] },
+    refusesAt: [],
+  },
+  {
+    label: 'ONE measure on a dimensionless `pie`',
+    value: { ...DIMLESS_WIDGET, type: 'pie', values: ['amount_sum'] },
+    refusesAt: [],
+  },
+  {
+    label: 'three measures on a dimensionless `table` — in the multi-measure set',
+    value: { ...DIMLESS_WIDGET, type: 'table', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: [],
+  },
+  {
+    label: 'three measures on a dimensionless `horizontal-bar` — likewise',
+    value: { ...DIMLESS_WIDGET, type: 'horizontal-bar', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: [],
+  },
+  {
+    label: 'two measures on a dimensionless `metric` — the sibling\'s refusal, not this one\'s',
+    value: { ...DIMLESS_WIDGET, type: 'metric', values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+  {
+    label: 'two measures on a dimensionless widget that declares NO type (the `metric` default)',
+    value: { ...DIMLESS_WIDGET, values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The population — every mirrored spec object that carries an object-level check
 // ---------------------------------------------------------------------------
@@ -351,7 +446,10 @@ const MIRRORED: MirroredSchema[] = [
   {
     name: 'PageSchema',
     schema: PageSchema,
-    exports: [{ name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures }],
+    exports: [
+      { name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures },
+      { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
+    ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
   {
@@ -380,6 +478,11 @@ const MIRRORED: MirroredSchema[] = [
         name: 'checkDashboardWidgetMetricMeasureArity',
         check: checkDashboardWidgetMetricMeasureArity,
         fixtures: metricMeasureArityFixtures,
+      },
+      {
+        name: 'checkDashboardWidgetChartMeasureArity',
+        check: checkDashboardWidgetChartMeasureArity,
+        fixtures: chartMeasureArityFixtures,
       },
     ],
     cleanFixtures: [{ ...WIDGET, type: 'horizontal-bar' }],
@@ -493,11 +596,13 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares the export and attaches it to PageSchema', () => {
+  it('page.zod.ts declares both exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    expect(src).toContain('export function checkPageSourceCompleteness(');
-    expect(declarations(src, 'checkPageSourceCompleteness')).toBe(1);
-    expect(attachments(src, 'checkPageSourceCompleteness')).toBe(1);
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind']) {
+      expect(src).toContain(`export function ${name}(`);
+      expect(declarations(src, name)).toBe(1);
+      expect(attachments(src, name)).toBe(1);
+    }
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
@@ -513,9 +618,10 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
 // ---------------------------------------------------------------------------
 
 describe('`./index` (the `@objectstack/spec/ui` surface) exports the same function objects', () => {
-  // NOT the full export list: the two widget checks —
-  // `checkDashboardWidgetStageOrder` and
-  // `checkDashboardWidgetMetricMeasureArity` — are catalogued in `MIRRORED`
+  // NOT the full export list: the three widget checks —
+  // `checkDashboardWidgetStageOrder`,
+  // `checkDashboardWidgetMetricMeasureArity` and
+  // `checkDashboardWidgetChartMeasureArity` — are catalogued in `MIRRORED`
   // above (legs 1-2) and carry their own legs 3-4 — barrel identity and
   // attached-by-identifier — beside the schema they guard, in
   // `dashboard.test.ts`. Read this `it.each` as the rows that live here, not as
@@ -523,6 +629,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   it.each([
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
+    ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
@@ -533,7 +640,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // [#17063] The retired member, from the same surface, in the same leg. A
   // downstream mirror re-attaching a check it imports from here is the whole
   // point of this file, so the barrel is where a relapse would first become
-  // reachable — the runtime namespace answers it, with the three survivors
+  // reachable — the runtime namespace answers it, with the four survivors
   // above as the lit control that the namespace is really populated.
   it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
     expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);

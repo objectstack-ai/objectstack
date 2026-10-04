@@ -256,7 +256,7 @@ export function registerMemberRoleCanonicalization(
     // where an operator is told the population exists.
     logger?.debug?.(
       `[MemberRoleCanonical] normalised sys_member.role on ${event}: ` +
-        `${JSON.stringify(before)} -> ${JSON.stringify(canonical)} (#8317)`,
+        `${JSON.stringify(before)} -> ${JSON.stringify(canonical)}, so ObjectStack and better-auth read one role`,
     );
   };
 
@@ -460,7 +460,7 @@ export async function canonicalizeStoredMemberRoles(
       `[MemberRoleCanonical] canonicalised sys_member.role on ${result.normalized} row(s) of ` +
         `${result.scanned} — better-auth reads this column with a raw split(','), so a ` +
         `non-canonical spelling read as an owner to ObjectStack and as a plain member to the ` +
-        `vendor (#8317).`,
+        `vendor.`,
       { spellings: result.census.filter((c) => c.rewritten > 0).map((c) => ({ stored: c.stored, canonical: c.canonical, rows: c.rewritten })) },
     );
   }
@@ -470,7 +470,7 @@ export async function canonicalizeStoredMemberRoles(
         `untouched: they carry no role from the closed membership vocabulary, so their case is ` +
         `a position name (mapMembershipRole passes unknown values through with their case) and ` +
         `rewriting it could re-point a sys_position_permission_set binding. They cannot produce ` +
-        `the #8317 inversion; decide them by hand if they are not intended.`,
+        `the owner-versus-member inversion; decide them by hand if they are not intended.`,
       { spellings: result.census.filter((c) => c.canonical === null).map((c) => ({ stored: c.stored, rows: c.count })) },
     );
   }
@@ -481,7 +481,7 @@ export async function canonicalizeStoredMemberRoles(
     logger?.error?.(
       `[MemberRoleCanonical] ${result.failed} sys_member.role row(s) could NOT be canonicalised. ` +
         `Those memberships stay readable as an owner by ObjectStack and as a plain member by ` +
-        `better-auth, so an org admin can remove or demote them (#8317). Fix: correct the row ` +
+        `better-auth, so an org admin can remove or demote them. Fix: correct the row ` +
         `(lower-case and trim the role value) and restart, or re-run the boot pass — it is ` +
         `idempotent and converges.`,
       undefined,

@@ -14,21 +14,50 @@ import {
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
+import { applyMetaMigrations } from '../migrations/chain.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
 import { renameConfigKey, renameKey } from './walk.js';
 import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
 
+/**
+ * A RELEASED major's fixture whose whole surface a LATER major retired, keyed
+ * by the fixture's id and naming the retiring entry.
+ *
+ * The contract below is that every fixture, replayed through the WHOLE table,
+ * equals its own `after` — which is what keeps two entries of one major from
+ * silently composing. It cannot hold for an entry of a released major once a
+ * later major removes the container its only surface lives in: the later strip
+ * runs after it on every replay, by design, and the released entry can be
+ * neither absorbed (its id and step are published in that major's
+ * `spec-changes.json` and upgrade guide) nor given a fixture the later strip
+ * leaves alone (it has no other surface). So such a fixture is replayed with
+ * the retiring entry excluded — its own contract, byte for byte — AND replayed
+ * with it, where the result must be exactly what the retiring entry produces on
+ * top. Both legs are asserted; nothing is skipped.
+ *
+ * ⛔ Not a way out of a same-major collision: an entry here must be from an
+ * EARLIER major than the one that retires its surface (asserted below), and a
+ * same-major pair is absorbed instead (`spec-property-retirement` §0).
+ */
+const SUPERSEDED_FIXTURES: Readonly<Record<string, { by: string; stripped: readonly string[] }>> = {
+  // `connector.fieldMappings[].transform` (17) lives only inside
+  // `connector.fieldMappings`, which protocol 18 retired whole with the rest of
+  // connector-attached sync (ADR-0049).
+  'field-mapping-transform-removed': { by: 'connector-sync-keys-removed', stripped: ['fieldMappings'] },
+};
+
 describe('conversion layer (ADR-0087 D2)', () => {
   describe('fixture pairs — every entry converts old shape → canonical', () => {
     for (const conversion of ALL_CONVERSIONS) {
       it(`${conversion.id}: before → after, emits ${conversion.fixture.expectedNotices} notice(s)`, () => {
+        const superseded = SUPERSEDED_FIXTURES[conversion.id];
         // `includeRetired` so graduated (load-retired) entries stay fixture-tested
         // forever — the chain replays them even though the loader no longer does.
         const { stack, notices } = collectConversionNotices(
           structuredClone(conversion.fixture.before),
-          { includeRetired: true },
+          { includeRetired: true, ...(superseded ? { excludeConversionIds: [superseded.by] } : {}) },
         );
         // The whole table runs, but fixtures are disjoint, so the result must
         // equal exactly this entry's `after`.
@@ -42,7 +71,31 @@ describe('conversion layer (ADR-0087 D2)', () => {
           expect(n.retiresIn).toBe(conversion.toMajor + 1);
           expect(n.surface).toBe(conversion.surface);
         }
+        if (superseded) {
+          // The other leg: the full table, retiring entry included. The result
+          // is this fixture's `after` with the retired container stripped from
+          // every connector, and the extra notices are all the retiring entry's.
+          const retiring = ALL_CONVERSIONS.find((c) => c.id === superseded.by);
+          expect(retiring, `${superseded.by} must be registered`).toBeDefined();
+          expect(retiring!.toMajor, 'a superseding entry must come from a LATER major').toBeGreaterThan(conversion.toMajor);
+          const full = collectConversionNotices(structuredClone(conversion.fixture.before), { includeRetired: true });
+          const expected = structuredClone(conversion.fixture.after) as { connectors: Record<string, unknown>[] };
+          for (const c of expected.connectors) for (const key of superseded.stripped) delete c[key];
+          expect(full.stack).toEqual(expected);
+          const extra = full.notices.filter((n) => n.conversionId !== conversion.id);
+          expect(extra.length, 'the retiring entry must actually fire on this fixture').toBeGreaterThan(0);
+          for (const n of extra) expect(n.conversionId).toBe(superseded.by);
+          expect(full.notices.length - extra.length).toBe(conversion.fixture.expectedNotices);
+        }
       });
+    }
+  });
+
+  it('every superseded fixture names a registered entry and a registered retiring entry', () => {
+    const ids = new Set(ALL_CONVERSIONS.map((c) => c.id));
+    for (const [id, { by }] of Object.entries(SUPERSEDED_FIXTURES)) {
+      expect(ids.has(id), id).toBe(true);
+      expect(ids.has(by), by).toBe(true);
     }
   });
 
@@ -345,6 +398,131 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  /**
+   * `flow-decision-mode-inclusive-explicit` (#15429) — the DEFAULT FLIP that
+   * carries an edge-branched decision across the exclusive-gateway ruling.
+   *
+   * The fixture pair above pins the rewrite; what needs its own cover is the
+   * PREDICATE's edges (the count, the two shapes it must leave alone, regions)
+   * and its JURISDICTION: the chain replays it, the authoring funnel does not,
+   * and a second replay is a no-op. The flow rehydration seam's refusal by id
+   * is pinned where that seam lives (`service-automation`).
+   */
+  describe('flow-decision-mode-inclusive-explicit (#15429)', () => {
+    const ID = 'flow-decision-mode-inclusive-explicit';
+    const entry = () => ALL_CONVERSIONS.find((c) => c.id === ID)!;
+    const decisionFlow = (edges: Record<string, unknown>[], config?: Record<string, unknown>) => ({
+      flows: [{
+        name: 'gateway',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'check', type: 'decision', label: 'Check', ...(config ? { config } : {}) },
+          { id: 'a', type: 'end', label: 'A' },
+          { id: 'b', type: 'end', label: 'B' },
+          { id: 'c', type: 'end', label: 'C' },
+        ],
+        edges: [{ id: 'e0', source: 'start', target: 'check' }, ...edges],
+      }],
+    });
+    const chain = (stack: Record<string, unknown>) => applyMetaMigrations(structuredClone(stack), 17, 18);
+    const checkConfigAfter = (result: ReturnType<typeof applyMetaMigrations>) =>
+      ((result.stack.flows as any[])[0].nodes as any[]).find((n) => n.id === 'check').config;
+    const two = [
+      { id: 'e1', source: 'check', target: 'a', condition: "x != 'a'" },
+      { id: 'e2', source: 'check', target: 'b', condition: "x == 'b'" },
+    ];
+
+    it('is registered at protocol 18, retired from the load path, and wired into the step-18 chain', () => {
+      expect(entry().toMajor).toBe(18);
+      expect(entry().retiredFromLoadPath).toBe(true);
+      const result = chain(decisionFlow(two));
+      expect(result.applied.map((a) => a.conversionId)).toContain(ID);
+    });
+
+    it('writes `mode: inclusive` on two conditioned out-edges, and says what the site relied on', () => {
+      const result = chain(decisionFlow(two));
+      expect(checkConfigAfter(result)).toEqual({ mode: 'inclusive' });
+      const mine = result.applied.filter((a) => a.conversionId === ID);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]!.path).toBe('flows[0].nodes[1].config.mode');
+      expect(mine[0]!.from).toContain('2 conditioned out-edges');
+      expect(mine[0]!.to).toBe('inclusive');
+    });
+
+    it('counts an envelope condition, and a third conditioned edge, but never a fault edge or a blank one', () => {
+      const three = [
+        ...two,
+        { id: 'e3', source: 'check', target: 'c', condition: { dialect: 'cel', source: "x == 'c'" } },
+      ];
+      expect(checkConfigAfter(chain(decisionFlow(three)))).toEqual({ mode: 'inclusive' });
+      // A `fault` edge is error routing; a blank condition is no condition.
+      const notBranches = [
+        { id: 'e1', source: 'check', target: 'a', condition: "x != 'a'" },
+        { id: 'e2', source: 'check', target: 'b', condition: "x == 'b'", type: 'fault' },
+        { id: 'e3', source: 'check', target: 'c', condition: '   ' },
+      ];
+      expect(checkConfigAfter(chain(decisionFlow(notBranches)))).toBeUndefined();
+    });
+
+    it('leaves ONE conditioned out-edge plus a default alone — first-match and every-true-edge cannot differ', () => {
+      const guarded = [
+        { id: 'e1', source: 'check', target: 'a', condition: "x == 'a'" },
+        { id: 'e2', source: 'check', target: 'b', isDefault: true },
+      ];
+      const result = chain(decisionFlow(guarded));
+      expect(checkConfigAfter(result)).toBeUndefined();
+      expect(result.applied.filter((a) => a.conversionId === ID)).toEqual([]);
+    });
+
+    it('leaves a decision that already declares `mode` alone — either member — and a `conditions` list alone', () => {
+      expect(checkConfigAfter(chain(decisionFlow(two, { mode: 'exclusive' })))).toEqual({ mode: 'exclusive' });
+      expect(checkConfigAfter(chain(decisionFlow(two, { mode: 'inclusive' })))).toEqual({ mode: 'inclusive' });
+      const listed = { conditions: [{ label: 'A', expression: "x == 'a'" }] };
+      expect(checkConfigAfter(chain(decisionFlow(two, listed)))).toEqual(listed);
+      // An EMPTY list declares no branch: the node routes on its edges, so it is rewritten.
+      expect(checkConfigAfter(chain(decisionFlow(two, { conditions: [] })))).toEqual({ conditions: [], mode: 'inclusive' });
+    });
+
+    it('never touches a non-decision node with the same two conditioned out-edges', () => {
+      const stack = decisionFlow(two);
+      (stack.flows[0]!.nodes[1] as Record<string, unknown>).type = 'screen';
+      const result = chain(stack);
+      expect(checkConfigAfter(result)).toBeUndefined();
+      expect(result.applied.filter((a) => a.conversionId === ID)).toEqual([]);
+    });
+
+    it('is idempotent: the migrated stack replays to itself with nothing applied', () => {
+      const first = chain(decisionFlow(two));
+      const again = applyMetaMigrations(structuredClone(first.stack), 17, 18);
+      expect(again.stack).toEqual(first.stack);
+      expect(again.applied.filter((a) => a.conversionId === ID)).toEqual([]);
+    });
+
+    it('⛔ never replays on the authoring funnel — a decision written against the new contract stays exclusive', () => {
+      const authored = decisionFlow(two);
+      const notices: ConversionNotice[] = [];
+      const out = normalizeStackInput(structuredClone(authored), { onConversionNotice: (n) => notices.push(n) });
+      expect(out).toEqual(authored);
+      expect(notices.map((n) => n.conversionId)).not.toContain(ID);
+    });
+
+    it('a seam that opens the retired window can still refuse it by id — the flow rehydration seam does', () => {
+      // The primitive behind `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in the
+      // automation engine: same bytes, window open, entry refused by name.
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(decisionFlow(two), {
+        includeRetired: true,
+        excludeConversionIds: [ID],
+        onNotice: (n) => notices.push(n),
+      });
+      expect(((out.flows as any[])[0].nodes as any[])[1].config).toBeUndefined();
+      expect(notices.map((n) => n.conversionId)).not.toContain(ID);
+      // FIRING CONTROL: with the window open and no refusal, it does fire.
+      const fired = applyConversions(decisionFlow(two), { includeRetired: true });
+      expect(((fired.flows as any[])[0].nodes as any[])[1].config).toEqual({ mode: 'inclusive' });
+    });
+  });
+
   describe('registry invariants', () => {
     it('every conversion carries a fixture pair and a positive retirement window', () => {
       for (const c of ALL_CONVERSIONS) {
@@ -393,7 +571,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
 
     /**
-     * The jurisdiction pin for `retiredFromLoadPath` (#16864).
+     * The jurisdiction pin for `retiredFromLoadPath` (commit 29dd1a6dd).
      *
      * `apply.ts` and `types.ts` now declare that retirement is an AUTHORING
      * surface event: the flag keeps an entry off `normalizeStackInput`, while
@@ -590,9 +768,17 @@ describe('conversion layer (ADR-0087 D2)', () => {
           `${key} must be rejected`,
         ).toThrow(/was removed in @objectstack\/spec 17/);
       }
-      // The flow-level parse is deliberately blind here — pinned so the note
-      // above stays true if `FlowNodeSchema.config` is ever tightened.
-      expect(() => FlowSchema.parse((scriptFlow({ actionType: 'email' }).flows as any[])[0])).not.toThrow();
+      // The flow-level parse is deliberately blind to the TOMBSTONES — pinned so
+      // the note above stays true if `FlowNodeSchema.config` is ever tightened.
+      // What it does see since #20316 is the one key the script contract
+      // requires, left out: a stripped node naming no callable is refused at
+      // the build doors now, not only at execute — and by that, never by a
+      // tombstone.
+      expect(() => FlowSchema.parse((scriptFlow({ function: 'score_lead', actionType: 'email' }).flows as any[])[0])).not.toThrow();
+      const stripped = FlowSchema.safeParse((scriptFlow({ actionType: 'email' }).flows as any[])[0]);
+      expect(stripped.success).toBe(false);
+      expect(stripped.error!.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.function']);
+      expect(stripped.error!.issues[0].message).not.toMatch(/was removed in @objectstack\/spec 17/);
     });
   });
 
@@ -709,7 +895,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  // #6345 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
+  // Commit e2798fab7 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
   // together, and only together: the stored value CONVERGES, and a deployment
   // that never runs the conversion is NOT broken. Either alone would be the
   // wrong shape — a rename that breaks old rows, or a rename that leaves one
@@ -788,7 +974,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
 
     it('still lands for a row whose driver id is ITSELF being renamed (#6345)', () => {
-      // The pairs are keyed by CANONICAL driver id, and #6345 renamed mongo's.
+      // The pairs are keyed by CANONICAL driver id, and commit e2798fab7 renamed mongo's.
       // A stored `driver: 'mongo'` must therefore still find the mongo pairs
       // (through the alias) even as the sibling conversion rewrites its id —
       // otherwise the rename would quietly un-convert every legacy mongo config.

@@ -17,7 +17,7 @@
  * re-verification carrier: re-measure the prolongation once that fix lands, and
  * close only on the measurement.
  *
- * The re-verification (PR #14431) found that #13331 closes the registry-heal
+ * The re-verification (commit a98b61b3e) found that #13331 closes the registry-heal
  * half but opens a SECOND gap on the read-in-window path (see "Arms" below,
  * preserved as history). Ruling A′ (2026-09-03, director batch #22, comment
  * 5528370129) ordered the fix for that gap: `applyRemoteMetadataMutation`
@@ -110,7 +110,7 @@
  *      writes the deleted row straight back into the registry the bridge
  *      just healed — and the registry has no TTL.
  *
- * So the prolongation was — PR #14431's finding, kept as history below —
+ * So the prolongation was — commit a98b61b3e's finding, kept as history below —
  * neither unconditionally bounded nor unconditionally unbounded, and the
  * discriminator was not time but TRAFFIC:
  *
@@ -132,7 +132,7 @@
  * one. The bounded arm is the quiet-replica arm.
  *
  * ---------------------------------------------------------------------------
- * Why the re-hydration USED TO happen, precisely (history — PR #14431)
+ * Why the re-hydration USED TO happen, precisely (history — commit a98b61b3e)
  * ---------------------------------------------------------------------------
  * Nothing on the bridge's receipt path touched the WRITE EPOCH that keys the
  * overlay cache. `applyRemoteMetadataMutation` re-read the row and repaired the
@@ -180,7 +180,7 @@
  *     re-derived (the dispatch forbids re-deriving that finding).
  *  3. list-cache TTL (#5109) ............. RE-MEASURED, then CLOSED. At this
  *     door the cache is `meta-overlay-cache`, not `MetadataManager.listCache` —
- *     PR #14431 found it did not merely delay the correct answer, it FED the
+ *     commit a98b61b3e found it did not merely delay the correct answer, it FED the
  *     untimed registry, converting a 30s residue into an unbounded one on any
  *     read landing in the window. Ruling A′'s bump on the receipt path retires
  *     this cache at the moment of convergence, so the read that follows has
@@ -691,7 +691,7 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
 
         // `measureProlongationMs` reads the door once BEFORE advancing the
         // clock — i.e. inside the residue window, which is what a replica
-        // under load does continuously. Previously (PR #14431) that read
+        // under load does continuously. Previously (commit a98b61b3e) that read
         // converted the bounded cache residue into an unbounded registry
         // entry. Now the convergence bump has already retired the cache
         // before this first read runs, so the read-in-window traffic

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16518] `current_user.accessible_org_ids` must RESOLVE — the plumbing, pinned
+ * [commit 470746ae4] `current_user.accessible_org_ids` must RESOLVE — the plumbing, pinned
  * end to end.
  *
  * ## The contradiction this file closes

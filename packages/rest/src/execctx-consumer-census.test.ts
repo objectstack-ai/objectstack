@@ -58,7 +58,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
     ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
-    // [#13279] §8 drives the real loud failure rather than a stand-in, so the
+    // [commit 6a180e42d] §8 drives the real loud failure rather than a stand-in, so the
     // propagation it observes is the one production raises.
     AuthzStoreUnavailableError, AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
@@ -82,7 +82,7 @@ type Handler = (req: any, res: any) => any;
  * Every `this.resolveExecCtx(environmentId, req)` invocation, with the line it
  * sits on and whether it carries its OWN `.catch(…)`.
  *
- * [#13279] The catch ARGUMENT changed: a caught site passes
+ * [commit 6a180e42d] The catch ARGUMENT changed: a caught site passes
  * `rethrowAuthzStoreUnavailable` instead of `() => undefined`, so a
  * permission-store outage is re-raised rather than degraded into a refusal.
  * The detection below keys on `.catch(` and is deliberately spelling-agnostic,
@@ -163,6 +163,15 @@ function metaProtocol(doc: any) {
             if (k === 'getMetaItems') return vi.fn(async () => [doc]);
             if (k === 'getMetaItem') return vi.fn(async () => ({ type: doc.type, name: doc.name, item: doc }));
             if (k === 'getMetaItemCached') return undefined;
+            // [#20507] The layered read in its own shape, `doc` at the code
+            // layer. The generic answer below carries no layer at all, which
+            // the layered chain answers as the name's absence (404), so the
+            // `/layers` row would stop reaching the answer it measures.
+            if (k === 'getMetaItemLayered') {
+                return vi.fn(async () => ({
+                    type: doc.type, name: doc.name, code: doc, overlay: null, overlayScope: null, effective: doc,
+                }));
+            }
             return vi.fn(async () => ({ ok: true, rows: [], data: [], items: [doc], total: 1 }));
         },
     });
@@ -173,7 +182,7 @@ const ENTITLED = {
     isSystem: false,
     tenantId: 'org_census',
     systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
-    // [#13214] The internal key `computeExecCtx` stamps on every context it
+    // [commit cc837dbfe] The internal key `computeExecCtx` stamps on every context it
     // produces, naming the environment whose auth service actually validated
     // the caller. `enforceEnvironmentOwnership` — the new guard on the UI-view
     // site this census now counts — compares it against the environment the
@@ -425,7 +434,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // doc-comment recording that `resolveExecCtx` is memoised per request
         // and so this is not a new org-resolution seam.
         //
-        // [#13214] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
+        // [commit cc837dbfe] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
         // the ONE metadata-touching route in the table that resolved no
         // identity at all — the exception this census surfaced — and the
         // 2026-08-30 ruling closed it. It joins as a BARE site behind the
@@ -458,7 +467,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // silently loses eight sites. [#20237] 15 → 13 and 23 → 21: the list
         // route's app and dashboard sites moved into the shared list gate (§2).
         //
-        // [#13214] The new site is BARE, and that is a decision the next case
+        // [commit cc837dbfe] The new site is BARE, and that is a decision the next case
         // enforces: a locally-caught site sitting behind the shared floor would
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
@@ -542,7 +551,7 @@ describe('[#13160] §4 the 20 locally-caught sites — the half with no shared f
         }
     }, 180_000);
 
-    it('⭐ with the umbrella ISOLATED, six of the inner sites do NOT refuse on their own reading', async () => {
+    it('⭐ with the umbrella ISOLATED, four of the inner sites do NOT refuse on their own reading', async () => {
         // ⛔ Counterfactual, not a production posture — production mounts the
         // umbrella, and section 4's first case measures that it refuses. What
         // this separates is DOUBLE-guarded from SINGLE-guarded: an absent
@@ -560,12 +569,16 @@ describe('[#13160] §4 the 20 locally-caught sites — the half with no shared f
             'DELETE /api/v1/meta/:type/:name',
             'POST /api/v1/meta/:type/:name/publish',
             'POST /api/v1/meta/:type/:name/rollback',
+            // [#20441] An authoring door now, like `_drafts`: the authoring
+            // capability is asked at its head, so an absent context is refused
+            // there even with the umbrella isolated. It moved from the list
+            // below, whose length the title states.
+            'GET /api/v1/meta/:type/:name/audit',
         ];
         const SERVES_ON_ITS_OWN = [
             'GET /api/v1/meta/:type',                      // list — org scope only
             'GET /api/v1/meta/:type/:name',                // item read — org scope only
             'GET /api/v1/meta/:type/:name/layers',
-            'GET /api/v1/meta/:type/:name/audit',
             'GET /api/v1/meta/:type/:name/published',
         ];
 
@@ -685,7 +698,7 @@ describe('[#13160] §6 the boundary of this census', () => {
         // `package-door-execctx-fault-reading.test.ts` (PR #13153) —
         // fail-CLOSED, two ablation legs, both rival readings falsified.
         // ⛔ Recorded as DEFERRED to that file, never as "assumed closed".
-        // [#13279] The catch argument is now `rethrowAuthzStoreUnavailable`
+        // [commit 6a180e42d] The catch argument is now `rethrowAuthzStoreUnavailable`
         // (was `() => undefined`): a permission-store OUTAGE must reach the
         // door as the 503 it is instead of being laundered into a 401/403.
         // This grep tracks the wrapper's CURRENT spelling — the site is still

@@ -1,0 +1,72 @@
+{
+  "type": "picklist",
+  "_note": "PicklistSchema (`data/picklist.zod.ts`) — a shared option list that select fields reference by name (`Field.select({ picklist })`). Read at runtime by the ObjectQL registry, which merges `picklistExtensions` into the list (additive only) and resolves it onto every field that names it. The ADR-0010 envelope keys carry the same `null` verdict as `capability`: loader-stamped, not authored.",
+  "props": {
+    "name": {
+      "status": "live",
+      "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions",
+      "verifiedAt": "2026-10-01",
+      "note": "The handle a field's `picklist` names: the registry looks the list up by it when it resolves a field, and the boot audit refuses a field whose name matches no registered list."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-10-01",
+      "note": "display: the list's own label, served with the kind (`GET /meta/picklist`; the artifact door registers `picklists:` as items) and translated under `picklists.<name>.label` (`translatePicklist`). A Studio picklist page is a later phase."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-10-01",
+      "note": "display: served with the kind (`GET /meta/picklist`) for authors choosing a list."
+    },
+    "options": {
+      "status": "live",
+      "verifiedAt": "2026-10-01",
+      "note": "Merged with every `picklistExtensions` entry's options (additive only — a repeated value is refused, `registerPicklistExtension`) and written onto each referencing field's served `options`, which the record validator judges writes against.",
+      "children": {
+        "label": {
+          "status": "live",
+          "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions",
+          "verifiedAt": "2026-10-01",
+          "note": "Reaches every consumer as the referencing field's resolved option label, translated under `picklists.<name>.options.<value>` (`translateObject`)."
+        },
+        "value": {
+          "status": "live",
+          "evidence": "packages/objectql/src/validation/record-validator.ts",
+          "verifiedAt": "2026-10-01",
+          "note": "The value a write to a referencing field is judged against, through the field's resolved `options`."
+        },
+        "description": {
+          "status": "live",
+          "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions",
+          "verifiedAt": "2026-10-01",
+          "note": "Carried onto the referencing field's resolved option, where the same key is `live` on `field.json`."
+        },
+        "color": {
+          "status": "live",
+          "verifiedAt": "2026-10-01",
+          "note": "display: carried onto the referencing field's resolved option, rendered like an inline option's (`field.options`)."
+        },
+        "default": {
+          "status": "live",
+          "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions",
+          "verifiedAt": "2026-10-01",
+          "note": "Carried onto the referencing field's resolved option, so the engine's insert-time option default and the import template's required star read it like an inline option's (`packages/rest/src/import-template-route.test.ts`)."
+        },
+        "visibleWhen": {
+          "status": "live",
+          "evidence": "packages/objectql/src/validation/rule-validator.ts",
+          "verifiedAt": "2026-10-01",
+          "note": "Carried onto the referencing field's resolved option, where the option-visibility predicate reads it like an inline option's."
+        }
+      },
+      "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions"
+    },
+    "_lock": null,
+    "_lockReason": null,
+    "_lockSource": null,
+    "_provenance": null,
+    "_packageId": null,
+    "_packageVersion": null,
+    "_lockDocsUrl": null
+  }
+}

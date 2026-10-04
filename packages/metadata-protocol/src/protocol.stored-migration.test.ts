@@ -26,8 +26,14 @@ import { describe, expect, it } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { applyMetaMigrations } from '@objectstack/spec/migrations';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
+import {
+    DECISION_MODE_REVIEW_CONVERSION_ID,
+    collectDecisionModeReview,
+    formatStoredMigrationReport,
+    storedMigrationClean,
+} from './stored-migration.js';
 
 interface Row {
     id: string;
@@ -134,7 +140,7 @@ const legacyObjectRow = {
         name: 'crm_invoice',
         label: 'Invoice',
         fields: {
-            status: { type: 'select', label: 'Status' },
+            status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
             amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
         },
     },
@@ -148,7 +154,7 @@ const canonicalObjectRow = {
         name: 'crm_quote',
         label: 'Quote',
         fields: {
-            status: { type: 'select', label: 'Status' },
+            status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
             amount: { type: 'currency', label: 'Amount', requiredWhen: "record.status == 'sent'" },
         },
     },
@@ -573,6 +579,32 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
         expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.amount.conditionalRequired).toBe('x');
     });
 
+    it('marks a legacy row whose select has no option source `failed` and leaves its bytes alone', async () => {
+        // The choice door (ruling record 5910124148): the conversion chain
+        // lowers the retired alias, but no entry can invent the options an
+        // author meant, so the rewritten body still fails `FieldSchema`. The
+        // pass records the refusal; the row keeps reading through the chain
+        // and is named by its diagnostics until an option or a picklist is added.
+        const { engine, tables } = makeStubEngine([{
+            ...legacyObjectRow,
+            metadata: {
+                ...legacyObjectRow.metadata,
+                fields: { ...legacyObjectRow.metadata.fields, status: { type: 'select', label: 'Status' } },
+            },
+        }]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true });
+
+        expect(report.failed).toBe(1);
+        expect(report.rewritten).toBe(0);
+        expect(report.rows[0]!.reason).toMatch(/failed spec validation/);
+        expect(historyRows(tables)).toHaveLength(0);
+        const stored = JSON.parse(metaRows(tables)[0]!.metadata);
+        expect(stored.fields.status).toEqual({ type: 'select', label: 'Status' });
+        expect(stored.fields.amount.conditionalRequired).toBe("record.status == 'sent'");
+    });
+
     it('does not clobber a row a concurrent writer moved — the optimistic lock is real', async () => {
         const { engine, tables } = makeStubEngine([legacyObjectRow]);
         // Someone else saved between the pass's scan and its write: the scan is
@@ -801,5 +833,223 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
         expect(rerun.outcome).toBe('skipped');
         expect(rerun.todos).toHaveLength(1);
         expect(again.canonical).toBe(0);
+    });
+});
+
+describe('migrateStoredMetadata — the decision review list: stored rows take first-match, and are LISTED, never rewritten (#15429, ruling C)', () => {
+    // Maintainer ruling letter C on #15429: a stored decision with no
+    // `conditions` list, no `mode` and two or more conditioned out-edges takes
+    // the protocol-18 meaning (first match) on upgrade — no stored-row rewrite,
+    // no cutoff, no read-path completion — and `os migrate meta --stored` lists
+    // every such node, report only, so an operator can review candidates
+    // before and after the upgrade.
+    //
+    // The hotcrm#1555 shape: both predicates hold for a confirmed lead.
+    const OVERLAP = { a: "lead.status != 'suspected'", b: "lead.status == 'confirmed'" };
+    const gatewayBody = (name: string, opts: {
+        config?: Record<string, unknown>;
+        b?: string;
+        bType?: string;
+        withDefault?: boolean;
+        withLegacyPurge?: boolean;
+    } = {}) => ({
+        name,
+        label: 'Lead Verdict',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+            // A second, unrelated pre-protocol shape the canonicalizer rewrites,
+            // so an apply run DOES write this row — and must still write no `mode`.
+            ...(opts.withLegacyPurge
+                ? [{ id: 'purge', type: 'delete_record', label: 'Purge', config: { objectName: 'lead', filters: { status: 'stale' } } }]
+                : []),
+            { id: 'check', type: 'decision', label: 'Verdict?', ...(opts.config ? { config: opts.config } : {}) },
+            { id: 'refuse', type: 'end', label: 'Refuse' },
+            { id: 'convert', type: 'end', label: 'Convert' },
+            ...(opts.withDefault ? [{ id: 'fallback', type: 'end', label: 'Fallback' }] : []),
+        ],
+        edges: [
+            { id: 'e_refuse', source: 'check', target: 'refuse', condition: OVERLAP.a },
+            {
+                id: 'e_convert', source: 'check', target: 'convert',
+                ...(opts.bType ? { type: opts.bType } : {}),
+                ...(opts.b === '' ? {} : { condition: opts.b ?? OVERLAP.b }),
+            },
+            ...(opts.withDefault ? [{ id: 'e_fallback', source: 'check', target: 'fallback', isDefault: true }] : []),
+        ],
+    });
+    const flowRow = (name: string, body: unknown, extra: Record<string, unknown> = {}) =>
+        ({ type: 'flow', name, metadata: body, ...extra });
+    /**
+     * Stands in for `AutomationEngine.canonicalizeStoredFlow`, and answers what
+     * the real seam answers for these bodies: it refuses the D2 entry by id, so
+     * a two-branch decision comes back WITHOUT `mode`. It rewrites only the
+     * legacy `filters` alias, so a row carrying one is a real rewrite.
+     */
+    const canonicalizeFlow = (_name: string, body: any) => {
+        const purge = body?.nodes?.find((n: any) => n.id === 'purge');
+        if (!purge || !('filters' in (purge.config ?? {}))) return { storable: body, notices: [], conflicts: [] };
+        return {
+            storable: {
+                ...body,
+                nodes: body.nodes.map((n: any) => (n === purge
+                    ? { ...n, config: { objectName: 'lead', filter: purge.config.filters } }
+                    : n)),
+            },
+            notices: [{
+                conversionId: 'flow-node-crud-filter-alias',
+                surface: 'flow.node.config.filter',
+                from: 'filters',
+                to: 'filter',
+                path: 'flows[0].nodes[0].config',
+                message: 'filters → filter',
+            }],
+            conflicts: [],
+        };
+    };
+
+    it('a stored two-branch decision with no `mode` is LISTED — row, flow, node, label and path — and the row is canonical', async () => {
+        const { engine, tables } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict'), { organization_id: 'org_1' })]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ canonicalizeFlow });
+
+        expect(report.decisionModeReview).toEqual([{
+            id: metaRows(tables)[0]!.id,
+            name: 'lead_verdict',
+            organizationId: 'org_1',
+            packageId: null,
+            state: 'active',
+            nodeId: 'check',
+            nodeLabel: 'Verdict?',
+            path: 'nodes[0]',
+        }]);
+        // ON protocol: listed, not pending — the list moves no count and no verdict.
+        expect(report).toMatchObject({ scanned: 1, canonical: 1, pending: 0, skipped: 0, failed: 0, rows: [] });
+        expect(storedMigrationClean(report)).toBe(true);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+    });
+
+    it('`--apply` changes nothing for it: no rewrite, no history row, the stored bytes identical — and the list is the same', async () => {
+        const { engine, tables } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict'))]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow });
+
+        expect(report.decisionModeReview.map((r) => `${r.name}:${r.nodeId}`)).toEqual(['lead_verdict:check']);
+        expect(report).toMatchObject({ canonical: 1, rewritten: 0, failed: 0 });
+        expect(historyRows(tables)).toHaveLength(0);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+        expect(JSON.parse(metaRows(tables)[0]!.metadata).nodes[0]).not.toHaveProperty('config');
+    });
+
+    it('a row `--apply` DOES rewrite for another conversion persists no `mode` — the list never rides into the write', async () => {
+        const { engine, tables } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict', { withLegacyPurge: true }))]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow });
+
+        expect(report.rewritten).toBe(1);
+        expect(report.rows[0]!.notices.map((n) => n.conversionId)).toEqual(['flow-node-crud-filter-alias']);
+        const stored = JSON.parse(metaRows(tables)[0]!.metadata);
+        expect(stored.nodes.find((n: any) => n.id === 'purge').config).toEqual({ objectName: 'lead', filter: { status: 'stale' } });
+        expect(stored.nodes.find((n: any) => n.id === 'check')).not.toHaveProperty('config');
+        expect(report.decisionModeReview.map((r) => `${r.nodeId}@${r.path}`)).toEqual(['check@nodes[1]']);
+    });
+
+    it('needs no engine: with no canonicalizer the flow row is `skipped` and its decision is STILL listed', async () => {
+        const { engine } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict'))]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.skipped).toBe(1);
+        expect(report.rows[0]!.reason).toMatch(/no automation service/);
+        expect(report.decisionModeReview.map((r) => r.nodeId)).toEqual(['check']);
+    });
+
+    it('lists a decision inside a loop body, judged against the region\'s own edges, at its region path', async () => {
+        const body = {
+            name: 'lead_sweep',
+            label: 'Sweep',
+            type: 'autolaunched',
+            status: 'active',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'sweep', type: 'loop', label: 'Sweep',
+                    config: {
+                        collection: '{leads}',
+                        iteratorVariable: 'lead',
+                        body: {
+                            nodes: [
+                                { id: 'gate', type: 'decision' },
+                                { id: 'x', type: 'end', label: 'X' },
+                                { id: 'y', type: 'end', label: 'Y' },
+                            ],
+                            edges: [
+                                { id: 'g1', source: 'gate', target: 'x', condition: OVERLAP.a },
+                                { id: 'g2', source: 'gate', target: 'y', condition: { dialect: 'cel', source: OVERLAP.b } },
+                            ],
+                        },
+                    },
+                },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'sweep' }],
+        };
+
+        expect(collectDecisionModeReview(body)).toEqual([{ nodeId: 'gate', path: 'nodes[1].config.body.nodes[0]' }]);
+    });
+
+    it('CONTROLS — a declared `mode` (either member), one conditioned edge beside a default, a `conditions` list and a `fault` second edge are NOT listed', () => {
+        expect(collectDecisionModeReview(gatewayBody('f', { config: { mode: 'exclusive' } }))).toEqual([]);
+        expect(collectDecisionModeReview(gatewayBody('f', { config: { mode: 'inclusive' } }))).toEqual([]);
+        expect(collectDecisionModeReview(gatewayBody('f', { b: '', withDefault: true }))).toEqual([]);
+        expect(collectDecisionModeReview(gatewayBody('f', {
+            config: { conditions: [{ label: 'Refuse', expression: OVERLAP.a }] },
+        }))).toEqual([]);
+        expect(collectDecisionModeReview(gatewayBody('f', { bType: 'fault' }))).toEqual([]);
+        // …and the POSITIVE for the same builder, so the controls cannot pass vacuously.
+        expect(collectDecisionModeReview(gatewayBody('f')).map((r) => r.nodeId)).toEqual(['check']);
+    });
+
+    it('ONE PREDICATE — the list is exactly what the `--from 17` chain writes `mode` at, through the same registry entry', () => {
+        const body = gatewayBody('lead_verdict');
+        const bodyBytes = JSON.stringify(body);
+
+        const listed = collectDecisionModeReview(body).map((r) => `flows[0].${r.path}.config.mode`);
+        const chain = applyMetaMigrations({ flows: [body] }, 17, 18);
+        const written = chain.applied
+            .filter((a) => a.conversionId === DECISION_MODE_REVIEW_CONVERSION_ID)
+            .map((a) => a.path);
+
+        expect(written).toEqual(['flows[0].nodes[0].config.mode']);
+        expect(listed).toEqual(written);
+        // The listing ran the entry and discarded its output: the body is untouched.
+        expect(JSON.stringify(body)).toBe(bodyBytes);
+    });
+
+    it('the renderer prints the list with the one-line fix, beside — not instead of — the on-protocol verdict', async () => {
+        const { engine } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict'), { state: 'draft' })]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const text = formatStoredMigrationReport(await protocol.migrateStoredMetadata({ canonicalizeFlow })).join('\n');
+
+        expect(text).toMatch(/1 decision node\(s\) in 1 flow row\(s\) take the FIRST matching branch since protocol 18/);
+        expect(text).toContain(`flow/lead_verdict [env-wide, draft] — decision 'check' "Verdict?" at nodes[0]`);
+        expect(text).toContain("declare `mode: 'inclusive'`");
+        expect(text).toMatch(/already on protocol/);
+    });
+
+    it('CONTROL — a run with nothing to review prints no review section', async () => {
+        const { engine } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict', { config: { mode: 'exclusive' } }))]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ canonicalizeFlow });
+
+        expect(report.decisionModeReview).toEqual([]);
+        expect(formatStoredMigrationReport(report).join('\n')).not.toMatch(/FIRST matching branch/);
     });
 });

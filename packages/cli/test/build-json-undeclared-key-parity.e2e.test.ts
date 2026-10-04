@@ -71,6 +71,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -120,7 +121,9 @@ const PLANTED_KEY = 'zzzUndeclaredProbeKey';
  *    finding (a STRING), the subject of this file.
  */
 const CONFIG_WITH_UNDECLARED_KEY = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.ukparity', name: 'ukparity', version: '1.0.0', type: 'app', namespace: 'ukparity' },
   objects: [
     {
@@ -137,7 +140,7 @@ export default {
       },
     },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -146,7 +149,9 @@ export default {
  * build that emitted one unconditionally.
  */
 const CONFIG_CLEAN = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.ukclean', name: 'ukclean', version: '1.0.0', type: 'app', namespace: 'ukclean' },
   objects: [
     {
@@ -163,7 +168,7 @@ export default {
       },
     },
   ],
-};
+}, { strict: false });
 `;
 
 /** Every undeclared-key line in a `warnings` list, whatever else rides beside it. */
@@ -183,6 +188,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), source);
+    linkSpec(dir);
     dirs[name] = dir;
   }
 });
@@ -279,7 +285,7 @@ describe('#11643 — `os build --json` carries the undeclared-authoring-key warn
     // consumed by both faces. The text output must be what it was.
     const run = await runCli(['build'], dirs.planted);
     expect(run.code, `os build failed:\n${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain('Undeclared authoring keys (1) — dropped at load (#3786)');
+    expect(run.stdout).toContain('Undeclared authoring keys (1) — dropped at load; reported here, never refused');
     expect(run.stdout).toContain(`${PLANTED_KEY}' is not a declared field key, so its value is dropped at load.`);
   }, 120_000);
 });

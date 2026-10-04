@@ -288,7 +288,7 @@ describe('#12159 Part 1 — a composition WITH automation: flows and actions bot
         const rows = await ql.find(LEDGER, { where: { metadata_type: 'flow' }, context: SYSTEM_CTX });
         const row = rows.find((r) => r.name === FLOW);
         // The durable half. A toggle that only moved the engine's in-process
-        // projection is the #10243 mechanism ADR-0126 §7.2 retires, and it
+        // projection is the mechanism commit 02b41232d measured, which ADR-0126 §7.2 retires, and it
         // would look identical on the wire.
         expect(row, `no durable '${FLOW}' row — the flow ledger is not attached: ${JSON.stringify(rows)}`).toBeDefined();
         expect(row!.active === false || row!.active === 0).toBe(true);

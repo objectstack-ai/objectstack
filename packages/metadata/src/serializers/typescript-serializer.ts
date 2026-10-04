@@ -53,6 +53,7 @@ const ANNOTATION_BY_METADATA_TYPE: ReadonlyMap<string, readonly [typeName: strin
   ['hook', ['Hook', 'data']],
   ['seed', ['Seed', 'data']],
   ['mapping', ['Mapping', 'data']],
+  ['picklist', ['Picklist', 'data']],
   ['datasource', ['Datasource', 'data']],
   ['analytics_cube', ['Cube', 'data']],
   ['page', ['Page', 'ui']],

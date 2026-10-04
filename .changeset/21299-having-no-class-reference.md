@@ -1,0 +1,28 @@
+---
+"@objectstack/objectql": minor
+---
+
+fix(objectql)!: `having` and the per-aggregation `filter` refuse a `{ $field }` comparison against a column with no comparison class (a file field, a list, a formula) with `INVALID_FILTER` / 400, as `where` refuses it; `applyInMemoryAggregation` takes the same reference rules
+
+Clause-②: no (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) a refusal of filter STRUCTURE at the engine's query door and at its published in-memory aggregation function: a { $field } comparison against a column the spec's crossFieldComparisonVerdict answers no-class for, at having and at a per-aggregation filter, and the reference rules engine.aggregate already applied, now applied by applyInMemoryAggregation when its caller passes a field map. No authorable key, spelling, export or stored shape moves: FieldReferenceSchema, every query shape and every object definition parse as before, the package entries export nothing new and nothing less, applyInMemoryAggregation keeps its signature, and no stored row is read or rewritten. What is refused is a comparison the same query's where already refuses on driver-sql, and which comparable column the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter's comparison class (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+
+**BREAKING**: this narrows what a `{ $field }` reference may pair at two positions of `engine.aggregate`, and what `applyInMemoryAggregation` accepts when it is handed a field map. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+
+**What was accepted before.** The spec's comparison-class verdict (`crossFieldComparisonVerdict`) answers `no-class` for a pair in which either column has no comparison class: a list or an object (a structured-JSON type, a multi-option type, a multi-capable type flagged `multiple: true`), a file field (`FILE_REFERENCE_TYPES`), or a formula. `having` and a per-aggregation `filter` (`aggregations[i].filter`) did not judge that answer. Measured on `SqlDriver` over better-sqlite3 through `engine.aggregate`, beside a `where` twin that `driver-sql` refused `INVALID_FILTER` / 400 each time:
+
+- a per-aggregation `{ customer_id: { $ne: { $field: 'photo' } } }` (text against an image) counted 6 of 6 rows;
+- a per-aggregation `{ closed_at: { $lte: { $field: 'due_f' } } }` (datetime against a formula) counted 0 of 6;
+- a per-aggregation `{ amount: { $ne: { $field: 'tags' } } }` (number against a multiselect) counted 6 of 6 when the column held no value, 0 on an empty table, and was refused by the per-row array check, in other words, when the column held a list;
+- `having: { photo: { $ne: { $field: 'n' } } }` over a groupBy on an image field kept all 6 groups.
+
+A `{ $field, addDays }` pair against a formula was answered at both positions. `applyInMemoryAggregation`, called with a field map, applied none of `engine.aggregate`'s reference rules: a reference to a field the map does not declare, a pair across two classes and a pair against a column with no class were all counted.
+
+**What is refused now.** At `having` and at a per-aggregation `filter`, a scalar comparison (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`) whose `{ $field }` comparand, or whose own column, has no comparison class, with or without `addDays`. The refusal is `INVALID_FILTER` / 400, raised before any driver is asked for a row, on an empty set as on a populated one, in the reason `driver-sql`'s `where` logs for the same pair: the column it names (the referenced one first, as `where` asks it first) "has no scalar stored column a comparison can read". The per-aggregation `filter` withholds the fields, the operator and the reason from the message and writes them to the server log, as `where` does; `having` names the two columns of the query's own projection. A `{ $field, addDays }` pair against a file or list column was already refused, in the `addDays` pair rule's words (that rule reads those types as text, so it answered with a cross-class or an offset sentence); it is now refused in this one.
+
+`applyInMemoryAggregation(rows, ast, timezone, fields, reportWithheld)`, when `fields` is passed, judges each per-aggregation `filter` by the reference rules `engine.aggregate` applies at that position, through the same function, before any row is judged: the referenced column (and an `addDays` offset column) is declared, a pair across two classes or against a column with no class is refused, and an `addDays` pair follows its class rule. The refusal is `INVALID_FILTER` / 400; the withheld diagnostic goes to `reportWithheld`, and it names no object (this function is not told one).
+
+**The remedy.** Compare two columns that each have a comparison class, and the same one: a file field, a list and a formula have no stored scalar a comparison can read. Compare the scalar column the value is derived from, or filter the column with a literal.
+
+**Unchanged.** A reference between two columns of one class answers as before, and the cross-class refusal keeps its words. A side with no declaration is not judged at any of the three positions: a host with no registered object, a column the field map does not carry (`id`, and an audit-opt-out object's row-carried `created_at` / `updated_at`), an aggregation over an undeclared field. A declared type outside `FieldType` is not judged either. `applyInMemoryAggregation` called without `fields` judges nothing it did not judge before.

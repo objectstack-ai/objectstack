@@ -121,12 +121,25 @@
 # board identifier that can be typed is a board identifier that can be typed
 # wrong, and a patrol sweeping the repo it was installed FROM would file a fully
 # green report about the wrong board.
+#
+# ## An empty anchor: loud by default, summary-only by declaration (#20793)
+#
+# An empty `anchor-issue` cannot tell "this board has no anchor" from "this
+# caller lost its variable", and only the second is a lapse, so by default it
+# fails the run. A caller whose board has no anchor BY DECISION says so by name
+# (`anchor-optional: true`) and gets the other reading: a `::notice::`, a
+# passing run, and the findings in the run summary only -- which notifies
+# nobody, the accepted trade of that configuration. ⛔ The opt-in never widens:
+# a non-numeric anchor fails in both modes, and so does a sweep that could not
+# run.
 
 name: Half-state patrol
 description: >-
   Sweep the calling repository's board for half-states and rewrite that
-  repository's pinned anchor issue with the result. Report-only: findings never
-  fail the run, but a sweep that could not run does.
+  repository's pinned anchor issue with the result -- or, for a caller that
+  declares `anchor-optional` and passes no anchor, deliver it to the run summary
+  only. Report-only: findings never fail the run, but a sweep that could not run
+  does.
 
 inputs:
   github-token:
@@ -142,9 +155,24 @@ inputs:
       body this patrol owns end-to-end. An issue number is only ever meaningful
       in the repo it was minted in, so there is no default and no fallback: left
       empty, the run says so loudly and fails rather than guessing a number and
-      rewriting an unrelated card four times a day.
+      rewriting an unrelated card four times a day -- unless the caller has
+      declared `anchor-optional`, below.
     required: false
     default: ''
+  anchor-optional:
+    description: >-
+      `true` declares that an EMPTY `anchor-issue` is this caller's supported
+      configuration: that one case becomes a `::notice::` and a passing run,
+      with the findings delivered to the run summary only. It exists for one
+      consumer, objectui, whose maintainer declined an anchor there (#20793,
+      decision A). The default, `false`, stays LOUD -- an empty anchor fails the
+      run -- because without the declaration an empty value reads the same as a
+      caller that lost its variable, and objectstack's own caller must go red
+      when that happens. It never widens: a non-numeric `anchor-issue` fails
+      either way, and a value other than true or false is refused on every
+      run, pull_request included.
+    required: false
+    default: 'false'
   closed-floor:
     description: >-
       Optional `YYYY-MM-DD` floor for the sweeper's closed-card pass, passed
@@ -169,6 +197,7 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
         GH_TOKEN_IN: ${{ inputs.github-token }}
+        ANCHOR_OPTIONAL_IN: ${{ inputs.anchor-optional }}
       run: |
         set -euo pipefail
 
@@ -200,6 +229,24 @@ runs:
           echo "::error::The 'github-token' input is empty. Pass the calling workflow's own secrets.GITHUB_TOKEN through this input; an unauthenticated sweep cannot read the board and must not be reported as a clean one."
           exit 1
         fi
+
+        # `anchor-optional` is judged HERE, on every event, although only the
+        # anchor steps read it: a pull_request run skips those steps, so a
+        # misspelt opt-in judged there would pass the PR that adds it and first
+        # fail on the scheduled run after. The accepted spellings are the YAML
+        # 1.2 core-schema booleans `core.getBooleanInput` takes; anything else
+        # is refused rather than read as `false`, because a misspelt `true` read
+        # that way goes red with the no-anchor error, which names the wrong
+        # remedy.
+        case "$ANCHOR_OPTIONAL_IN" in
+          true|True|TRUE) anchor_optional=true ;;
+          false|False|FALSE) anchor_optional=false ;;
+          *)
+            echo "::error::The 'anchor-optional' input is '$ANCHOR_OPTIONAL_IN'. It takes true or false: true when this repository's board has no anchor issue by decision, false (the default) otherwise."
+            exit 1
+            ;;
+        esac
+        echo "anchor_optional=$anchor_optional" >> "$GITHUB_OUTPUT"
 
         # The runtime floor travels WITH the sweeper, read from the .nvmrc of
         # the tree this action shipped from. Deliberately not a literal typed
@@ -304,12 +351,26 @@ runs:
       # findings (the same "land the truth, then raise the alarm" order the final
       # step keeps), and skipped on a pull_request run, which never writes an
       # anchor at all.
+      #
+      # The one exception to "loudly" is DECLARED, never inferred: a caller that
+      # passed `anchor-optional: true` gets a `::notice::` and exit 0 on an empty
+      # anchor, and this step publishes `configured` so the write below runs
+      # exactly when delivery was asked for. ⛔ Do not re-derive emptiness in any
+      # other step: a second spelling of it would drift, and the drift that
+      # matters is a run that reports "no anchor" and then PATCHes issue 0.
+      id: anchor
       if: github.event_name != 'pull_request'
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
         ANCHOR_ISSUE: ${{ inputs.anchor-issue }}
+        ANCHOR_OPTIONAL: ${{ steps.sources.outputs.anchor_optional }}
       run: |
+        if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ] && [ "$ANCHOR_OPTIONAL" = true ]; then
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::No anchor issue configured for ${{ github.repository }}, which is a supported configuration for this caller: it declares 'anchor-optional: true' on the half-state-patrol action. The sweep RAN and its rendered body is in this run's summary; nothing was written to any issue, and the missing anchor does not fail this run. To deliver findings to a pinned issue instead, open a \`tracking\`-labeled anchor issue in this repo and pass its number as the 'anchor-issue' input."
+          exit 0
+        fi
         if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ]; then
           echo "::error::No anchor issue configured for ${{ github.repository }}. The sweep RAN (see the run summary) but has nowhere to land. Open a \`tracking\`-labeled anchor issue in this repo and pass its number as the 'anchor-issue' input of the half-state-patrol action."
           exit 1
@@ -317,11 +378,14 @@ runs:
         case "$ANCHOR_ISSUE" in
           *[!0-9]*|'') echo "::error::The 'anchor-issue' input is '$ANCHOR_ISSUE', which is not an issue number."; exit 1 ;;
         esac
+        echo "configured=true" >> "$GITHUB_OUTPUT"
         echo "anchor: #$ANCHOR_ISSUE in ${{ github.repository }}"
 
     - name: Update the pinned anchor issue
-      # A pull_request run proves the sweep; it must not touch the board.
-      if: github.event_name != 'pull_request'
+      # A pull_request run proves the sweep; it must not touch the board. And a
+      # declared anchor-less install has no board write to attempt: the guard
+      # reads the resolve step's OUTPUT rather than testing the input again.
+      if: github.event_name != 'pull_request' && steps.anchor.outputs.configured == 'true'
       uses: actions/github-script@v9
       env:
         SWEEP_EXIT: ${{ steps.sweep.outputs.exit_code }}
@@ -400,6 +464,12 @@ runs:
           echo
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "_Anchor write skipped: a pull_request run proves the sweep without touching the board._"
+            echo
+          elif [ "${{ steps.anchor.outputs.configured }}" = "false" ]; then
+            # ⛔ Only on the EXPLICIT not-configured reading. An empty anchor
+            # without the opt-in, or a non-numeric one, sets no output and fails
+            # the run, and must not be described here as "nothing was asked for".
+            echo "_No anchor issue configured (\`anchor-optional\` is on and \`anchor-issue\` is empty): this summary is the ONLY delivery of the findings below — it notifies nobody, by accepted trade. Pass a \`tracking\` issue's number as \`anchor-issue\` to have them land on a pinned card instead._"
             echo
           fi
           echo '<details><summary>Rendered anchor body</summary>'

@@ -45,7 +45,7 @@ describe('isUniqueViolationError — input shapes', () => {
     });
 
     /**
-     * [#13197] The platform's OWN registered code, on the `code` channel.
+     * [commit 56c093c4d] The platform's OWN registered code, on the `code` channel.
      *
      * Not a dialect and not a heuristic — `UNIQUE_VIOLATION` is the value
      * `error-code-ledger.zod.ts` registers for this exact condition and the one
@@ -74,7 +74,7 @@ describe('isUniqueViolationError — input shapes', () => {
     });
 
     /**
-     * [#13197] The column question is answered `undefined` for that refusal,
+     * [commit 56c093c4d] The column question is answered `undefined` for that refusal,
      * and that is the CORRECT answer rather than a gap: the driver names no
      * column in a dialect spelling this module parses, and inventing one would
      * mean imitating SQLite or Postgres prose. `undefined` is the documented

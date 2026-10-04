@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { FieldSchema } from '@objectstack/spec/data';
+import { renderValidationMessage } from '@objectstack/spec/system';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
 
 /**
@@ -51,7 +52,7 @@ describe('validateRecord — required + autonumber exemption', () => {
 describe('validateRecord — time field accepts time-of-day', () => {
   const schema = { fields: { at: { type: 'time' } } };
 
-  for (const v of ['14:30', '09:05:30', '23:59', '00:00:00', '14:30:00Z', '14:30:00.500', '08:15:00+02:00']) {
+  for (const v of ['14:30', '09:05:30', '23:59', '00:00:00', '14:30:00.500']) {
     it(`accepts ${v}`, () => {
       expect(() => validateRecord(schema, { at: v }, 'insert')).not.toThrow();
     });
@@ -60,6 +61,24 @@ describe('validateRecord — time field accepts time-of-day', () => {
   it('accepts a full ISO datetime for a time field (lenient)', () => {
     expect(() => validateRecord(schema, { at: '2026-06-17T14:30:00Z' }, 'insert')).not.toThrow();
   });
+
+  // [#20671] A time field is a zone-less wall clock. These two were accepted
+  // here before, and were stored verbatim on memory and SQLite and as
+  // `14:30:00` / `08:15:00` on PostgreSQL. Refused now with `invalid_time`, in
+  // the sentence that says to drop the suffix or use a datetime field.
+  for (const v of ['14:30:00Z', '08:15:00+02:00']) {
+    it(`rejects the zone-suffixed ${v} with invalid_time and the zone sentence`, () => {
+      let err: ValidationError | undefined;
+      try {
+        validateRecord(schema, { at: v }, 'insert');
+      } catch (e) {
+        err = e as ValidationError;
+      }
+      expect(err, v).toBeInstanceOf(ValidationError);
+      expect(err!.fields.map((f) => [f.field, f.code])).toEqual([['at', 'invalid_time']]);
+      expect(err!.fields[0]!.message).toBe(renderValidationMessage({ messageKey: 'invalid_time_zoned', label: 'at', field: 'at' }));
+    });
+  }
 
   for (const v of ['25:00', '14:60', 'not-a-time', '14']) {
     it(`rejects ${v}`, () => {
@@ -1339,5 +1358,84 @@ describe('validateRecord — `currency` is outside the max_scale enforced set (#
       code: 'max_scale',
       constraint: { scale: 4, actual: 5 },
     });
+  });
+});
+
+/**
+ * [#20846] A `date` / `datetime` value the kind's rule reads, whose year falls
+ * outside the kind's supported years, is refused with the SAME wire code as
+ * before — `invalid_date`, constraint `{ type }` and nothing more — and a
+ * sentence that names the years. "Must be a valid datetime (ISO-8601)" was
+ * false for `0500-07-15T10:00:00Z`, which is valid ISO 8601: the year is what
+ * is refused. A value that is not readable keeps the ISO sentence (the
+ * CONTROL), and so does a readable value inside the years that is refused for
+ * its spelling.
+ */
+describe('[#20846] validateRecord — a readable date / datetime outside its years names the years', () => {
+  const schema = { fields: { due: { type: 'date', label: 'Due' }, at: { type: 'datetime', label: 'At' } } };
+  const refusal = (data: Record<string, unknown>, messages?: { locale: string }) => {
+    try {
+      validateRecord(schema, data, 'insert', messages ? { messages } : undefined);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      const fields = (e as ValidationError).fields;
+      expect(fields).toHaveLength(1);
+      return fields[0];
+    }
+    throw new Error('expected a ValidationError');
+  };
+  const DATETIME_RANGE = 'At must be a datetime whose UTC year falls in the years 1000 to 9999';
+  const DATE_RANGE = 'Due must be a date in the years 0001 to 9999';
+
+  it.each([
+    ['a datetime in year 500', { at: '0500-07-15T10:00:00Z' }, 'datetime', DATETIME_RANGE],
+    ['a datetime in year 0', { at: '0000-06-15T10:00:00.000Z' }, 'datetime', DATETIME_RANGE],
+    ['a datetime in 9999 in its zone, 10000 in UTC', { at: '9999-12-31T23:59:59-01:00' }, 'datetime', DATETIME_RANGE],
+    ['a datetime in 1000 in its zone, 999 in UTC', { at: '1000-01-01T00:00:00+08:00' }, 'datetime', DATETIME_RANGE],
+    ['a datetime in year 10000, the extended ISO string', { at: '+010000-01-01T00:00:00.000Z' }, 'datetime', DATETIME_RANGE],
+    ['a Date in year 500', { at: new Date(Date.parse('0500-07-15T10:00:00Z')) }, 'datetime', DATETIME_RANGE],
+    ['a date in year 10000, the extended ISO string', { due: '+010000-01-01T00:00:00.000Z' }, 'date', DATE_RANGE],
+    ['a date in year 10000, the extended ISO day', { due: '+010000-01-01' }, 'date', DATE_RANGE],
+    ['a date in year 0, a bare day', { due: '0000-06-15' }, 'date', DATE_RANGE],
+    ['a date in year -1', { due: '-000001-01-01T00:00:00.000Z' }, 'date', DATE_RANGE],
+  ] as const)('%s: invalid_date, constraint { type } only, and the range sentence', (_name, data, type, message) => {
+    const f = refusal(data as Record<string, unknown>);
+    expect(f.code).toBe('invalid_date');
+    expect(f.constraint).toEqual({ type });
+    expect(f.message).toBe(message);
+  });
+
+  it('CONTROL — a value that is not readable, or a number, keeps the ISO sentence', () => {
+    // Epoch milliseconds in year 10000: never a written value, whatever its year.
+    const y10000 = Date.parse('+010000-01-01T00:00:00.000Z');
+    for (const [data, sentence] of [
+      [{ at: 'not-a-date' }, 'At must be a valid datetime (ISO-8601)'],
+      [{ due: 'not-a-date' }, 'Due must be a valid date (ISO-8601)'],
+      [{ at: y10000 }, 'At must be a valid datetime (ISO-8601)'],
+      [{ due: y10000 }, 'Due must be a valid date (ISO-8601)'],
+    ] as const) {
+      const f = refusal(data);
+      expect(f.code, JSON.stringify(data)).toBe('invalid_date');
+      expect(f.message, JSON.stringify(data)).toBe(sentence);
+    }
+  });
+
+  it('CONTROL — a readable value inside the years, refused for its spelling, keeps the ISO sentence', () => {
+    expect(refusal({ at: '2026-02-30T10:00:00Z' }).message).toBe('At must be a valid datetime (ISO-8601)');
+    expect(refusal({ at: '07/15/2026 10:00' }).message).toBe('At must be a valid datetime (ISO-8601)');
+    expect(refusal({ due: '2026/07/15' }).message).toBe('Due must be a valid date (ISO-8601)');
+  });
+
+  it('CONTROL — the years\' edges are written', () => {
+    for (const data of [{ at: '1000-01-01T00:00:00.000Z' }, { at: '9999-12-31T23:59:59.999Z' }, { due: '0001-01-01' }, { due: '9999-12-31' }]) {
+      expect(() => validateRecord(schema, data, 'insert'), JSON.stringify(data)).not.toThrow();
+    }
+  });
+
+  it('names the years in the caller\'s locale', () => {
+    expect(refusal({ at: '0500-07-15T10:00:00Z' }, { locale: 'zh-CN' }).message)
+      .toBe('At必须是 UTC 年份在 1000 年至 9999 年之间的日期时间');
+    expect(refusal({ due: '0000-06-15' }, { locale: 'ja-JP' }).message)
+      .toBe('Dueは 0001 年から 9999 年までの日付を入力してください');
   });
 });

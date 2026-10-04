@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12380] A `Field.json` column round-trips FAITHFULLY — what you wrote is what
+ * [commit 4045b954d] A `Field.json` column round-trips FAITHFULLY — what you wrote is what
  * you read back — on every dialect this driver speaks.
  *
  * ## What was measured, and why the contract decides it
@@ -297,7 +297,7 @@ describe(`[#12380] driver-sql — Field.json round-trips faithfully (${cell.labe
  *
  * This block used to assert that the DDL was UNCHANGED — that a `Field.json`
  * column was still declared `json`, still carried NUMERIC affinity, and that
- * #12380's encoded form survived it. #12738 changed the DDL: the SQLite family
+ * commit 4045b954d's encoded form survived it. #12738 changed the DDL: the SQLite family
  * now declares `text`, so NUMERIC affinity is gone from NEW columns and the
  * exposure is closed at the root rather than encoded around.
  *
@@ -308,7 +308,7 @@ describe(`[#12380] driver-sql — Field.json round-trips faithfully (${cell.labe
  *    so a bare number-like value written by raw SQL is no longer destroyed.
  *  - **§B a LEGACY column** — declared `json` by hand, which is what every
  *    database created before #12738 holds. NUMERIC affinity is still in force
- *    there and #12380's encoding still defeats it. This is the half the #12738
+ *    there and commit 4045b954d's encoding still defeats it. This is the half the #12738
  *    ruling requires to stay green: existing columns keep their declared type,
  *    so the codec that protects them stays load-bearing forever.
  *
@@ -354,7 +354,7 @@ describe('[#12738] SQLite affinity: gone from new columns, still defeated on leg
     async (raw) => {
       const bare = `bare_${raw}`;
       const enc = `enc_${raw}`;
-      // ONE statement, one column, two bindings: the pre-#12380 form and the
+      // ONE statement, one column, two bindings: the form from before commit 4045b954d and the
       // form `formatInput` produces. Bound through raw SQL so nothing but
       // SQLite's own affinity rule can be responsible for the outcome.
       await driver.execute(
@@ -388,7 +388,7 @@ describe('[#12738] SQLite affinity: gone from new columns, still defeated on leg
     expect(rows[0].val).toBe(4200);
   });
 
-  // ─── §B the legacy column — #12380 still in force, and still needed ───────
+  // ─── §B the legacy column — commit 4045b954d's encoding still in force, and still needed ───────
 
   it('[#12738] a LEGACY column is still declared `json` — the fixture is real', async () => {
     expect(await catalogType(driver, cell, LEGACY_T)).toBe('json');
@@ -406,7 +406,7 @@ describe('[#12738] SQLite affinity: gone from new columns, still defeated on leg
       const bareDisk = await diskCell(driver, cell, LEGACY_T, bare);
       const encDisk = await diskCell(driver, cell, LEGACY_T, enc);
       // Unchanged from the pre-#12738 assertion, on purpose: this is the exact
-      // measurement #12380 made, still true, now correctly scoped to the
+      // measurement commit 4045b954d made, still true, now correctly scoped to the
       // columns it is still true OF.
       expect(['integer', 'real'], `bare ${raw} must be eaten by NUMERIC affinity`).toContain(bareDisk.t);
       expect(encDisk.t, `encoded ${raw} must stay TEXT`).toBe('text');

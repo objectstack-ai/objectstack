@@ -122,7 +122,7 @@ describe('createStandaloneStack — the artifact boot serves ONE copy of each se
     const stack = await createStandaloneStack({
       artifactPath,
       projectRoot: dir,
-      databaseUrl: 'memory://issue-12892-fixed',
+      databaseUrl: ':memory:',
       skipSeedData: true,
       runPlatformMigrations: false,
     });
@@ -160,7 +160,7 @@ describe('createStandaloneStack — the artifact boot serves ONE copy of each se
     const stack = await createStandaloneStack({
       artifactPath,
       projectRoot: dir,
-      databaseUrl: 'memory://issue-12892-control',
+      databaseUrl: ':memory:',
       skipSeedData: true,
       runPlatformMigrations: false,
     });

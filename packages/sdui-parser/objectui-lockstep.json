@@ -6,8 +6,8 @@
   ],
   "objectui": {
     "repo": "https://github.com/objectstack-ai/objectui.git",
-    "rev": "f8a9d0fb0596f4521076628e2bbfe27e6ce67d52",
-    "revDate": "2026-09-24T20:41:09+00:00",
+    "rev": "2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6",
+    "revDate": "2026-10-04T07:05:00+00:00",
     "source": "packages/sdui-parser/src",
     "files": [
       "packages/sdui-parser/src/body-dialect.ts",
@@ -15,14 +15,13 @@
       "packages/sdui-parser/src/dashboard-widget-options.ts",
       "packages/sdui-parser/src/index.ts",
       "packages/sdui-parser/src/input-type.ts",
-      "packages/sdui-parser/src/kanban-quick-add.ts",
       "packages/sdui-parser/src/parse.ts",
       "packages/sdui-parser/src/provenance.ts",
       "packages/sdui-parser/src/types.ts",
       "packages/sdui-parser/src/validate.ts"
     ]
   },
-  "recordedAgainstPin": "f8a9d0fb0596f4521076628e2bbfe27e6ce67d52",
+  "recordedAgainstPin": "2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6",
   "grammarRegion": {
     "file": "packages/sdui-parser/src/parse.ts",
     "delimiter": "/* ---------------------- the JS literal subset (#6614) ---------------------- */",
@@ -39,7 +38,6 @@
     "forbidden-attr",
     "forbidden-tag",
     "inert-expression",
-    "inert-quick-add",
     "invalid-enum",
     "member-type-mismatch",
     "mismatched-tag",

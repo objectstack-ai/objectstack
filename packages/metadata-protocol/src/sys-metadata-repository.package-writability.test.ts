@@ -512,11 +512,43 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       // The other side of the false-prescription pin: opening the hatch (on a
       // package-less write) remains a real answer, so the sentence must
       // survive when the hatch is not already set.
+      //
+      // [#20910] MOVED from `permission` to `page`, a type with no ADR-0126
+      // regime row. ADR-0126 §2 is why the two sentences now differ: a Regime C
+      // type's packaged base is "refused loudly at the write door, the refusal
+      // naming the sanctioned path", and for `flow` / `action` / `permission`
+      // that path is the clone or the switch, never the hatch (the pin beside
+      // this one). For every type with no regime row the hatch is still the
+      // answer this limb offers. Measured to reach the SAME limb: `ITEM_LOCKED`,
+      // `lockSource: 'package'`, the named base echoed back.
+      const err = await putWith(repo, {
+        type: 'page', name: 'crm_landing',
+        intent: 'override-artifact', packageId: READ_ONLY_PKG,
+      }) as { message?: string };
+      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG });
+      expect(String(err.message)).toContain('set OS_METADATA_WRITABLE=page');
+    });
+
+    it('[ADR-0126 §2] …while a Regime C type with the hatch CLOSED is told its sanctioned path, not the hatch', async () => {
+      // The pin above, on a type that HAS a regime row: same limb, same
+      // envelope, and the remedy is the row's — `permission`'s is its clone.
       const err = await putWith(repo, {
         type: 'permission', name: 'showcase_contributor',
         intent: 'override-artifact', packageId: READ_ONLY_PKG,
       }) as { message?: string };
-      expect(String(err.message)).toContain('set OS_METADATA_WRITABLE=permission');
+      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG });
+      const message = String(err.message);
+      expect(message.startsWith(
+        `Cannot overlay 'permission' in package '${READ_ONLY_PKG}': that package is read-only, and its packaged base `
+        + 'is locked against in-place edits. ',
+      )).toBe(true);
+      expect(message).toContain(
+        'Clone it under a new name to customize it (the "Clone" action on the permission set, '
+        + 'or POST /api/v1/data/sys_permission_set with a new name).',
+      );
+      expect(message).not.toContain('OS_METADATA_WRITABLE');
+      expect(message).not.toContain('redeploy');
+      expect(message.endsWith('See docs/adr/0126-packaged-metadata-customization-model.md.')).toBe(true);
     });
   });
 
@@ -1203,4 +1235,137 @@ describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
     // The name-less spelling, verbatim: no `job/nightly_sweep` at this seam.
     expect(String(err.message)).toContain(`Cannot create job in package '${READ_ONLY_PKG}'`);
   }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// [#20910, ADR-0126 §2] The repository's two refusals onto a packaged base —
+// the TYPE door and the named-base `ITEM_LOCKED` limb — speak for the type's
+// regime row, with the hatch closed, exactly as the protocol's package door
+// does. Every type with no regime row keeps its sentence byte for byte.
+// ---------------------------------------------------------------------------
+
+describe('[#20910] the repository doors name a Regime C type\'s sanctioned path, from the one regime table', () => {
+  const ADR_0126 = 'See docs/adr/0126-packaged-metadata-customization-model.md.';
+  const ACTION_SWITCH = 'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
+    + ':object = global for an object-less action; operator-only where one install serves several organizations).';
+  const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '
+    + 'or POST /api/v1/data/sys_permission_set with a new name).';
+  const FLOW_PATHS = 'Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, body {name, label}), '
+    + 'or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
+    + 'operator-only where one install serves several organizations).';
+  /** Each Regime C row's prescription, spelled out — never read back from the table under test. */
+  const PATHS: ReadonlyArray<readonly [MetaRef['type'], string]> = [
+    ['flow', FLOW_PATHS], ['action', ACTION_SWITCH], ['permission', PERMISSION_CLONE],
+  ];
+
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let repo: SysMetadataRepository;
+
+  beforeEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+    engine = makeFakeEngine();
+    repo = new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' });
+  });
+
+  afterEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  });
+
+  // ── the type door (a package-less write, hatch closed) ────────────────
+
+  for (const [type, paths] of PATHS) {
+    it(`type door, save: a packaged ${type} is refused NOT_OVERRIDABLE with its row's path, no hatch`, async () => {
+      const err = await putWith(repo, { type, name: `pkg_${type}`, intent: 'override-artifact' }) as any;
+      expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      expect(String(err.message)).toBe(
+        `Metadata item '${type}/pkg_${type}' is provided by a code package, and its packaged base is locked `
+        + `against in-place edits. ${paths} ${ADR_0126}`,
+      );
+      expect(Array.from(engine.rows.values())).toEqual([]);
+    });
+  }
+
+  for (const [type, paths] of PATHS.filter(([t]) => t !== 'permission')) {
+    // `permission` merges its overlay at read (`supportsOverlay`), so its
+    // removal is the #6960 carve-out and never reaches this door.
+    it(`type door, delete: a packaged ${type}'s removal is refused with its row's path too`, async () => {
+      const err = await repo
+        .delete({ org: 'env', type, name: `pkg_${type}` }, { parentVersion: 'sha256:whatever', actor: null, intent: 'override-artifact' })
+        .then(() => null, (e: unknown) => e) as any;
+      expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      expect(String(err.message)).toBe(
+        `Metadata item '${type}/pkg_${type}' is provided by a code package, and its packaged base is locked `
+        + `against removal. ${paths} ${ADR_0126}`,
+      );
+    });
+  }
+
+  it('type door, control: a type with no regime row keeps the overlay-allowed list and the hatch, byte for byte', async () => {
+    const err = await putWith(repo, { type: 'object', name: 'showcase_task', intent: 'override-artifact' }) as any;
+    expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(String(err.message)).toBe(
+      "'object' is not allowOrgOverride in the registry. "
+      + 'Overlay-allowed: view, dashboard, report, translation, email_template. '
+      + 'Set OS_METADATA_WRITABLE to enable additional types at runtime.',
+    );
+  });
+
+  it('type door: the hatch still opens a Regime C type exactly as before (NARROW untouched)', async () => {
+    process.env.OS_METADATA_WRITABLE = 'action';
+    resetEnvWritableMetadataTypes();
+    const err = await putWith(repo, { type: 'action', name: 'pkg_action', intent: 'override-artifact' });
+    expect(err).toBeNull();
+    const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
+    expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
+  });
+
+  // ── the named-base ITEM_LOCKED limb (a read-only base named, hatch closed) ──
+
+  for (const [type, paths] of PATHS) {
+    it(`named base, hatch CLOSED: a ${type} answers ITEM_LOCKED with its row's path, envelope unchanged`, async () => {
+      const err = await putWith(repo, { type, name: `pkg_${type}`, intent: 'override-artifact', packageId: READ_ONLY_PKG }) as any;
+      expect(err).toMatchObject({
+        code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG,
+        docs: 'docs/adr/0010-metadata-protection-model.md',
+      });
+      expect(String(err.message)).toBe(
+        `Cannot overlay '${type}' in package '${READ_ONLY_PKG}': that package is read-only, and its packaged base `
+        + `is locked against in-place edits. ${paths} ${ADR_0126}`,
+      );
+    });
+  }
+
+  it('named base, hatch OPEN: a Regime C type keeps the hatch-open remedy byte for byte', async () => {
+    process.env.OS_METADATA_WRITABLE = 'flow';
+    resetEnvWritableMetadataTypes();
+    const err = await putWith(repo, { type: 'flow', name: 'pkg_flow', intent: 'override-artifact', packageId: READ_ONLY_PKG }) as any;
+    expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG });
+    expect(String(err.message)).toBe(
+      `Cannot overlay 'flow' in package '${READ_ONLY_PKG}': that package is read-only `
+      + '(provided by code or an installed app) and the type has no per-org overlay channel '
+      + '(allowOrgOverride=false), so this item is locked against runtime edits. '
+      + 'OS_METADATA_WRITABLE=flow is set, and it does not apply here: the hatch unlocks the '
+      + "metadata TYPE (treating it as allowOrgOverride), never a package's writability. "
+      + "Retry without '?package=' to land the env-wide / per-org overlay the hatch does grant, "
+      + 'or edit the source artifact and redeploy. See docs/adr/0010-metadata-protection-model.md.',
+    );
+  });
+
+  it('every Regime C row arrives whole through the REST door\'s 500-character bound with a long package id', () => {
+    // `truncateClientMessage` (packages/rest/src/error-response.ts) keeps a
+    // message only while it is SHORTER than 500 characters. 64 characters is
+    // longer than any package id this repository ships (the longest,
+    // `com.objectstack.platform-objects.activation-ledger`, is 50).
+    const longPkg = `com.example.${'x'.repeat(52)}`;
+    expect(longPkg).toHaveLength(64);
+    for (const [type] of PATHS) {
+      const message = String(SysMetadataRepository.readOnlyBaseOverrideError(type, longPkg, false).message);
+      expect(message.length, type).toBeLessThan(500);
+      expect(message.endsWith(ADR_0126), type).toBe(true);
+    }
+  });
 });

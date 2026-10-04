@@ -307,20 +307,36 @@ const BaseNavItemSchema = z.object({
    * Display label — OPTIONAL since the cloud#2021 / objectui#9868 letter-A
    * ruling, and optional in the ACCEPT sense only: an entry still shows text.
    *
-   * Absent ⇒ the entry inherits, **at render time**, the CURRENT label of what
-   * it opens — the view's label when it names a view and that view is labelled,
-   * else the object's / dashboard's label. Present ⇒ rendered verbatim, never
-   * overwritten. Nothing is stored for the absent case: there is no `inherited`
-   * flag and no materialised copy, which is what makes a renamed target show
-   * its new name on the next render rather than a stale snapshot.
+   * Resolved in ONE order, keyed by the entry's identity:
+   *  1. the bundle entry `apps.<app>.navigation.<id>.label` for the active
+   *     locale chain — applied at the `/meta` boundary by `translateApp`
+   *     (`system/i18n-resolver.ts`), the one place this step runs, over the
+   *     app's `navigation` tree (it does not walk `areas`);
+   *  2. else a present label, the author's source text: its inline locale
+   *     map's value for that locale, else the text as authored;
+   *  3. else (absent) the CURRENT label of what the entry opens, **at render
+   *     time** — the view's label when it names a view and that view is
+   *     labelled, else the object's / dashboard's label — localized by the
+   *     target's own translation.
+   *
+   * A present label is never replaced by its target's label and never
+   * translated by matching its text (pinned in
+   * `system/i18n-resolver.nav-label-identity.test.ts`). Nothing is stored for
+   * the absent case: there is no `inherited` flag and no materialised copy,
+   * which is what makes a renamed target show its new name on the next render
+   * rather than a stale snapshot.
    *
    * The rule this relaxes — *every real destination must have identity and
    * text* — still holds: identity is the target, text is inherited at render.
    */
   label: I18nLabelSchema.optional().describe(
-    'Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render '
-    + "time — the view's label when it names a view and that view is labelled, else the object's / dashboard's "
-    + 'label; a present label renders verbatim and is never overwritten. Every real destination must have identity '
+    'Display proper label. Optional. Resolved in one order: (1) the bundle entry '
+    + "`apps.<app>.navigation.<id>.label` for the active locale chain, keyed by this entry's `id` — `translateApp` "
+    + "applies it at the `/meta` boundary, over the app's `navigation` tree (not `areas`); (2) else a present label "
+    + "as authored — its inline locale map's value for that locale, else its text; (3) else (absent) the CURRENT "
+    + "label of what the entry opens, at render time — the view's label when it names a labelled view, else the "
+    + "object's / dashboard's label — localized by the target's own translation. A present label is never replaced "
+    + "by its target's label and never translated by matching its text. Every real destination must have identity "
     + 'and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is '
     + 'materialised for the absent case.',
   ),

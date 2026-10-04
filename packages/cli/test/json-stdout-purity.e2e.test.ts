@@ -2,7 +2,7 @@
 
 /**
  * `--json` ⇒ stdout is EXACTLY ONE JSON DOCUMENT, for the whole
- * `bootSchemaStack` family (#6217).
+ * `bootSchemaStack` family (commit 2b641ddd4).
  *
  * `--json` has one audience — a program — and the commands that boot a kernel
  * were handing that program a stream it could not parse. `ObjectLogger` routes
@@ -91,6 +91,12 @@ const FAMILY: Record<string, string[]> = {
   // diagnostic the failed scan produces is emitted before it.
   'migrate account-issuer': [],
   'migrate apply': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots (plugin-audit's objects registered), reads `sys_audit_log` /
+  // `sys_activity` and writes nothing. Its rewrite runner logs through a sink of
+  // its own, which `--json` points at stderr — a third pollution source beside
+  // the two in the header, so this member is worth driving, not only listing.
+  'migrate audit-metadata-bodies': [],
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],
@@ -98,11 +104,19 @@ const FAMILY: Record<string, string[]> = {
   'migrate recorded-by': [],
   'migrate resume': [],
   'migrate summary-nulls': [],
+  // One object per run, so it needs a name: the fixture's own `jp_ticket`,
+  // which the composed host config registers. No database file exists, so the
+  // face driven here is its empty-work answer for a table not there yet.
+  'migrate unmapped-columns': ['--object', 'jp_ticket'],
   'migrate value-shapes': [],
   // Report-only is its DEFAULT and the only form driven here: without
   // `--delete` it boots, reports and writes nothing, so the family gains a
   // member without this fixture gaining a destructive run.
   'secret orphans': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only and writes nothing, so the family gains a member
+  // without this fixture gaining a run that re-wraps anything.
+  'secret rewrap': [],
   'storage orphans': [],
 };
 

@@ -145,7 +145,7 @@ already executes, and it will still be one.
 | `label` | ✅ | Human-readable display name |
 | `description` | ✅ | The text the **model** reads to decide when to call the tool |
 | `parameters` | ✅ | JSON Schema for the tool input — the model generates arguments conforming to it |
-| `outputSchema` | optional | ⚠️ **Experimental, not enforced.** Its top-level keys are folded into the description shown to the model; outputs are never validated against it |
+| `outputSchema` | optional | ⚠️ **Experimental, not enforced.** Nothing reads it on a tool record. To have a result validated, declare the schema as `ai.outputSchema` on the action instead — the cloud AI runtime checks the action's result against that one and withholds a result that does not conform |
 | `objectName` | optional | The object this tool operates on, when there is exactly one |
 | `protection` | optional | Package-author lock policy ([ADR-0010](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0010-metadata-protection-model.md)) |
 

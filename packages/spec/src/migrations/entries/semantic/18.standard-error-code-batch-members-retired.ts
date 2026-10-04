@@ -17,7 +17,8 @@ export const entry: SemanticMigration = {
     + 'spellings outright: it never fired, because nothing ever emitted them',
   reason:
     'ADR-0049 enforce-or-remove applied to the error vocabulary. No producer has ever '
-    + 'emitted any of the three — measured on #9266: outside the enum declaration the '
+    + 'emitted any of the three — measured when a sweep of the error catalogue found these '
+    + 'three entries publishing no HTTP status: outside the enum declaration the '
     + 'only occurrences in the whole repo were two spec tests using them as arbitrary '
     + 'fixture strings, and `git log -S` shows they never had a producer since ADR-0112 '
     + 'introduced the vocabulary. A catalog member no producer can speak teaches an AI '
@@ -27,8 +28,8 @@ export const entry: SemanticMigration = {
     + '`driver-sql-upsert-cross-row-identity-merge-refused`) this entry is the '
     + 'notification channel. No mechanical rewrite exists: a dead branch has no '
     + 'correct mechanical target — the per-row codes carry strictly more information '
-    + 'than the envelope code the branch expected. Maintainer ruling 2026-08-18: '
-    + '「9266 同意 A」. #9266, ADR-0112, ADR-0049.',
+    + 'than the envelope code the branch expected. Maintainer ruling 2026-08-18: option A, '
+    + 'retire all three from `StandardErrorCode`. ADR-0112, ADR-0049.',
   acceptanceCriteria:
     'No consumer branches on the three retired spellings; batch failure handling reads '
     + 'the per-row `results[].errors[].code` (`ROLLED_BACK` / `NOT_ATTEMPTED`) instead '

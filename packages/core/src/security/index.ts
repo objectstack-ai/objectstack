@@ -38,7 +38,7 @@ export {
 // portable like the signature contract above; consumed by the
 // `os plugin publish` preflight. Unpack-time re-verification is owned by
 // the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-// control plane (#11331).
+// control plane (that leg is unbuilt).
 export {
   verifyIntegrity,
   formatIntegrityViolation,
@@ -47,6 +47,12 @@ export {
   type IntegrityViolationKind,
   type VerifyIntegrityResult,
 } from './plugin-artifact-integrity.js';
+
+// The outbound HTTP signature scheme (`X-Objectstack-Signature`) — one
+// definition shared by the messaging outbox and the flow `http` node's inline
+// arm, which cannot import each other; `@objectstack/service-messaging`
+// re-exports both names unchanged.
+export { HTTP_SIGNATURE_HEADER, signHttpBody } from './http-signature.js';
 
 // `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
 // 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
@@ -76,7 +82,7 @@ export {
   type ResourceUsage,
 } from './sandbox-runtime.js';
 
-// `./security-scanner.js` was RETIRED in #14919 (ADR-0049 enforce-or-remove).
+// `./security-scanner.js` was RETIRED in commit cc00df2f7 (ADR-0049 enforce-or-remove).
 // `PluginSecurityScanner` and its two companion types (`ScanTarget`,
 // `SecurityIssue`) shipped on this barrel and on `@objectstack/core`'s root
 // barrel with zero constructors anywhere in this repo, in objectui at the
@@ -118,7 +124,7 @@ export {
   type TenancyServiceResolver,
 } from './admission-tenancy-posture.js';
 
-// [#13279] The LOUD failure an unreachable permission store raises, and the
+// [commit 6a180e42d] The LOUD failure an unreachable permission store raises, and the
 // brand predicate a fail-closed `catch` uses to re-raise it instead of
 // degrading an outage into a capability denial. Ruled 2026-08-30.
 export {
@@ -137,6 +143,9 @@ export {
   // surface that only knows a user id asks this instead of re-reading
   // `sys_*_permission_set` — the prohibition resolve-authz-context.ts states.
   hasPlatformAdminStanding,
+  // [#20580] The session arm's membership check (#15409 ruling B), so the
+  // permission explainer resolves the user it explains through the same one.
+  vetOrganizationClaim,
   resolveLocalizationContext,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,
@@ -159,7 +168,7 @@ export {
   type ApiExposureSchemaLike,
 } from './effective-object-permissions.js';
 
-// #6216 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
+// Commit f586f1a89 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
 // assembly shared by every transport entry point, with the anonymous face as
 // two NAMED entries (fail-closed default / explicit guest) instead of drift.
 export {
@@ -210,7 +219,7 @@ export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant
 // enforces it and the break-glass guard that simulates a write to it.
 export { isRowActive, type ActivatableRow } from './row-active.js';
 
-// [#8734] The measured read surface of the administrator derivation — the
+// [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.
 export {
   ADMIN_STANDING_SURFACE,

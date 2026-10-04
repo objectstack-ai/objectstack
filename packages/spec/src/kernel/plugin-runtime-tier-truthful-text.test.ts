@@ -50,7 +50,7 @@ const SAYS_LOAD_SIDE_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
  */
 const SAYS_GRANT_REGISTERED_NOT_ENFORCED = /REGISTERED on the PluginPermissionEnforcer at load and queried by\s+nothing/i;
 
-describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
+describe('manifest.runtime trust-tier text is truthful', () => {
   const baseManifest = {
     id: 'com.example.plugin',
     namespace: 'example',
@@ -107,7 +107,7 @@ describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
     ).not.toMatch(/trust tier \(`manifest\.runtime`\) and the permission declarations, which are enforced/);
   });
 
-  it('[#17147] states the PERMISSIONS half truthfully too — the handoff landed', () => {
+  it('states the PERMISSIONS half truthfully too — the handoff landed', () => {
     // The coordination pin this replaces read
     // `expect(message).toContain('the permission declarations, which are enforced')`
     // and existed to go RED the day commit aaacf1d5c corrected the other half of the
@@ -139,7 +139,7 @@ describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
     ).not.toMatch(/permission declarations, which are enforced/);
   });
 
-  it('[#17147] corrects the permissions half in the shipped ADR-0087 D3 entry too', () => {
+  it('corrects the permissions half in the shipped ADR-0087 D3 entry too', () => {
     // Same two-carrier problem the tier half had: the tombstone ships once in
     // the schema and once through this entry into `docs/protocol-upgrade-guide.md`.
     const text = loadingRetiredEntry.replacement;

@@ -32,7 +32,7 @@ export {
     parseXlsxToRows,
 } from './import-prepare.js';
 export type { PreparedImport, PrepareImportResult } from './import-prepare.js';
-export { runImport } from './import-runner.js';
+export { runImport } from '@objectstack/core';
 export type {
     ImportAction,
     ImportRowResult,
@@ -42,14 +42,14 @@ export type {
     ImportProtocolLike,
     ImportProtocolRequest,
     RunImportOptions,
-} from './import-runner.js';
-export { coerceRow } from './import-coerce.js';
-export type { CoerceContext, RefResolver } from './import-coerce.js';
+} from '@objectstack/core';
+export { coerceRow } from '@objectstack/core';
+export type { CoerceContext, RefResolver } from '@objectstack/core';
 export { buildFieldMetaMap } from './export-format.js';
 export type { ExportFieldMeta } from './export-format.js';
 
 // Query-parameter MULTIPLICITY — the repo's ONE rule for a single-valued
-// parameter supplied more than once (#6307 / #6877), published so the doors
+// parameter supplied more than once (commit 293476148 / #6877), published so the doors
 // OUTSIDE this package can answer it with that one implementation instead of a
 // second copy that drifts (#17672). `query-multiplicity.ts`'s header is the
 // authority on the rule; what belongs here is which half travels.
@@ -86,11 +86,85 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // audience prunes, the app nav filter and the dashboard widget gate — over the
 // same ports. The judge answers the pruned ITEMS; each caller rewraps them in
 // its own list envelope.
-export { createMetaItemReadGate, createMetaListReadGate } from './meta-item-read-gate.js';
+//
+// [#20320] …and everything else the two transports' `/meta` reads must answer
+// alike: the list route's whole post-read chain (`createMetaListAnswer` — the
+// `api` served-set face, the list gate, `?id=`, `?object=`, the doc locale
+// collapse and slim, the object mask over the transport's masker, the translation
+// `translateMetaList`), the one locale parse it reads (`metaRequestLocale`),
+// the anonymous gates'
+// `public`-audience predicate (`isPublicAudienceRead`) and the stored-version
+// doors' policy (`STORED_VERSION_DOOR_POLICY`, which `?state=draft` runs).
+//
+// [#20408] …and the item read's and the book tree's: the item route's whole
+// post-read chain (`createMetaItemAnswer` — absence, the item gate, the doc
+// locale collapse, the object mask and its `private, no-store`, and the body
+// `translateMetaEnvelope` builds: the translation and `sortability`), the one
+// projection every object-schema exit applies (`projectMetaObjectSchema`), the
+// `GET /meta/book/:name/tree` answer (`createMetaBookTreeAnswer`), the list's
+// unknown-type refusal (`refuseUnknownMetaListType`) and the organization a
+// caller's `/meta` request is scoped to — the VETTED one on its execution
+// context (`metaCallerOrganizationId`, and `metaReadOrganizationId` for a read
+// of one type).
+//
+// [#20478] …and the layered view's, on both of its spellings: its post-read
+// chain (`createMetaLayeredAnswer` — the per-caller gate on every layer under
+// the stored-version doors' policy, the object mask and its cache posture), the
+// deprecated `?layers=` flag's parse (`wantsMetaItemLayers`) and the headers it
+// is served under (`metaItemLayersDeprecationHeaders`). The read itself is each
+// transport's, scoped by `metaReadOrganizationId`.
+//
+// [#21087] …and the type-level read admission both transports ask at their
+// `/meta` entry, before any store read (`metaTypeReadRefusal` over
+// `META_TYPE_READ_CAPABILITIES`): a datasource-family type is read under the
+// capability its own door requires.
+//
+// [#21124] …and its write-side twin (`metaTypeWriteRefusal` over
+// `META_TYPE_WRITE_CAPABILITIES`), asked at the same two entries before any
+// store write: a datasource definition is written under the capability the
+// datasource admin door requires.
+export {
+    createMetaBookTreeAnswer,
+    createMetaItemAnswer,
+    createMetaItemReadGate,
+    createMetaLayeredAnswer,
+    createMetaListReadGate,
+    createMetaListAnswer,
+    isPublicAudienceRead,
+    META_TYPE_READ_CAPABILITIES,
+    META_TYPE_WRITE_CAPABILITIES,
+    metaCallerOrganizationId,
+    metaItemLayersDeprecationHeaders,
+    metaReadOrganizationId,
+    metaRequestLocale,
+    metaTypeReadRefusal,
+    metaTypeWriteRefusal,
+    projectMetaObjectSchema,
+    refuseUnknownMetaListType,
+    STORED_VERSION_DOOR_POLICY,
+    translateMetaEnvelope,
+    translateMetaList,
+    wantsMetaItemLayers,
+} from './meta-item-read-gate.js';
 export type {
+    MetaBookTreeAnswer,
+    MetaBookTreeSources,
+    MetaItemAnswer,
+    MetaItemAnswerSources,
     MetaItemReadGateSources,
     MetaItemReadRefusal,
     MetaItemReadVerdict,
+    MetaItemRequest,
+    MetaLayeredAnswer,
+    MetaLayeredRequest,
+    MetaListAnswer,
+    MetaListAnswerSources,
+    MetaListRequest,
+    MetaListTranslationSources,
+    MetaPublicReadRoute,
     MetaReadGateCaller,
     MetaReadGatePolicy,
+    MetaRequestHttp,
+    MetaTypeReadRefusal,
+    MetaTypeWriteRefusal,
 } from './meta-item-read-gate.js';

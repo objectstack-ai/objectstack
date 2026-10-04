@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../commands/serve.js';
+import { oneShotSettingsPlugin } from './one-shot-settings.js';
 
 /**
  * The plugins a gated data migration boots with.
@@ -8,7 +9,9 @@ import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../comm
  * Every gated migration needs the `sys_migration` flag ledger (#3617), and
  * that is all most of them need: it is registered by `PlatformObjectsPlugin`
  * — platform infrastructure, present with or without any optional service
- * (#4243). `os migrate value-shapes` boots exactly that.
+ * (#4243). `os migrate value-shapes` boots exactly that, plus the
+ * `MigrationRecoveryPlugin` every data boot carries (#21498). A journal-backed
+ * run started here is resumed by `os migrate resume`, which boots this same set.
  *
  * Only the FILE migration (`os migrate files-to-references`) also needs
  * `sys_file` plus the deployment's REAL storage adapter — it reconciles what
@@ -18,7 +21,10 @@ import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../comm
  *  - Settings first: the storage plugin re-resolves its adapter from
  *    persisted settings when a settings service is present, which is how an
  *    S3-configured deployment's backfill uploads land in S3 rather than on
- *    this machine.
+ *    this machine. [#21471] It is the one-shot composition
+ *    (`./one-shot-settings.ts`): the settings service opens a stored
+ *    credential with the data key this host already has, and never mints
+ *    one in the key home — `os storage orphans` is report-only.
  *  - Storage config through the SAME resolver `os serve` uses
  *    (`resolveStorageCapabilityArg`), fed by the SAME env channel
  *    (`resolveStorageLocalRootEnv`, #4968), so the CLI materialises bytes
@@ -27,11 +33,39 @@ import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../comm
  *    swap the adapter out from under the root the operator named.
  */
 export async function buildDataMigrationPlugins(
-  opts: { storage?: boolean; automation?: boolean } = {},
+  opts: { storage?: boolean; automation?: boolean; audit?: boolean } = {},
 ): Promise<unknown[]> {
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
   plugins.push(new PlatformObjectsPlugin());
+  // [#21498] The `migration-plans` registry (ADR-0119 D2), once per boot. The
+  // plan's owner hands its plan over at `kernel:ready`
+  // (`@objectstack/metadata-protocol` registers
+  // `metadata.recorded-by-sentinel-to-null`), and `os migrate resume` looks it
+  // up once the boot is done. Two processes never share a registry, so the
+  // resume boot needs its own, filled by the plan's owner rather than by the
+  // run being resumed.
+  //
+  // The plugin's journal scan rides along. Its measured effects here: a data
+  // command booted over an interrupted run warns about that run on stderr
+  // before it does anything else. [#21529] A read-only boot of a database that
+  // has no journal table yet is silent: the scan reads the missing table as
+  // "no runs" (`isMissingTableError`, for that table only), and `resume`,
+  // `recorded-by` and `value-shapes` answer such a database with empty work
+  // instead of reading the tables their boot measured absent.
+  const { MigrationRecoveryPlugin } = await import('@objectstack/runtime');
+  plugins.push(new MigrationRecoveryPlugin());
+  if (opts.audit === true) {
+    // [#21120] `os migrate audit-metadata-bodies` reads and rewrites
+    // `sys_audit_log` / `sys_activity` rows, so their schema must be
+    // registered — those objects are plugin-audit's, not platform-objects'.
+    // The plugin's own write hooks exclude both tables (`SKIP_OBJECTS`), so
+    // arming it cannot recurse on the rewrite; nothing else here is armed, the
+    // same "a migration is not a second server" discipline the automation arm
+    // takes above.
+    const { AuditPlugin } = await import('@objectstack/plugin-audit');
+    plugins.push(new AuditPlugin());
+  }
   if (opts.automation === true) {
     // `os migrate meta --stored` needs the automation ENGINE, never the
     // automation RUNTIME (#4454). Flow-node conversions carry ADR-0078's
@@ -50,8 +84,7 @@ export async function buildDataMigrationPlugins(
   }
   if (opts.storage === true) {
     try {
-      const { SettingsServicePlugin } = await import('@objectstack/service-settings');
-      plugins.push(new SettingsServicePlugin({ registerRoutes: false }));
+      plugins.push(await oneShotSettingsPlugin());
     } catch {
       // optional — without it, constructor/env-driven storage config still applies
     }

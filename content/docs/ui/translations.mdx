@@ -74,13 +74,13 @@ export default defineStack({
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
-| Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
+| Dashboard widget title / description (the card-header subtitle) | `dashboards.<name>.widgets.<widgetId>.title` / `description` |
 | Dashboard global-filter label and static option labels | `dashboards.<name>.globalFilters.<filterName>.label` / `.options.<value>` — the key is the filter's `name`, or its `field` when it authors no `name`; an option is keyed by its `value` spelled as a string |
 | Analytics dataset label / description | `datasets.<name>.label` / `description` |
 | Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` — on a `kind: 'slotted'` page the header under `slots.header` is the page's header |
 | Page component copy, by component id | `pages.<name>.components.<id>.title` / `description` / `label` / `placeholder` / `emptyText` — reached under `regions[].components[]` and `slots.<slot>`, through `properties.children` and a `page:tabs` / `page:accordion` panel's `items[].children` |
-| Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
+| Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
@@ -95,13 +95,16 @@ in a zh-CN workspace for every consumer except the Console, which happened to
 re-resolve them client-side against its own copy of the bundle.
 
 <Callout type="info">
-**A widget's `subtitle` alias resolves to `subCaption`, not `description`
-(#5428 item 4, #7862).** The metric widget's sub-caption — the string under
-the number — is the authored `widget.options.description`, a *different*
-authored field from `widget.description` (the copy under the card header).
-Two authored fields get two keys (「两个作者字段两个 key」): `description`
-translates `widget.description`, `subCaption` translates
-`widget.options.description`, and neither reaches the other's field.
+**A widget has one translatable description; the metric sub-caption is
+retired (#21257).** `widget.description` renders as the card-header subtitle
+and is translated by `dashboards.<name>.widgets.<widgetId>.description`.
+The `subCaption` key, which used to overlay a caption under a metric's value
+onto `widget.options.description`, is refused at parse with its prescription,
+and the server no longer writes `options.description`. A `subtitle` entry is
+refused too, naming both readings: card-header copy belongs under
+`description`; a caption under the value has nowhere to render, so delete
+it. `os migrate meta --from 17` lists the `subCaption` entries to delete from
+existing bundles.
 </Callout>
 
 <Callout type="info">
@@ -173,6 +176,33 @@ Two rules keep the declaration honest (#14882, #15711):
 Resolved labels are served straight from the REST metadata endpoints (the
 locale is part of the ETag), so the Console and any SDUI client get translated
 metadata without doing lookups themselves.
+
+### An edit beats the packaged catalog
+
+A package's bundle translates the strings that package shipped, so it applies
+only to a string the served metadata still carries unchanged. Dashboards and
+views are the translated types an organization can edit in place: once an
+org's edit to a packaged dashboard or view is published, the metadata reads
+serve each edited string as written, in every locale. Each string is compared
+with the same string in the item as the package shipped it:
+
+| Packaged type | Strings compared, and how each is matched |
+|:---|:---|
+| Dashboard | its `label` and `description`; each widget's `title` and `description`, matched by widget `id`; each global filter's `label` and static option labels, matched by the filter key and the option `value` |
+| View | its `label` and `description`; each bulk action's `label`, `confirmText` and `confirmLabel`, and each of its params' `label`, `help` and `placeholder`, matched by `name` |
+
+- **Only the edited strings move.** A widget the org left alone on an edited
+  dashboard, or a view nobody edited, is still translated.
+- **A widget, global filter or bulk action the package never shipped counts as
+  edited**: the org authored it, so its text is served as written.
+- **An edited string is served in the language it was written in, to every
+  reader.** The bundle entry for that string no longer applies to it.
+- **Resetting the overlay restores the shipped string and its translation.**
+
+Objects follow the same rule for their `label`, `pluralLabel` and
+`description`: a value that differs from the owning package's declaration (a
+label an [object extension](/docs/data-modeling/object-extensions) contributes,
+for one) is served as written.
 
 ## Organizing the files
 
@@ -352,15 +382,16 @@ Honest limits worth knowing before you plan around them:
   by rule name alone and so could not tell two objects' rules apart; the route
   above is object-scoped and shipped with its reader. ADR-0049's 2026-09-04
   amendment carries that record.
-- **The `flows` group is declared, not yet applied.** A screen flow's copy has
+- **The `flows` group is only partly applied.** A screen flow's copy has
   somewhere to live (#7646) and the keys are addressed the way the runner
-  resolves them — flow name, screen node id, screen field name — but no shipped
-  screen-flow runner reads the group yet, so a wizard still renders the strings
-  authored on the flow. The liveness ledger carries it as `planned` and the
-  compile lint warns when you author it. Two related limits are deliberate: a
-  screen field has no help text to translate (it declares none), and the
-  runner's own chrome — the Cancel and Submit buttons — belongs to the
-  console's message catalog rather than your app's bundle.
+  resolves them — flow name, screen node id, screen field name. The console's
+  screen-flow runner reads `screens`: each screen's `title` and each field's
+  `label`, `placeholder` and `inlineHelpText` render in the active locale. The
+  flow's own `label` is read by nothing yet, so the liveness ledger carries the
+  group as `planned` and the compile lint warns when you author it. The runner's
+  own chrome — the Cancel and Submit buttons — is deliberately outside the
+  group: it belongs to the console's message catalog rather than your app's
+  bundle.
 
   **So the tooling does not ask you for these keys either.** `os lint` does not
   report `flows.*` as missing translations, and `os i18n extract` does not

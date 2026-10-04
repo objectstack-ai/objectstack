@@ -48,6 +48,7 @@ type FormEntry = {
   field?: string;
   widget?: string;
   type?: string;
+  language?: string;
   helpText?: string;
   visibleWhen?: string | { dialect?: string; source?: string };
   fields?: FormEntry[];
@@ -166,5 +167,38 @@ describe('declared keys that now have a form row (#19085)', () => {
     // door with no example is the Source tab wearing a label.
     expect(row.helpText).toContain('"type"');
     expect(row.helpText).toContain('"name"');
+  });
+});
+
+/**
+ * **A `type: 'code'` row's `language` must name the slot it actually edits**
+ * (#20439).
+ *
+ * `hook.form.ts`'s `condition` row declared `language: 'javascript'` over
+ * `HookSchema.condition`, which is `EvaluatedExpressionInputSchema` — a CEL
+ * predicate, not a script. Every sibling predicate row (`field.form.ts` /
+ * `object.form.ts`'s `visibleWhen` / `readonlyWhen` / `requiredWhen`, and the
+ * formula `expression` row) already declares `language: 'expression'`; a
+ * consumer keyed on the declared language (objectui#10963's `CodeWidget`
+ * fix) cannot otherwise tell this row apart from a real script row
+ * (`body.source`, `action.source`, both genuinely `'javascript'`).
+ */
+describe('hook.condition declares the CEL predicate language it edits (#20439)', () => {
+  it('hook.condition is a `code` row declaring language: expression, not javascript', () => {
+    const [row, ...extra] = rowFor('hook', 'condition');
+    expect(row, '`condition` is declared by HookSchema; the hook form must offer it').toBeDefined();
+    expect(extra, 'one row only').toEqual([]);
+    expect(row.type).toBe('code');
+    expect(row.language).toBe('expression');
+  });
+
+  it('CONTROL: a sibling predicate row (field.visibleWhen) also declares expression', () => {
+    // Proves the assertion above actually discriminates: run the identical
+    // probe against a row known to already be correct, so a helper that
+    // stopped reading `language` at all would fail here rather than passing
+    // hook.condition vacuously.
+    const [row] = rowFor('field', 'visibleWhen');
+    expect(row.type).toBe('code');
+    expect(row.language).toBe('expression');
   });
 });

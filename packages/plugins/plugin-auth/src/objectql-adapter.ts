@@ -59,7 +59,7 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0135 D6 / ADR-0134.
   ssoProvider: 'sys_sso_provider',
   // (rc.1's one scim model, `scimProvider` → `sys_scim_provider`, retired
-  // under #11757: stable 1.7.x no longer derives that model.)
+  // under commit 4d25d22d4: stable 1.7.x no longer derives that model.)
   // The stable @better-auth/scim 1.7.x model set (#3653). Verified against the
   // installed 1.7.1: `SCIMOptions` still declares no `schema` / `modelName` /
   // `fields` member, so the adapter bridge remains scim's ONLY naming route.
@@ -397,7 +397,7 @@ function convertWhere(model: string, where: CleanedWhere[]): Record<string, any>
           `(operator '${operator}', better-auth \`Where.mode: 'insensitive'\`), but ` +
           `'${model}.${fieldName}' is not a normalised identifier field — the query is ` +
           `being answered CASE-SENSITIVELY, so a differently-cased value will not match. ` +
-          `ObjectQL has no case-insensitive equality operator (#5814 deferred \`$ieq\` ` +
+          `ObjectQL has no case-insensitive equality operator (\`$ieq\` is deliberately deferred ` +
           `until there is demonstrated pull for it). Normalised identifier fields: ` +
           `${Object.entries(NORMALISED_IDENTIFIER_FIELDS)
             .map(([m, fs]) => fs.map((f) => `${m}.${f}`).join(', '))
@@ -489,7 +489,7 @@ function convertWhere(model: string, where: CleanedWhere[]): Record<string, any>
             `Translate it to an ObjectQL operator in convertWhere() ` +
             `(packages/plugins/plugin-auth/src/objectql-adapter.ts) — refusing ` +
             `the query rather than dropping the predicate, which would widen ` +
-            `the result set instead of narrowing it (#5813).`,
+            `the result set instead of narrowing it.`,
         );
       }
     }
@@ -893,10 +893,6 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
         if (await hideRevokedSessionRow(objectName, result)) return null;
         if (revokedAtIsBorrowed) delete (result as Record<string, unknown>).revoked_at;
-        // [#8009] Read half — MANDATORY. `/sso/callback` reads the provider back
-        // and authenticates to the IdP with the plaintext; encrypt-on-write
-        // without this breaks every federated login.
-        await injectClientSecretOnRead(secretEngine, objectName, result);
         // [#7823, #7987] Session and account rows come back missing their
         // credential columns off the engine's generic read path
         // (`internal: true`); better-auth reads `session.token` back off this
@@ -905,12 +901,21 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // and refresh OAuth tokens. Re-attach them through the privileged
         // accessor. The projection guard uses the CALLER's select, not the
         // tombstone-borrowed one above.
+        //
+        // [#21197] FIRST, before the client-secret injection below: that
+        // injection parses `sys_sso_provider.oidc_config` off this row, and
+        // the blob is itself `internal` now — injecting into a row the strip
+        // emptied would find nothing to inject into.
         await reattachInternalFieldsOnRead(
           internalFieldEngine,
           objectName,
           result,
           bridged && select ? select.map(camelToSnake) : select,
         );
+        // [#8009] Read half — MANDATORY. `/sso/callback` reads the provider back
+        // and authenticates to the IdP with the plaintext; encrypt-on-write
+        // without this breaks every federated login.
+        await injectClientSecretOnRead(secretEngine, objectName, result);
         // [#18728] Ruling C's producer half: `sys_organization.metadata` is a
         // text column holding JSON, and better-auth decodes it on its two
         // write echoes only. Decode it here so all four READ routes
@@ -946,9 +951,6 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         });
         // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
         const results = await filterRevokedSessionRows(objectName, found);
-        // [#8009] Same read half, per row — better-auth reaches the provider
-        // through findMany as well as findOne.
-        for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
         // [#7823, #7987] Same readback, batched over the whole result. This is
         // the read `revoke-other-sessions` filters by `session.token`, where a
         // token-less row set made it answer `200 {status:true}` while revoking
@@ -956,8 +958,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // `internalAdapter.findAccounts(userId)` issues, which feeds every
         // OAuth token-exchange route. One privileged read serves the page per
         // column (#8118's batch shape); this verb has no projection, so no
-        // guard is needed.
+        // guard is needed. [#21197] Before the injection below, for the same
+        // ordering reason as `findOne`.
         await reattachInternalFieldsOnRead(internalFieldEngine, objectName, results);
+        // [#8009] Same read half, per row — better-auth reaches the provider
+        // through findMany as well as findOne.
+        for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
 
         return results.map((r) => {
           // [#18728] Same producer half as `findOne` above — an organization
@@ -1092,6 +1098,13 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
 
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return null;
+        // [#21197] The consumed row is handed BACK to better-auth, which reads
+        // its credential column off it — reset-password takes the user id from
+        // `verification.value` of exactly this row — so it is re-attached
+        // like every other read this adapter returns. Before the delete: the
+        // privileged accessor reads the stored row, and after the delete
+        // there is none.
+        await reattachInternalFieldsOnRead(internalFieldEngine, objectName, record);
         await dataEngine.delete(objectName, { where: { id: record.id } });
         const norm = normaliseLegacyDates(model, record);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;

@@ -178,14 +178,105 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'tsconfig.json'
               - '.github/workflows/ci.yml'
+              # BUILD INPUTS outside every package (#21202): turbo.json itself,
+              # its `globalDependencies`, and each `$TURBO_ROOT$/…` input of a
+              # build task Build Core's `pnpm build` runs. A diff confined to
+              # one of them moves the build hashes it reaches, and before these
+              # entries it matched nothing here, so Build Core skipped and the
+              # merge queue ran that build first (PR #21199, turbo.json only).
+              # Every core-gated job starts on such a diff, not Build Core
+              # alone: each one builds, and turbo re-runs every task downstream
+              # of a moved build hash.
+              #
+              # scripts/check-ci-filter-parity.mjs DERIVES the required set from
+              # turbo.json and the root `build` script, and reds while a declared
+              # build input is uncovered here, or while a literal entry beside
+              # them covers none of them and none of Build Core's guards below
+              # (a leftover). `tsconfig.json` and the
+              # `packages/cli/...` input are covered by the entries above;
+              # `@objectstack/docs#build` (its input is `content/**`) is the
+              # docs filter's, since `pnpm build` excludes that package.
+              #
+              # WIDTH: literal files, not `scripts/**`. Over the 3288
+              # first-parent commits of `main` in the 30 days to `1371dc980c`,
+              # through picomatch 2.3.1 and 4.0.5 (they agree on every row),
+              # `core` matched 2247; these entries add 28, `scripts/**` with
+              # turbo.json and tsup.config.ts would add 593, 516 of them diffs
+              # touching a `scripts/pm/` tool or a `scripts/check-*` gate.
+              - 'turbo.json'
+              - 'tsup.config.ts'
+              - 'scripts/build-input-hash.mjs'
+              - 'scripts/check-dev-prereqs.mjs'
+              - 'scripts/check-dts-emitted.mjs'
+              - 'scripts/check-dts-references.mjs'
+              - 'scripts/check-regen-pending.mjs'
+              - 'scripts/cli-build-prerequisite.mjs'
+              - 'scripts/git-env.mjs'
+              - 'scripts/import-prerequisite.mjs'
+              - 'scripts/invoked-as.mjs'
+              - 'scripts/js-comment-mask.mjs'
+              - 'scripts/regen-artifacts.mjs'
+              - 'scripts/sync-scaffold-emission-policy.mjs'
+              - 'scripts/sync-template-versions.mjs'
+              - 'scripts/ts-parse.mjs'
+              - 'scripts/tsup-drop-sources-content.mjs'
+              - 'scripts/workspace-enumerator.mjs'
+              # BUILD CORE'S GUARDS (#21341): every repository script the
+              # build-core job's own steps run (named by a `run:` step or
+              # reached through its `pnpm check:*` alias) and each one's
+              # first-party imports. Build Core is the only job that runs
+              # them, so before these rows a diff confined to one started no
+              # Build Core and the changed guard ran nowhere before the merge
+              # queue (PR #17100 changed only check-lean-entry-closure.mjs;
+              # Build Core skipped). A change to the guard runs the guard, as
+              # the `console:` filter below already does for its own.
+              #
+              # Not a hand-kept list: scripts/check-ci-filter-parity.mjs
+              # DERIVES the set from the job's steps and reds while a script a
+              # step runs is uncovered here, or while a literal row covers
+              # neither a build input nor such a script (a leftover of a
+              # deleted step). Scripts that are also build inputs
+              # (check-dts-emitted.mjs and the helpers the guards import) are
+              # covered by the rows above and are not repeated.
+              # population-floor.mjs is here because check-dual-build-cjs-
+              # loads.mjs imports it.
+              #
+              # WIDTH: over the 3287 first-parent commits of `main` in the 30
+              # days to `96b12b589f`, through picomatch 2.3.1 and 4.0.5 (they
+              # agree on every row), `core` matched 2276; these rows add 2.
+              - 'scripts/check-dts-closure.mjs'
+              - 'scripts/check-dual-build-cjs-loads.mjs'
+              - 'scripts/check-lean-entry-closure.mjs'
+              - 'scripts/check-sourcemap-no-sources-content.mjs'
+              - 'scripts/population-floor.mjs'
             # Build inputs of the vendored Console SPA — see the Console Pin Gate
             # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
             # it matches neither filter above: a pin-only diff skipped `core` and
             # `docs` alike, which is how #4288 moved the pin 76 commits with six of
             # fourteen checks skipped and nothing anywhere building the new SHA.
-            # The last two entries are the "a change to the guard runs the guard"
-            # rule the repo applies to every other filtered gate; they are close to
-            # free here because an unmoved pin hits the dist cache.
+            #
+            # Every entry is one of two kinds, and scripts/check-ci-filter-parity.mjs
+            # holds each one to its kind (#20765):
+            #   - a BUILD INPUT: something the console build reads to produce the
+            #     cached dist or the injection stamp inside it. Each one is ALSO
+            #     hashed into the `console-pin` job's dist-cache key. A head that
+            #     selects the job by moving a build input and then restores the old
+            #     dist from cache runs the gate without judging the change, because
+            #     the build-time assertion lives inside the build step a hit skips.
+            #   - a GUARD: code every run executes, cache hit or miss (the two check
+            #     scripts, this workflow). That is the "a change to the guard runs the
+            #     guard" rule the repo applies to every other filtered gate, and it is
+            #     close to free here because an unmoved key hits the dist cache.
+            # The two packages/spec entries are the spec's ENTRY LAYOUT: the exports
+            # map that objectui's OBJECTSTACK_SPEC_DIST hook and the probe derivation
+            # both resolve entry by entry, and the tsup entry list that decides which
+            # built file each entry points at. A head that moves them runs this gate
+            # before it enqueues. #20695 moved the migration registries to a new
+            # entry, skipped this job on every push, and went red first in the merge
+            # queue, where a check outside the required set cannot stop a merge.
+            # ⛔ Not packages/spec/**: the rest of the spec is bundled CONTENT, and
+            # its lag behind a cached dist is the ruled cache design (#9667, #9706;
+            # see scripts/check-console-injection.mjs).
             console:
               - '.objectui-sha'
               - 'scripts/build-console.sh'
@@ -193,6 +284,8 @@ jobs:
               - 'scripts/check-console-injection.mjs'
               - 'scripts/console-spec-probes.mjs'
               - 'scripts/assert-console-spec-injection.mjs'
+              - 'packages/spec/package.json'
+              - 'packages/spec/tsup.config.ts'
               - '.github/workflows/ci.yml'
             # Test inputs that live OUTSIDE every package (#9829, #10015). Packages
             # whose suites read across their own boundary declare that radius in
@@ -556,14 +649,19 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
-      # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN A RUN THAT
-      # CARRIES NO PASSTHROUGH, so that the sharded run in the next step can be
-      # `--only` (#16395).
+      # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN ITS OWN
+      # GUARDED STEP, so the slice leg in the next step REPLAYS it. Since #19278
+      # that leg carries its slice in `OS_TEST_SHARD`, which only the `test`
+      # task declares, so its build tasks hash exactly as they do here (61 of 61
+      # identical, measured) and it schedules its own closure: this step is no
+      # longer what makes the leg correct, only what keeps the closure build off
+      # the test step's stall-guard site (see the last paragraph below).
       #
-      # Turbo folds a run-level passthrough into the hash of EVERY task in the
-      # run, not only the task that receives it -- and `-- "--shard=k/n"` is the
-      # whole reason a slice gets its own invocation at all (the next step's
-      # comment says why it cannot ride the shared run). Measured on turbo
+      # Why the step first existed (#16395, when the slice was still a
+      # passthrough and the leg was `--only`): turbo folds a run-level
+      # passthrough into the hash of EVERY task in the run, not only the task
+      # that receives it -- and `-- "--shard=k/n"` was then the whole reason a
+      # slice got its own invocation at all. Measured on turbo
       # 2.10.10, `--filter=@objectstack/cli`, `turbo run test ... --dry=json`
       # (60 tasks: 59 `build` + 1 `test`):
       #
@@ -677,12 +775,15 @@ jobs:
 
           # Split the shard's ITEMS into the whole packages, which share one
           # turbo run as they always have, and the file-level slices, which
-          # cannot: `--shard=k/n` is passed through to vitest by turbo as a
-          # RUN-level argument, so it would reach every package in the run —
-          # and on any package with fewer test files than n that is a hard
-          # vitest failure (or, with --passWithNoTests, silently no tests at
-          # all). A slice therefore gets its own invocation, filtered to the one
-          # package the partitioner sliced.
+          # cannot: a slice's `k/n` travels as `OS_TEST_SHARD` in the turbo
+          # run's environment, and a run has ONE environment — set on the
+          # shared run it would reach every package's `test` task, which
+          # turbo.json declares it on. (Before #19278 it travelled as a
+          # `--shard=k/n` passthrough, which reached every package's vitest: a
+          # hard failure on any package with fewer test files than n, or with
+          # --passWithNoTests silently no tests at all.) A slice therefore gets
+          # its own invocation, filtered to the one package the partitioner
+          # sliced.
           FILTERS=""
           SLICES=""
           while read -r PKG SLICE; do
@@ -727,74 +828,73 @@ jobs:
               PKG="${LEG%%=*}"
               SLICE="${LEG#*=}"
               LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
-              # `--only` (#16395): the step above already built this slice's
-              # dependency closure in a passthrough-free run, so this run must
-              # schedule the ONE task the passthrough is for. Without it turbo
-              # re-hashes the whole `^build` closure under `--shard=k/n` and
-              # rebuilds it -- that comment carries the measurement. ⚠ The build
-              # step is load-bearing for this flag: a sliced package whose build
-              # never ran fails LOUDLY here (its imports resolve to a missing
-              # dist), never as a silent green.
+              # THE SLICE RIDES IN `OS_TEST_SHARD` (#19278), a variable turbo.json
+              # declares on this package's `test` task and its vitest.config.ts
+              # reads into vitest's `shard` (vitest 4.1.11 reads no shard
+              # variable of its own). Not a `-- --shard=k/n` passthrough, and so
+              # neither `--only` nor `--force`. The partitioner's `--self-test`
+              # fails a package it can slice whose config or task does not.
               #
-              # ⛔ `--force` (#18671) IS NOT REDUNDANT BESIDE `--only` -- do not
-              # delete it as a no-op. Read the paragraph above backwards: if
-              # `--only` is what stops turbo re-hashing the `^build` closure,
-              # then under `--only` this task's hash NO LONGER CARRIES that
-              # closure, and the one path by which a change in a dependency
-              # reaches this task is gone with it. What is left is the package's
-              # own files plus the hand-declared `$TURBO_ROOT$` inputs in
-              # turbo.json. So a slice that IS in the affected set -- and this
-              # shard's package set is exactly the affected set, computed two
-              # steps up -- can match a main-seeded cache entry across the very
-              # change that put it in that set, and be replayed instead of run.
+              # Why the two flags existed, and why they are gone:
               #
-              # That is not a hypothetical. Run 34746808828 replayed
-              # `@objectstack/cli:test` on this leg -- `Cached: 1 cached, 1
-              # total`, `73ms >>> FULL TURBO` -- out of a log a main push run
-              # had produced ~15 minutes earlier, on a commit that did not
-              # contain the PR under test. All six shards reported success,
-              # `check-test-completeness` graded the replay OK, and the shard
-              # attestation said "ran to completion". Neither of those two can
-              # tell a run from a replay; the red reached `main`.
+              #   `--only` (#16395). Turbo folds a run-level passthrough into the
+              #   hash of EVERY task in the run (turbo 2.10.10, cli's plan, plain
+              #   vs `-- --shard=1/2`: 0 of 62 hashes identical), so the leg
+              #   re-hashed and rebuilt the `^build` closure the step above had
+              #   just built. `--only` scheduled the test alone -- and dropped the
+              #   closure out of the test's HASH with it (#18671), leaving the
+              #   package's own files plus the hand-declared `$TURBO_ROOT$`
+              #   inputs. A slice in the affected set (on a PR, queue or push run
+              #   this shard's set IS the affected set) could then match a
+              #   main-seeded entry across the very change that put it there.
+              #   Run 34746808828 did: it replayed `@objectstack/cli:test` on
+              #   this leg -- `Cached: 1 cached, 1 total`, `73ms >>> FULL
+              #   TURBO` -- out of a log a main push run had produced ~15
+              #   minutes earlier, on a commit that did not contain the PR under
+              #   test. All six shards reported success,
+              #   `check-test-completeness` graded the replay OK, the shard
+              #   attestation said "ran to completion", and the red reached
+              #   `main`. Neither of those two can tell a run from a replay.
               #
-              # Measured on this tree (turbo 2.10.10) with a package whose
-              # `test` task has the same shape (`dependsOn: ["^build"]`), after
-              # a source change in an upstream package PLUS the closure rebuild
-              # the step above performs -- i.e. exactly this job's sequence:
+              #   `--force` (#18671, PR #19271). Made the leg execute; a constant
+              #   bypass cannot alarm, and the hash stayed blind to the closure.
               #
-              #   --only              (before)  1 task   `1 cached, 1 total`   81ms >>> FULL TURBO   <- NOT RUN
-              #   --only --force      (here)    1 task   `0 cached, 1 total`   1.15s                 <- runs
-              #   no --only           (option)  6 tasks  `0 cached, 6 total`   1m54.963s             <- runs, and rebuilds the closure
+              # A declared env reaches ONLY the task that declares it: same plan,
+              # plain vs `OS_TEST_SHARD=1/2` is 61 of 62 identical, the one that
+              # moves is `cli#test`, and `1/2` vs `2/2` moves that one alone. The
+              # closure keeps the hashes the step above gave it (61 of 61 equal
+              # to `turbo run build --filter=$PKG`) and replays, while the test's
+              # hash carries the closure again. `cli#test`, `--dry=json`:
               #
-              # The third row is why the repair is `--force` rather than
-              # "drop `--only`": dropping it re-executes the closure the step
-              # above just built, which is #16395's bill paid twice per job.
-              # That bill re-measured TODAY at cli's real scale, same tree,
-              # `--dry=json` against a cache the passthrough-free build had
-              # just filled: the `--only` leg plans 1 task; dropping `--only`
-              # plans 60 and every one of the 60 is a cache MISS, against 57
-              # HIT / 3 MISS for the same plan without the passthrough (2 of
-              # those 3 are `#build` tasks for packages that declare no `build`
-              # script, so they never execute; the real miss is the test). Cost
-              # of re-executing that closure here, `--concurrency=2` on a
-              # SHARED container: 5m11.262s, against 60ms `>>> FULL TURBO` for
-              # the same command when its hashes are left alone.
+              #   this leg, OS_TEST_SHARD=1/2          clean  1ee03ac2f26389a6
+              #     + packages/spec/src/ui/view.zod.ts        04eabd0b5a9db364  moves
+              #     + packages/types/src/env.ts               4b15652b8c493471  moves
+              #     + connector-slack/src/* (not in closure)  1ee03ac2f26389a6  still (control)
+              #   old leg, --only --force -- --shard=1/2
+              #     clean / + view.zod.ts                     d5e7ec263710fe59  still (the defect)
               #
-              # `--force` re-executes THIS ONE TASK and nothing else, which is
-              # why `--only` stays: the two are a pair. Precedent, for the same
-              # reason in one sentence -- a gate must not be satisfiable by a
-              # replayed artifact -- is the docs-build gate's `TURBO_FORCE`
-              # below. Two things fall out of it that are worth keeping:
-              # `--summarize` now records a REAL duration for the sliced
-              # package (measure-test-shard-timings.mjs refuses to read one
-              # from a replay), and the log says `cache bypass, force
-              # executing <hash>` where it used to say `cache hit, replaying
-              # logs <hash>`.
+              # Executed (cli, slice 1/16 for time; `packages/client/src/index.ts`
+              # edited -- a cli dependency no `$TURBO_ROOT$` input names -- then
+              # the step above rebuilt the closure, 57 of 59 cached):
               #
-              # ⚠ What `--force` does NOT do is make the hash honest. It stays
-              # blind to the closure, so nothing in this repo yet fails when a
-              # slice leg's hash stops moving for an upstream source change.
-              set -- pnpm turbo run test "--filter=$PKG" --only --force --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+              #   old leg, no --force  `cache hit, replaying logs`  69ms FULL TURBO  <- NOT RUN
+              #   old leg, --force     `cache bypass, force executing` (same hash)   <- runs
+              #   this leg             `cache miss, executing`, 59 of 60 cached      <- runs
+              #
+              # and on an unchanged tree this leg replays (`60 cached, 60 total`,
+              # 104ms): with the closure in the hash a HIT means these inputs were
+              # already tested, which is why no `--force`. Cost: 62 tasks planned,
+              # 59 HIT / 3 MISS against the cache the step above fills (the test,
+              # plus two `#build` tasks of packages with no `build` script, which
+              # never execute), where the passthrough without `--only` was 62 MISS.
+              # The step above is no longer load-bearing for correctness -- this
+              # run schedules its own closure -- but it keeps that build on its
+              # own stall-guard site, and here it replays. `--summarize` records
+              # the slice only as the sha256 of `OS_TEST_SHARD` (`cliArguments`
+              # is empty); measure-test-shard-timings.mjs resolves that digest
+              # against the k/n the partitioner can emit and refuses one it
+              # cannot, so a slice is never timed as the whole package.
+              set -- env "OS_TEST_SHARD=$SLICE" pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream
             fi
             LOGS="$LOGS $LOG"
             node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
@@ -1426,6 +1526,14 @@ jobs:
       - name: Run the non-SQL temporal backends under the skewed process zone
         env:
           TZ: America/New_York
+          # [#21564] The same URL the SQL legs of this job receive, for the
+          # postgres service this job already runs. `service-analytics` keys
+          # its live-PostgreSQL cells on it (`describe.skipIf(!config)`), so
+          # without this line they were named skips here and the job read as
+          # though ADR-0053 D-A3's live non-UTC PostgreSQL row had run. Core,
+          # formula, driver-memory and driver-mongodb do not read it. No
+          # `OS_EXPECT_LIVE_DIALECT_MATRIX` here: no test in this step reads it.
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           # The axis is only real if the zone actually took. Without this, a
           # dropped `TZ:` line silently returns the job to UTC coverage and
@@ -1603,8 +1711,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      # Shard-scoped key: the turbo test hash differs per shard (pass-through
-      # args are part of the task hash). Restore-only on PRs — see the Restore
+      # Shard-scoped key: the turbo test hash differs per shard (the task-declared
+      # env `OS_TEST_SHARD` is part of the task hash). Restore-only on PRs — see the Restore
       # Turbo cache comment in the test job; the save step at the end of this
       # job seeds from main only. The job-level catch-all (same as Test Core's)
       # is what keeps a NEW shard number warm before main has ever saved it:
@@ -1624,13 +1732,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # ⛔ THE DOGFOOD PACKAGE'S DEPENDENCY CLOSURE IS BUILT HERE, IN A RUN
-      # THAT CARRIES NO PASSTHROUGH, so that the sharded run in the next step
-      # can be `--only` (#16395's shape, applied to this job by #16886).
+      # THAT CARRIES NO PASSTHROUGH. (#20820: the next step no longer needs this
+      # for correctness -- it carries its shard in the task env `OS_TEST_SHARD`,
+      # so it plans and replays this same closure itself, with no `--only`. The
+      # step stays as its own stall-guard site, and the closure replays there.
+      # The measurement below is the history of the `-- --shard=k/3` shape.)
       #
-      # Turbo folds a run-level passthrough into the hash of EVERY task in the
-      # run, not only the task that receives it -- and `-- --shard=k/3` is the
-      # whole reason each shard gets its own invocation at all (the next step's
-      # comment says what those args are for). Measured on turbo 2.10.10,
+      # (History.) Turbo folds a run-level passthrough into the hash of EVERY
+      # task in the run, not only the task that receives it -- and the old leg's
+      # `-- --shard=k/3` was the whole reason each shard got its own invocation
+      # (the next step's comment says what carries the slice now). Measured on turbo 2.10.10,
       # `--filter=@objectstack/dogfood`, `turbo run test ... --dry=json`
       # (67 tasks: 66 `build` + 1 `test`):
       #
@@ -1675,11 +1786,16 @@ jobs:
       # Boots real example apps in-process (in-memory SQLite) and exercises them
       # through the real HTTP + service stack — catches runtime regressions that
       # build / unit tests / spec-liveness pass over (e.g. the #2018 tz-bucketing
-      # break, which was green on every static gate). The `--` args reach the
-      # package's `vitest run` and are hashed into the turbo task, so each
-      # shard caches its test leg independently -- and under `--only` that is
-      # the ONLY task the passthrough is hashed into; the build closure it used
-      # to scatter is built once, shard-independently, by the step above.
+      # break, which was green on every static gate). The shard slice travels in
+      # the task-declared env `OS_TEST_SHARD` (#20820, #19278's carrier):
+      # `turbo.json` lists it in `@objectstack/dogfood#test`'s `env`, so it is
+      # hashed into THAT task only, and `packages/qa/dogfood/vitest.config.ts`
+      # hands it to vitest's `shard`. There is no `--` passthrough and no
+      # `--only`: the run plans the `^build` closure with the same hashes as the
+      # step above (they replay), and the test task's hash therefore moves when
+      # an upstream package changes -- the old `--only` + `-- --shard=k/3` shape
+      # dropped the closure from the test's hash and a main-seeded cache entry
+      # could replay a shard green across an upstream-only change.
       # run-with-stall-guard: same wiring as Test Core (see the comment there;
       # #4250/#4314) — it tees to dogfood.log itself for the completeness guard
       # below, propagates the suite's real exit status (no `| tee` + pipefail),
@@ -1699,17 +1815,14 @@ jobs:
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
           mkdir -p "$RUNNER_TEMP/stall-reports"
-          # `--only` (#16395's flag, #16886's site): the step above already
-          # built this package's dependency closure in a passthrough-free run,
-          # so this run must schedule the ONE task the passthrough is for.
-          # Without it turbo re-hashes the whole `^build` closure under
-          # `--shard=k/3` and rebuilds it, once per shard -- the step comment
-          # above carries the measurement. ⚠ That build step is load-bearing
-          # for this flag: with the closure unbuilt, this run fails LOUDLY
-          # here (imports resolve to a missing dist), never as a silent green.
+          # The slice is the ENV below, not a passthrough: see the step comment.
+          # The build step above still builds the closure once, so the closure's
+          # `build` tasks REPLAY here (identical hashes: nothing run-level is
+          # hashed into them any more) and only `dogfood#test` executes.
+          export OS_TEST_SHARD="${{ matrix.shard }}/3"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --filter=@objectstack/dogfood --only --log-order=stream -- --shard=${{ matrix.shard }}/3
+            pnpm turbo run test --filter=@objectstack/dogfood --log-order=stream
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like
@@ -2013,7 +2126,51 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 67 package build commands end with `node …/scripts/check-dts-emitted.mjs`,
+      # so the `pnpm build` below runs that checker on every package it builds,
+      # and until this step no workflow ran its `--self-test`. It surfaced when
+      # the `core:` filter began naming the file as a build input (#21202) and
+      # `check:self-test-wired` saw a workflow name a self-test it never runs.
+      # Milliseconds, no prerequisites; placed before the build so a broken
+      # checker is reported before the 67 verdicts that rely on it.
+      - name: check-dts-emitted self-test
+        run: node scripts/check-dts-emitted.mjs --self-test
+
+      # ── Turbo remote cache (#21186) ─────────────────────────────────────
+      # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's
+      # test.yml builds this repo at its pinned SHA with the same command and
+      # reads/writes the same Vercel team, and the task hashes are identical
+      # in both places (72 of 72 build tasks, read from both CI logs at one
+      # SHA), so a pin bump there can replay what this step built on `main`.
+      #
+      # Scope: THIS step only, i.e. `build` tasks. `test` / `test:repo` stay
+      # off the remote: their cross-package inputs are hand-declared, and a
+      # wrong hash replayed from a remote reaches every run and cloud too.
+      # Build Docs forces execution and carries no credentials.
+      #
+      # TURBO_CACHE is the env form of `--cache`. Writes happen on
+      # `merge_group` and on `push` / `workflow_dispatch` against main; every
+      # other event, `pull_request` and `schedule` included, only reads,
+      # because read-only is the default branch of the expression. This is
+      # turbo configuration, not a property of the credential: a same-repo PR
+      # receives the secrets and runs its own copy of this file; fork PRs
+      # receive none. ⚠️ Never let it evaluate to '': turbo then disables the
+      # LOCAL cache too (`no caches are enabled`) and re-executes everything.
+      #
+      # Credentials: TURBO_TOKEN (secret) is passed only when the signing key
+      # is non-empty, because an empty key still "signs" with a zero-length
+      # HMAC key; TURBO_TEAM is a repo VARIABLE so the slug is not masked out
+      # of the log; TURBO_REMOTE_CACHE_SIGNATURE_KEY (secret) must equal
+      # cloud's. turbo.json's `remoteCache.signature` makes turbo tag every
+      # upload and verify every download with that key. Any of the three
+      # unset: remote caching is off and the build is unchanged; the summary
+      # then reads `Remote caching disabled (remote cache requested — …)`.
       - name: Build packages (excluding docs)
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm build
 
       # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
@@ -2300,10 +2457,12 @@ jobs:
   # already covered in practice; the hole is a hand-edited pin, or that single
   # line cherry-picked out of another branch.
   #
-  # Cost is real but narrowly aimed. A moved pin is the only trigger that pays
-  # the full clone + vite build, and #4288's 76 commits of staleness are the
-  # measure of how rare that is. The other triggers (this file, the drift guard)
-  # leave the pin untouched, so they hit the dist cache and cost about a minute.
+  # Cost is real but narrowly aimed. A moved BUILD INPUT (the pin, the build and
+  # probe scripts, the spec's entry layout; see the `console` filter's comment)
+  # is the only trigger that always pays the full clone + vite build: 32 of the
+  # 3219 first-parent commits on main from 2026-08-31 to 9905e61ca2 moved one.
+  # The other triggers (this file, the check scripts) leave the key untouched,
+  # so they cost about a minute whenever the entry is still in the cache.
   #
   # Scope, stated plainly: this proves the PINNED SHA builds. It does NOT cover a
   # packages/client change breaking the injected-client bundle — that input lives
@@ -2395,10 +2554,20 @@ jobs:
       - name: Build @objectstack/client and its dependencies
         run: pnpm exec turbo run build --filter=@objectstack/client... --concurrency=4
 
-      # Same key as release.yml's "Cache vendored Console dist" step. Actions
-      # caches are repo-scoped, so a PR reads whatever main already built for this
-      # pin — that is what makes the non-pin triggers cheap. Only a pin the repo
-      # has never built misses, and a miss is exactly when this gate has work to do.
+      # Keyed on every BUILD INPUT the `filter` job's `console` list names (the
+      # pin, the build script, the two scripts that derive and stamp the injection
+      # probes, and the spec's entry layout) and on nothing else.
+      # scripts/check-ci-filter-parity.mjs holds this key and that list in step
+      # (#20765). A head that moves a build input MISSES, so the build and the
+      # assertion inside it judge the change on the PR head, not first in the
+      # merge queue. A head that moves only a guard hits, which is what keeps
+      # those triggers cheap. A PR reads what main, or its own earlier pushes,
+      # saved under the same key.
+      #
+      # ⚠️ release.yml's restore step still keys on the pin and the build script
+      # alone, so the two workflows no longer share dist entries: each builds its
+      # own on a miss. The narrower release key is deliberate, and that file's
+      # comment says why (#20765).
       #
       # Split restore/save where release.yml uses the combined action, because the
       # combined form's post-step saves even when the job FAILED. build-console.sh
@@ -2407,12 +2576,12 @@ jobs:
       # run restores it, skips the build, and sails through the stamp check. Saving
       # only once every assertion below is green is what lets a restored dist carry
       # the same guarantees as a freshly built one.
-      - name: Restore vendored Console dist (keyed on the objectui pin)
+      - name: Restore vendored Console dist (keyed on the pin and its other build inputs)
         id: console-dist
         uses: actions/cache/restore@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts') }}
 
       # The gate. Shallow-clones objectui at the pinned SHA, builds
       # @object-ui/console against this tree's client, copies the dist into
@@ -2451,10 +2620,11 @@ jobs:
       # The spec-injection half of the same question, and the reason it is a
       # SEPARATE step from build-console.sh (#9667).
       #
-      # The dist cache key is hashFiles('.objectui-sha', 'scripts/build-console.sh')
-      # — packages/spec is deliberately NOT in it, because adding it would bust the
-      # key on every spec change and force a ~20 min cold console rebuild on a repo
-      # doing ~18 merges a day. The cost model stays; what does not stay is the
+      # The dist cache key carries only the spec's ENTRY LAYOUT (package.json and
+      # tsup.config.ts, see the restore step). The rest of packages/spec is
+      # deliberately NOT in it, because adding it would bust the key on every spec
+      # change and force a ~20 min cold console rebuild on a repo doing ~18 merges
+      # a day. The cost model stays; what does not stay is the
       # silence. scripts/assert-console-spec-injection.mjs runs INSIDE
       # build-console.sh, so the `if: cache-hit != 'true'` above skips it exactly
       # when the dist was NOT built here — which is the run that most needs asking.
@@ -2475,7 +2645,7 @@ jobs:
       # a poisoned entry is reachable from here and must not pass quietly.
       - name: Verify the restored Console dist bundles this tree's spec
         env:
-          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts') }}
         run: pnpm check:console-injection --require-stamp
 
       # Reached only with every assertion above green (see the split-restore note).
@@ -2488,4 +2658,4 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts') }}

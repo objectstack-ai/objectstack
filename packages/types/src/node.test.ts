@@ -214,7 +214,7 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
     'the DEFAULT fallback is this package\'s own resolution — @objectstack/spec and nothing else',
     async () => {
       // ⚠️ Read this case for what it measures, not for what it used to be
-      // called (#10943). It was named "falls back to the importing package's
+      // called (commit 46d34ab7c). It was named "falls back to the importing package's
       // own resolution", which is the helper's DOCUMENTED contract — but it
       // passes because `@objectstack/spec` is the one dependency
       // `@objectstack/types` declares, so it is green whether the fallback
@@ -223,7 +223,7 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
       // be found by measurement instead.
       //
       // What it legitimately pins is the DEFAULT (no `fallbackImport`) base:
-      // unchanged by #10943, so an out-of-tree caller keeps working. The
+      // unchanged by commit 46d34ab7c, so an out-of-tree caller keeps working. The
       // documented contract is pinned by the caller-anchored matrix below,
       // where every row can actually fail.
       const mod = await createHostImporter(undeclaringRoot)('@objectstack/spec');
@@ -443,10 +443,10 @@ describe('what counts as a declaration (#4719)', () => {
 });
 
 /**
- * #10943 — the undeclared fallback resolves from the CALLER, not from
+ * Commit 46d34ab7c — the undeclared fallback resolves from the CALLER, not from
  * `@objectstack/types`.
  *
- * The card's own 4-row matrix, measured on `main` from an app declaring
+ * The 4-row matrix behind that commit, measured on `main` from an app declaring
  * nothing, is what these cases pin:
  *
  *                                via host importer    bare import() from packages/cli
@@ -591,7 +591,7 @@ describe('the undeclared fallback resolves from the CALLER (#10943)', () => {
   });
 
   it('the undeclared failure NAMES a missing caller base instead of hiding it', async () => {
-    // The pre-#10943 default is retained so an out-of-tree caller (cloud's
+    // The default from before commit 46d34ab7c is retained so an out-of-tree caller (cloud's
     // loader) cannot break under this parameter's arrival — so the one thing it
     // must not be is silent. A `MODULE_NOT_FOUND` naming no base is exactly what
     // let this defect survive being read.
@@ -1475,7 +1475,7 @@ describe('an aliased install is verified against the name its DECLARATION names 
     //
     // ⚠️ This pin has been re-read twice and its reason has moved twice, so it
     // is spelled out rather than inherited. It asserted the INSTALL wording
-    // until #15045 (which re-worded, and kept the refusal). #17046 then gave
+    // until commit 288fe9c34 (which re-worded, and kept the refusal). #17046 then gave
     // the fallback a SECOND axis — the declared PATH — under which a `link:`
     // whose key IS the declared directory now loads. This fixture is not that:
     // `installAs` writes a plain directory at `node_modules/<key>`, while the
@@ -1563,7 +1563,7 @@ describe('an aliased install is verified against the name its DECLARATION names 
 });
 
 /**
- * ── #15044: the SUCCEEDING leg recognised the package by the DECLARATION KEY ──
+ * ── Fixed by commit 088f761e5: the SUCCEEDING leg recognised the package by the DECLARATION KEY ─
  *
  * #14278 taught the #14041 FALLBACK finder that `{"foo": "npm:bar@1"}` installs
  * a package named `bar`. The same blindness survived one leg over, on the path
@@ -1878,7 +1878,7 @@ exports.BUILD = 'cjs';
 });
 
 /**
- * ── #15045: the location sub-case REFUSES correctly and EXPLAINED itself wrongly ─
+ * ── Reworded by commit 288fe9c34: the location sub-case REFUSES correctly and EXPLAINED itself wrongly ─
  *
  * #14278 left one sub-case standing on the fallback leg, deliberately and with
  * a pin: `link:` / `file:` (and a git or tarball URL) name a LOCATION, not a
@@ -1907,7 +1907,7 @@ exports.BUILD = 'cjs';
  * the declared directory, which is now the shape that LOADS; the wording below
  * is therefore driven on the residue that still cannot be verified either way,
  * and each fixture says which residue it is. ⛔ Nothing here was deleted to
- * make room: every #15045 assertion survives, on an input that still reaches
+ * make room: every assertion commit 288fe9c34 wrote survives, on an input that still reaches
  * the text it pins. The load itself is pinned in the #17046 suite below, next
  * to the negative controls that keep the refusal.
  */
@@ -1984,7 +1984,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   /**
    * The residue this suite's wording still governs after #17046: a location
    * declaration whose key is a COPY rather than the declared directory. Both
-   * axes are measured, both fail, and the message is the one #15045 wrote.
+   * axes are measured, both fail, and the message is the one commit 288fe9c34 wrote.
    */
   const copiedApp = (tag: string, key: string, specifier: string, manifestName: string): string =>
     linkedApp(tag, key, specifier, manifestName, ESM_ONLY_EXPORTS, 'copy');
@@ -2050,7 +2050,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   });
 
   it('THE CARD: the git / tarball sentence is on the spelling that HAS no location', async () => {
-    // #15045 asked for this sentence and pinned it on a `link:` fixture,
+    // Commit 288fe9c34 wrote this sentence and pinned it on a `link:` fixture,
     // because at the time every spelling on the list shared one paragraph.
     // #17046 split the paragraph — a path specifier now gets the location
     // axis's own reading instead — so the sentence is pinned where it is true.
@@ -2074,7 +2074,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   });
 
   it('NEGATIVE CONTROL: a `link:` install whose manifest MATCHES the key still loads, silently', async () => {
-    // The load path #15045 must not have moved, and #17046 must not have moved
+    // The load path commit 288fe9c34 must not have moved, and #17046 must not have moved
     // either: this one is carried by the NAME axis, which is untouched.
     const root = linkedApp('control', 'linked', 'link:../elsewhere', 'linked');
     expect((await createHostImporter(root)('linked')).BUILD).toBe('linked');
@@ -2157,7 +2157,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
  * `realpath(resolve(hostRoot, <declared path>))`, exactly, both sides
  * canonicalised, no basename matching and no case folding.
  *
- * ⛔ What it is NOT, quoted from #15045's triage because it predicted a dev
+ * ⛔ What it is NOT, quoted from the triage commit 288fe9c34 landed, because it predicted a dev
  * would reach for it: *"skip the check when the specifier is a location. That
  * accepts any directory sitting at the key — the looser finder #4719 and
  * #14041 exist to prevent — and trades a confidently-wrong remedy for a wrong
@@ -2172,7 +2172,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
  *   nothing to compare and the refusal stands.
  * - **the #13330 leg is untouched.** A dual-published `link:` target still
  *   resolves through CommonJS and still keeps its `require` entry — pinned by
- *   the #15044 BOUNDARY above. Extending there would change a load that
+ *   the BOUNDARY commit 088f761e5 pinned above. Extending there would change a load that
  *   already succeeds; this axis only ever fires inside `hostRequire.resolve`'s
  *   catch, so nothing that loads today changes.
  * - **case-insensitive filesystems are NOT covered by a test**, and the
@@ -2314,7 +2314,7 @@ describe('a correctly LINKED package is verified by the LOCATION its host declar
   it('`file:` and `portal:` are location protocols too, and verify the same way', async () => {
     // npm installs a directory `file:` dependency AS a symlink, which is this
     // shape. (pnpm routes `file:` through its virtual store instead — a copy,
-    // covered by the negative below and by the #15045 suite's wording pins.)
+    // covered by the negative below and by the wording pins of commit 288fe9c34's suite.)
     for (const specifier of ['file:../linked', 'portal:../linked']) {
       const root = linkFixture(`proto-${specifier.slice(0, 4)}`, 'linked-key', { specifier });
       expect((await createHostImporter(root)('linked-key')).BUILD, specifier).toBe('the-linked-directory');
@@ -2416,8 +2416,8 @@ describe('a correctly LINKED package is verified by the LOCATION its host declar
   it('the load stays inside the FALLBACK — a package with a `require` entry never reaches it', async () => {
     // The property that makes this strictly additive: the axis fires only in
     // `hostRequire.resolve`'s catch. A dual-published linked package resolves
-    // through CommonJS and keeps today's behaviour, which the #15044 BOUNDARY
-    // above pins from the other side (#13330's leg is deliberately untouched).
+    // through CommonJS and keeps today's behaviour, which the BOUNDARY commit 088f761e5
+    // added above pins from the other side (#13330's leg is deliberately untouched).
     const root = linkFixture('dual', 'linked-key', {
       specifier: 'link:../linked',
       exportsField: { '.': { require: './dist/index.cjs', import: './dist/index.js' } },

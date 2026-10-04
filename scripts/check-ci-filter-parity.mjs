@@ -112,6 +112,119 @@
  * NOTHING the table declares, though the table is precisely this gate's
  * population. Measured on 589758d22: 1 (gate, file) pair before, 3253 after.
  *
+ * ## The second subject: the `console` selection and the dist key it must move (#20765)
+ *
+ * The same filter job schedules `Console Pin Gate` from a second hand-kept list,
+ * `console:`, and that job restores its console dist from a cache keyed on
+ * `hashFiles(...)`. The two lists answer different questions and each has a hole
+ * the other one cannot see:
+ *
+ *   - A path the KEY hashes but the FILTER does not name moves the key without
+ *     starting the job, so the first build under the new key is the merge
+ *     queue's, where a check outside the required set cannot stop a merge.
+ *   - A path the FILTER names but the KEY does not hash starts the job, and the
+ *     job then restores the dist built before the change and skips the build
+ *     step, which is where the build-time assertion
+ *     (`scripts/assert-console-spec-injection.mjs`) lives. The run is green
+ *     without judging the change. That is only right for a GUARD: code every run
+ *     executes, hit or miss. `CONSOLE_GUARDS` declares those, each with the step
+ *     that runs it.
+ *
+ * Measured on the #20695 shape (the migration registries moved to a new spec
+ * entry): its queue build missed the cache, rebuilt, and went red with "Neither
+ * spec appears in the built console"; a fixture replay of the same head on the
+ * cache-hit path (the restored pre-move dist, its stamp, the post-move tree)
+ * exits 0. So the job judges an entry-layout change only when the key moves too.
+ *
+ * So `judgeConsole` holds five things of the checked-in ci.yml: every `console`
+ * entry is a literal path (with no pattern in the list, a path selects the job
+ * exactly when the list names it, which is what lets the self-test pin the
+ * selection, and a pattern under `packages/spec` would widen the job to every
+ * spec change); every key spelling in the job is one string; every hashed path
+ * is a `console` entry; every `console` entry is hashed or a declared guard; and
+ * every declared guard is still in the list and not hashed. Pure string again,
+ * for the reason above: no matcher, so no third recognizer.
+ *
+ * ## The third subject: Build Core and the build inputs turbo.json declares (#21202)
+ *
+ * `core:` schedules Build Core, and Build Core runs `pnpm build`. turbo.json
+ * declares which files outside the packages move a build's hash: itself, its
+ * `globalDependencies` (inputs of every task, builds included), and each
+ * `$TURBO_ROOT$/...` input of a `build` / `<package>#build` task. A diff
+ * confined to one of those moves the hashes it reaches; if no `core` entry
+ * matches it, Build Core does not start, and the merge queue is the first
+ * place that build runs. PR #21199 showed it on itself: a turbo.json-only diff,
+ * Build Core skipped.
+ *
+ * `judgeBuildInputs` DERIVES the required set rather than holding a copy of
+ * it, so this file is not a second list of the declarations either: the
+ * build-task inputs and `globalDependencies` come out of turbo.json, and the
+ * builds Build Core does not run come out of the root manifest's `build`
+ * script (`--filter=!<package>`), which is what the job's `run: pnpm build`
+ * expands to. Every misreading of that script can only drop an exclusion,
+ * which REQUIRES more of `core` -- a loud red, never a silent gap. The only
+ * constant is turbo.json itself, which is the config being read.
+ *
+ * Findings: a declared build input no `core` entry covers (same pure-string
+ * rule as above), and the reverse direction where the declarations alone can
+ * decide it: a literal `core` entry in a directory that holds a declared
+ * literal build input, covering none of them, is a leftover from an input
+ * turbo.json dropped, and it starts the core pipeline on a diff no build reads
+ * (since #21341 a row covering one of Build Core's guards, the population the
+ * next section adds, is not a leftover either).
+ * Root-level files and pattern entries are not judged that way -- nothing here
+ * says why `package.json` or `packages/**` is in `core`. Refusals: no `build-core` job, its `if:` no longer naming
+ * `core`, no `run: pnpm build` step, turbo.json or the root manifest unreadable
+ * or not JSON, no `tasks` map, no build task, and a `build` script that is not
+ * `turbo run build ...`.
+ *
+ * Known bounds: a package-level turbo.json (none is tracked today) would add
+ * build inputs this subject does not read; and a leftover in a directory where
+ * turbo.json no longer declares ANY build input, and no Build Core step runs
+ * any script, is not reported (the cheap direction: it over-schedules, it
+ * never under-schedules).
+ *
+ * ## The same subject's second population: the scripts Build Core's steps run (#21341)
+ *
+ * Build Core does more than build. Its own steps run guards that need a real
+ * `dist/` (`pnpm check:dts-closure`, `check:dual-build-cjs-loads`,
+ * `check:sourcemap-no-sources-content`, `check:lean-entry-closure`, each a
+ * `--self-test` and a real leg), and Build Core is the only job that runs
+ * them. A diff confined to one of those scripts moved no build hash and
+ * matched no `core` entry, so Build Core skipped and the changed guard ran
+ * nowhere before the merge queue: PR #17100 changed only
+ * `scripts/check-lean-entry-closure.mjs`, and its Build Core concluded
+ * `skipped`. `console:` already applies "a change to the guard runs the guard"
+ * to its job (`CONSOLE_GUARDS` above); `core:` had no such rows.
+ *
+ * This population is DERIVED from the job, the way the build inputs are
+ * derived from turbo.json, so no list of guards is kept here: every `run:`
+ * step of the `build-core` job is read through `collectInvocations`, the
+ * recognizer `check-self-test-wired.mjs` uses for "which repository scripts
+ * does this CI command run" (a `scripts/...` path named directly, or reached
+ * through a root `package.json` alias chain), and each script it names brings
+ * its first-party import closure from `first-party-closure.mjs`, the one
+ * answer to which modules a script executes. Each resulting path must be
+ * covered by `core`, and it widens the leftover rule above: a literal entry
+ * beside the build inputs and the guards that covers neither is reported. So a
+ * guard step added to Build Core without a filter row reds, and a filter row
+ * left behind by a deleted guard step reds too. The ONE list is the rows in
+ * ci.yml; there is no second copy here to fall out of step with it.
+ *
+ * Known bounds, each the recognizer's and stated rather than guessed at: a
+ * script a PACKAGE's own manifest runs (`pnpm --filter <pkg> <script>`) is
+ * not followed (today's one such step, the spec's `analyze`, runs a file
+ * inside `packages/spec`, which `packages/**` covers); a local composite
+ * action a step `uses:` is not followed (today's one, setup-pnpm, names no
+ * repository script, and every job in every workflow runs it); `pnpm
+ * install`'s lifecycle (`prepare` -> `scripts/setup-git-hooks.mjs`) is not a
+ * guard (every job installs, the unfiltered lint.yml jobs included, so a
+ * change to it already runs at PR time); a script spelled in an extension
+ * the recognizer does not read (`.cjs`, `.ts`) is not seen, exactly as
+ * `check:self-test-wired` does not see it; and a DATA file a guard reads (a
+ * baseline) is not a script and is not derived. The self-test pins the first
+ * two against the real tree.
+ *
  * ## Wiring
  *
  * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly, both
@@ -124,15 +237,18 @@
  * exists and is not scheduled is the same dormant shape from the other side.
  */
 
-import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { requireDependency } from './import-prerequisite.mjs';
 const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
+import { collectInvocations } from './check-self-test-wired.mjs';
 import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
+import { firstPartyModuleClosure } from './first-party-closure.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -159,11 +275,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(5) refusals: never a clean zero over a subject that was not read': 10,
   '(6) the real tree': 10,
   '(7) WIRING: the gate and its self-test really run in CI': 2,
+  '(8) the `console` selection and the dist key it must move': 20,
+  '(9) Build Core and the build inputs turbo.json declares': 33,
+  '(10) Build Core and the scripts its own steps run': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -243,6 +362,38 @@ export function declarationsOf(table) {
  * does them.
  */
 export function readSchedulingFilters(source) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+  for (const name of SCHEDULING_FILTERS) {
+    if (!(name in filters)) {
+      return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${name}:\` filter.` };
+    }
+  }
+
+  const job = jobs[SCHEDULED_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${SCHEDULED_JOB}\` job -- Layer A's \`--union-into\` step has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  const absent = SCHEDULING_FILTERS.filter((n) => !condition.includes(`needs.filter.outputs.${n}`));
+  if (absent.length > 0) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${SCHEDULED_JOB}\` job no longer names ${absent.map((n) => `\`${n}\``).join(', ')} in its \`if:\`, ` +
+        `so that filter does not schedule it any more and parity against it means nothing.\n` +
+        `    if: ${condition || '(absent)'}`,
+    };
+  }
+
+  return { filters, condition, entries: SCHEDULING_FILTERS.flatMap((n) => filters[n]) };
+}
+
+/**
+ * The shared half of both readers: ci.yml's `jobs` map and the `filter` job's
+ * path lists, or `{ refusal }` naming what could not be read. Both subjects of
+ * this gate read the lists through here, so they cannot disagree about what
+ * the lists are.
+ */
+function readFilterLists(source) {
   let doc;
   try {
     doc = parse(source);
@@ -282,26 +433,7 @@ export function readSchedulingFilters(source) {
       return { refusal: `${CI_WORKFLOW}'s \`${name}:\` filter is not a list of path strings.` };
     }
   }
-  for (const name of SCHEDULING_FILTERS) {
-    if (!(name in filters)) {
-      return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${name}:\` filter.` };
-    }
-  }
-
-  const job = jobs[SCHEDULED_JOB];
-  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${SCHEDULED_JOB}\` job -- Layer A's \`--union-into\` step has moved.` };
-  const condition = typeof job.if === 'string' ? job.if : '';
-  const absent = SCHEDULING_FILTERS.filter((n) => !condition.includes(`needs.filter.outputs.${n}`));
-  if (absent.length > 0) {
-    return {
-      refusal:
-        `${CI_WORKFLOW}'s \`${SCHEDULED_JOB}\` job no longer names ${absent.map((n) => `\`${n}\``).join(', ')} in its \`if:\`, ` +
-        `so that filter does not schedule it any more and parity against it means nothing.\n` +
-        `    if: ${condition || '(absent)'}`,
-    };
-  }
-
-  return { filters, condition, entries: SCHEDULING_FILTERS.flatMap((n) => filters[n]) };
+  return { jobs, filters };
 }
 
 /**
@@ -333,6 +465,463 @@ export function judge(source, table) {
   );
 
   return { filters: read.filters, condition: read.condition, declarations, covered, uncovered, stale };
+}
+
+// ── The second subject: the `console` selection and its dist key (#20765) ────
+
+/** The filter list that schedules the console job, and that job, by id. */
+export const CONSOLE_FILTER = 'console';
+export const CONSOLE_JOB = 'console-pin';
+/** Every spelling of the console dist-cache key carries this. */
+const CONSOLE_KEY_MARKER = '-console-dist-';
+
+/**
+ * The `console` entries that are GUARDS rather than build inputs: code every
+ * run of the job executes, cache hit or miss, so a change to one is judged even
+ * when the dist is restored. Every other entry must move the dist key. A new
+ * entry lands in neither place by default: it reds as unclassified until
+ * someone decides which it is.
+ */
+export const CONSOLE_GUARDS = Object.freeze({
+  '.github/workflows/ci.yml': 'the job definition itself: its steps run on a hit and on a miss',
+  'scripts/check-console-sha.mjs': 'run by `pnpm check:console-sha` on every run, hit or miss',
+  'scripts/check-console-injection.mjs': 'run by `pnpm check:console-injection --require-stamp` on every run, hit or miss',
+});
+
+/** The quoted arguments of the ONE `hashFiles(...)` a key spells, or null. */
+export function hashFilesInputs(key) {
+  const calls = [...String(key).matchAll(/hashFiles\(([^)]*)\)/g)];
+  if (calls.length !== 1) return null;
+  const args = calls[0][1].split(',').map((a) => a.trim());
+  if (args.length === 0 || args.some((a) => !/^'[^']+'$/.test(a))) return null;
+  return args.map((a) => a.slice(1, -1));
+}
+
+/**
+ * Does a path select the console job? Only answerable when every entry is a
+ * literal path, which `judgeConsole` requires; `null` otherwise, so a caller
+ * can never read a pattern list as a membership test.
+ */
+export function consoleSelects(path, entries) {
+  if (entries.some((e) => WILDCARD.test(e))) return null;
+  return entries.includes(path);
+}
+
+/**
+ * The verdict on the console selection and the key it must move. `{ refusal }`
+ * for every state in which the subject was not read; otherwise the findings,
+ * each list empty on a clean tree.
+ */
+export function judgeConsole(source) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+
+  const entries = filters[CONSOLE_FILTER];
+  if (!entries) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${CONSOLE_FILTER}:\` filter.` };
+  if (entries.length === 0) return { refusal: `${CI_WORKFLOW}'s \`${CONSOLE_FILTER}:\` filter is empty.` };
+
+  const job = jobs[CONSOLE_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${CONSOLE_JOB}\` job -- the console gate has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  if (!condition.includes(`needs.filter.outputs.${CONSOLE_FILTER}`)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${CONSOLE_JOB}\` job no longer names \`${CONSOLE_FILTER}\` in its \`if:\`, so that ` +
+        `filter does not schedule it any more and parity against it means nothing.\n    if: ${condition || '(absent)'}`,
+    };
+  }
+
+  // Every place the job spells the key: the restore and save steps' `with.key`,
+  // and any env value that carries it (the remedy text the injection check prints).
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  const spellings = [];
+  for (const step of steps) {
+    const uses = String(step?.uses ?? '');
+    const key = step?.with?.key;
+    if (typeof key === 'string' && key.includes(CONSOLE_KEY_MARKER)) spellings.push({ where: `${uses || step?.name} key`, key, uses });
+    for (const [name, value] of Object.entries(step?.env ?? {})) {
+      if (typeof value === 'string' && value.includes(CONSOLE_KEY_MARKER)) spellings.push({ where: `env ${name}`, key: value, uses: '' });
+    }
+  }
+  const restores = spellings.filter((s) => s.uses.startsWith('actions/cache/restore'));
+  const saves = spellings.filter((s) => s.uses.startsWith('actions/cache/save'));
+  if (restores.length !== 1 || saves.length !== 1) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${CONSOLE_JOB}\` job spells the console dist key in ${restores.length} restore and ` +
+        `${saves.length} save step(s); this gate reads exactly one of each. The cache has moved or been split.`,
+    };
+  }
+  const keyInputs = hashFilesInputs(restores[0].key);
+  if (!keyInputs) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s console dist key does not spell exactly one \`hashFiles(...)\` of quoted paths:\n    ${restores[0].key}`,
+    };
+  }
+
+  const mismatched = spellings.filter((s) => s.key !== restores[0].key).map((s) => s.where);
+  const patterns = entries.filter((e) => WILDCARD.test(e));
+  const unselected = keyInputs.filter((p) => !entries.includes(p));
+  const unclassified = entries.filter((e) => !keyInputs.includes(e) && !Object.hasOwn(CONSOLE_GUARDS, e));
+  const staleGuards = Object.keys(CONSOLE_GUARDS).filter((g) => !entries.includes(g));
+  const hashedGuards = Object.keys(CONSOLE_GUARDS).filter((g) => keyInputs.includes(g));
+
+  return { entries, keyInputs, spellings: spellings.length, mismatched, patterns, unselected, unclassified, staleGuards, hashedGuards };
+}
+
+function reportConsole(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge the console selection.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  const lines = (xs) => xs.map((x) => `      ${x}`).join('\n');
+  if (verdict.patterns.length > 0) {
+    problems.push(
+      `the \`${CONSOLE_FILTER}:\` filter carries pattern entr(ies):\n${lines(verdict.patterns)}\n` +
+        '    Name files. A pattern under packages/spec widens the console gate to every spec change, and a\n' +
+        '    list of literal paths is what lets this gate say which paths select the job.',
+    );
+  }
+  if (verdict.mismatched.length > 0) {
+    problems.push(
+      `the \`${CONSOLE_JOB}\` job spells the console dist key differently at: ${verdict.mismatched.join(', ')}\n` +
+        '    The restore, the save and the remedy text must name ONE key, or a run saves an entry no run restores.',
+    );
+  }
+  if (verdict.unselected.length > 0) {
+    problems.push(
+      `the console dist key hashes path(s) the \`${CONSOLE_FILTER}:\` filter does not name:\n${lines(verdict.unselected)}\n` +
+        '    A change to one moves the key without starting the job, so its first build is the merge queue\'s,\n' +
+        `    where a check outside the required set cannot stop a merge. Add each to \`${CONSOLE_FILTER}:\`.`,
+    );
+  }
+  if (verdict.unclassified.length > 0) {
+    problems.push(
+      `the \`${CONSOLE_FILTER}:\` filter names path(s) the dist key does not hash and CONSOLE_GUARDS does not declare:\n` +
+        `${lines(verdict.unclassified)}\n` +
+        '    A head that moves one starts the job, restores the dist built before the change and skips the build\n' +
+        '    step, so the run is green without judging it. A BUILD INPUT goes into the key\'s hashFiles (all of its\n' +
+        '    spellings); a GUARD that every run executes goes into CONSOLE_GUARDS in this file, with the step.',
+    );
+  }
+  if (verdict.staleGuards.length > 0) {
+    problems.push(
+      `CONSOLE_GUARDS declares path(s) the \`${CONSOLE_FILTER}:\` filter no longer names:\n${lines(verdict.staleGuards)}\n` +
+        '    Delete the declaration, or restore the entry if the guard still runs.',
+    );
+  }
+  if (verdict.hashedGuards.length > 0) {
+    problems.push(
+      `CONSOLE_GUARDS declares path(s) the dist key also hashes:\n${lines(verdict.hashedGuards)}\n` +
+        '    A guard runs on a cache hit, so hashing it only buys a rebuild per change. Pick one kind.',
+    );
+  }
+  if (problems.length > 0) {
+    console.error('FAIL: ci.yml\'s `console` filter and the console dist key are out of step.\n');
+    for (const p of problems) console.error(`  - ${p}\n`);
+    return 1;
+  }
+  console.log(
+    `OK: all ${verdict.entries.length} \`${CONSOLE_FILTER}\` entr(ies) are literal paths; ` +
+      `${verdict.keyInputs.length} are build inputs the console dist key hashes and ` +
+      `${verdict.entries.length - verdict.keyInputs.length} are declared guards; the key is spelled one way ` +
+      `in all ${verdict.spellings} place(s) the \`${CONSOLE_JOB}\` job uses it.`,
+  );
+  return 0;
+}
+
+// ── The third subject: Build Core and the build inputs turbo.json declares (#21202) ──
+
+/** The job every build input must schedule, by id, and the filter its `if:` reads. */
+export const BUILD_JOB = 'build-core';
+export const BUILD_FILTER = 'core';
+/** The turbo config whose declarations are the population. */
+export const TURBO_CONFIG = 'turbo.json';
+/** The root manifest whose `build` script is what Build Core's `pnpm build` runs. */
+export const ROOT_MANIFEST = 'package.json';
+/** The step Build Core runs, verbatim; the manifest's `build` script is what it expands to. */
+const BUILD_COMMAND = 'pnpm build';
+/** The prefix turbo.json spells a repo-root-relative input with. */
+const TURBO_ROOT = '$TURBO_ROOT$/';
+
+/** The directory part of a repo-relative path; '' for a root-level file. */
+function dirOf(path) {
+  const cut = path.lastIndexOf('/');
+  return cut === -1 ? '' : path.slice(0, cut);
+}
+
+/** Is this turbo.json task key a build task? `build`, or `<package>#build`. */
+function isBuildTask(task) {
+  return task === 'build' || task.endsWith('#build');
+}
+
+/**
+ * The packages the root manifest's `build` script excludes with
+ * `--filter=!<name>` (or `--filter !<name>`), or `{ refusal }`. Any spelling
+ * this misreads can only yield FEWER exclusions, which REQUIRES more inputs of
+ * `core` -- a loud red, never a silent gap.
+ */
+export function buildExclusions(script) {
+  if (typeof script !== 'string' || !/^\s*turbo run build(\s|$)/.test(script)) {
+    return {
+      refusal:
+        `${ROOT_MANIFEST}'s \`build\` script is not \`turbo run build ...\` (${JSON.stringify(script ?? null)}), so it ` +
+        `no longer says which build tasks Build Core's \`${BUILD_COMMAND}\` runs.`,
+    };
+  }
+  const tokens = script.trim().split(/\s+/);
+  const excluded = new Set();
+  for (let i = 0; i < tokens.length; i++) {
+    let value = null;
+    if (tokens[i].startsWith('--filter=')) value = tokens[i].slice('--filter='.length);
+    else if (tokens[i] === '--filter' || tokens[i] === '-F') value = tokens[i + 1] ?? '';
+    if (value === null) continue;
+    value = value.replace(/^['"]|['"]$/g, '');
+    if (value.startsWith('!')) excluded.add(value.slice(1));
+  }
+  return { excluded };
+}
+
+/**
+ * Every repo-root-relative path turbo.json makes a build input: turbo.json
+ * itself, each `globalDependencies` entry (an input of every task, builds
+ * included), and each `$TURBO_ROOT$/...` input of a build task Build Core runs.
+ * Negated inputs are skipped -- a negation can only narrow a hash. Returns the
+ * rows, each with the declarations that named it, plus the build tasks left
+ * out because the build script excludes their package; or `{ refusal }`.
+ */
+export function buildInputsOf(turbo, excluded) {
+  if (!turbo || typeof turbo !== 'object' || Array.isArray(turbo)) {
+    return { refusal: `${TURBO_CONFIG} did not parse to an object.` };
+  }
+  const tasks = turbo.tasks;
+  if (!tasks || typeof tasks !== 'object' || Array.isArray(tasks)) {
+    return { refusal: `${TURBO_CONFIG} declares no \`tasks\` map.` };
+  }
+  const buildTasks = Object.keys(tasks).filter(isBuildTask);
+  if (buildTasks.length === 0) {
+    return { refusal: `${TURBO_CONFIG} declares no \`build\` task -- there is no build whose inputs Build Core could run on.` };
+  }
+
+  const byPath = new Map();
+  const add = (path, from) => byPath.set(path, [...(byPath.get(path) ?? []), from]);
+  add(TURBO_CONFIG, 'the turbo config itself');
+  for (const dep of Array.isArray(turbo.globalDependencies) ? turbo.globalDependencies : []) {
+    if (typeof dep !== 'string' || dep.startsWith('!')) continue;
+    add(dep.startsWith(TURBO_ROOT) ? dep.slice(TURBO_ROOT.length) : dep, 'globalDependencies');
+  }
+  const excludedTasks = [];
+  for (const task of buildTasks) {
+    const pkg = task.includes('#') ? task.slice(0, task.lastIndexOf('#')) : null;
+    if (pkg !== null && excluded.has(pkg)) {
+      excludedTasks.push(task);
+      continue;
+    }
+    const inputs = Array.isArray(tasks[task]?.inputs) ? tasks[task].inputs : [];
+    for (const input of inputs) {
+      if (typeof input === 'string' && input.startsWith(TURBO_ROOT)) add(input.slice(TURBO_ROOT.length), task);
+    }
+  }
+  return { rows: [...byPath].map(([path, from]) => ({ path, from })), excludedTasks };
+}
+
+/** The first-party closure of a script in the checked-in tree. */
+const closureIn = (root) => (rel) => firstPartyModuleClosure(rel, { root });
+
+/**
+ * Every repository script Build Core's own steps run (#21341): each script a
+ * `run:` step names, directly or through a root `package.json` alias chain
+ * (`collectInvocations`, the recognizer `check:self-test-wired` reads CI
+ * with), plus each one's first-party import closure (`closureOf`). Returns the
+ * rows, each with where it came from: the step that runs it, or the script
+ * that imports it. `{ refusal }` when a closure cannot be computed -- a step
+ * naming a script that does not resolve is a subject this gate did not read.
+ */
+export function buildGuardsOf(steps, pkgScripts, closureOf) {
+  const byPath = new Map();
+  const add = (path, from) => byPath.set(path, [...new Set([...(byPath.get(path) ?? []), from])]);
+  for (const [index, step] of (Array.isArray(steps) ? steps : []).entries()) {
+    if (typeof step?.run !== 'string') continue;
+    const label = typeof step.name === 'string' ? step.name : `step ${index + 1}`;
+    const { named } = collectInvocations([{ name: label, text: step.run }], pkgScripts ?? {});
+    for (const [script, where] of named) {
+      let closure;
+      try {
+        closure = closureOf(script);
+      } catch (err) {
+        return {
+          refusal:
+            `${CI_WORKFLOW}'s \`${BUILD_JOB}\` step "${label}" runs ${script}, whose first-party closure could not be ` +
+            `computed: ${String(err?.message ?? err).split('\n')[0]}`,
+        };
+      }
+      for (const member of closure) {
+        if (member === script) for (const w of where) add(member, w);
+        else add(member, `imported by ${script}`);
+      }
+    }
+  }
+  return { rows: [...byPath].map(([path, from]) => ({ path, from })) };
+}
+
+/**
+ * The verdict on Build Core's scheduling against the build inputs turbo.json
+ * declares and the scripts the job's own steps run. Takes the three SOURCE
+ * STRINGS (null for one that could not be read) and the closure reader, so
+ * the self-test can drive every failure. `{ refusal }` for every state in
+ * which the subject was not read; otherwise the findings, each list empty on a
+ * clean tree.
+ */
+export function judgeBuildInputs(source, turboSource, manifestSource, closureOf = closureIn(REPO_ROOT)) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+
+  const entries = filters[BUILD_FILTER];
+  if (!entries) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${BUILD_FILTER}:\` filter.` };
+
+  const job = jobs[BUILD_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${BUILD_JOB}\` job -- Build Core has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  if (!condition.includes(`needs.filter.outputs.${BUILD_FILTER}`)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job no longer names \`${BUILD_FILTER}\` in its \`if:\`, so that filter ` +
+        `does not schedule it any more and parity against it means nothing.\n    if: ${condition || '(absent)'}`,
+    };
+  }
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  if (!steps.some((s) => typeof s?.run === 'string' && s.run.trim() === BUILD_COMMAND)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job has no \`run: ${BUILD_COMMAND}\` step, so ${ROOT_MANIFEST}'s \`build\` ` +
+        'script no longer says which build tasks it runs.',
+    };
+  }
+
+  if (typeof turboSource !== 'string') return { refusal: `${TURBO_CONFIG} could not be read.` };
+  let turbo;
+  try {
+    turbo = JSON.parse(turboSource);
+  } catch (err) {
+    return { refusal: `${TURBO_CONFIG} could not be read as JSON: ${err?.message ?? err}` };
+  }
+  if (typeof manifestSource !== 'string') return { refusal: `${ROOT_MANIFEST} could not be read.` };
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestSource);
+  } catch (err) {
+    return { refusal: `${ROOT_MANIFEST} could not be read as JSON: ${err?.message ?? err}` };
+  }
+
+  const exclusions = buildExclusions(manifest?.scripts?.build);
+  if (exclusions.refusal) return exclusions;
+  const declared = buildInputsOf(turbo, exclusions.excluded);
+  if (declared.refusal) return declared;
+
+  const guards = buildGuardsOf(steps, manifest?.scripts, closureOf);
+  if (guards.refusal) return guards;
+
+  const split = (rows) => {
+    const covered = [];
+    const uncovered = [];
+    for (const row of rows) {
+      const verdict = coverageVerdict(row.path, entries);
+      (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+    }
+    return { covered, uncovered };
+  };
+  const { covered, uncovered } = split(declared.rows);
+  const { covered: guardsCovered, uncovered: guardsUncovered } = split(guards.rows);
+  // The reverse direction, judged only where it is decidable from the
+  // populations alone: a LITERAL entry in a directory that holds a declared
+  // literal build input or a guard is there for the same reason those are, so
+  // one that covers none of them is a leftover -- of an input turbo.json
+  // dropped, or of a guard step Build Core dropped. Root-level files and
+  // pattern entries are not this subject's to judge -- nothing here says why
+  // they are in `core`.
+  const reasons = [...declared.rows, ...guards.rows];
+  const reasonDirs = new Set(reasons.filter(({ path }) => !WILDCARD.test(path)).map(({ path }) => dirOf(path)).filter(Boolean));
+  const stale = entries.filter(
+    (entry) =>
+      !WILDCARD.test(entry) &&
+      reasonDirs.has(dirOf(entry)) &&
+      !reasons.some(({ path }) => coverageVerdict(path, [entry]).covered),
+  );
+
+  return {
+    entries,
+    condition,
+    inputs: declared.rows,
+    covered,
+    uncovered,
+    guards: guards.rows,
+    guardsCovered,
+    guardsUncovered,
+    stale,
+    excludedTasks: declared.excludedTasks,
+  };
+}
+
+function reportBuildInputs(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge Build Core's build inputs.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  if (verdict.uncovered.length > 0) {
+    problems.push(
+      `${verdict.uncovered.length} build input(s) ${TURBO_CONFIG} declares are covered by no \`${BUILD_FILTER}:\` entry in ` +
+        `${CI_WORKFLOW}. A diff confined to one moves the build hashes it reaches and starts no Build Core, so the\n` +
+        `    merge queue is the first place that build runs:\n` +
+        verdict.uncovered.map((r) => `      ${r.path}   (${r.from.join(', ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW}. Not the subtree it sits in: over a\n` +
+        '    tooling directory that starts the whole core pipeline on every tooling diff, and the declaration is the\n' +
+        '    narrower list.',
+    );
+  }
+  if (verdict.guardsUncovered.length > 0) {
+    problems.push(
+      `${verdict.guardsUncovered.length} script(s) the \`${BUILD_JOB}\` job's own steps run are covered by no ` +
+        `\`${BUILD_FILTER}:\` entry in ${CI_WORKFLOW}. Build Core is the only job that runs them, so a diff confined to one\n` +
+        `    starts no Build Core and the changed script runs nowhere before the merge queue:\n` +
+        verdict.guardsUncovered.map((r) => `      ${r.path}   (${r.from.join('; ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the guard rows of the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW} -- a change to\n` +
+        '    the guard runs the guard. Not the subtree it sits in, for the reason the build inputs give.',
+    );
+  }
+  if (verdict.stale.length > 0) {
+    problems.push(
+      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries literal entr(ies) beside the build inputs and Build Core's ` +
+        `guards that cover none of them -- left over from an input ${TURBO_CONFIG} no longer declares, or from a ` +
+        `script no \`${BUILD_JOB}\` step runs any more:\n` +
+        verdict.stale.map((e) => `      ${e}`).join('\n') +
+        `\n    Delete them. Each one starts the whole core pipeline on a diff that neither a build nor Build Core reads.`,
+    );
+  }
+  if (problems.length > 0) {
+    console.error(
+      `FAIL: ci.yml's \`${BUILD_FILTER}\` filter is out of step with the build inputs ${TURBO_CONFIG} declares and ` +
+        `the scripts Build Core's steps run.\n`,
+    );
+    for (const p of problems) console.error(`  - ${p}\n`);
+    return 1;
+  }
+  const fromGlobal = verdict.inputs.filter((r) => r.from.includes('globalDependencies')).length;
+  const imported = verdict.guards.filter((r) => r.from.every((f) => f.startsWith('imported by '))).length;
+  console.log(
+    `OK: all ${verdict.inputs.length} build input(s) ${TURBO_CONFIG} declares outside the packages (itself, ` +
+      `${fromGlobal} globalDependencies, and every \`$TURBO_ROOT$\` input of a build Build Core runs) and all ` +
+      `${verdict.guards.length} script(s) the \`${BUILD_JOB}\` job's own steps run (${verdict.guards.length - imported} ` +
+      `named by a step, ${imported} only imported by one) are covered by \`${BUILD_FILTER}\`, which the ` +
+      `\`${BUILD_JOB}\` job's \`if:\` reads; no literal \`${BUILD_FILTER}\` entry beside them is a leftover. Left out ` +
+      `because \`${BUILD_COMMAND}\` excludes their package: ` +
+      `${verdict.excludedTasks.length > 0 ? verdict.excludedTasks.join(', ') : 'none'}.`,
+  );
+  return 0;
 }
 
 function report(verdict) {
@@ -397,7 +986,22 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.error(`FAIL: cannot read ${CI_WORKFLOW}: ${err?.code ?? err?.message ?? err}`);
     return 1;
   }
-  return report(judge(source, table));
+  // Every subject is judged and every one reports, so one red never hides another.
+  const crosspkg = report(judge(source, table));
+  const consoleCode = reportConsole(judgeConsole(source));
+  const buildCode = reportBuildInputs(
+    judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST), closureIn(root)),
+  );
+  return crosspkg === 0 && consoleCode === 0 && buildCode === 0 ? 0 : 1;
+}
+
+/** A root file's text, or null when it cannot be read -- the judge refuses on null by name. */
+function readOrNull(root, rel) {
+  try {
+    return readFileSync(join(root, rel), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
@@ -415,7 +1019,45 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.glob}${row.covered ? `   via ${row.kind} ${row.via}` : ''}`);
   }
   console.log(`\n${seen.size} unique glob(s), ${verdict.uncovered.length} uncovered declaration(s).`);
-  return verdict.uncovered.length > 0 ? 1 : 0;
+
+  const con = judgeConsole(readFileSync(join(root, CI_WORKFLOW), 'utf8'));
+  if (con.refusal) {
+    console.error(`FAIL: ${con.refusal}`);
+    return 1;
+  }
+  console.log(`\n${CONSOLE_FILTER}: ${JSON.stringify(con.entries)}`);
+  for (const entry of con.entries) {
+    const kind = con.keyInputs.includes(entry) ? 'build input (hashed into the dist key)' : Object.hasOwn(CONSOLE_GUARDS, entry) ? `guard: ${CONSOLE_GUARDS[entry]}` : 'UNCLASSIFIED';
+    console.log(`${kind === 'UNCLASSIFIED' ? 'FAIL' : 'ok  '} ${entry}   ${kind}`);
+  }
+
+  const build = judgeBuildInputs(
+    readFileSync(join(root, CI_WORKFLOW), 'utf8'),
+    readOrNull(root, TURBO_CONFIG),
+    readOrNull(root, ROOT_MANIFEST),
+    closureIn(root),
+  );
+  if (build.refusal) {
+    console.error(`FAIL: ${build.refusal}`);
+    return 1;
+  }
+  console.log(`\nbuild inputs ${TURBO_CONFIG} declares, against ${BUILD_FILTER} (${BUILD_JOB}):`);
+  for (const row of [...build.covered, ...build.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
+  }
+  console.log(`\nscripts the ${BUILD_JOB} job's own steps run, against ${BUILD_FILTER}:`);
+  for (const row of [...build.guardsCovered, ...build.guardsUncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join('; ')})`);
+  }
+  for (const entry of build.stale) console.log(`FAIL ${entry}   stale: covers no declared build input and no script a ${BUILD_JOB} step runs`);
+  console.log(`left out (excluded by \`${BUILD_COMMAND}\`): ${build.excludedTasks.join(', ') || 'none'}`);
+  return verdict.uncovered.length > 0 ||
+    con.unclassified.length > 0 ||
+    build.uncovered.length > 0 ||
+    build.guardsUncovered.length > 0 ||
+    build.stale.length > 0
+    ? 1
+    : 0;
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
@@ -766,6 +1408,466 @@ export async function selfTest() {
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
   }
 
+  // ── (8) the `console` selection and the dist key it must move (#20765) ───
+  battery('(8) the `console` selection and the dist key it must move');
+  const realSource = readFileSync(join(REPO_ROOT, CI_WORKFLOW), 'utf8');
+  const realConsole = judgeConsole(realSource);
+  const findingsOf = (v) =>
+    ['mismatched', 'patterns', 'unselected', 'unclassified', 'staleGuards', 'hashedGuards'].flatMap((k) => v[k] ?? ['(no verdict)']);
+  assert(!realConsole.refusal, `the checked-in ci.yml's console selection is readable -- ${realConsole.refusal ?? ''}`);
+  assert(findingsOf(realConsole).length === 0, `the checked-in console filter and dist key are in step -- ${findingsOf(realConsole).join(', ')}`);
+  // Triage's pins, over the real tree: the spec's entry layout selects the job
+  // AND moves the key, so the head judges the change instead of replaying a dist
+  // built before it; an ordinary spec source file does neither.
+  for (const layout of ['packages/spec/package.json', 'packages/spec/tsup.config.ts']) {
+    assert(
+      consoleSelects(layout, realConsole.entries ?? []) === true && (realConsole.keyInputs ?? []).includes(layout),
+      `a head touching only ${layout} selects Console Pin Gate and moves its dist key`,
+    );
+  }
+  const control = 'packages/spec/src/ui/view.zod.ts';
+  assert(
+    existsSync(join(REPO_ROOT, control)) && consoleSelects(control, realConsole.entries ?? []) === false,
+    `the control: a head touching only ${control} (a tracked spec source file) does NOT select Console Pin Gate`,
+  );
+  assert(
+    !(realConsole.entries ?? []).some((e) => e.startsWith('packages/spec/src/')),
+    'no console entry reaches into packages/spec/src -- the entry layout selects the job, the spec content does not',
+  );
+
+  // Synthetic trees. The default is clean, so every red below is the named drift.
+  const guardEntries = Object.keys(CONSOLE_GUARDS);
+  const keyOf = (paths) => `\${{ runner.os }}-console-dist-\${{ hashFiles(${paths.map((p) => `'${p}'`).join(', ')}) }}`;
+  const consoleFixture = ({ entries, key, saveKey, envKey, condition, withSave = true } = {}) => {
+    const k = key ?? keyOf(['.objectui-sha', 'scripts/build-console.sh']);
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(['packages/**']),
+      '            console:',
+      list(entries ?? ['.objectui-sha', 'scripts/build-console.sh', ...guardEntries]),
+      '  console-pin:',
+      `    if: ${JSON.stringify(condition ?? "${{ !cancelled() && needs.filter.outputs.console != 'false' }}")}`,
+      '    steps:',
+      '      - uses: actions/cache/restore@v6',
+      '        with:',
+      '          path: packages/console/dist',
+      `          key: ${k}`,
+      '      - run: pnpm check:console-injection --require-stamp',
+      '        env:',
+      `          CONSOLE_DIST_CACHE_KEY: ${envKey ?? k}`,
+      ...(withSave
+        ? ['      - uses: actions/cache/save@v6', '        with:', '          path: packages/console/dist', `          key: ${saveKey ?? k}`]
+        : []),
+    ].join('\n');
+  };
+  const clean = judgeConsole(consoleFixture());
+  assert(!clean.refusal && findingsOf(clean).length === 0, `positive control: the default synthetic tree is clean -- ${clean.refusal ?? findingsOf(clean).join(', ')}`);
+
+  const specInFilterOnly = judgeConsole(
+    consoleFixture({ entries: ['.objectui-sha', 'scripts/build-console.sh', 'packages/spec/package.json', ...guardEntries] }),
+  );
+  assert(
+    (specInFilterOnly.unclassified ?? []).join(',') === 'packages/spec/package.json',
+    'THE HOLE: a spec path the filter names but the key does not hash is reported -- the head would replay a pre-change dist',
+  );
+  const keyOnly = judgeConsole(consoleFixture({ key: keyOf(['.objectui-sha', 'scripts/build-console.sh', 'packages/spec/package.json']) }));
+  assert(
+    (keyOnly.unselected ?? []).join(',') === 'packages/spec/package.json',
+    'the other hole: a path the key hashes but the filter does not name is reported -- its first build would be the queue\'s',
+  );
+  const subtree = judgeConsole(consoleFixture({ entries: ['.objectui-sha', 'scripts/build-console.sh', 'packages/spec/**', ...guardEntries] }));
+  assert((subtree.patterns ?? []).join(',') === 'packages/spec/**', 'a pattern entry is reported -- the filter must not become all of spec');
+  assert(consoleSelects('packages/spec/src/x.zod.ts', ['packages/spec/**']) === null, '-- and a pattern list is never read as a membership test');
+  const splitKey = judgeConsole(consoleFixture({ saveKey: keyOf(['.objectui-sha']) }));
+  assert(
+    (splitKey.mismatched ?? []).length === 1 && /cache\/save/.test(splitKey.mismatched[0]),
+    'a save step spelling a different key than the restore is reported, naming the save',
+  );
+  const staleGuard = judgeConsole(
+    consoleFixture({ entries: ['.objectui-sha', 'scripts/build-console.sh', ...guardEntries.filter((g) => g !== CI_WORKFLOW)] }),
+  );
+  assert((staleGuard.staleGuards ?? []).join(',') === CI_WORKFLOW, 'a declared guard the filter no longer names is reported stale');
+  const hashedGuard = judgeConsole(consoleFixture({ key: keyOf(['.objectui-sha', 'scripts/build-console.sh', CI_WORKFLOW]) }));
+  assert((hashedGuard.hashedGuards ?? []).join(',') === CI_WORKFLOW, 'a declared guard the key also hashes is reported');
+
+  assert(
+    /declares no \`console:\` filter/.test(judgeConsole(consoleFixture().replace(/            console:\n(              - '[^']*'\n?)+/, '')).refusal ?? ''),
+    'a filters input with no `console:` list => REFUSAL, not a clean zero',
+  );
+  assert(
+    /no longer names \`console\`/.test(judgeConsole(consoleFixture({ condition: "${{ !cancelled() }}" })).refusal ?? ''),
+    'the console job dropping the filter from its `if:` => REFUSAL',
+  );
+  assert(/exactly one of each/.test(judgeConsole(consoleFixture({ withSave: false })).refusal ?? ''), 'a job with no save step => REFUSAL');
+  assert(
+    hashFilesInputs("${{ runner.os }}-x-${{ hashFiles(env.PATHS) }}") === null &&
+      /quoted paths/.test(judgeConsole(consoleFixture({ key: "${{ runner.os }}-console-dist-${{ hashFiles(env.PATHS) }}" })).refusal ?? ''),
+    'a key whose hashFiles arguments are not quoted paths => REFUSAL: the gate cannot say what it hashes',
+  );
+
+  // A scratch root carrying the given ci.yml beside the REAL turbo.json and
+  // root manifest, so the only drift `main()` can see is the one injected: a
+  // root missing either file would red the build-input subject on its own and
+  // satisfy a "returns 1" assertion for the wrong reason. The same holds for
+  // every script the real Build Core's steps run (#21341): their closures are
+  // read from the root being judged, so they are staged too.
+  const realGuardPaths = (
+    judgeBuildInputs(realSource, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8')).guards ?? []
+  ).map((r) => r.path);
+  const inScratchTree = (ciSource, fn) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
+    try {
+      mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
+      writeFileSync(join(scratch, CI_WORKFLOW), ciSource);
+      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST, ...realGuardPaths]) {
+        mkdirSync(dirname(join(scratch, rel)), { recursive: true });
+        writeFileSync(join(scratch, rel), readFileSync(join(REPO_ROOT, rel), 'utf8'));
+      }
+      return fn(scratch);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  };
+
+  // The report path, over the real ci.yml with one drift injected: the spec's
+  // tsup entry list dropped from the filter while the key still hashes it.
+  const drifted = realSource.replace("              - 'packages/spec/tsup.config.ts'\n", '');
+  assert(drifted !== realSource, 'the report-path fixture found its anchor in the checked-in ci.yml');
+  assert(
+    inScratchTree(drifted, (root) => quietly(() => main(root))) === 1,
+    'main() returns 1 over a ci.yml whose console filter lost a hashed path -- the report path, not only `judgeConsole`',
+  );
+
+  // ── (9) Build Core and the build inputs turbo.json declares (#21202) ────
+  battery('(9) Build Core and the build inputs turbo.json declares');
+  const BUILD_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' }}";
+  const buildWorkflow = ({ core, condition = BUILD_IF, run = 'pnpm build' } = {}) => {
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(core ?? ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs']),
+      '  build-core:',
+      `    if: ${JSON.stringify(condition)}`,
+      '    steps:',
+      `      - run: ${run}`,
+    ].join('\n');
+  };
+  const turboFixture = ({ globalDependencies = ['tsconfig.json', 'tsup.config.ts'], tasks } = {}) =>
+    JSON.stringify({
+      globalDependencies,
+      tasks: tasks ?? {
+        build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs'] },
+        '@objectstack/probe#build': {
+          inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '$TURBO_ROOT$/packages/cli/src/x.ts'],
+        },
+        '@objectstack/docs#build': { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/content/**'] },
+        test: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/docker/**'] },
+      },
+    });
+  const manifestFixture = (build = 'turbo run build --filter=!@objectstack/docs') => JSON.stringify({ scripts: { build } });
+  const judgeBuild = ({ workflow, turbo, manifest } = {}) =>
+    judgeBuildInputs(workflow ?? buildWorkflow(), turbo === undefined ? turboFixture() : turbo, manifest === undefined ? manifestFixture() : manifest);
+  const uncoveredPaths = (v) => (v.uncovered ?? []).map((r) => r.path);
+  const findingsOfBuild = (v) => [...(v.uncovered ?? ['(no verdict)']).map((r) => r.path ?? r), ...(v.stale ?? ['(no verdict)'])];
+
+  const buildClean = judgeBuild();
+  assert(!buildClean.refusal && findingsOfBuild(buildClean).length === 0, `positive control: the default synthetic tree is clean -- ${buildClean.refusal ?? findingsOfBuild(buildClean).join(', ')}`);
+  assert(
+    buildClean.covered?.find((r) => r.path === 'packages/cli/src/x.ts')?.via === 'packages/**',
+    '-- a root input under a package root is covered by that subtree entry, with no literal of its own',
+  );
+  assert(
+    !(buildClean.inputs ?? []).some((r) => r.path === 'docker/**'),
+    '-- a TEST task\'s root input is not a build input: `crosspkg` is that population\'s scheduler, not `core`',
+  );
+  assert(
+    (buildClean.excludedTasks ?? []).join(',') === '@objectstack/docs#build' && !(buildClean.inputs ?? []).some((r) => r.path === 'content/**'),
+    '-- a build the root `build` script excludes is left out, and its root input with it',
+  );
+
+  // THE HOLE, the one the card reads: a build input `core:` does not cover.
+  const droppedInput = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs'] }) });
+  assert(uncoveredPaths(droppedInput).join(',') === 'scripts/b.mjs', 'THE HOLE: a build input dropped from `core:` is reported uncovered, by path');
+  assert(
+    (droppedInput.uncovered?.[0]?.from ?? []).join(',') === '@objectstack/probe#build',
+    '-- naming the build task that declared it',
+  );
+  const droppedTurbo = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs'] }) });
+  assert(uncoveredPaths(droppedTurbo).join(',') === 'turbo.json', 'turbo.json itself missing from `core:` is reported -- it moves every task hash');
+  const droppedGlobal = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'turbo.json', 'scripts/a.mjs', 'scripts/b.mjs'] }) });
+  assert(uncoveredPaths(droppedGlobal).join(',') === 'tsup.config.ts', 'a `globalDependencies` entry missing from `core:` is reported -- the set is derived, not listed here');
+  const newInput = judgeBuild({
+    turbo: turboFixture({
+      tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '$TURBO_ROOT$/tools/gen.mjs'] } },
+    }),
+  });
+  assert(uncoveredPaths(newInput).join(',') === 'tools/gen.mjs', 'a build input turbo.json gains under a NEW root reds until `core:` covers it');
+  const negated = judgeBuild({
+    turbo: turboFixture({ tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '!$TURBO_ROOT$/scripts/c.mjs'] } } }),
+  });
+  assert(uncoveredPaths(negated).length === 0, 'a NEGATED root input is not required -- a negation can only narrow a hash');
+  const docsBuilt = judgeBuild({ manifest: manifestFixture('turbo run build') });
+  assert(
+    uncoveredPaths(docsBuilt).join(',') === 'content/**',
+    'the root `build` script no longer excluding a package puts that build\'s root inputs back in the required set -- the exclusion is read, not declared',
+  );
+  const staleEntry = judgeBuild({
+    workflow: buildWorkflow({
+      core: ['packages/**', 'package.json', CI_WORKFLOW, 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/old.mjs'],
+    }),
+  });
+  assert((staleEntry.stale ?? []).join(',') === 'scripts/old.mjs', 'a literal `core:` entry beside declared build inputs, covering none of them, is reported stale');
+  assert(
+    (staleEntry.stale ?? ['(no verdict)']).length === 1,
+    '-- while a root-level file, a pattern entry and a literal in a directory holding no declared build input are not judged',
+  );
+  assert(buildExclusions('turbo run build --filter !@objectstack/docs').excluded?.has('@objectstack/docs'), 'the spaced `--filter !<pkg>` spelling is read as an exclusion too');
+
+  // Refusals: never a clean zero over a subject that was not read.
+  const buildRefusal = (opts) => judgeBuild(opts).refusal ?? '';
+  assert(/no \`build-core\` job/.test(judgeBuildInputs(fixtureWorkflow(), turboFixture(), manifestFixture()).refusal ?? ''), 'no Build Core job => REFUSAL');
+  assert(/no longer names \`core\`/.test(buildRefusal({ workflow: buildWorkflow({ condition: '${{ !cancelled() }}' }) })), 'Build Core dropping `core` from its `if:` => REFUSAL');
+  assert(/no \`run: pnpm build\` step/.test(buildRefusal({ workflow: buildWorkflow({ run: 'pnpm turbo run build' }) })), 'Build Core no longer running `pnpm build` => REFUSAL');
+  assert(/turbo.json could not be read\./.test(buildRefusal({ turbo: null })), 'an unreadable turbo.json => REFUSAL');
+  assert(/could not be read as JSON/.test(buildRefusal({ turbo: '{ tasks: ' })), 'a turbo.json that is not JSON => REFUSAL');
+  assert(/no \`tasks\` map/.test(buildRefusal({ turbo: '{}' })), 'a turbo.json with no tasks map => REFUSAL');
+  assert(/no \`build\` task/.test(buildRefusal({ turbo: turboFixture({ tasks: { test: { inputs: [] } } }) })), 'a turbo.json with no build task => REFUSAL');
+  assert(/package.json could not be read\./.test(buildRefusal({ manifest: null })), 'an unreadable root manifest => REFUSAL');
+  assert(/not \`turbo run build/.test(buildRefusal({ manifest: JSON.stringify({ scripts: {} }) })), 'a root manifest with no `build` script => REFUSAL');
+  assert(/not \`turbo run build/.test(buildRefusal({ manifest: manifestFixture('tsup') })), 'a root `build` script that is not `turbo run build` => REFUSAL');
+
+  // The real tree.
+  const realBuild = judgeBuildInputs(realSource, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'));
+  assert(!realBuild.refusal && findingsOfBuild(realBuild).length === 0, `the checked-in core filter covers every build input turbo.json declares -- ${realBuild.refusal ?? findingsOfBuild(realBuild).join(', ')}`);
+  for (const path of [TURBO_CONFIG, 'tsup.config.ts', 'scripts/tsup-drop-sources-content.mjs']) {
+    assert(
+      (realBuild.covered ?? []).some((r) => r.path === path && r.kind === 'literal'),
+      `a head touching only ${path} schedules Build Core, through its own literal \`core\` entry`,
+    );
+  }
+  const notABuildInput = 'scripts/check-ci-filter-parity.mjs';
+  assert(
+    existsSync(join(REPO_ROOT, notABuildInput)) &&
+      !(realBuild.inputs ?? []).some((r) => r.path === notABuildInput) &&
+      !coverageVerdict(notABuildInput, realBuild.entries ?? []).covered,
+    `the control: ${notABuildInput}, a tracked script no build declares, does NOT schedule Build Core -- \`core\` names files, not \`scripts/**\``,
+  );
+  const droppedReal = realSource.replace("              - 'scripts/invoked-as.mjs'\n", '');
+  assert(droppedReal !== realSource, 'the real-tree drop found its anchor in the checked-in ci.yml');
+  assert(
+    uncoveredPaths(judgeBuildInputs(droppedReal, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'))).join(',') ===
+      'scripts/invoked-as.mjs',
+    'the checked-in ci.yml with one build input dropped from `core:` reports exactly that input',
+  );
+  assert(inScratchTree(realSource, (root) => quietly(() => main(root))) === 0, 'main() returns 0 over the scratch copy of the real tree -- the scratch root is complete');
+  assert(inScratchTree(droppedReal, (root) => quietly(() => main(root))) === 1, '-- and 1 with that one build input dropped: the report path, not only `judgeBuildInputs`');
+
+  // ── (10) Build Core and the scripts its own steps run (#21341) ──────────
+  battery('(10) Build Core and the scripts its own steps run');
+  // A Build Core whose steps reach scripts every way the recognizer reads, and
+  // two ways it deliberately does not: `pnpm build` (the other population),
+  // `pnpm install` (a builtin; the root `prepare` it triggers runs in every
+  // job) and a package-scoped `pnpm --filter` script (the stated bound).
+  const GUARD_CORE = ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/check-foo.mjs', 'scripts/check-bar.mjs', 'scripts/helper.mjs'];
+  const GUARD_STEPS = [
+    { name: 'Install', run: 'pnpm install --frozen-lockfile' },
+    { name: 'Bar self-test', run: 'node scripts/check-bar.mjs --self-test' },
+    { name: 'Build', run: 'pnpm build' },
+    { name: 'Foo guard', run: 'pnpm check:foo' },
+    { name: 'Analyze', run: 'pnpm --filter @objectstack/spec analyze' },
+  ];
+  const guardWorkflow = ({ core = GUARD_CORE, steps = GUARD_STEPS } = {}) => {
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(core),
+      '  build-core:',
+      `    if: ${JSON.stringify(BUILD_IF)}`,
+      '    steps:',
+      ...steps.flatMap((s) => [`      - name: ${JSON.stringify(s.name)}`, '        run: |', ...s.run.split('\n').map((l) => `          ${l}`)]),
+    ].join('\n');
+  };
+  const guardManifest = (extra = {}) =>
+    JSON.stringify({
+      scripts: {
+        build: 'turbo run build --filter=!@objectstack/docs',
+        prepare: 'node scripts/setup.mjs',
+        'check:foo': 'node scripts/check-foo.mjs --self-test && node scripts/check-foo.mjs',
+        ...extra,
+      },
+    });
+  const GUARD_CLOSURES = {
+    'scripts/a.mjs': ['scripts/a.mjs'],
+    'scripts/check-foo.mjs': ['scripts/check-foo.mjs', 'scripts/helper.mjs'],
+    'scripts/check-bar.mjs': ['scripts/check-bar.mjs'],
+    'scripts/check-baz.mjs': ['scripts/check-baz.mjs'],
+    'scripts/check-qux.mjs': ['scripts/check-qux.mjs'],
+    'ops/scripts/check-z.mjs': ['ops/scripts/check-z.mjs'],
+  };
+  const fixtureClosure = (rel) => {
+    if (!Object.hasOwn(GUARD_CLOSURES, rel)) throw new Error(`firstPartyModuleClosure: ${rel} does not exist under the fixture root.`);
+    return GUARD_CLOSURES[rel];
+  };
+  const judgeGuards = ({ workflow, manifest } = {}) =>
+    judgeBuildInputs(workflow ?? guardWorkflow(), turboFixture(), manifest ?? guardManifest(), fixtureClosure);
+  const guardPaths = (v) => (v.guards ?? []).map((r) => r.path).sort().join(',');
+  const uncoveredGuards = (v) => (v.guardsUncovered ?? ['(no verdict)']).map((r) => r.path ?? r).join(',');
+  const guardFrom = (v, path) => (v.guards ?? []).find((r) => r.path === path)?.from ?? [];
+
+  const guardClean = judgeGuards();
+  assert(
+    !guardClean.refusal && findingsOfBuild(guardClean).length === 0 && uncoveredGuards(guardClean) === '',
+    `positive control: the default guard fixture is clean -- ${guardClean.refusal ?? [...findingsOfBuild(guardClean), uncoveredGuards(guardClean)].join(', ')}`,
+  );
+  assert(
+    guardPaths(guardClean) === 'scripts/check-bar.mjs,scripts/check-foo.mjs,scripts/helper.mjs',
+    `the population is exactly the scripts the steps run and what they import -- nothing from \`pnpm build\`, \`pnpm install\`'s \`prepare\` or the package-scoped step: ${guardPaths(guardClean)}`,
+  );
+  assert(guardFrom(guardClean, 'scripts/check-foo.mjs').join(';') === 'Foo guard (pnpm check:foo)', '-- a script reached through a root alias is attributed to its step and the alias');
+  assert(guardFrom(guardClean, 'scripts/check-bar.mjs').join(';') === 'Bar self-test', '-- a script a step names directly is attributed to that step');
+  assert(guardFrom(guardClean, 'scripts/helper.mjs').join(';') === 'imported by scripts/check-foo.mjs', '-- a closure member is attributed to the script that imports it');
+
+  // THE HOLE, both ways the card reads it.
+  const droppedGuard = judgeGuards({ workflow: guardWorkflow({ core: GUARD_CORE.filter((e) => e !== 'scripts/check-foo.mjs') }) });
+  assert(uncoveredGuards(droppedGuard) === 'scripts/check-foo.mjs', 'THE HOLE: a guard row dropped from `core:` is reported uncovered, by path');
+  assert(
+    guardFrom(droppedGuard, 'scripts/check-foo.mjs').join(';') === 'Foo guard (pnpm check:foo)' && (droppedGuard.uncovered ?? ['x']).length === 0,
+    '-- naming the step that runs it, and not as a build input',
+  );
+  const newGuardStep = judgeGuards({
+    workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'Baz guard', run: 'pnpm check:baz' }] }),
+    manifest: guardManifest({ 'check:baz': 'node scripts/check-baz.mjs --self-test && node scripts/check-baz.mjs' }),
+  });
+  assert(uncoveredGuards(newGuardStep) === 'scripts/check-baz.mjs', 'THE HOLE, other side: a guard STEP added to Build Core with no filter row reds, by path');
+  const newDirectStep = judgeGuards({ workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'Qux self-test', run: 'node scripts/check-qux.mjs --self-test' }] }) });
+  assert(uncoveredGuards(newDirectStep) === 'scripts/check-qux.mjs', '-- and so does one that names its script directly rather than through an alias');
+  const droppedHelper = judgeGuards({ workflow: guardWorkflow({ core: GUARD_CORE.filter((e) => e !== 'scripts/helper.mjs') }) });
+  assert(uncoveredGuards(droppedHelper) === 'scripts/helper.mjs', 'a module a guard IMPORTS, dropped from `core:`, reds too -- the guard executes it');
+  const chained = judgeGuards({
+    workflow: guardWorkflow({ steps: [{ name: 'Build', run: 'pnpm build' }, { name: 'Chain', run: 'pnpm check:chain' }] }),
+    manifest: guardManifest({ 'check:chain': 'pnpm check:foo' }),
+  });
+  assert(guardPaths(chained) === 'scripts/check-foo.mjs,scripts/helper.mjs', 'an alias that calls another alias is followed to the script at the end of the chain');
+  const commented = judgeGuards({
+    workflow: guardWorkflow({ steps: [{ name: 'Build', run: 'pnpm build' }, { name: 'Foo guard', run: '# pnpm check:baz\npnpm check:foo' }] }),
+    manifest: guardManifest({ 'check:baz': 'node scripts/check-baz.mjs' }),
+  });
+  assert(guardPaths(commented) === 'scripts/check-foo.mjs,scripts/helper.mjs', 'a commented-out line inside a step runs nothing and requires nothing');
+  const sharedRow = judgeGuards({ workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'A self-test', run: 'node scripts/a.mjs --self-test' }] }) });
+  assert(
+    !sharedRow.refusal && uncoveredGuards(sharedRow) === '' && (sharedRow.uncovered ?? ['x']).length === 0,
+    'a guard that is also a declared build input is satisfied by its one literal row -- no duplicate is demanded',
+  );
+
+  // The reverse direction: the rows are held to the steps, not only the steps to the rows.
+  const leftoverGuard = judgeGuards({ workflow: guardWorkflow({ core: [...GUARD_CORE, 'scripts/check-old.mjs'] }) });
+  assert((leftoverGuard.stale ?? []).join(',') === 'scripts/check-old.mjs', 'a guard row whose step is gone is reported as a leftover');
+  assert(
+    (judgeGuards({ workflow: guardWorkflow({ steps: GUARD_STEPS.filter((s) => s.name !== 'Bar self-test') }) }).stale ?? []).join(',') === 'scripts/check-bar.mjs',
+    '-- the same row reds the moment the step that ran it is deleted',
+  );
+  const guardOnlyDir = judgeGuards({
+    workflow: guardWorkflow({
+      core: [...GUARD_CORE, 'ops/scripts/check-z.mjs', 'ops/scripts/old.mjs'],
+      steps: [...GUARD_STEPS, { name: 'Z guard', run: 'node ops/scripts/check-z.mjs' }],
+    }),
+  });
+  assert(
+    (guardOnlyDir.stale ?? []).join(',') === 'ops/scripts/old.mjs',
+    '-- and a directory holding only a guard is judged for leftovers too, while the guard row itself is not one',
+  );
+  assert(
+    /step "Ghost" runs scripts\/check-ghost\.mjs/.test(
+      judgeGuards({ workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'Ghost', run: 'node scripts/check-ghost.mjs' }] }) }).refusal ?? '',
+    ),
+    'a step running a script whose closure cannot be computed => REFUSAL naming the step and the script',
+  );
+
+  // The real tree. The four guards the card names, and the self-test step
+  // #21338 added, each reached from its own step and covered by a literal row.
+  assert(
+    !realBuild.refusal && uncoveredGuards(realBuild) === '' && (realBuild.guards ?? []).length > 0,
+    `the checked-in core filter covers every script Build Core's steps run -- ${realBuild.refusal ?? uncoveredGuards(realBuild)}`,
+  );
+  for (const guard of [
+    'scripts/check-dts-emitted.mjs',
+    'scripts/check-dts-closure.mjs',
+    'scripts/check-dual-build-cjs-loads.mjs',
+    'scripts/check-sourcemap-no-sources-content.mjs',
+    'scripts/check-lean-entry-closure.mjs',
+  ]) {
+    const row = (realBuild.guardsCovered ?? []).find((r) => r.path === guard);
+    assert(
+      row?.kind === 'literal' && row.from.some((f) => !f.startsWith('imported by ')),
+      `a head touching only ${guard} schedules Build Core: a step runs it, and its own literal \`core\` row covers it`,
+    );
+  }
+  assert(
+    guardFrom(realBuild, 'scripts/population-floor.mjs').join(';') === 'imported by scripts/check-dual-build-cjs-loads.mjs' &&
+      (realBuild.guardsCovered ?? []).some((r) => r.path === 'scripts/population-floor.mjs' && r.kind === 'literal'),
+    'the module a guard imports and no build declares is required through the closure, and covered',
+  );
+  assert(
+    !(realBuild.guards ?? []).some((r) => r.path === notABuildInput),
+    `the control: ${notABuildInput} is no script a Build Core step runs either -- \`core\` stays a list of files`,
+  );
+  // The card's own instance (PR #17100): the lean-entry guard's row dropped.
+  const droppedGuardReal = realSource.replace("              - 'scripts/check-lean-entry-closure.mjs'\n", '');
+  assert(droppedGuardReal !== realSource, 'the real-tree guard drop found its anchor in the checked-in ci.yml');
+  const droppedGuardVerdict = judgeBuildInputs(droppedGuardReal, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'));
+  assert(
+    uncoveredGuards(droppedGuardVerdict) === 'scripts/check-lean-entry-closure.mjs' && findingsOfBuild(droppedGuardVerdict).length === 0,
+    'the checked-in ci.yml with the lean-entry guard row dropped reports exactly that guard, and nothing else',
+  );
+  assert(inScratchTree(droppedGuardReal, (root) => quietly(() => main(root))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeBuildInputs`');
+
+  // The two recognizer bounds the header states, pinned against the real job
+  // so a change that makes either one bite reds here rather than going quiet.
+  const realBuildJob = parse(realSource)?.jobs?.[BUILD_JOB] ?? {};
+  const scopedRuns = (realBuildJob.steps ?? []).filter((s) => typeof s?.run === 'string' && /\bpnpm\s+(--filter|-F)\b/.test(s.run)).map((s) => s.run.trim());
+  const specAnalyze = JSON.parse(readFileSync(join(REPO_ROOT, 'packages/spec/package.json'), 'utf8')).scripts?.analyze ?? '';
+  assert(
+    scopedRuns.join('|') === 'pnpm --filter @objectstack/spec analyze' && specAnalyze !== '' && !specAnalyze.includes('..'),
+    `bound 1: Build Core's only package-scoped step is the spec's \`analyze\`, and that script stays inside packages/spec -- got ${JSON.stringify(scopedRuns)} running ${JSON.stringify(specAnalyze)}`,
+  );
+  const localActions = (realBuildJob.steps ?? []).map((s) => String(s?.uses ?? '')).filter((u) => u.startsWith('./'));
+  // Its `run:` steps only, read the way `buildGuardsOf` reads the job's: the
+  // action's description prose says "pnpm version", which is a root alias.
+  const rootScripts = JSON.parse(readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8')).scripts ?? {};
+  const actionScripts = localActions.flatMap((u) => {
+    const runs = (parse(readFileSync(join(REPO_ROOT, u, 'action.yml'), 'utf8'))?.runs?.steps ?? []).filter((s) => typeof s?.run === 'string');
+    return runs.length === 0 ? ['(no run: step read)'] : runs.flatMap((s) => [...collectInvocations([{ name: u, text: s.run }], rootScripts).named.keys()]);
+  });
+  assert(
+    localActions.length > 0 && actionScripts.length === 0,
+    `bound 2: the local composite action(s) Build Core uses (${localActions.join(', ') || 'none found'}) run no repository script -- got ${actionScripts.join(', ') || 'none'}`,
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -823,7 +1925,18 @@ export async function selfTest() {
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
       `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, ` +
-      `and the CI wiring read out of lint.yml.`,
+      `the CI wiring read out of lint.yml, and the \`console\` selection: the spec's entry layout selecting Console Pin ` +
+      `Gate and moving its dist key while a spec source file does neither, each way the filter and the key can drift ` +
+      `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter; ` +
+      `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
+      `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +
+      `and the excluded docs build left out until the build script stops excluding it, a leftover literal entry, ` +
+      `ten refusals, and the checked-in tree green with one input dropped observed red through the report path; ` +
+      `and the scripts Build Core's own steps run: a guard row dropped from \`core\` and a guard step added with no ` +
+      `row each observed red by path and step, through an alias, an alias chain, a direct path and an import, a ` +
+      `commented-out line requiring nothing, a row whose step is gone reported as a leftover, an unresolvable ` +
+      `script refused, the five real guards and the imported population-floor covered by their own rows, the ` +
+      `lean-entry row dropped observed red through the report path, and both recognizer bounds pinned to the real job.`,
   );
   selfTestReachedVerdict = true;
   return 0;

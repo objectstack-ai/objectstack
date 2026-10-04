@@ -84,6 +84,43 @@ export const MarkDoneAction = defineAction({
   refreshAfter: true,
 });
 
+/**
+ * script — the hook-REFUSAL specimen. Reopening a finished task is refused by
+ * the `showcase_guard_task_reopen` beforeUpdate hook
+ * (`src/data/hooks/index.ts`), so a click on this action always fails, by
+ * design: the body's `ctx.api` write is aborted and the hook's sentence is what
+ * the user must be told. The action route answers it as a 4xx carrying that
+ * sentence, and the console owes exactly one error toast that contains it.
+ * Platform checklist item `records-forms.script-action-hook-refusal-toast`
+ * drives this.
+ *
+ * Shown only on finished tasks — the only records the refusal applies to.
+ */
+export const ReopenTaskAction = defineAction({
+  name: 'showcase_reopen_task',
+  label: 'Reopen',
+  icon: 'rotate-ccw',
+  objectName: task,
+  type: 'script',
+  body: {
+    language: 'js',
+    source:
+      "var id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;" +
+      "if (!id) throw new Error('No record to reopen');" +
+      "await ctx.api.object('showcase_task').update({ id: id, done: false });" +
+      "return { ok: true, id: id };",
+    capabilities: ['api.write'],
+  },
+  execution: 'perRecord',
+  // #8990 — `has()` guards the sparse `list_item` face, as on Mark Done.
+  visible: 'has(record.done) && record.done == true',
+  // The task list's row menu only. `record_header` would be inert here: the
+  // Task Detail page (`showcase_task_detail`, `kind: 'full'`) owns the whole
+  // record layout and renders no header action bar.
+  locations: ['list_item'],
+  refreshAfter: true,
+});
+
 /** url — navigate out, from the row overflow menu. */
 export const OpenDocsAction = defineAction({
   name: 'showcase_open_docs',
@@ -207,10 +244,11 @@ export const LogTimeAction = defineAction({
   icon: 'clock',
   objectName: task,
   type: 'form',
-  // Targets the `edit` FORM view. `showcase_task.default` is the LIST view (the
-  // container's main `list` implicitly claims the `default` key), so pointing a
-  // form action there opens a list as a form — now a build error (#2554).
-  target: 'showcase_task.edit',
+  // Targets the container's default FORM view, `showcase_task.form`.
+  // `showcase_task.default` is the LIST view (the container's main `list`
+  // implicitly claims the `default` key), so pointing a form action there opens
+  // a list as a form — now a build error (#2554).
+  target: 'showcase_task.form',
   // `record_section` so it surfaces in the Task Detail quick-actions bar too.
   locations: ['record_header', 'record_related', 'record_section'],
   refreshAfter: true,
@@ -257,7 +295,7 @@ export const NewTaskAction = defineAction({
   icon: 'plus',
   objectName: task,
   type: 'form',
-  target: 'showcase_task.edit',
+  target: 'showcase_task.form',
   locations: [],
   refreshAfter: true,
 });
@@ -456,6 +494,7 @@ export const PortfolioSnapshotAction = defineAction({
 
 export const allActions = [
   MarkDoneAction,
+  ReopenTaskAction,
   OpenDocsAction,
   BulkReassignAction,
   QuickViewAction,

@@ -36,8 +36,10 @@ function makeQl(declared: any[] = []) {
       if (object !== 'sys_capability') return [];
       const where = q?.where ?? {};
       // [#8470] A `null` comparand is IS NULL, not `=== null`: `driver-sql`
-      // compiles `{ field: null }` to `IS NULL`, `driver-memory`'s matcher uses
-      // `value == condition`, and MongoDB matches null-or-missing — none of them
+      // compiles `{ field: null }` to `IS NULL`, `driver-memory`'s query path
+      // matches null-or-missing through mingo (its reference matcher, retired by
+      // commit `8fec76a2b`, used `value == condition`), and MongoDB matches
+      // null-or-missing — none of them
       // is strict equality against an ABSENT key. `bootstrapSystemCapabilities`
       // (called by several cases below) scopes its curated lookup with
       // `organization_id: null`, which strict `===` would make unsatisfiable
@@ -60,12 +62,12 @@ function makeQl(declared: any[] = []) {
           return (v === null ? r[k] == null : r[k] === v);
         }),
       );
-      // [#11518] `limit` is HONOURED, and a paged read is ordered by `id`
+      // [commit e1d773eb7] `limit` is HONOURED, and a paged read is ordered by `id`
       // ascending (#4363's pagination tie-breaker). Both are properties of the
       // shipped drivers, measured for the sibling double in
       // `bootstrap-system-capabilities.test.ts`; this one ignored `limit`
       // entirely, which made the whole class of page-cap defect INEXPRESSIBLE
-      // here — including #11518's, whose consequence lands on THIS seeder.
+      // here — including the cap commit e1d773eb7 fixed, whose consequence lands on THIS seeder.
       if (q?.limit === undefined) return matched;
       return [...matched]
         .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
@@ -434,7 +436,7 @@ describe('unowned-declaration diagnostic (#4967 Part 3)', () => {
 });
 
 /**
- * [#11518] THE CONSEQUENCE THIS SEEDER PAYS FOR A TRUNCATED EXISTENCE PAGE.
+ * [commit e1d773eb7] THE CONSEQUENCE THIS SEEDER PAYS FOR A TRUNCATED EXISTENCE PAGE.
  *
  * This is one of the two callers on `main` that read UNSCOPED (the other is
  * `permission-set-projection`'s overlay pass), and `seed-name-lookup.ts` capped

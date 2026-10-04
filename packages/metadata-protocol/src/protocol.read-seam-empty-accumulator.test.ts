@@ -41,6 +41,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { REFERENCE_SITES } from './reference-sites.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 interface FixtureObject {
@@ -318,11 +319,11 @@ describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a regis
 
 describe('[#8896] findReferencesToMeta — a source type that could not be READ is not a source type with no references', () => {
     /**
-     * `view` is reachable from four source types (`app`, `object`, `page`,
-     * `view`), so a single failing source type leaves the others answering —
-     * which is exactly the pre-fix trap: a SHORT list that looks complete.
-     * `page` carries a real reference to `my_view`, so the healthy half is
-     * observable.
+     * `view` is reachable from several source types (`app`, `page`, `view` —
+     * `object` left the set with #20301, below), so a single failing source type
+     * leaves the others answering — which is exactly the pre-fix trap: a SHORT
+     * list that looks complete. `page` carries a real reference to `my_view`, so
+     * the healthy half is observable.
      *
      * [#9190] The fixture used to spell that reference `page.viewName`, which
      * `PageSchema` does not declare — it agreed with the hand-curated path
@@ -367,10 +368,21 @@ describe('[#8896] findReferencesToMeta — a source type that could not be READ 
             },
         ]);
         // Every source type that can name a view was really consulted — this is
-        // what makes "one of them failed" a meaningful condition below.
+        // what makes "one of them failed" a meaningful condition below. The
+        // population is the DERIVED index's, not a remembered list, so a source
+        // type that gains or loses a view-reference site moves this control with it.
         expect(typeReads).toContain('app');
-        expect(typeReads).toContain('object');
         expect(typeReads).toContain('page');
+        const viewSources = new Set((REFERENCE_SITES.byTarget.get('view') ?? []).map((s) => s.fromType));
+        expect(viewSources.size, 'the derived index names no source type for `view`: the walk is broken').toBeGreaterThan(1);
+        for (const source of viewSources) expect(typeReads, `${source} can name a view`).toContain(source);
+        // [#20301] `object` is no longer one of them. Its one view-reference site
+        // was `listViews.*.tabs[].view` — a `ViewTab` naming a list view — and the
+        // list view's own `tabs` is now a retired key (`retiredKey()`, its input
+        // type `never`), so the walk finds no `view`-spelled property under
+        // `object` and the scan correctly stops reading `object` rows for a view.
+        expect(viewSources.has('object'), 'an object names no view since list-view `tabs` retired').toBe(false);
+        expect(typeReads).not.toContain('object');
     });
 
     it('a source type whose read FAILS fails the whole scan, envelope intact', async () => {

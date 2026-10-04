@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The one-off platform-row organization backfill (#11308) — dry run and write.
+ * The one-off platform-row organization backfill (commit 5a916c4d4) — dry run and write.
  *
  * The three properties the 2026-08-23 maintainer ruling names are asserted
  * here rather than described anywhere:
@@ -14,9 +14,9 @@
  *  3. **Idempotent** — the sweep runs twice against the same engine and the
  *     second run's write count is asserted to be 0.
  *
- * Plus the one thing this card must not do: a platform row about a
+ * Plus the one thing this sweep must not do: a platform row about a
  * `sys_api_key` is repaired from `active_organization_id` (limb 0,
- * stamp-only, #8778), and the credential table is never written to. A sweep
+ * stamp-only, commit 7901b2dd2), and the credential table is never written to. A sweep
  * that "unified everything onto one organization field" would flatten that
  * fork, so it is pinned rather than trusted.
  */

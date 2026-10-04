@@ -10,7 +10,7 @@ import path from 'path';
 // `@objectstack/spec/data` helpers — the enum object carries the type of the
 // same name, so the three vocabularies below still read
 // `satisfies Record<FieldType, …>` and a field type added to the spec is still a
-// named compile error here instead of a silent fallback (#14657). The value
+// named compile error here instead of a silent fallback (commit 431979e67). The value
 // half is what {@link refuseUndeclarableFieldType} reads.
 // #16091 — IMPORTED, not transcribed. Both are on `@objectstack/spec/data`'s
 // exported surface, and spec is not a driver package: the #5726 constraint the
@@ -45,6 +45,9 @@ import {
   // above: it asks the schema whether a name is legal instead of restating
   // the charset the schema declares.
   ObjectSchema,
+  // #21325 — the record's title field (ADR-0079's ladder), which the `view`
+  // scaffold sorts its list by. Asked, never re-derived here.
+  resolveDisplayField,
 } from '@objectstack/spec/data';
 // #20197 — the namespace-prefix gate's own verdict, IMPORTED for the reason
 // the block above gives: `objectNameFor` asks it rather than restating it.
@@ -55,7 +58,7 @@ import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 import { singularToPlural } from '@objectstack/spec/shared';
 import { printHeader, printSuccess, printError, printInfo, printStep, printWarning, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
-import { readProjectNamespace } from '../utils/project-namespace.js';
+import { readProjectNamespace, type ProjectNamespace } from '../utils/project-namespace.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
 import {
@@ -65,6 +68,7 @@ import {
   wiringLines,
   type StackReach,
 } from '../utils/scaffold-wiring.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -78,14 +82,59 @@ import {
 const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
 
 /**
+ * An object a binding scaffold binds to, as the project's stack declares it
+ * (#21325). Read off the loaded stack by {@link stackBindingCandidates}, never
+ * built from the name the author gave the new item.
+ */
+export interface ScaffoldObjectBinding {
+  /** The object's machine name, exactly as the stack declares it. */
+  name: string;
+  /** Its `label`, when the stack declares one as a plain string. */
+  label?: string;
+  /** Its `pluralLabel`, when the stack declares one as a plain string. */
+  pluralLabel?: string;
+  /** Its declared field names, in declaration order. */
+  fields: readonly string[];
+  /** The record's title field (`resolveDisplayField`), when it is a declared field. */
+  displayField?: string;
+}
+
+/** What a binding scaffold is rendered against: each reference it writes, resolved. */
+export interface ScaffoldBindings {
+  object?: ScaffoldObjectBinding;
+  /** The machine name of a flow the stack declares. */
+  flow?: string;
+}
+
+/**
+ * Where a binding scaffold takes each reference it writes from (#21325).
+ *
+ *  - `object: 'name'` — the item's own name names the object. Only `view`:
+ *    a views container is registered under the object it binds to, so
+ *    `os g view task` IS "the views of task", and the name resolves through
+ *    {@link objectNameFor} exactly as `os g object task` writes it.
+ *  - `object: 'flag'` — `--object`, or the stack's only object.
+ *  - `flow: 'flag'`   — `--flow`, or the stack's only flow.
+ *
+ * Every reference is checked against the loaded stack before anything is
+ * rendered, so no scaffold is written naming metadata the stack does not
+ * declare. ⛔ No reference is ever derived from the new item's own name
+ * (`os g flow task_done` once bound object `task_done`).
+ */
+export interface ScaffoldBinds {
+  object?: 'name' | 'flag';
+  flow?: 'flag';
+}
+
+/**
  * The scaffold templates, keyed by metadata type.
  *
  * A generator declares WHAT to write. It does not declare what the file is
  * called: every filename comes from {@link metadataFileName}, which reads the
  * type's own `filePatterns` out of `DEFAULT_METADATA_TYPE_REGISTRY`. The
  * harness wrote `NAME.ts` for years, which matches no pattern the registry
- * declares for any type; #11025 closed that for `skill` alone through a
- * per-generator override, and #11071 replaced the override with the derived
+ * declares for any type; commit 1c3a46f87 closed that for `skill` alone through a
+ * per-generator override, and commit 50fb191dc replaced the override with the derived
  * default so a type added here cannot arrive misnamed by omission.
  *
  * A type registered here that the registry gives no TypeScript pattern is
@@ -105,10 +154,22 @@ const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
  * flag against the templates.
  *
  * Only object names are prefixed. The scaffold's own `name` on an action, a
- * flow, a dashboard, an app or a skill is not judged against the namespace by
- * any gate `os validate` runs, so it stays the name the author typed. A view
- * container's own `name` IS an object name — the container is registered under
- * the object it binds to — so it is prefixed with it (#20215).
+ * flow, a dashboard, an app, a skill or a picklist is not judged against the
+ * namespace by any gate `os validate` runs, so it stays the name the author
+ * typed. A view container writes no `name` at all: it is registered under
+ * the object it binds to (#21325, see the `view` generator).
+ *
+ * ## A binding is read off the stack, never derived from the new item's name
+ *
+ * `view`, `action`, `flow` and `app` write references to OTHER metadata — an
+ * object, and for an action a flow. `binds` says where each comes from (see
+ * {@link ScaffoldBinds}), and `runMetadataGeneration` resolves every one of
+ * them against the loaded stack before rendering, refusing when it cannot:
+ * `generate` receives them already resolved, as {@link ScaffoldBindings}.
+ * These four used to bind the object NAMED LIKE the new item, so
+ * `os g flow task_done` wrote a flow on an object `task_done` nobody declared
+ * (a trigger that never fires), and `os g action complete_task` could only
+ * ever be written for an object called `complete_task` (#21325).
  *
  * ## Every scaffold reaches the stack, or the command says it does not
  *
@@ -121,8 +182,15 @@ const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
 const GENERATORS: Record<string, {
   description: string;
   defaultDir: string;
-  /** Whether the scaffold writes an object machine name (see above). */
+  /**
+   * Whether the scaffold writes an object machine name (see above) — its own
+   * (`object`) or one it binds (`view`, `action`, `flow`, `app`). Such a
+   * generator reads the project's config first and refuses when it does not
+   * load, because the namespace and the stack's objects are both read there.
+   */
   namesObject: boolean;
+  /** The references the scaffold writes, and where each is taken from (#21325). */
+  binds?: ScaffoldBinds;
   /**
    * The metadata `name` the scaffold writes, for the same arguments as
    * `generate`. `runMetadataGeneration` looks for exactly this name in the
@@ -141,16 +209,18 @@ const GENERATORS: Record<string, {
    * @param name      the name the author passed, already past the charset gate
    * @param namespace the project's `manifest.namespace`; omitted for a project
    *                  that declares none, which is the gate's own "no prefix owed"
+   * @param bindings  every reference `binds` declares, resolved against the
+   *                  stack; a binding scaffold throws without them
    */
-  generate: (name: string, namespace?: string) => string;
+  generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
 }> = {
   object: {
     description: 'Business data object',
     defaultDir: 'src/objects',
     /**
-     * Carries an AUTHORED `sharingModel` (#14336).
+     * Carries an AUTHORED `sharingModel` (commit 79c71d29d).
      *
-     * Unlike the other three repairs on that card this one is not shape drift:
+     * Unlike the other three repairs in that commit this one is not shape drift:
      * the object parsed fine and was refused one layer later, by
      * `security-owd-unset` — an author-time ERROR rule saying the org-wide
      * default must be a decision rather than an accident. So the scaffold
@@ -177,6 +247,16 @@ const GENERATORS: Record<string, {
      * the `${namespace}_` prefix the namespace-prefix gate demands, the way
      * the `os init` template's own object does. The binding and the filename
      * stay derived from the name the author typed.
+     *
+     * ONE field, the record's title (#21325). The scaffold used to declare a
+     * `description` textarea too, which nothing in the stack reads: the moment
+     * the project held any view, flow, action, app, dashboard or skill,
+     * `os validate` / `os build` / `os lint` reported it (`field-no-consumers`)
+     * for every object this command had written. `name` is exempt — the
+     * platform reads the title field for every record's display name — so the
+     * scaffold carries no finding into any project. A field the author adds
+     * gets its consumer from `os g view NAME`, whose list shows every field the
+     * object declares.
      */
     namesObject: true,
     itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
@@ -190,15 +270,14 @@ const ${toCamelCase(name)} = ObjectSchema.create({
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
   fields: {
+    // The record's title: the platform shows it as each record's name. Add
+    // the fields this object needs beside it; \`objectstack generate view\`
+    // then lists every one of them.
     name: {
       type: 'text',
       label: 'Name',
       required: true,
       maxLength: 255,
-    },
-    description: {
-      type: 'textarea',
-      label: 'Description',
     },
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
@@ -218,7 +297,7 @@ export default ${toCamelCase(name)};
     description: 'List or form view',
     defaultDir: 'src/views',
     /**
-     * A view CONTAINER — which is what a `view` artifact is (#14336).
+     * A view CONTAINER — which is what a `view` artifact is (commit 79c71d29d).
      *
      * `ViewSchema` is `.strict()` and its view slots are `list` / `form` /
      * `listViews` / `formViews`; `type` and `objectName` belong to a single
@@ -233,45 +312,74 @@ export default ${toCamelCase(name)};
      *
      * The object binding is `object` — the key `getViewsByObject()` reads and
      * the one a stack-level `views: [...]` entry needs to say which object its
-     * views belong to. `objectName` is the spelling on the QUERY surface. It
-     * names the object `os g object NAME` writes, prefix included, so the two
-     * scaffolds compose.
+     * views belong to. `objectName` is the spelling on the QUERY surface. The
+     * view is NAMED after that object (`binds.object: 'name'`): `os g view
+     * task` writes the views of the object `os g object task` writes, prefix
+     * included, and refuses when the stack declares no such object.
      *
-     * The container's own `name` is that SAME object name (#20215). A views
-     * container is registered under the object it binds to, and the runtime
-     * refuses one whose `name` disagrees with that key at boot
-     * (`ObjectQL.registerMetadataCollections`: "Register under one name: drop
-     * `name`, or set it to …"). `os validate` did not say so, and the scaffold
-     * was never loaded, so nobody met it until `os init` started wiring
-     * `src/views`: in a namespaced project the scaffold then stopped `os serve`
-     * from booting. Unprefixed and prefixed are the same string in a project
-     * with no namespace, so only a namespaced project sees the difference.
+     * ## No container `name` or `label` (#21325) — decided from their readers
+     *
+     * The template used to write both, with a comment saying the server
+     * refuses a container whose `name` disagrees, while `os validate` called
+     * both dead. Read from the code that reads them, both statements are true
+     * and they do not conflict:
+     *
+     *  - The container is registered under the key
+     *    `deriveViewContainerObject` returns (`@objectstack/metadata`,
+     *    `view-container.ts`): its own `object`, else `list.data.object` /
+     *    `form.data.object`, and only then `name`. With `object` set, `name`
+     *    is never the key. Its one reader is `viewContainerNameRefusal`
+     *    (`@objectstack/objectql`), which refuses a `name` that is set AND
+     *    differs from that key, and passes a container with no `name`. So
+     *    `name` can only ever restate the key or contradict it — the liveness
+     *    ledger's `dead` (`packages/spec/liveness/view.json`) — and the
+     *    refusal's own remedy is "drop `name`".
+     *  - A container's `label` reaches no reader: every ViewItem the container
+     *    expands into takes the label of its list or form entry
+     *    (`expandViewContainerWithDiagnostics`), never the container's.
+     *
+     * So both are dropped, and the label a person sees is the list view's
+     * own: `list.label`, which `os lint` requires (`required/label`) and the
+     * Console draws as the view's tab and title.
+     *
+     * The list shows every field the bound object declares, read off the
+     * stack: a column naming a field the object lacks renders blank and is
+     * refused (`list-view-field-unknown`), and the template's old fixed `name`
+     * column was exactly that on any object without a `name` field. It is
+     * sorted by the record's title field when the object has one.
      */
     namesObject: true,
+    binds: { object: 'name' },
     itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
-    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('view', bindings, 'object');
+      const columns = object.fields.map((field) => `      { field: ${tsString(field)} },`).join('\n');
+      const sort = object.displayField
+        ? `\n    sort: [{ field: ${tsString(object.displayField)}, order: 'asc' }],`
+        : '';
+      return `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Views
  */
 const ${toCamelCase(name)}Views: UI.View = {
-  // A views container is registered under the object it binds to, so its
-  // \`name\` is that object's name: the server refuses one that disagrees.
-  name: '${objectNameFor(name, namespace)}',
-  label: '${toTitleCase(name)}',
-  object: '${objectNameFor(name, namespace)}',
+  // A views container is registered under the object it binds to: \`object\`
+  // is its identity, so it declares no \`name\` or \`label\` of its own. The
+  // label people see is the list view's, below.
+  object: ${tsString(object.name)},
   list: {
+    label: ${tsString(`All ${objectPluralLabel(object)}`)},
     type: 'grid',
     columns: [
-      { field: 'name', width: 200 },
-    ],
-    sort: [{ field: 'name', order: 'asc' }],
+${columns}
+    ],${sort}
     pagination: { pageSize: 25 },
   },
 };
 
 export default ${toCamelCase(name)}Views;
-`,
+`;
+    },
   },
 
   action: {
@@ -279,27 +387,41 @@ export default ${toCamelCase(name)}Views;
     defaultDir: 'src/actions',
     /**
      * `type` comes from `ActionType` — `script | url | modal | flow | api |
-     * form` — and the handler binding is the single `target` slot (#14336).
+     * form` — and the handler binding is the single `target` slot (commit 79c71d29d).
      *
      * The template used to write `type: 'custom'`, which is not a member, plus
      * a `handler: { type, target }` block, which is not an Action key: the
      * `execute`/`handler` second slot was removed in protocol 17 precisely so
      * no consumer has two places to disagree about. What that block was trying
      * to express is exactly `type: 'flow'` with `target` naming the flow, so
-     * that is what it now says — and it targets the name `os g flow NAME`
-     * writes, so the two scaffolds compose.
+     * that is what it now says.
      *
      * `target` is REQUIRED for every type but `script`, enforced by
      * `ActionSchema`'s own refinement, so this cannot drift back to an action
      * bound to nothing.
      *
-     * `objectName` is an object name, so it carries the namespace prefix;
-     * `defineStack` refuses one that names no declared object. `target` names
-     * a FLOW, whose name no gate prefixes, so it does not.
+     * Both references are BINDINGS (#21325): `objectName` is the object from
+     * `--object` (or the stack's only object), `target` the flow from `--flow`
+     * (or the stack's only flow), each one the stack declares. They used to be
+     * derived from the action's own name — `os g action complete_task` named
+     * object `complete_task` and flow `complete_task_flow` — so `defineStack`
+     * refused the action in every project that had not happened to give an
+     * object and a flow that same name, and in one with no flows at all it
+     * loaded an action whose flow did not exist.
+     *
+     * `locations` places it (#21325): an action with none, that no view
+     * places by name, renders on no surface, and `os validate` says so
+     * (`action-no-placement`). `record_header` is the button on the record it
+     * acts on; the emitted comment names the rest of the vocabulary and the
+     * explicit headless `[]`.
      */
     namesObject: true,
+    binds: { object: 'flag', flow: 'flag' },
     itemName: (name: string) => toSnakeCase(name),
-    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('action', bindings, 'object');
+      const flow = requireBinding('action', bindings, 'flow');
+      return `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Action
@@ -307,13 +429,19 @@ export default ${toCamelCase(name)}Views;
 const ${toCamelCase(name)}Action: UI.Action = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
+  // Runs the flow named in \`target\` against the record it is invoked on.
   type: 'flow',
-  objectName: '${objectNameFor(name, namespace)}',
-  target: '${toSnakeCase(name)}_flow',
+  objectName: ${tsString(object.name)},
+  target: ${tsString(flow)},
+  // Where the button is drawn: the record's header. Others: 'record_more',
+  // 'record_section', 'list_item', 'list_toolbar'. An action meant only for
+  // REST / MCP / AI callers says so with an empty list.
+  locations: ['record_header'],
 };
 
 export default ${toCamelCase(name)}Action;
-`,
+`;
+    },
   },
 
   flow: {
@@ -338,41 +466,53 @@ export default ${toCamelCase(name)}Action;
      * gates on. `generate-scaffold-validates.test.ts` puts this output through
      * both layers, which is the drift this template is not allowed to repeat.
      *
-     * `status` stays `'draft'`: the scaffold fixes the SHAPE and leaves the
-     * arming decision to the author (`os validate` says so — draft flows do
-     * fire, so declare `'active'` to arm deliberately).
+     * `status` is `'active'` (#21325). It used to be `'draft'`, which arms
+     * nothing less: only `'obsolete'` and `'invalid'` disable a flow
+     * (`AutomationEngine` keeps exactly those two in `flowStatusDisabled`), so
+     * a draft flow fires its trigger exactly as an active one does. What
+     * `'draft'` added was ambiguity, which `os validate` reports on every
+     * scaffold (`flow-draft-status-ambiguous`, and the server's own boot line
+     * says the same). `'active'` is the runtime behaviour the scaffold always
+     * had, declared; the emitted comment names `'obsolete'` as the off switch.
      *
-     * The start node's `objectName` carries the namespace prefix: a trigger
-     * bound to an object the stack does not define never fires, and
-     * `validate-flow-trigger-readiness` reports it.
+     * The start node's `objectName` is a BINDING (#21325): the object from
+     * `--object`, or the stack's only object, one the stack declares. It used
+     * to be derived from the flow's own name, so `os g flow task_done` bound
+     * object `task_done`, a trigger that never fires — the generator printed
+     * "Reaches the stack" while `validate-flow-trigger-readiness` warned.
      *
      * It declares what it needs to run (#20215): {@link FLOW_SCAFFOLD_REQUIRES}.
      * `defineStack` refuses a record-change flow in a stack whose `requires`
-     * lacks `triggers`, and a stack that has `triggers` but not `automation`
-     * loads it and never runs it — measured on `os serve`: "1 flow(s) declared
-     * but the automation engine is not enabled — they will never run", each
-     * trigger plugin "NOT installed". So both tokens are declared here, `os
-     * init` declares the union, `os g flow` names any the stack is missing, and
-     * the emitted file says so in its own header.
+     * lacks `triggers` or `automation` (#20332): the trigger installs into the
+     * automation service, so a stack with `triggers` alone used to load the flow
+     * and never run it — measured on `os serve`: "1 flow(s) declared but the
+     * automation engine is not enabled — they will never run", each trigger
+     * plugin "NOT installed" — and is now refused instead. So both tokens are
+     * declared here, `os init` declares the union, `os g flow` names any the
+     * stack is missing, and the emitted file says so in its own header.
      */
     namesObject: true,
+    binds: { object: 'flag' },
     itemName: (name: string) => `${toSnakeCase(name)}_flow`,
     requires: FLOW_SCAFFOLD_REQUIRES,
-    generate: (name: string, namespace?: string) => `import * as Automation from '@objectstack/spec/automation';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('flow', bindings, 'object');
+      return `import * as Automation from '@objectstack/spec/automation';
 
 /**
  * ${toTitleCase(name)} Flow
  *
  * Starts when a record changes, so the stack that carries it must declare
  * requires: [${FLOW_SCAFFOLD_REQUIRES.map((t) => `'${t}'`).join(', ')}]. The 'triggers' capability
- * fires the flow and 'automation' runs it: without 'triggers' the config does
- * not load, and without 'automation' the server loads the flow and never runs it.
+ * fires the flow and 'automation' runs it: without either one the config does
+ * not load.
  */
 const ${toCamelCase(name)}Flow: Automation.Flow = {
   name: '${toSnakeCase(name)}_flow',
   label: '${toTitleCase(name)} Flow',
   type: 'record_change',
-  status: 'draft',
+  // Armed: the trigger below fires it. Set 'obsolete' to switch it off.
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -385,7 +525,7 @@ const ${toCamelCase(name)}Flow: Automation.Flow = {
       //               token ('write' is create OR update, in one flow)
       //   condition   optional bare-CEL gate, e.g. 'record.amount >= 500'
       config: {
-        objectName: '${objectNameFor(name, namespace)}',
+        objectName: ${tsString(object.name)},
         triggerType: 'record-after-write',
       },
     },
@@ -401,7 +541,8 @@ const ${toCamelCase(name)}Flow: Automation.Flow = {
 };
 
 export default ${toCamelCase(name)}Flow;
-`,
+`;
+    },
   },
 
   dashboard: {
@@ -428,7 +569,7 @@ export default ${toCamelCase(name)}Dashboard;
     description: 'Application navigation',
     defaultDir: 'src/apps',
     /**
-     * `AppSchema.navigation` is an ARRAY of nav items (#14336).
+     * `AppSchema.navigation` is an ARRAY of nav items (commit 79c71d29d).
      *
      * The template used to write `{ type: 'sidebar', items: [] }`. There is no
      * `sidebar` wrapper on the authoring surface: the array IS the sidebar
@@ -437,13 +578,19 @@ export default ${toCamelCase(name)}Dashboard;
      * It scaffolds one real entry rather than an empty array, because the
      * entry shape is the thing an author copies to add the second one — and
      * because an app with no navigation renders a shell with nothing in it.
-     * The entry points at the object `os g object NAME` writes, prefix
-     * included, so the two scaffolds compose: `defineStack` refuses a nav
-     * `objectName` that names no declared object.
+     *
+     * The entry's `objectName` is a BINDING (#21325): the object from
+     * `--object`, or the stack's only object, one the stack declares, and the
+     * entry is labelled with that object's own plural label. It used to be
+     * derived from the app's name, so `os g app tasks` opened an object
+     * `tasks` and `defineStack` refused the app in every project without one.
      */
     namesObject: true,
+    binds: { object: 'flag' },
     itemName: (name: string) => `${toSnakeCase(name)}_app`,
-    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('app', bindings, 'object');
+      return `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} App
@@ -453,16 +600,17 @@ const ${toCamelCase(name)}App: UI.App = {
   label: '${toTitleCase(name)}',
   navigation: [
     {
-      id: '${toSnakeCase(name)}_nav',
+      id: ${tsString(`${object.name}_nav`)},
       type: 'object',
-      label: '${toTitleCase(name)}s',
-      objectName: '${objectNameFor(name, namespace)}',
+      label: ${tsString(objectPluralLabel(object))},
+      objectName: ${tsString(object.name)},
     },
   ],
 };
 
 export default ${toCamelCase(name)}App;
-`,
+`;
+    },
   },
 
   skill: {
@@ -473,16 +621,16 @@ export default ${toCamelCase(name)}App;
      * from a per-generator override.
      *
      * `skill` is where the consequence of getting this wrong was first
-     * measured (#11025). It is `allowRuntimeCreate: true`, a type the platform
+     * measured (commit 1c3a46f87). It is `allowRuntimeCreate: true`, a type the platform
      * expects to DISCOVER rather than one wired in by hand, so a scaffold
      * named `lead_qualification.ts` matches neither `*.skill.ts` nor
      * `*.skill.yml`, and then type-checks, passes `os validate` and publishes
      * with nothing anywhere saying it was skipped — the silent-strip shape
-     * ADR-0063's retirement of `os g agent` closed (#10359), re-entering
+     * ADR-0063's retirement of `os g agent` closed (commit 15b63e85a), re-entering
      * through the scaffolder that replaced it.
      *
      * That reasoning was scoped to `skill` on the belief that the other six
-     * types were not filesystem-discovered. #11071 measured the loader
+     * types were not filesystem-discovered. Commit 50fb191dc measured the loader
      * instead — the mechanism, and the precondition that keeps it from
      * firing in this repo today, are stated once in `metadata-file-name.ts`
      * (#12075), not restated here. The override is gone and the rule is the
@@ -540,6 +688,59 @@ const ${toCamelCase(name)}Skill = defineSkill({
 export default ${toCamelCase(name)}Skill;
 `,
   },
+
+  picklist: {
+    description: 'Shared option list that select fields reference by name',
+    defaultDir: 'src/picklists',
+    /**
+     * A shared option list (`data/picklist.zod.ts`): one `options` array that
+     * select fields on any object take their options from by NAMING the list,
+     * `Field.select({ picklist: 'NAME' })`, instead of each carrying a copy.
+     *
+     * Written as `NAME.picklist.ts`, the registry's own pattern for the kind,
+     * through {@link metadataFileName} like every other type here, with no
+     * override. Declared through `definePicklist`, so the list is parsed the
+     * moment this module loads: an unknown key or an empty `options` is a
+     * startup error naming it, not a list that goes missing later.
+     *
+     * Every door a referencing field passes resolves the name, so the list
+     * this writes is one the runtime serves, not a declaration it ignores:
+     *
+     * - `os validate` and `os build` refuse a field whose `picklist` names no
+     *   list the stack declares (`utils/picklist-references.ts`);
+     * - the boot refuses the same unresolved name, and serves every field that
+     *   names a list with the list's options resolved onto it, together with
+     *   the options other packages add through `picklistExtensions`
+     *   (`@objectstack/objectql`, `picklist-resolution.ts`);
+     * - a write to such a field is judged against that resolved set.
+     *
+     * The emitted header states the one rule an author meets next: a field
+     * that names the list declares no `options` of its own, because
+     * `FieldSchema` refuses the two together.
+     */
+    namesObject: false,
+    itemName: (name: string) => toSnakeCase(name),
+    generate: (name: string) => `import { definePicklist } from '@objectstack/spec/data';
+
+/**
+ * ${toTitleCase(name)} Picklist
+ *
+ * A shared option list. A select field offers these options by naming the
+ * list — Field.select({ picklist: '${toSnakeCase(name)}' }) — and declares no
+ * \`options\` of its own: a field declaring both is refused.
+ */
+const ${toCamelCase(name)}Picklist = definePicklist({
+  name: '${toSnakeCase(name)}',
+  label: '${toTitleCase(name)}',
+  options: [
+    { label: 'Option A', value: 'option_a' },
+    { label: 'Option B', value: 'option_b' },
+  ],
+});
+
+export default ${toCamelCase(name)}Picklist;
+`,
+  },
 };
 
 /**
@@ -562,15 +763,23 @@ export const GENERATOR_SCAFFOLD_TARGETS: readonly {
   /** The `defineStack` key this type is collected under: `singularToPlural(type)`. */
   stackKey: string;
   namesObject: boolean;
+  /**
+   * The references the scaffold writes and where each comes from (#21325);
+   * `{}` for a scaffold that binds nothing. A pin builds each binding's
+   * prerequisite from this — an object, a flow — so a generator added later
+   * is measured against a stack that declares what it binds.
+   */
+  binds: ScaffoldBinds;
   itemName: (name: string, namespace?: string) => string;
   requires: readonly string[];
-  generate: (name: string, namespace?: string) => string;
+  generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
 }[] =
   Object.entries(GENERATORS).map(([type, gen]) => ({
     type,
     defaultDir: gen.defaultDir,
     stackKey: singularToPlural(type),
     namesObject: gen.namesObject,
+    binds: gen.binds ?? {},
     itemName: gen.itemName,
     requires: gen.requires ?? [],
     generate: gen.generate,
@@ -734,11 +943,107 @@ function toSnakeCase(str: string): string {
  * is refused by `runMetadataGeneration` before anything is written.
  */
 function objectNameFor(name: string, namespace?: string): string {
-  const shortName = toSnakeCase(name);
+  return prefixedObjectName(toSnakeCase(name), namespace);
+}
+
+/**
+ * The namespace half of {@link objectNameFor}, applied to a name taken as
+ * written: `--object` names an object the stack already declares, so it is
+ * looked up, never re-spelled (#21325).
+ */
+function prefixedObjectName(shortName: string, namespace?: string): string {
   if (!namespace) return shortName;
   return validateObjectNamespacePrefix(shortName, namespace) === null
     ? shortName
     : `${namespace}_${shortName}`;
+}
+
+/**
+ * A TypeScript single-quoted string literal for `value`. Bindings carry text
+ * read off the author's stack (an object's label), so it is escaped rather
+ * than interpolated raw.
+ */
+function tsString(value: string): string {
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n')}'`;
+}
+
+/** The words a scaffold labels a bound object's records with. */
+function objectPluralLabel(object: ScaffoldObjectBinding): string {
+  return object.pluralLabel ?? object.label ?? toTitleCase(object.name);
+}
+
+/**
+ * The binding `generate` was handed, or a thrown error naming what is missing.
+ * Reached without one only by a caller that skipped `runMetadataGeneration`'s
+ * resolution — a test or a new call site — never by an author: rendering a
+ * binding scaffold with a reference made up on the spot is the defect #21325
+ * removed, so there is no fallback to fall to.
+ */
+function requireBinding(type: string, bindings: ScaffoldBindings | undefined, key: 'object'): ScaffoldObjectBinding;
+function requireBinding(type: string, bindings: ScaffoldBindings | undefined, key: 'flow'): string;
+function requireBinding(
+  type: string,
+  bindings: ScaffoldBindings | undefined,
+  key: 'object' | 'flow',
+): ScaffoldObjectBinding | string {
+  const bound = bindings?.[key];
+  if (bound === undefined) {
+    throw new Error(`generate: the \`${type}\` scaffold binds a ${key} and was rendered without one`);
+  }
+  return bound;
+}
+
+/**
+ * Every object and flow a loaded stack declares, in the shape a binding
+ * scaffold is rendered against (#21325). Read off the stack the config
+ * EVALUATES to, folded the way `os validate` folds it
+ * ({@link authoringRuleUnionStack}, so a `packages[]` composition counts), and
+ * from both collection spellings — the array every scaffold config uses and
+ * the name-keyed map `normalizeStackInput` also accepts.
+ *
+ * Exported so a pin can resolve bindings from the same reader the command
+ * uses, against a stack of scaffolds it composed.
+ */
+export function stackBindingCandidates(config: unknown): {
+  objects: ScaffoldObjectBinding[];
+  flows: string[];
+} {
+  const stack = authoringRuleUnionStack((config ?? {}) as Record<string, unknown>) as Record<string, unknown>;
+  const entries = (key: string): [string | undefined, Record<string, unknown>][] => {
+    const collection = stack[key];
+    if (Array.isArray(collection)) {
+      return collection
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => [undefined, item]);
+    }
+    if (collection && typeof collection === 'object') {
+      return Object.entries(collection as Record<string, unknown>)
+        .filter((entry): entry is [string, Record<string, unknown>] => !!entry[1] && typeof entry[1] === 'object');
+    }
+    return [];
+  };
+  const named = ([key, item]: [string | undefined, Record<string, unknown>]) =>
+    typeof item.name === 'string' && item.name ? item.name : key;
+
+  const objects: ScaffoldObjectBinding[] = [];
+  for (const entry of entries('objects')) {
+    const name = named(entry);
+    if (!name) continue;
+    const item = entry[1];
+    const declared = item.fields && typeof item.fields === 'object' && !Array.isArray(item.fields)
+      ? Object.keys(item.fields as Record<string, unknown>)
+      : [];
+    const title = resolveDisplayField(item as Parameters<typeof resolveDisplayField>[0]);
+    objects.push({
+      name,
+      ...(typeof item.label === 'string' && item.label ? { label: item.label } : {}),
+      ...(typeof item.pluralLabel === 'string' && item.pluralLabel ? { pluralLabel: item.pluralLabel } : {}),
+      fields: declared,
+      ...(title && declared.includes(title) ? { displayField: title } : {}),
+    });
+  }
+  const flows = entries('flows').map(named).filter((name): name is string => !!name);
+  return { objects, flows };
 }
 
 /**
@@ -803,16 +1108,18 @@ function nameCharsetRefusal(name: string): string | null {
  * honour. `generate-field-type-vocabulary.pin.test.ts` now fails on any such
  * key, in this table and in the two vocabularies below it.
  *
- * TOTAL since #14657, and total BY CONSTRUCTION: the `satisfies
+ * TOTAL since commit 431979e67, and total BY CONSTRUCTION: the `satisfies
  * Record<FieldType, string>` below makes a missing member a named `tsc` error
  * (`Property 'x' is missing …`), so the next field type the spec adds cannot
  * arrive here in silence. Before it, 21 real members had no entry and every one
  * of them silently generated `unknown` — a plausible-looking wrong type with
  * nothing to tell the author. The `|| 'unknown'` below stays, and now means
  * only what it always should have: this generator's answer for a `type` string
- * that is not a `FieldType` at all, which the UNVALIDATED authoring door (a
- * plain-object config export, `defineStack(x, { strict: false })`) can still
- * deliver.
+ * that is not a `FieldType` at all, which the UNVALIDATED authoring mode
+ * (`defineStack(x, { strict: false })`) can still deliver. A plain-object config
+ * export is no longer a legal authoring shape — `os validate` / `os build`
+ * refuse a default export `defineStack` did not build (`STACK_PROVENANCE_MISSING`)
+ * — though this command, which checks no provenance, still loads one.
  *
  * Values are MEASURED, not invented — each one is the shape the platform
  * actually implements, read from the spec's ADR-0104 D1 value classes
@@ -850,7 +1157,7 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   color: 'string',
   rating: 'number',
   vector: 'number[]',
-  // #14657 — the members that used to fall to `|| 'unknown'`. Grouped by the
+  // Commit 431979e67 — the members that used to fall to `|| 'unknown'`. Grouped by the
   // spec's ADR-0104 D1 value class, which is what decides each answer.
   // STRING_VALUE_TYPES. `secret` is a string because the ROW holds an opaque
   // ref, not the credential: the engine encrypts via the ICryptoProvider,
@@ -905,7 +1212,7 @@ const FIELD_TYPE_MAP: Record<string, string> = {
  * `schema-drift`'s `fieldHasColumn` opens with `isMultiValueField(...)` — and
  * left this file behind on a raw `field.multiple` read. That gap was measurable:
  * a `text` field flagged `multiple: true` got JSONB from `os generate migration`
- * and a varchar from the driver that actually creates the table, which is #14829
+ * and a varchar from the driver that actually creates the table — the defect commit ee370d318 fixed
  * ("the platform and the GENERATED DDL as two lists") in reverse.
  *
  * Takes the RESOLVED type rather than reading `field.type`, for the same reason
@@ -1075,7 +1382,11 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
 
 // ─── Command ────────────────────────────────────────────────────────
 
-async function runMetadataGeneration(type: string, name: string, flags: { dir?: string; dryRun?: boolean }): Promise<void> {
+async function runMetadataGeneration(
+  type: string,
+  name: string,
+  flags: { dir?: string; dryRun?: boolean; object?: string; flow?: string },
+): Promise<void> {
     printHeader('Generate');
 
     // A withdrawn type never reaches this function: `Generate.run` answers it
@@ -1196,7 +1507,13 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       if (project.kind === 'loaded') namespace = project.namespace;
     }
 
-    const objectName = generator.namesObject ? objectNameFor(name, namespace) : undefined;
+    // The object name derived from what the author TYPED as this item's name:
+    // the `object` scaffold's own name, and a view's, which names the object
+    // it binds. A scaffold that binds through `--object` derives nothing from
+    // its own name (#21325), so it has none.
+    const nameNamesObject = (generator.namesObject && generator.binds === undefined)
+      || generator.binds?.object === 'name';
+    const objectName = nameNamesObject ? objectNameFor(name, namespace) : undefined;
     if (objectName !== undefined && namespace) {
       // Prefixing answers the one refusal it can answer — a missing prefix.
       // A name the gate still refuses after it (the legacy `NS__SHORT` form)
@@ -1214,6 +1531,19 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         process.exit(1);
       }
     }
+
+    // Every reference the scaffold writes, resolved against the loaded stack
+    // BEFORE anything is rendered (#21325) — see `resolveScaffoldBindings`.
+    // Below the namespace read and the residual-prefix gate because the
+    // namespace is how a typed object name is resolved, and above the render,
+    // the parse check and the dry-run branch, so a preview never shows a file
+    // bound to something the stack does not declare.
+    const verdict = generator.binds
+      ? resolveScaffoldBindings({ type, name, binds: generator.binds, project, namespace, objectName, flags })
+      : undefined;
+    if (verdict && !verdict.ok) refuseGeneration(verdict.headline, verdict.lines);
+    const resolved = verdict?.ok ? verdict : undefined;
+    const bindings = resolved?.bindings;
 
     const dir = flags.dir || generator.defaultDir;
     // The written name comes from the registry's `filePatterns` for this type
@@ -1250,7 +1580,11 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
 
     console.log(`  ${chalk.dim('Type:')}  ${chalk.cyan(type)} — ${generator.description}`);
     console.log(`  ${chalk.dim('Name:')}  ${chalk.white(name)}`);
-    if (objectName !== undefined && namespace) {
+    if (resolved) {
+      // Said out loud: a binding scaffold's references are not the string the
+      // author typed as its name, so where each came from is printed.
+      for (const line of resolved.said) console.log(line);
+    } else if (objectName !== undefined && namespace) {
       // Said out loud: in a namespaced project the object name that lands is
       // not the string the author typed, so it is never left to be discovered.
       console.log(
@@ -1264,8 +1598,9 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     // them: the scaffold file, and the barrel re-export line. They are the two
     // files one name reaches (#16541), and rendering them at the single point
     // where the name has finished being derived is what lets one refusal cover
-    // all 14 emission sites across all 7 generators instead of 14 patches.
-    const content = generator.generate(name, namespace);
+    // every emission site of every generator (14 across 7 when it landed)
+    // instead of one patch per site.
+    const content = generator.generate(name, namespace, bindings);
     const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
 
     // ⛔ REFUSE rather than rewrite (#16541).
@@ -1546,6 +1881,230 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     reportStackReach(reach, { type, dir, scaffoldLabel, stackKey, itemName, requires, barrelDir: fullDir });
 }
 
+/** Print a refusal and exit 1 — never returns. Every caller has written nothing yet. */
+function refuseGeneration(headline: string, lines: readonly string[]): never {
+  printError(`Refusing to generate — ${headline}`);
+  console.log('');
+  for (const line of lines) console.log(line ? chalk.dim(`  ${line}`) : '');
+  console.log('');
+  process.exit(1);
+}
+
+/** `a flow`, `an action` — the type's name with the article it takes. */
+function article(type: string, capitalized = false): string {
+  const a = /^[aeiou]/.test(type) ? 'an' : 'a';
+  return `${capitalized ? a[0].toUpperCase() + a.slice(1) : a} ${type}`;
+}
+
+/** `a, b and c` — a stack's own names, listed for the author to pick from. */
+function listed(names: readonly string[]): string {
+  const quoted = names.map((n) => `'${n}'`);
+  return quoted.length <= 1 ? quoted.join('') : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+}
+
+/** What {@link resolveScaffoldBindings} answers: the bindings, or why there are none. */
+export type ScaffoldBindingVerdict =
+  /** Every reference resolved; `said` is the header lines naming each and where it came from. */
+  | { ok: true; bindings: ScaffoldBindings; said: string[] }
+  /** A refusal, for the caller to print: a headline completing "Refusing to generate — …" and its body. */
+  | { ok: false; headline: string; lines: string[] };
+
+/**
+ * Resolve every reference a binding scaffold writes against the project's
+ * loaded stack, or answer why it cannot — the refusal names the remedy, and
+ * `runMetadataGeneration` prints it and exits 1 with nothing written (#21325).
+ * Pure: it prints nothing and exits nothing, so every branch is pinned
+ * in-process (`generate-binds-from-stack.test.ts`).
+ *
+ * ## Where each reference comes from
+ *
+ *  - An object named by the item's own name (`view`): {@link objectNameFor},
+ *    exactly as `os g object` writes it, and the stack must declare it.
+ *  - An object from `--object`: the name as written, or with the namespace
+ *    prefix {@link objectNameFor} would give it — looked up, never re-spelled
+ *    — and the stack must declare it.
+ *  - No `--object`: the stack's only object. With none there is nothing to
+ *    bind; with several, which one a scaffold acts on is the author's to say,
+ *    so the command lists them and asks for `--object` rather than choosing.
+ *  - A flow (`action`): the same three answers, with `--flow`.
+ *
+ * ⛔ What it never does is the thing it replaced: derive a reference from the
+ * new item's own name. `os g flow task_done` bound object `task_done`, and
+ * `os g action complete_task` bound object `complete_task` and flow
+ * `complete_task_flow`, whether or not the stack declared either.
+ *
+ * Only DECLARED metadata binds: an object another installed package provides
+ * is not in this stack, so `os validate` could not tell a scaffold bound to
+ * it from one bound to a typo. Outside a project (no config) there is no stack
+ * to check against, so a binding scaffold is refused there too. A config that
+ * does not load never reaches here: it was refused above, for every generator
+ * that names an object.
+ */
+export function resolveScaffoldBindings(args: {
+  type: string;
+  name: string;
+  binds: ScaffoldBinds;
+  project: ProjectNamespace;
+  namespace: string | undefined;
+  /** The object named by the item's own name, for `binds.object === 'name'`. */
+  objectName: string | undefined;
+  flags: { object?: string; flow?: string };
+}): ScaffoldBindingVerdict {
+  const { type, name, binds, project, namespace, objectName, flags } = args;
+  const g = `${CLI_ALIAS} g`;
+  const what = binds.flow ? 'an object and a flow' : 'an object';
+  const refuse = (headline: string, lines: string[]): ScaffoldBindingVerdict => ({ ok: false, headline, lines });
+  const aType = article(type);
+  const AType = article(type, true);
+
+  if (project.kind !== 'loaded') {
+    return refuse(
+      `\`${g} ${type}\` binds ${what}, and there is no objectstack.config.{ts,js,mjs} here to bind in`,
+      [
+        `${AType} is written against metadata the project's stack declares, and what it binds`,
+        'is checked against that stack before anything is written. Outside a project there is',
+        'nothing to check it against. Nothing was written.',
+        '',
+        `Run \`${g} ${type}\` in the project's directory, next to its objectstack.config.ts.`,
+      ],
+    );
+  }
+
+  const { objects, flows } = stackBindingCandidates(project.config);
+  const objectNames = objects.map((o) => o.name);
+  const declaredObjects = objectNames.length > 0
+    ? `Objects this stack declares: ${listed(objectNames)}.`
+    : 'This stack declares no object.';
+  const ns = namespace ? ` ${chalk.dim(`(manifest.namespace '${namespace}')`)}` : '';
+  const bindings: ScaffoldBindings = {};
+  const said: string[] = [];
+
+  if (binds.object === 'name') {
+    const object = objects.find((o) => o.name === objectName);
+    if (!object) {
+      return refuse(
+        `\`${g} ${type} ${name}\` binds object '${objectName}', which this stack does not declare`,
+        [
+          `${AType} is named after the object it binds, and that object has to be one the stack`,
+          'declares — a view of an object nobody declared lists nothing. Nothing was written.',
+          '',
+          declaredObjects,
+          `Generate the object first (\`${g} object ${name}\`), or name one the stack declares.`,
+        ],
+      );
+    }
+    bindings.object = object;
+    said.push(`  ${chalk.dim('Object:')} ${chalk.white(object.name)}${object.name !== name ? ns : ''}`);
+  } else if (binds.object === 'flag') {
+    if (flags.object !== undefined) {
+      const typed = flags.object;
+      const object = objects.find((o) => o.name === typed)
+        ?? objects.find((o) => o.name === prefixedObjectName(typed, namespace));
+      if (!object) {
+        return refuse(
+          `--object ${typed} names no object this stack declares`,
+          [
+            `${AType} is bound to an object the stack declares, so it is checked before anything`,
+            'is written. Nothing was written.',
+            '',
+            declaredObjects,
+            `Pass one of them, or generate the object first (\`${g} object ${typed}\`).`,
+          ],
+        );
+      }
+      bindings.object = object;
+      said.push(
+        `  ${chalk.dim('Object:')} ${chalk.white(object.name)} `
+          + chalk.dim(object.name !== typed && namespace
+            ? `(--object ${typed}, prefixed by manifest.namespace '${namespace}')`
+            : '(--object)'),
+      );
+    } else if (objects.length === 1) {
+      bindings.object = objects[0];
+      said.push(
+        `  ${chalk.dim('Object:')} ${chalk.white(objects[0].name)} `
+          + chalk.dim('(the only object this stack declares; --object binds another)'),
+      );
+    } else if (objects.length === 0) {
+      return refuse(
+        `${aType} binds an object, and this stack declares none`,
+        [
+          `Generate the object first, then bind the ${type} to it. Nothing was written.`,
+          '',
+          `    ${g} object <object>`,
+          `    ${g} ${type} ${name} --object <object>`,
+        ],
+      );
+    } else {
+      return refuse(
+        `${aType} binds an object, and this stack declares ${objects.length}: name one with --object`,
+        [
+          `Which object ${aType} acts on is yours to say, so it is not picked for you. Nothing`,
+          'was written.',
+          '',
+          declaredObjects,
+          '',
+          `    ${g} ${type} ${name} --object <object>`,
+        ],
+      );
+    }
+  }
+
+  if (binds.flow === 'flag') {
+    const declaredFlows = flows.length > 0
+      ? `Flows this stack declares: ${listed(flows)}.`
+      : 'This stack declares no flow.';
+    const objectArg = flags.object !== undefined ? ` --object ${flags.object}` : '';
+    if (flags.flow !== undefined) {
+      const flow = flows.find((f) => f === flags.flow);
+      if (!flow) {
+        return refuse(
+          `--flow ${flags.flow} names no flow this stack declares`,
+          [
+            `${AType} runs a flow the stack declares, so it is checked before anything is`,
+            'written. Nothing was written.',
+            '',
+            declaredFlows,
+            `Pass one of them, or generate the flow first (\`${g} flow <name> --object <object>\`).`,
+          ],
+        );
+      }
+      bindings.flow = flow;
+      said.push(`  ${chalk.dim('Flow:')}   ${chalk.white(flow)} ${chalk.dim('(--flow)')}`);
+    } else if (flows.length === 1) {
+      bindings.flow = flows[0];
+      said.push(
+        `  ${chalk.dim('Flow:')}   ${chalk.white(flows[0])} `
+          + chalk.dim('(the only flow this stack declares; --flow runs another)'),
+      );
+    } else if (flows.length === 0) {
+      return refuse(
+        `${aType} runs a flow, and this stack declares none`,
+        [
+          `Generate the flow first, then the ${type} that runs it. Nothing was written.`,
+          '',
+          `    ${g} flow <name> --object <object>`,
+          `    ${g} ${type} ${name}${objectArg} --flow <name>_flow`,
+        ],
+      );
+    } else {
+      return refuse(
+        `${aType} runs a flow, and this stack declares ${flows.length}: name one with --flow`,
+        [
+          `Which flow ${aType} runs is yours to say, so it is not picked for you. Nothing was`,
+          'written.',
+          '',
+          declaredFlows,
+          '',
+          `    ${g} ${type} ${name}${objectArg} --flow <flow>`,
+        ],
+      );
+    }
+  }
+
+  return { ok: true, bindings, said };
+}
+
 /**
  * Say whether a scaffold `os generate` just wrote is part of the project's
  * stack (#20215). Every branch that is not "yes, and it can run" is a
@@ -1824,7 +2383,7 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
 /**
  * The SQL column type each authored field type generates (#13871).
  *
- * Same invariant as `FIELD_TYPE_MAP`, and since #14657 the same totality: every
+ * Same invariant as `FIELD_TYPE_MAP`, and since commit 431979e67 the same totality: every
  * key is a `FieldType` member AND every `FieldType` member has a key, enforced
  * by the `satisfies` below. The `|| 'TEXT'` default now covers only a `type`
  * string that is not a field type at all (the unvalidated authoring door).
@@ -1838,9 +2397,9 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * The totality rule is unchanged: `formula` still has an ENTRY, so a field type
  * added to the spec still cannot arrive here in silence.
  *
- * ## #14828 — the five pre-#14657 entries that disagreed with the platform
+ * ## Commit 08706f0e0 — the five entries predating commit 431979e67 that disagreed with the platform
  *
- * #13871 removed entries naming types the platform does not have; #14657 added
+ * #13871 removed entries naming types the platform does not have; commit 431979e67 added
  * entries for real members that had none, and deliberately left every
  * PRE-EXISTING entry byte-for-byte alone. This is the third direction: entries
  * that existed, keyed on a real member, and described something the platform
@@ -1890,12 +2449,12 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  *                 other two moved would have manufactured a fresh within-file
  *                 contradiction of exactly the kind this card exists to close.
  *
- * ## #17883 — the FILE_REFERENCE_TYPES exclusion is closed
+ * ## Commit b06b2db5c — the FILE_REFERENCE_TYPES exclusion is closed
  *
  * This paragraph used to hold the family (`file` / `image` / `avatar` /
  * `video` / `audio`) out of scope, "filed rather than mirrored": the family was
  * in the driver's `JSON_COLUMN_TYPES` while this table gave it `VARCHAR(2048)`,
- * which was #14657's ADR-0104 D3 answer against a driver that was still pre-D3
+ * which was commit 431979e67's ADR-0104 D3 answer against a driver that was still pre-D3
  * — a decision about which side moves, not a wrong value to correct.
  *
  * It was decided, and it landed. ADR-0104 records the ruling: "The driver is
@@ -1905,7 +2464,7 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * `table.string(name, MEDIA_ID_VARCHAR_CHARS)` at 2048.
  *
  * What that left was the same fork one level down and INSIDE this file, which
- * is the defect #17883 names: the typescript format below spelled the family's
+ * is the defect commit b06b2db5c fixed: the typescript format below spelled the family's
  * column as a bare `table.string(name)` — knex's `varchar(255)`, as the
  * `autonumber` note above states in as many words — so ONE `os generate
  * migration` answered ONE field with `varchar(2048)` under `--format sql` and
@@ -2010,20 +2569,20 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   phone: 'VARCHAR(255)',
   url: 'VARCHAR(255)',
   select: 'VARCHAR(255)',
-  // #14828 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
+  // Commit 08706f0e0 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
   // the runtime stores this in a JSON column; `json: 'JSONB'` below is the
   // spelling, read from this table's own entry by `fieldTypeToSql`.
   multiselect: 'JSONB',
-  // #14828 — REFERENCE_VALUE_TYPES, one width for the whole class: the stored
+  // Commit 08706f0e0 — REFERENCE_VALUE_TYPES, one width for the whole class: the stored
   // value is the TARGET's `id`, which `driver-sql` emits as
   // `table.string('id').primary()` = `varchar(255)`. See `user` / `tree` below.
   lookup: 'VARCHAR(255)',
   master_detail: 'VARCHAR(255)',
-  // #14828 — VIRTUAL. `createColumn` answers `case 'formula': return;` and its
+  // Commit 08706f0e0 — VIRTUAL. `createColumn` answers `case 'formula': return;` and its
   // own mirror `varcharColumnChars` answers `case 'formula': return null;`.
   // Both migration generators skip the field entirely; see `fieldTypeToSql`.
   formula: null,
-  // #14828 — the runtime issues a RENDERED string (prefix + counter + suffix)
+  // Commit 08706f0e0 — the runtime issues a RENDERED string (prefix + counter + suffix)
   // and `createColumn` gives it `table.string(name)`. `FIELD_TYPE_MAP` above
   // has always said `string`; `SERIAL` made this file contradict itself.
   autonumber: 'VARCHAR(255)',
@@ -2041,11 +2600,11 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // for the same object refuses.
   color: 'VARCHAR(255)',
   rating: numericSqlType('rating'),
-  // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
+  // Commit 08706f0e0 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
   // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
   // does not exist on MySQL or SQLite.
   vector: 'JSONB',
-  // #14657 — the members that used to fall to `|| 'TEXT'`. Same ADR-0104 D1
+  // Commit 431979e67 — the members that used to fall to `|| 'TEXT'`. Same ADR-0104 D1
   // classes as `FIELD_TYPE_MAP`, resolved to this table's own SQL vocabulary.
   // STRING_VALUE_TYPES. `secret` holds the opaque `sys_secret` ref, not the
   // credential, so it is an ordinary short string column (ADR-0100).
@@ -2075,7 +2634,7 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   progress: numericSqlType('progress'),
   summary: numericSqlType('summary'),
   // REFERENCE_VALUE_TYPES: the stored value is the related record's id, so the
-  // width belongs to the TARGET's id column, never to this field. #14828 read
+  // width belongs to the TARGET's id column, never to this field. Commit 08706f0e0 read
   // that derivation off the driver and applied it: the target's `id` column is
   // `table.string('id').primary()`, knex's `varchar(255)`. These two moved with
   // `lookup` / `master_detail` above so one class keeps one answer.
@@ -2458,7 +3017,7 @@ function declaredVarchar(maxLength: unknown): VarcharAnswer {
 
 /**
  * The `varchar(n)` width a FILE_REFERENCE_TYPES column takes, READ from this
- * file's own SQL vocabulary rather than transcribed beside it (#17883).
+ * file's own SQL vocabulary rather than transcribed beside it (commit b06b2db5c).
  *
  * ⛔ Never a second literal. The width is a decision this file already carries
  * once — {@link FIELD_TYPE_SQL_MAP}'s `VARCHAR(2048)`, which ADR-0104 calls the
@@ -2751,7 +3310,7 @@ function uniqueIndexesForObject(obj: Record<string, any>): MirroredUniqueIndex[]
  *   1. A key part with no column. `syncDeclaredIndexes` skips a declared index
  *      whose columns are not in `physicalColumns` and warns; the generator's
  *      equivalent of "not materialized" is a field this file emits no column
- *      for — a VIRTUAL `formula` (#14828). Emitting the index anyway produces
+ *      for — a VIRTUAL `formula` (commit 08706f0e0). Emitting the index anyway produces
  *      DDL that refuses to run at all.
  *   2. An EXPRESSION key part. `COALESCE(<tenant>, '__global__')` is what the
  *      driver builds through raw DDL precisely because knex's schema builder
@@ -2803,7 +3362,7 @@ function partitionUniqueIndexes(
  * the comment "Mirrors `SqlDriver.createColumn` exactly ... including
  * `multiple` (a JSON column)". Three statements of one rule: a multi-value
  * field is a JSON column whatever its element type would have been, so the
- * element type gets no vote here either (#14829). Before this, one authored
+ * element type gets no vote here either (commit ee370d318). Before this, one authored
  * `Field.lookup({ multiple: true })` produced `account?: string[]` from
  * `os generate types` and a scalar `VARCHAR(36)` column from this generator, in
  * the same run.
@@ -2824,7 +3383,7 @@ function partitionUniqueIndexes(
  * The JSON spelling is READ from this table's own `json` entry rather than
  * restated, so the two cannot drift about what a JSON column is spelled here.
  *
- * `null` means NO COLUMN — the answer for a virtual field type (#14828). It is
+ * `null` means NO COLUMN — the answer for a virtual field type (commit 08706f0e0). It is
  * the table's own entry, not a second decision here, and it composes in the
  * driver's order: multi-value still wins first, so a multi-value field of any
  * type is a JSON column and never reaches the lookup at all.
@@ -2832,7 +3391,7 @@ function partitionUniqueIndexes(
  * ⚠️ The lookup is by OWN-PROPERTY PRESENCE, not by the value being falsy or
  * nullish, because `null` is a meaningful ANSWER and every other spelling
  * swallows it: `||` and `??` both fall through on `null` and hand a virtual
- * field a TEXT column again — the exact defect #14828 closed, one operator to
+ * field a TEXT column again — the exact defect commit 08706f0e0 closed, one operator to
  * the left. (Measured: the first cut of that fix used `??` and still emitted
  * `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second half of the same
  * care — `in` answers true for `toString` and every other inherited key.
@@ -2943,7 +3502,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     const fields = (obj.fields ?? {}) as Record<string, Record<string, unknown>>;
 
     lines.push(`CREATE TABLE IF NOT EXISTS "${tableName}" (`);
-    // #15040 — the table's OWN id, corrected to what `driver-sql` emits for it:
+    // Commit 8644d1d33 — the table's OWN id, corrected to what `driver-sql` emits for it:
     // `table.string('id').primary()`, i.e. knex's `varchar(255)`
     // (`SqlDriver.DEFAULT_STRING_VARCHAR_CHARS`). This is the same derivation
     // `lookup` / `master_detail` / `user` / `tree` above already state — a
@@ -2979,7 +3538,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
         fieldDef.maxLength,
         keyColumns.has(fieldName),
       );
-      // #14828 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
+      // Commit 08706f0e0 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
       // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
       // answers false for it, so a column here is one the runtime never writes.
       if (sqlType === null) continue;
@@ -3022,7 +3581,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     //
     // #15521's other two rows are now RULED, option B on both: the generator
     // follows the driver rather than improving on it — the same principle
-    // #15040 applied to the `id` column a few lines above.
+    // commit 8644d1d33 applied to the `id` column a few lines above.
     //
     //   NULLABILITY — the driver leaves both columns nullable, so the `NOT
     //   NULL` these two lines carried is gone. It was never load-bearing:
@@ -3126,7 +3685,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     const emittedColumns = new Set<string>(['id']);
 
     lines.push(`  await db.schema.createTable('${tableName}', (table: any) => {`);
-    // #15040 — the driver's own line for this column, emitted verbatim:
+    // Commit 8644d1d33 — the driver's own line for this column, emitted verbatim:
     // `table.string('id').primary()`. See `generateMigrationSql` above for the
     // derivation and for why the `.defaultTo(db.fn.uuid())` half goes with it
     // (on Postgres `knex.fn.uuid()` compiles to `(gen_random_uuid())`, so the
@@ -3141,7 +3700,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // name is kept so the emitter below reads unchanged.
       const required = declaredNotNull(fieldDef) ? '.notNullable()' : '.nullable()';
 
-      // #14829 - MULTI-VALUE before the type, exactly as `SqlDriver.createColumn`
+      // Commit ee370d318 - MULTI-VALUE before the type, exactly as `SqlDriver.createColumn`
       // does it: the driver short-circuits above its own per-type switch, so a
       // multi-value field is a JSON column whatever its element type would have
       // been. Emitted here rather than as a switch arm because the switch cases
@@ -3156,7 +3715,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         continue;
       }
 
-      // #14828 — `string | null`, where `null` is the VIRTUAL answer. Carried
+      // Commit 08706f0e0 — `string | null`, where `null` is the VIRTUAL answer. Carried
       // through the switch rather than short-circuited above it so every field
       // type keeps exactly one arm in one vocabulary, which is what
       // `generate-field-type-vocabulary.pin.test.ts` measures.
@@ -3190,7 +3749,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // a declared bound would size the wrong string. That is the driver's
         // own stated reason, not an inference from its silence.
         case 'select': case 'color':
-        // #14657 — `secret` holds the opaque `sys_secret` ref, not the
+        // Commit 431979e67 — `secret` holds the opaque `sys_secret` ref, not the
         // credential (ADR-0100); `radio` is a single option code like `select`.
         case 'secret': case 'radio':
           colMethod = `table.string('${fieldName}')`;
@@ -3213,7 +3772,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // both generated tables, accepting it.
         case 'text':
         case 'textarea': case 'richtext': case 'html': case 'markdown':
-        // #14657 — `driver-sql`'s own DDL switch puts these three in the text
+        // Commit 431979e67 — `driver-sql`'s own DDL switch puts these three in the text
         // family (#11794, #11875): the declared `maxLength`, when there is one
         // and the column is not keyed, is enforced at the write seam rather
         // than by the column.
@@ -3249,7 +3808,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           break;
         }
         case 'boolean':
-        // #14657 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
+        // Commit 431979e67 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
         case 'toggle':
           colMethod = `table.boolean('${fieldName}')`;
           break;
@@ -3263,7 +3822,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           colMethod = `table.time('${fieldName}')`;
           break;
         case 'json': case 'multiselect':
-        // #14657 — the rest of MULTI_OPTION_TYPES, the whole
+        // Commit 431979e67 — the rest of MULTI_OPTION_TYPES, the whole
         // STRUCTURED_JSON_TYPES family answered ONCE, and `vector`. Every one
         // of these is a member of `driver-sql`'s `JSON_COLUMN_TYPES`, which is
         // seeded from these very spec classes, so a JSON column here is what
@@ -3275,7 +3834,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         case 'location': case 'address': case 'vector':
           colMethod = `table.jsonb('${fieldName}')`;
           break;
-        // #14828 — VIRTUAL: `SqlDriver.createColumn` answers this type with
+        // Commit 08706f0e0 — VIRTUAL: `SqlDriver.createColumn` answers this type with
         // `case 'formula': return; // Virtual — no column`, and
         // `schema-drift.ts`'s `fieldHasColumn` answers false for it. The
         // generated migration used to create a `table.text` column the runtime
@@ -3286,14 +3845,14 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           break;
         // `user` references sys_user, whose id is a text identifier (not a uuid),
         // so store it as a string column — consistent with the runtime sql-driver.
-        // #14657 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
-        // object's own id. (FILE_REFERENCE_TYPES rode this arm too until #17883
+        // Commit 431979e67 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
+        // object's own id. (FILE_REFERENCE_TYPES rode this arm too until commit b06b2db5c
         // gave it its own below: its value is not another row's id, and the sql
         // format states a width of its own for it.) `autonumber` is a RENDERED string
         // (prefix + counter + suffix), which is both what `FIELD_TYPE_MAP` says
         // and what `driver-sql` emits — a SERIAL could not hold `INV-0001`.
         //
-        // #14828 — `lookup` / `master_detail` JOIN this arm, out of a
+        // Commit 08706f0e0 — `lookup` / `master_detail` JOIN this arm, out of a
         // `table.uuid` arm of their own. They are the other two members of
         // REFERENCE_VALUE_TYPES and the driver gives the whole class one
         // answer: `createColumn`'s `case 'lookup': case 'user':` is
@@ -3310,7 +3869,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         case 'autonumber':
           colMethod = `table.string('${fieldName}')`;
           break;
-        // #17883 — FILE_REFERENCE_TYPES takes an arm of its own, at the width
+        // Commit b06b2db5c — FILE_REFERENCE_TYPES takes an arm of its own, at the width
         // the sql format above already states for it.
         //
         // It used to ride the reference arm, and that arm's derivation was
@@ -3339,7 +3898,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           colMethod = `table.text('${fieldName}')`;
       }
 
-      // #14828 — the virtual answer: emit nothing at all for this field.
+      // Commit 08706f0e0 — the virtual answer: emit nothing at all for this field.
       if (colMethod === null) continue;
 
       // [#16294 cause 3] The same verdict the sql format above renders, in
@@ -3449,6 +4008,66 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
 
 // ─── Main Generate Command ──────────────────────────────────────────
 
+/** The generator types whose `binds[key]` is `source`, read off the roster. */
+function typesBinding(key: keyof ScaffoldBinds, source: 'name' | 'flag'): string {
+  return Object.entries(GENERATORS)
+    .filter(([, gen]) => gen.binds?.[key] === source)
+    .map(([type]) => type)
+    .join(', ');
+}
+
+/**
+ * The refusal for `--object` / `--flow` on a type that does not take them, or
+ * `undefined` (#21325). A type with no generator and no sub-command route is
+ * left to the unknown-type answer, which is the more useful one. Pure, like
+ * {@link resolveScaffoldBindings}: `Generate.run` prints and exits.
+ */
+export function unusedBindingFlagRefusal(
+  type: string,
+  given: { object?: string; flow?: string },
+): { headline: string; lines: string[] } | undefined {
+  const generator = Object.prototype.hasOwnProperty.call(GENERATORS, type) ? GENERATORS[type] : undefined;
+  if (!generator && !Object.prototype.hasOwnProperty.call(SUB_COMMANDS, type)) return undefined;
+  for (const key of ['object', 'flow'] as const) {
+    if (given[key] === undefined || generator?.binds?.[key] === 'flag') continue;
+    return {
+      headline: `\`${CLI_ALIAS} g ${type}\` takes no --${key}`,
+      lines: [
+        generator?.binds?.[key] === 'name'
+          ? `${article(type, true)} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
+          : `${article(type, true)} binds no ${key}, so --${key} would name nothing it writes.`,
+        `--${key} is read by: ${typesBinding(key, 'flag')}. Nothing was written.`,
+      ],
+    };
+  }
+  return undefined;
+}
+
+/**
+ * The types `Generate.run` routes to a sub-command instead of a scaffold
+ * generator. One table, read by the routing and by
+ * {@link unusedBindingFlagRefusal}, so the set of types neither `--object`
+ * nor `--flow` reaches cannot drift from the set that is routed.
+ */
+const SUB_COMMANDS: Record<
+  string,
+  (name: string | undefined, flags: { output?: string; format?: string; 'dry-run'?: boolean }) => Promise<void>
+> = {
+  types: (name, flags) => runTypesGeneration(name, {
+    output: flags.output ?? 'src/types/objectstack.d.ts',
+    dryRun: flags['dry-run'],
+  }),
+  client: (name, flags) => runClientGeneration(name, {
+    output: flags.output ?? 'src/client/objectstack-client.ts',
+    dryRun: flags['dry-run'],
+  }),
+  migration: (name, flags) => runMigrationGeneration(name, {
+    output: flags.output,
+    format: flags.format ?? 'typescript',
+    dryRun: flags['dry-run'],
+  }),
+};
+
 export default class Generate extends Command {
   static override description = 'Generate metadata files or TypeScript types';
 
@@ -3470,6 +4089,16 @@ export default class Generate extends Command {
     'dry-run': Flags.boolean({ description: 'Show what would be created without writing files' }),
     output: Flags.string({ char: 'o', description: 'Output file path' }),
     format: Flags.string({ description: 'Output format: sql or typescript. The sql format emits PostgreSQL-only DDL and makes no MySQL or SQLite claim.', default: 'typescript' }),
+    // #21325 — the references a binding scaffold writes, named by the author
+    // instead of derived from the new item's name. Spelled as the other flags
+    // here are (a long name, a value), and described from the roster so the
+    // types they apply to cannot drift from the generators that read them.
+    object: Flags.string({
+      description: `Object the scaffold binds (${typesBinding('object', 'flag')}). The name as declared, or without the namespace prefix. Default: the stack's only object`,
+    }),
+    flow: Flags.string({
+      description: `Flow the scaffold runs (${typesBinding('flow', 'flag')}). Default: the stack's only flow`,
+    }),
   };
 
   async run(): Promise<void> {
@@ -3484,25 +4113,21 @@ export default class Generate extends Command {
       refuseRetiredGenerator(args.type);
     }
 
-    // Route to sub-commands by type name
-    switch (args.type) {
-      case 'types':
-        return runTypesGeneration(args.name, {
-          output: flags.output ?? 'src/types/objectstack.d.ts',
-          dryRun: flags['dry-run'],
-        });
-      case 'client':
-        return runClientGeneration(args.name, {
-          output: flags.output ?? 'src/client/objectstack-client.ts',
-          dryRun: flags['dry-run'],
-        });
-      case 'migration':
-        return runMigrationGeneration(args.name, {
-          output: flags.output,
-          format: flags.format ?? 'typescript',
-          dryRun: flags['dry-run'],
-        });
+    // ⛔ `--object` / `--flow` on a type that takes neither is refused, not
+    // ignored (#21325): a reference the author named and the command dropped
+    // would land as a file bound to something else, or to nothing, with the
+    // flag reading as honoured. An unknown type still meets the roster below.
+    const unusedFlag = unusedBindingFlagRefusal(args.type, { object: flags.object, flow: flags.flow });
+    if (unusedFlag) {
+      printHeader('Generate');
+      refuseGeneration(unusedFlag.headline, unusedFlag.lines);
     }
+
+    // Route to sub-commands by type name
+    const subCommand = Object.prototype.hasOwnProperty.call(SUB_COMMANDS, args.type)
+      ? SUB_COMMANDS[args.type]
+      : undefined;
+    if (subCommand) return subCommand(args.name, flags);
 
     // Metadata generation
     if (!args.name) {
@@ -3514,6 +4139,8 @@ export default class Generate extends Command {
     await runMetadataGeneration(args.type, args.name, {
       dir: flags.dir,
       dryRun: flags['dry-run'],
+      object: flags.object,
+      flow: flags.flow,
     });
   }
 }

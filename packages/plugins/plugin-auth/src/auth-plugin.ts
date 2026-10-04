@@ -18,7 +18,7 @@ import {
 // same question. [#14157] The dev-admin seed no longer GATES on it (a
 // directory row is not a login); it still reads it to find the seed account
 // among existing users when re-arming the credential hint.
-import { isHumanUserRow } from './audience-posture.js';
+import { isHumanUserRow, OPEN_POSTURE_VERIFICATION_OFF_WARNING } from './audience-posture.js';
 // [#14157] The dev-admin seed's own precondition — "does a login exist?".
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import {
@@ -225,6 +225,31 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * `AuthManagerOptions.databaseHooks` for the hop-by-hop correction (#4802).
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
+
+  /**
+   * [#20861] The HOST declares that it signs humans into this deployment
+   * through a handoff route of its OWN — a sign-in path that is not a
+   * login-page provider, and that mints the session without writing a
+   * `sys_account` row. A hosted kernel whose owner enters through the control
+   * plane's handoff is the case this exists for: that owner signs in whether or
+   * not the login page shows any platform sign-in button.
+   *
+   * It has ONE reader, the `no_sign_in_account_at_boot` boot report
+   * (`boot-sign-in-reachability.ts`): with it declared, "human `sys_user` rows,
+   * zero `sys_account` rows" is this deployment's healthy state rather than an
+   * unrecoverable dead end, and the shape is recorded at `debug`, naming this
+   * declaration, instead of at `error`.
+   *
+   * ⛔ A declaration, never an inference and never a silencer. Set it only where
+   * the host really mounts such a route; declared without one, it turns the loud
+   * report of a deployment nobody can sign in to into a quiet one. It changes
+   * nothing the login page is told — `getPublicConfig()` returns the same with
+   * or without it, and no provider is registered. It is read from this option
+   * alone (no env var, no setting), so the code that wires the handoff is the
+   * one place it can be stated.
+   * @default false
+   */
+  hostSignInHandoff?: boolean;
 }
 
 /**
@@ -479,11 +504,11 @@ export class AuthPlugin implements Plugin {
       authConfig.sharedCounterStore = createLazyCounterStore({
         resolveCache,
         logger: ctx.logger,
-        subject: 'per-number OTP send budget (#2780)',
+        subject: 'per-number OTP send budget',
         degradedImpact:
           'The budget is still enforced, but PER NODE: every node grants the same phone number its own ' +
           'cooldown and hourly cap, so an N-node deployment can send up to N× the configured number of ' +
-          'PAID SMS to one number (#4790)',
+          'PAID SMS to one number',
       });
     }
 
@@ -733,6 +758,17 @@ export class AuthPlugin implements Plugin {
       if (this.authManager) {
         await this.ensureAuthSettingsBound(ctx);
 
+        // [#20389] The `open` posture's verification opt-out is LOUD: once per
+        // boot, after the settings namespace (which carries the
+        // OS_AUTH_REQUIRE_EMAIL_VERIFICATION env override) has been applied,
+        // read from the same advertisement the login UI reads.
+        if (
+          this.authManager.getAudience().posture === 'open' &&
+          this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification === false
+        ) {
+          ctx.logger.warn(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
+        }
+
         let emailSvc: IEmailService | undefined;
         try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
         if (emailSvc) {
@@ -746,11 +782,16 @@ export class AuthPlugin implements Plugin {
           // misconfiguration loudly at boot instead of one failure per signup.
           const requiresEmail = !!this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification;
           if (requiresEmail) {
+            // [#20389] The second remedy is only real where the posture lets the
+            // deployment turn verification off: `email_domain` refuses it.
+            const disableRemedy = this.authManager.getAudience().posture === 'email_domain'
+              ? "; verification cannot be turned off under the 'email_domain' audience posture."
+              : ' or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).';
             ctx.logger.error(
               'Auth: email verification is REQUIRED but NO email service is registered — '
               + 'verification & password-reset emails will FAIL and new users will be locked '
-              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*) '
-              + 'or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).',
+              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*)'
+              + disableRemedy,
             );
           } else {
             ctx.logger.info('Auth: no email service registered — transactional mail disabled');
@@ -987,7 +1028,7 @@ export class AuthPlugin implements Plugin {
       });
     }
 
-    // [#11640] The walled deployment that declares an owner it can never
+    // [commit bf8d129b5] The walled deployment that declares an owner it can never
     // verify — maintainer ruling 2026-08-25 (option A): warn loudly, by name,
     // at boot; NEVER refuse. The whole decision (and why it must run here
     // rather than in `init()`, where no email transport is resolvable yet)
@@ -1036,7 +1077,10 @@ export class AuthPlugin implements Plugin {
       // pays for its bounded provider read only when the answer can change what
       // is reported; a deployment with no delegated path is untouched and still
       // reports at `error`.
-      const signInPath = await probeSignInPathWiring(reachability, pub, ql);
+      // [#20861] The plugin's own options ride along as the fourth fact: a
+      // handoff route the HOST owns never appears in `pub`, so the host's
+      // `hostSignInHandoff` declaration is the only place the gate can read it.
+      const signInPath = await probeSignInPathWiring(reachability, pub, ql, this.options);
       const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger, signInPath);
 
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
@@ -1118,7 +1162,7 @@ export class AuthPlugin implements Plugin {
       ctx.hook('kernel:ready', runEnsure);
       // [#11973 / #11663 L3] Re-run after every write that can move the
       // population answer, judged by the ONE exported trigger predicate: a
-      // `sys_user` insert or email/email_verified update (the #11343 trigger
+      // `sys_user` insert or email/email_verified update (commit c0714eb5d's trigger
       // set — how a CONFIG-anchored admin comes into standing), and the
       // legacy `sys_user_permission_set` insert (how `single`-posture
       // first-user promotion lands standing, Choice 4A — retired with the
@@ -1435,6 +1479,7 @@ export class AuthPlugin implements Plugin {
 
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
+      const authManager = this.authManager;
       try {
         const payload = await settings.getNamespace('auth');
         const values: Record<string, unknown> = {};
@@ -1461,18 +1506,62 @@ export class AuthPlugin implements Plugin {
           return Number.isFinite(n) && n > 0 ? n : undefined;
         };
 
+        // [#20412] The pass is applied in pieces, split along the lines where
+        // the manager can REFUSE. `applyConfigPatch` validates a patch on entry
+        // wherever it carries a block the manager judges: `emailAndPassword`
+        // (`assertAudienceConfig`, against the standing audience posture) and
+        // `plugins` (`assertScimAdminCoherence`). A key that lands in one of
+        // those blocks is applied ALONE (`refusable`), so a refusal names that
+        // key and takes nothing else with it; every other key rides `patch`,
+        // one application the manager does not validate. When the whole pass
+        // went out as one patch, one refused key dropped password policy, MFA,
+        // rate limits, session lifetime and social providers with it, while
+        // the settings console showed all of them as saved.
+        //
+        // The plugin decides nothing here: the manager's own verdict on each
+        // piece is the verdict, and the piece carries the settings key its
+        // refusal is reported under.
         const patch: Partial<AuthManagerOptions> = {};
-        const emailAndPassword: Partial<NonNullable<AuthConfig['emailAndPassword']>> = {};
+        type ApplyOptions = Parameters<AuthManager['applyConfigPatch']>[1];
+        const refusable: Array<{
+          key: string;
+          patch: Partial<AuthManagerOptions>;
+          options?: ApplyOptions;
+        }> = [];
+        const emailAndPasswordField = (
+          key: string,
+          fields: Partial<NonNullable<AuthConfig['emailAndPassword']>>,
+          options?: ApplyOptions,
+        ): void => {
+          refusable.push({
+            key,
+            patch: { emailAndPassword: fields as AuthManagerOptions['emailAndPassword'] },
+            options,
+          });
+        };
         if (isExplicit('email_password_enabled')) {
-          emailAndPassword.enabled = asBoolean(values.email_password_enabled, true);
+          emailAndPasswordField('email_password_enabled', {
+            enabled: asBoolean(values.email_password_enabled, true),
+          });
         }
         if (isExplicit('signup_enabled')) {
-          emailAndPassword.disableSignUp = !asBoolean(values.signup_enabled, true);
+          emailAndPasswordField('signup_enabled', {
+            disableSignUp: !asBoolean(values.signup_enabled, true),
+          });
         }
         if (isExplicit('require_email_verification')) {
-          emailAndPassword.requireEmailVerification = asBoolean(
-            values.require_email_verification,
-            false,
+          emailAndPasswordField(
+            'require_email_verification',
+            { requireEmailVerification: asBoolean(values.require_email_verification, false) },
+            {
+              // [#20389] An `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override is
+              // the DEPLOYMENT's declaration (the settings service reports it as
+              // source `env`, locked); anything else explicit was stored through
+              // the console. Under posture `open` only the former may turn
+              // verification off — `assertAudienceConfig` owns that verdict.
+              requireEmailVerificationFrom:
+                sources.require_email_verification === 'env' ? 'deployment' : 'console',
+            },
           );
         }
 
@@ -1506,14 +1595,11 @@ export class AuthPlugin implements Plugin {
         // password reset. Ignore malformed/non-positive values (keep the default).
         if (isExplicit('password_min_length')) {
           const n = asPositiveInt(values.password_min_length);
-          if (n !== undefined) emailAndPassword.minPasswordLength = n;
+          if (n !== undefined) emailAndPasswordField('password_min_length', { minPasswordLength: n });
         }
         if (isExplicit('password_max_length')) {
           const n = asPositiveInt(values.password_max_length);
-          if (n !== undefined) emailAndPassword.maxPasswordLength = n;
-        }
-        if (Object.keys(emailAndPassword).length > 0) {
-          patch.emailAndPassword = emailAndPassword as AuthManagerOptions['emailAndPassword'];
+          if (n !== undefined) emailAndPasswordField('password_max_length', { maxPasswordLength: n });
         }
 
         // Breached-password rejection (ADR-0069 D1) — enables better-auth's
@@ -1521,10 +1607,14 @@ export class AuthPlugin implements Plugin {
         // off; only an explicit toggle applies (manifest defaults must not
         // mask the deployment env var). See buildPluginList() for the seam.
         if (isExplicit('password_reject_breached')) {
-          patch.plugins = {
-            ...(patch.plugins ?? {}),
-            passwordRejectBreached: asBoolean(values.password_reject_breached, false),
-          } as AuthManagerOptions['plugins'];
+          refusable.push({
+            key: 'password_reject_breached',
+            patch: {
+              plugins: {
+                passwordRejectBreached: asBoolean(values.password_reject_breached, false),
+              } as AuthManagerOptions['plugins'],
+            },
+          });
         }
 
         // Password complexity (ADR-0069 D1) — custom validator in the before
@@ -1549,15 +1639,18 @@ export class AuthPlugin implements Plugin {
 
         // Enforced MFA (ADR-0069 D3). Enabling it also turns the twoFactor
         // plugin on so the /two-factor/* enrollment endpoints exist — otherwise
-        // gated users would have no way to comply.
+        // gated users would have no way to comply. [#20412] So the enforcement
+        // and the plugin are ONE piece: a refused plugins block leaves MFA at
+        // its standing value too, never enforced without its enrollment path.
         if (isExplicit('mfa_required')) {
           const on = asBoolean(values.mfa_required, false);
-          patch.mfaRequired = on;
           if (on) {
-            patch.plugins = {
-              ...(patch.plugins ?? {}),
-              twoFactor: true,
-            } as AuthManagerOptions['plugins'];
+            refusable.push({
+              key: 'mfa_required',
+              patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+            });
+          } else {
+            patch.mfaRequired = false;
           }
         }
         if (isExplicit('mfa_grace_period_days')) {
@@ -1680,19 +1773,57 @@ export class AuthPlugin implements Plugin {
             : undefined;
         }
 
+        const audienceKeys = [
+          'audience_posture',
+          'audience_allowed_email_domains',
+          'audience_self_registration_permission_set',
+        ];
+
+        // [#20412] Each piece is applied in its own `try`, so a refusal is
+        // contained to the piece it names. `error`, not `warn` (AGENTS.md,
+        // degradation log levels): the settings console shows the refused
+        // value as saved while the runtime keeps the standing one, and nothing
+        // else looks broken afterwards. The manager's message carries the
+        // remedy, as in the audience block below.
+        const applyPiece = (
+          keys: readonly string[],
+          piece: Partial<AuthManagerOptions>,
+          options?: ApplyOptions,
+        ): void => {
+          try {
+            authManager.applyConfigPatch(piece, options);
+          } catch (refusal: any) {
+            const named = keys.map((key) => `auth.${key}`).join(', ');
+            ctx.logger.error(
+              `[auth] auth settings REFUSED (${named}) — the standing runtime value keeps ruling while the settings ` +
+                'console shows the stored value as saved; the other auth settings in this pass still apply. ' +
+                String(refusal?.message ?? refusal),
+            );
+          }
+        };
         if (Object.keys(patch).length > 0) {
-          this.authManager.applyConfigPatch(patch);
+          const pieceKeys = new Set(refusable.map((piece) => piece.key));
+          applyPiece(
+            Object.keys(values).filter(
+              (key) => isExplicit(key) && !pieceKeys.has(key) && !audienceKeys.includes(key),
+            ),
+            patch,
+          );
+        }
+        for (const piece of refusable) {
+          applyPiece([piece.key], piece.patch, piece.options);
         }
 
         // [#11768] Audience posture (#11739) — the console switch for
         // `invite_only | email_domain | open`. The three `audience_*` keys are
         // ONE atomic declaration mapped to ONE `applyConfigPatch({ audience })`
         // (the #11767 contract: the patch replaces the WHOLE audience object
-        // and validates the MERGED result), applied AFTER the main patch so
+        // and validates the MERGED result), applied AFTER the pieces above so
         // that validation judges the audience against the `emailAndPassword`
         // state this same pass just applied — an explicit
-        // `require_email_verification: false` beside a self-registration
-        // posture is a contradiction `assertAudienceConfig` refuses.
+        // `require_email_verification: false` beside `email_domain`, or beside
+        // `open` when only the console stored it (#20389), is a contradiction
+        // `assertAudienceConfig` refuses.
         //
         // #5152's rules, exactly as `membership_policy` above:
         //   - EXPLICIT-only. The manifest default (`invite_only`) is a UI
@@ -1713,11 +1844,6 @@ export class AuthPlugin implements Plugin {
         // Missing required siblings are NOT guessed: the patch goes out
         // without them and `applyConfigPatch` refuses the merged result
         // (standing config keeps ruling — refusing to OPEN fails closed).
-        const audienceKeys = [
-          'audience_posture',
-          'audience_allowed_email_domains',
-          'audience_self_registration_permission_set',
-        ];
         if (audienceKeys.some((key) => isExplicit(key))) {
           const rawPosture = values.audience_posture;
           if (!isExplicit('audience_posture')) {
@@ -1772,7 +1898,17 @@ export class AuthPlugin implements Plugin {
           }
         }
       } catch (err: any) {
-        ctx.logger.warn('Auth: failed to apply auth settings: ' + (err?.message ?? err));
+        // [#20412] A refusal no longer reaches here — each piece above
+        // contains its own. What does is a pass that failed as a whole, the
+        // namespace read first among them: the stored auth settings it had not
+        // applied keep their standing runtime values while the console shows
+        // them as saved, so `error`, for the same reason as a refusal.
+        ctx.logger.error(
+          `[auth] auth settings NOT APPLIED — the auth settings pass failed (${String(err?.message ?? err)}), ` +
+            'so the stored auth settings it had not yet applied keep their standing runtime values while the settings ' +
+            'console shows them as saved. The pass re-runs on the next auth settings change: restore the settings ' +
+            'store, then save any auth setting (or restart) to apply them.',
+        );
       }
     };
 
@@ -1824,10 +1960,10 @@ export class AuthPlugin implements Plugin {
    * OS_SEED_ADMIN=0 (or false/off/no).
    */
   private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
-    // [#11640] Both clauses (and the seeded address below) are resolved by
+    // [commit bf8d129b5] Both clauses (and the seeded address below) are resolved by
     // `walled-owner-verification-path.ts`, because the boot check there treats
     // this seed as a verification path — it stamps the seeded account
-    // `email_verified` (#11343). That is only true while the two agree on when
+    // `email_verified` (commit c0714eb5d). That is only true while the two agree on when
     // the seed is armed and which address it provisions, so they read one
     // resolution rather than two copies of the same env parsing.
     if (!isDevAdminSeedArmed()) return;
@@ -1920,7 +2056,7 @@ export class AuthPlugin implements Plugin {
       } finally {
         this.authManager.clearOperatorProvisioning(email);
       }
-      // [#11343] Stamp the seeded admin's address VERIFIED. This account is
+      // [commit c0714eb5d] Stamp the seeded admin's address VERIFIED. This account is
       // provisioned by the deployment's own boot command with operator-known
       // credentials — it is not an unknown self-registrant, which is the class
       // the verified-elevation invariant exists to refuse. Under walled
@@ -2001,7 +2137,7 @@ export class AuthPlugin implements Plugin {
           { context: { isSystem: true } },
         )
         .catch(() => []);
-      // [#8676] `sys_account.password` is `internal: true`, so the row above
+      // [commit d6e80b28b] `sys_account.password` is `internal: true`, so the row above
       // arrives without it — the engine's strip has no `isSystem` carve-out.
       // Recover it through the privileged accessor; otherwise this probe reads
       // `undefined` on every boot and the dev credential hint silently stops
@@ -2525,7 +2661,7 @@ export class AuthPlugin implements Plugin {
         }
       });
 
-      // ── #11477: /admin/remove-user — AUTHORIZATION BEFORE THE GUARD ──────
+      // ── commit 6dd3e6968: /admin/remove-user — AUTHORIZATION BEFORE THE GUARD ──
       //
       // The break-glass last-local-credential guard is a global
       // `hooks.before` in auth-manager.ts keyed on `ctx.path`. A better-auth
@@ -2627,8 +2763,8 @@ export class AuthPlugin implements Plugin {
       //
       // Ledger: `POST /api/v1/auth/admin/has-permission` stays a
       // `BETTER_AUTH_MOUNTED_SURFACE` row; `check:auth-mount-ledger` accounts
-      // for this mount as "shadowing a vendor-declared path" (the #12029
-      // worked reading — a shadow is accounted for, not a new row).
+      // for this mount as "shadowing a vendor-declared path" (as it read commit
+      // 6dd3e6968's remove-user mount — a shadow is accounted for, not a new row).
       //
       // Pinned by `admin-has-permission-endpoint.test.ts` (both directions,
       // full table) and the two dogfood sweeps (admin standing + non-admin
@@ -3089,11 +3225,16 @@ export class AuthPlugin implements Plugin {
     // mount when an operator flipped the env var on without editing the
     // config file, leaving external OIDC/MCP clients unable to discover
     // the authorization server.
+    //
+    // [#21078] Called SYNCHRONOUSLY, like every route above: the discovery
+    // routes are on the router before this `kernel:ready` hook returns, so
+    // they land ahead of `kernel:listening` (the phase that opens the socket)
+    // and ahead of the first request. A throw here — a route that cannot
+    // mount — propagates out of the hook and fails the boot, the same as the
+    // routes above; ⛔ never `void` it, and ⛔ never catch-and-log it.
     const oidcEnabled = resolveOidcProviderEnabled(this.options.plugins);
     if (oidcEnabled) {
-      void this.registerOidcDiscoveryRoutes(rawApp, ctx).catch((error) => {
-        ctx.logger.error('Failed to register OIDC discovery routes', error as Error);
-      });
+      this.registerOidcDiscoveryRoutes(rawApp, ctx);
     }
 
     ctx.logger.info(`Auth routes registered: All requests under ${basePath}/* forwarded to better-auth`);
@@ -3104,27 +3245,52 @@ export class AuthPlugin implements Plugin {
    * URL. Required by RFC 8414 §3 and OpenID Connect Discovery 1.0 §4 — the
    * documents must live at `/.well-known/{oauth-authorization-server,openid-configuration}`
    * relative to the issuer, not under the auth basePath.
+   *
+   * ## [#21078] Every route is mounted HERE, synchronously — never after an await
+   *
+   * Hono builds its route matcher on the first request it matches, and from
+   * then on `app.get(...)` throws `Can not add a route since the matcher is
+   * already built`. This method used to `await` the better-auth instance
+   * first and mount after it, and its caller dispatched it with `void`, so the
+   * mounts landed whenever that build finished — after `kernel:listening`
+   * whenever the build outlasted the rest of the boot. A first request inside
+   * that window (a readiness probe is the likely one) built the matcher, the
+   * late mount threw, the throw was caught and logged, and both discovery
+   * doors answered 404 for the life of the process.
+   *
+   * So the work is split by what is knowable WHEN:
+   *
+   *   - CONFIG-level — known at mount, decided here: whether discovery is on
+   *     at all (the caller's `resolveOidcProviderEnabled`), the issuer and its
+   *     transport posture, the base path the RFC 8414 §3.1 alias inserts, and
+   *     whether the RFC 9728 protected-resource documents go up (the MCP
+   *     surface env switch and `isMcpOAuthEnabled()`, both configuration
+   *     reads). Every route is put on the router before this returns.
+   *   - INSTANCE-level — known only once better-auth is built: whether the
+   *     oauthProvider plugin actually initialised (`getDegradedAuthFeatures`),
+   *     and the instance the vendor's document builders read. Each handler
+   *     resolves that per request, through `getAuthInstance()` — single-flight
+   *     and memoised in `AuthManager`, so a request costs a cached promise, and
+   *     a rebuild after a settings patch is served from the live instance
+   *     rather than the one that happened to exist at boot.
+   *
+   * ⛔ No `rawApp.get` after an `await`, in this method or anywhere it calls.
    */
-  private async registerOidcDiscoveryRoutes(rawApp: any, ctx: PluginContext): Promise<void> {
-    const auth = await this.authManager!.getAuthInstance();
+  private registerOidcDiscoveryRoutes(rawApp: any, ctx: PluginContext): void {
+    const manager = this.authManager!;
 
     // The oauthProvider plugin may have been skipped by the optional-plugin
     // isolation in AuthManager.buildPluginList (a failing optional plugin no
     // longer fails the whole instance — the 15.1.0 lesson). Advertising
     // .well-known discovery documents for an IdP whose endpoints are not
-    // mounted would send every external client into 404s, so skip the mounts
-    // and say why. Core auth is already up at this point.
-    const degradedOidc = this.authManager!
-      .getDegradedAuthFeatures()
-      .find((d) => d.feature === 'oidcProvider');
-    if (degradedOidc) {
-      ctx.logger.error(
-        'OIDC provider is configured but its better-auth plugin failed to initialize; ' +
-          'skipping /.well-known discovery mounts. External SSO/MCP clients cannot use this ' +
-          `deployment as an IdP until the underlying error is fixed: ${degradedOidc.error}`,
-      );
-      return;
-    }
+    // mounted would send every external client into 404s. That is an
+    // INSTANCE-level fact, so it cannot decide whether a route is mounted
+    // (the routes are mounted before the instance exists); it decides how a
+    // mounted route ANSWERS — `next()`, which is exactly the answer the path
+    // gave when it was not mounted at all: whatever else matches, else the
+    // server's not-found response.
+    const degradedOidc = () =>
+      manager.getDegradedAuthFeatures().find((d) => d.feature === 'oidcProvider');
 
     // ── Plain-HTTP OAuth notices (maintainer ruling 2026-09-21; how the
     //    ruled sentence is carried: ruling batch #210 item 5) ───────────
@@ -3166,7 +3332,14 @@ export class AuthPlugin implements Plugin {
     // TLS. Both read off the PUBLISHED issuer — the authorization-server
     // identity these documents are about — so each names the exact URL a
     // client is sent to rather than a value only this method can see.
-    const authIssuer = this.authManager!.getAuthIssuer();
+    //
+    // [#21078] Both are CONFIG-level facts — the issuer is configuration — so
+    // they are emitted here, at mount, before the instance exists. They used
+    // to sit behind the degraded-oauthProvider early return; a deployment
+    // with that plugin degraded now also gets its own boot-time ERROR line
+    // below, which says the documents are NOT served, and that line is the
+    // one that decides what a client meets.
+    const authIssuer = manager.getAuthIssuer();
     const servedOverPlainHttp = /^http:\/\//i.test(authIssuer);
     if (servedOverPlainHttp && isOAuthEligibleBaseUrl(authIssuer)) {
       ctx.logger.warn(
@@ -3191,12 +3364,26 @@ export class AuthPlugin implements Plugin {
       );
     }
 
-    const { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } = await import(
-      '@better-auth/oauth-provider'
-    );
-
-    const authServerHandler = oauthProviderAuthServerMetadata(auth as any);
-    const openidConfigHandler = oauthProviderOpenIdConfigMetadata(auth as any);
+    // INSTANCE-level: the vendor's document builders, bound to the live
+    // instance. `null` = the oauthProvider plugin is degraded on that
+    // instance, so the documents are not served (see `degradedOidc` above).
+    // A rejection (the instance cannot be built) is NOT caught here: a
+    // request meets it as the server's error response, and the next request
+    // retries the build — `getOrCreateAuth` drops a failed build.
+    type DocumentHandler = (req: Request) => Promise<Response>;
+    const resolveDiscoveryDocuments = async (): Promise<
+      { authServer: DocumentHandler; openidConfig: DocumentHandler } | null
+    > => {
+      const auth = await manager.getAuthInstance();
+      if (degradedOidc()) return null;
+      const { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } = await import(
+        '@better-auth/oauth-provider'
+      );
+      return {
+        authServer: oauthProviderAuthServerMetadata(auth as any),
+        openidConfig: oauthProviderOpenIdConfigMetadata(auth as any),
+      };
+    };
 
     // Cache-Control for OIDC discovery docs. These describe stable issuer
     // configuration (endpoints, supported scopes, signing algs); they
@@ -3213,8 +3400,19 @@ export class AuthPlugin implements Plugin {
       return resp;
     };
 
-    rawApp.get('/.well-known/oauth-authorization-server', (c: any) => withDiscoveryCache(authServerHandler, c.req.raw));
-    rawApp.get('/.well-known/openid-configuration', (c: any) => withDiscoveryCache(openidConfigHandler, c.req.raw));
+    // One handler shape for every document route: resolve the instance-level
+    // half for THIS request, then serve — or hand on exactly as an unmounted
+    // path would when the provider is degraded.
+    const serveDocument =
+      (pick: (docs: { authServer: DocumentHandler; openidConfig: DocumentHandler }) => DocumentHandler) =>
+      async (c: any, next: () => Promise<void>) => {
+        const docs = await resolveDiscoveryDocuments();
+        if (!docs) return next();
+        return withDiscoveryCache(pick(docs), c.req.raw);
+      };
+
+    rawApp.get('/.well-known/oauth-authorization-server', serveDocument((d) => d.authServer));
+    rawApp.get('/.well-known/openid-configuration', serveDocument((d) => d.openidConfig));
 
     // RFC 8414 §3.1 path-insertion variant. Our issuer identifier carries a
     // path component (`<origin>/api/v1/auth`), so spec-conforming clients
@@ -3222,9 +3420,7 @@ export class AuthPlugin implements Plugin {
     // metadata) request `/.well-known/oauth-authorization-server/api/v1/auth`
     // — alias it to the same document.
     const basePath = (this.options.basePath ?? DEFAULT_AUTH_BASE_PATH).replace(/\/$/, '');
-    rawApp.get(`/.well-known/oauth-authorization-server${basePath}`, (c: any) =>
-      withDiscoveryCache(authServerHandler, c.req.raw),
-    );
+    rawApp.get(`/.well-known/oauth-authorization-server${basePath}`, serveDocument((d) => d.authServer));
 
     // ── MCP protected-resource metadata (RFC 9728, #2698) ──────────────
     // `/api/v1/mcp` is an OAuth 2.1 protected resource; its metadata points
@@ -3233,10 +3429,17 @@ export class AuthPlugin implements Plugin {
     // transport rule satisfied — TLS, or plain HTTP on a loopback / private
     // / link-local host): when it is off, nothing is advertised and the
     // endpoint stays API-key-only, fail-closed.
-    const manager = this.authManager!;
+    //
+    // [#21078] Mounted on the CONFIG-level decision (the env switch and
+    // `isMcpOAuthEnabled()` are both configuration reads). The document points
+    // clients at the authorization server above, so it carries the same
+    // INSTANCE-level gate: a degraded oauthProvider hands the request on,
+    // exactly as the unmounted path used to answer.
     if (readMcpServerEnabledEnv() && typeof manager.isMcpOAuthEnabled === 'function') {
       if (manager.isMcpOAuthEnabled()) {
-        const prmHandler = () => {
+        const prmHandler = async (_c: unknown, next: () => Promise<void>) => {
+          await manager.getAuthInstance();
+          if (degradedOidc()) return next();
           const body = JSON.stringify(manager.getMcpProtectedResourceMetadata());
           return new Response(body, {
             status: 200,
@@ -3262,6 +3465,47 @@ export class AuthPlugin implements Plugin {
 
     ctx.logger.info(
       'OIDC discovery endpoints mounted at /.well-known/{oauth-authorization-server,openid-configuration}',
+    );
+
+    // ── Boot-time preparation — mounts NOTHING ──────────────────────────
+    //
+    // Every route is already on the router above. This runs the SAME
+    // instance-level resolution a request runs, once, at boot, for the three
+    // things the old await-then-mount shape did at boot and that are kept:
+    //
+    //   1. the better-auth instance is built in the background at boot, not
+    //      by whichever request first needs it — moving that build (and the
+    //      vendor plugins' own `init` writes) into the serving window is a
+    //      separate change, not this one;
+    //   2. a degraded oauthProvider is reported at boot, once, at ERROR;
+    //   3. documents that cannot be built from the instance are reported at
+    //      boot, at ERROR, under the line's established opening words —
+    //      `scripts/publish-smoke.sh` asserts them BY NAME in its boot window
+    //      (SMOKE_BOOT_ERROR_PATTERN), so they are a grep anchor and are kept
+    //      verbatim at the front of the line.
+    //
+    // Not awaited — nothing above depends on it and nothing here can add a
+    // route — and not swallowed: both outcomes are logged, and a request that
+    // meets the same failure gets the server's error response.
+    void resolveDiscoveryDocuments().then(
+      (docs) => {
+        const degraded = docs ? undefined : degradedOidc();
+        if (!degraded) return;
+        ctx.logger.error(
+          'OIDC provider is configured but its better-auth plugin failed to initialize, so the ' +
+            '/.well-known discovery documents are NOT served: those paths answer as if they were not ' +
+            'mounted. External SSO/MCP clients cannot use this deployment as an IdP until the ' +
+            `underlying error is fixed: ${degraded.error}`,
+        );
+      },
+      (error) => {
+        ctx.logger.error(
+          'Failed to register OIDC discovery routes: the /.well-known paths are mounted, but the auth ' +
+            'instance their documents are built from could not be prepared, so every discovery request ' +
+            'answers an error until it can be',
+          error as Error,
+        );
+      },
     );
   }
 }

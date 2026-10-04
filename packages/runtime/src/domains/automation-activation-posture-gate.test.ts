@@ -18,7 +18,7 @@
 //
 // ## What this is made durable against
 //
-// #10243, measured over HTTP: on a real `isolated` posture a tenant org owner
+// The leak commit 02b41232d measured over HTTP: on a real `isolated` posture a tenant org owner
 // switched a shipped flow off through this very route and an unrelated tenant
 // in a DIFFERENT organization read it off — environment-wide reach from a
 // tenant caller. That leak went through a PROCESS-LOCAL map, so a cold boot
@@ -191,7 +191,7 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
                 expect(codeOf(response)).toBe('PERMISSION_DENIED');
                 // The load-bearing assertion: refused BEFORE the write. A gate
                 // that wrote the row and then refused would satisfy the two
-                // above and still be #10243.
+                // above and still be the leak commit 02b41232d measured.
                 expect(h.toggleFlow).not.toHaveBeenCalled();
             });
 
@@ -275,7 +275,7 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
 
                 // `POST /automation/trigger/toggle` RUNS a flow literally named
                 // `toggle`; gating it would over-block an execution door, which
-                // is the one thing the #10243 ruling did not do.
+                // is the one thing the ruling commit 266436a7f landed did not do.
                 expect(h.toggleFlow).not.toHaveBeenCalled();
             });
         });

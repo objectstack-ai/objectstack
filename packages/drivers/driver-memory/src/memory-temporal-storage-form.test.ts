@@ -22,7 +22,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { temporalStorageForm } from '@objectstack/core';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, type FilterCondition } from '@objectstack/spec/data';
 import { coerceTemporalValue } from './memory-temporal.js';
 import { InMemoryDriver } from './memory-driver.js';
 
@@ -85,7 +85,33 @@ const CARD_WHERE_TWINS: ReadonlyArray<readonly [string, () => FilterCondition, n
   ['row 6 — the same Date, $eq', () => ({ placed_on: { $eq: new Date('2026-02-01T10:00:00.000Z') } }), 2],
   ['row 7 — a Date on a time field', () => ({ slot: { $gt: new Date('2026-02-01T11:00:00.000Z') } }), 3],
   ['control — a zone-naive datetime string', () => ({ opened_at: { $gt: '2026-02-01 09:00' } }), 4],
+  // [#20480] The 2026 control beside the engine's refusal of an instant with
+  // no four-digit UTC year on a time field (`+010000-01-01T11:00:00Z`, which
+  // this driver compared as text: every row for `$gt`). The same wall clock in
+  // 2026, in each spelling the door admits, keeps its UTC time of day here.
+  ['[#20480] a 2026 instant $gt on a time field — the control', () => ({ slot: { $gt: '2026-02-01T11:00:00Z' } }), 3],
+  ['[#20480] the same instant, $lt', () => ({ slot: { $lt: '2026-02-01T11:00:00Z' } }), 2],
+  ['[#20480] the same instant with an offset', () => ({ slot: { $gt: '2026-02-01T19:00:00+08:00' } }), 3],
+  ['[#20480] the same instant as epoch milliseconds', () => ({ slot: { $gt: Date.parse('2026-02-01T11:00:00Z') } }), 3],
 ];
+
+/** The declared field map the twins run against — what a typed seam reads. */
+const LEDGER_FIELDS: Record<string, { type: string }> = {
+  placed_on: { type: 'date' },
+  opened_at: { type: 'datetime' },
+  slot: { type: 'time' },
+};
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the twin through the shared lowering, reading
+ * {@link LEDGER_FIELDS}' `datetime` columns. Rows 3 and 4 (a bare day as a
+ * datetime's upper bound) are answered by the lowered filter, as on every
+ * seam-fed path — the engine's per-aggregation `filter` included — since this
+ * driver keeps no whole-day copy of its own; the counts are unchanged.
+ */
+const seamed = <T,>(where: T): T =>
+  lowerFilterCondition(where, { isDatetimeColumn: (column) => LEDGER_FIELDS[column]?.type === 'datetime' });
 
 describe('[#20176] the where twins of the card\'s rows, on this driver', () => {
   let driver: InMemoryDriver;
@@ -95,14 +121,14 @@ describe('[#20176] the where twins of the card\'s rows, on this driver', () => {
     await driver.connect();
     await driver.syncSchema(OBJECT, {
       name: OBJECT,
-      fields: { placed_on: { type: 'date' }, opened_at: { type: 'datetime' }, slot: { type: 'time' } },
+      fields: LEDGER_FIELDS,
     });
     for (const row of ROWS) await driver.create(OBJECT, row);
   });
 
   for (const [name, where, expected] of CARD_WHERE_TWINS) {
     it(`${name}: ${expected} of 6`, async () => {
-      const rows = await driver.find(OBJECT, { where: where() });
+      const rows = await driver.find(OBJECT, { where: seamed(where()) });
       expect(rows).toHaveLength(expected);
     });
   }

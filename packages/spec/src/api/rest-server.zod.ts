@@ -201,7 +201,19 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   ),
 
   /**
-   * API documentation configuration
+   * The publisher's identity on the served OpenAPI document (#20294, ruling B
+   * on #20359; ADR-0049 enforce-or-remove). Each member an author sets
+   * overlays the document's `info` on BOTH doors that serve it —
+   * `{apiPath}/openapi.json` and its environment-scoped twin — in
+   * `packages/rest`'s `registerOpenApiEndpoints`; a member left unset keeps
+   * the bundled artifact's value, so nothing authored serves `info`
+   * byte-identical to `@objectstack/spec/openapi.json` (the #11646 invariant,
+   * now the unset case). `contact` and `license` replace the bundled object
+   * WHOLE, never member by member: a document must not state one party's
+   * licence name at another party's licence URL. `info.version` is not
+   * publisher identity — it is the protocol version, owned here (#11646) — so
+   * `version` is a tombstone, and neither `api.version` nor the runtime
+   * version ever reaches it.
    */
   documentation: z.object({
     /**
@@ -212,8 +224,9 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
      * `enableOpenApi` at the mount (`registerRoutes`). Tombstoned rather than
      * deleted: this inline object is a non-strict `z.object()`, so a bare
      * deletion would strip `enabled: false` in silence and the author would
-     * keep believing the document is off (ADR-0104). Only this key retires
-     * here; the block's other members are a separate decision.
+     * keep believing the document is off (ADR-0104). Only this key retired
+     * then; the block's other members were decided by #20294 (the identity
+     * members enforced, `version` retired below).
      */
     enabled: retiredKey(
       '`api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
@@ -222,20 +235,49 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
       + '`api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` '
       + 'viewer unmounted.',
     ),
-    title: z.string().default('ObjectStack API').describe('API documentation title'),
-    description: z.string().optional().describe('API description'),
-    version: z.string().optional().describe('Documentation version'),
-    termsOfService: z.string().optional().describe('Terms of service URL'),
+    // [#20294] `.optional()`, no longer `.default('ObjectStack API')`: that
+    // default was materialized into every present block and never served
+    // (the served title was, and unset still is, the bundled artifact's
+    // 'ObjectStack REST API'), so reading it would have retitled the document
+    // of an author who wrote only, say, `description`.
+    title: z.string().optional()
+      .describe('Title of the served OpenAPI document (`info.title`); unset keeps the bundled title'),
+    description: z.string().optional()
+      .describe('Description of the served OpenAPI document (`info.description`); unset keeps the bundled description. Your app\'s own release number belongs here'),
+    /**
+     * [REMOVED in #20294] Retired by ruling B on #20359 (ADR-0049
+     * enforce-or-remove): the served `info.version` is the protocol version —
+     * `SPEC_VERSION`, written by `build-openapi.ts` — as the #11646 ruling
+     * settled it, so a publisher-set version would give the field a third
+     * meaning after the route identifier and the runtime version.
+     * `normalizeConfig` copied this key into the server's config and nothing
+     * read it back. Tombstoned rather than deleted: this inline object is a non-strict
+     * `z.object()`, so a bare deletion would strip `version: '2.3.0'` in
+     * silence and the author would keep believing the document carries it
+     * (ADR-0104).
+     */
+    version: retiredKey(
+      '`api.documentation.version` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
+      + 'nothing ever read it, and the served OpenAPI document\'s `info.version` has one source: the '
+      + 'protocol version, i.e. the version of the `@objectstack/spec` package that generated the document, '
+      + 'which no deployment configuration overrides. Delete the key. To publish your app\'s own release '
+      + 'number, write it into `api.documentation.description`, which the served `info.description` carries.',
+    ),
+    termsOfService: z.string().optional()
+      .describe('Terms-of-service URL of the served OpenAPI document (`info.termsOfService`); unset serves none'),
     contact: z.object({
-      name: z.string().optional(),
-      url: z.string().optional(),
-      email: z.string().optional(),
-    }).optional(),
+      name: z.string().optional().describe('Contact name (`info.contact.name`)'),
+      url: z.string().optional().describe('Contact URL (`info.contact.url`)'),
+      email: z.string().optional().describe('Contact email (`info.contact.email`)'),
+    }).optional()
+      .describe('Contact of the served OpenAPI document; replaces the bundled `info.contact` whole, so a member left out is absent rather than inherited. Unset keeps the bundled contact'),
     license: z.object({
-      name: z.string(),
-      url: z.string().optional(),
-    }).optional(),
-  }).optional().describe('OpenAPI/Swagger documentation config'),
+      name: z.string().describe('License name (`info.license.name`)'),
+      url: z.string().optional().describe('License URL (`info.license.url`)'),
+    }).optional()
+      .describe('License of the served OpenAPI document; replaces the bundled `info.license` whole, so a license without `url` serves no URL. Unset keeps the bundled license'),
+  }).optional()
+    .describe('Publisher identity of the served OpenAPI document: each member set here overlays its `info` on both /openapi.json doors, and nothing set serves the bundled `info` unchanged. `info.version` is always the protocol version'),
   
   /**
    * [REMOVED in #20295] Server-wide toggles for the response envelope
@@ -283,11 +325,11 @@ export const CrudOperation = z.enum([
 
 export type CrudOperation = z.input<typeof CrudOperation>;
 
-// `CrudEndpointPatternSchema` — REMOVED (#14691)
+// `CrudEndpointPatternSchema` — REMOVED (commit b3a63d32c)
 //
 // The per-operation `{ method, path, summary, description }` pattern shape was
 // the value type of `crud.patterns`, retired below under ADR-0049
-// enforce-or-remove (the #14369 liveness census: every CRUD route is mounted
+// enforce-or-remove (the liveness census commit a3d5724c8 recorded: every CRUD route is mounted
 // from fixed method/path pairs in `packages/rest`'s `registerCrudEndpoints`,
 // so a custom pattern was validated and never read). With its carrier key
 // tombstoned the def had no consumer left, and an exported schema nothing
@@ -320,7 +362,7 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Enable/disable operations'),
   
   /**
-   * [REMOVED in #14691] Per-operation custom URL patterns. Tombstoned rather
+   * [REMOVED in commit b3a63d32c] Per-operation custom URL patterns. Tombstoned rather
    * than deleted: this schema is not `.strict()`, so a plain deletion would
    * silently strip the key and an author would keep a config that "customizes"
    * routes the server mounts from fixed pairs (ADR-0104, #3733). The mounted
@@ -344,7 +386,7 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   dataPrefix: z.string().default('/data').describe('URL prefix for data endpoints'),
   
   /**
-   * [REMOVED in #14691] The object-name parameter style. Every CRUD route takes
+   * [REMOVED in commit b3a63d32c] The object-name parameter style. Every CRUD route takes
    * the object name as a PATH segment; `'query'` was validated against the enum
    * and mounted exactly what `'path'` mounts. Tombstoned, not deleted — the
    * schema is not `.strict()` (see `patterns` above).
@@ -403,7 +445,7 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
   enableCache: z.boolean().default(true).describe('Enable HTTP cache headers (ETag, Last-Modified)'),
   
   /**
-   * [REMOVED in #14691] The metadata cache TTL. `enableCache` selects the
+   * [REMOVED in commit b3a63d32c] The metadata cache TTL. `enableCache` selects the
    * protocol's `getMetaItemCached` read path, which takes no TTL, and no
    * `Cache-Control` / `ETag` / `Last-Modified` header was ever built from this
    * value — `cacheTtl: 60` changed no header and no cache lifetime (and, having
@@ -499,7 +541,7 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
         + '`GET /meta/_drafts` and the `POST /meta/_migrate-stored` write door',
       ),
     /**
-     * [REMOVED in #14691] Gated a route that does not exist: the REST server
+     * [REMOVED in commit b3a63d32c] Gated a route that does not exist: the REST server
      * mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and
      * `true` added nothing. Its three siblings each gate a real mount.
      */
@@ -562,7 +604,7 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
     updateMany: z.boolean().default(true).describe('Enable POST /data/:object/updateMany'),
     deleteMany: z.boolean().default(true).describe('Enable POST /data/:object/deleteMany'),
     /**
-     * [REMOVED in #14691] Gated a route that was never built: there is no
+     * [REMOVED in commit b3a63d32c] Gated a route that was never built: there is no
      * `POST /data/:object/upsertMany` and no protocol member behind it (the
      * protocol carries `createManyData` / `updateManyData` / `deleteManyData`
      * and no upsert counterpart). Upsert is an operation TYPE of the generic
@@ -579,7 +621,7 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Enable/disable specific batch operations'),
 
   /**
-   * [REMOVED in #14691] A server-side default for batch atomicity. No batch
+   * [REMOVED in commit b3a63d32c] A server-side default for batch atomicity. No batch
    * handler ever consulted it: atomicity is decided per request by
    * `options.atomic` in the batch body (`BatchOptionsSchema`, ADR-0119 D4 —
    * opt-in, default `false`, aligned to what every caller already gets). A
@@ -607,8 +649,8 @@ export type BatchEndpointsConfigParsed = z.infer<typeof BatchEndpointsConfigSche
 /**
  * Route Generation Configuration Schema
  *
- * [#14691] Every key of this sub-object is a `retiredKey()` tombstone: the
- * #14369 liveness census found the whole block parsed, defaulted and
+ * [commit b3a63d32c] Every key of this sub-object is a `retiredKey()` tombstone: the
+ * liveness census recorded in commit a3d5724c8 found the whole block parsed, defaulted and
  * normalized into the REST server's config and never read back —
  * `excludeObjects: ['sys_log']` excluded nothing, `nameTransform: 'plural'`
  * mounted every route under the raw object name, and the per-object
@@ -711,8 +753,8 @@ export type RouteGenerationConfigParsed = z.infer<typeof RouteGenerationConfigSc
  * }
  *
  * To keep an object off the REST data surface, declare it on the object
- * (`enable.apiEnabled: false`, or an `enable.apiMethods` whitelist) — the
- * `routes` sub-object's selectors were retired in #14691 because nothing read them.
+ * (`enable.apiEnabled: false`, or an `enable.apiMethods` whitelist) — the `routes`
+ * sub-object's selectors were retired by commit b3a63d32c because nothing read them.
  */
 export const RestServerConfigSchema = lazySchema(() => z.object({
   /**

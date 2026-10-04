@@ -82,7 +82,7 @@ into the registry; the run of `//` comments immediately above `export const entr
   sentence once here and once there. This tree's one code/prose separator masks
   **comments** and leaves **string literals** intact on purpose, so to every scan built
   on it a quoted example is code — which is how prose in `packages/spec` turns
-  **another package's** test red. Measured on #14526: the new entry named four retired
+  **another package's** test red. Measured while landing commit db16b9424: the new entry named four retired
   call sites in their call spelling — the method with its opening parenthesis —
   `packages/client/src/envelope-caller-census.test.ts` counted 46 against the 28 it
   pins (nine mentions, each counted twice) and `Test Core` went red; respelling them
@@ -143,6 +143,12 @@ than a silent one.
 Reproduce any row with a driver-less clone and git's own server-side merge:
 
 ```
-git clone --shared --no-local . /tmp/driverless   # a fresh clone has no merge.os-regen.driver
-git -C /tmp/driverless merge-tree --write-tree --messages BRANCH_A BRANCH_B
+git clone -q --bare --shared . /tmp/driverless.git   # a fresh clone has no merge.os-regen.driver
+git --git-dir=/tmp/driverless.git fetch -q . BRANCH_A:refs/b BRANCH_B:refs/h
+git --git-dir=/tmp/driverless.git merge-tree --write-tree --messages refs/b refs/h
+rm -rf /tmp/driverless.git
 ```
+
+Exit 1 with no tree id is a missing object, never a conflict; a real conflict prints the tree id first.
+The fetch runs in your checkout (`.`), so `BRANCH_A`/`BRANCH_B` may be names or ids. Recipe and why:
+`scripts/pm/os-regen-merge.sh`.

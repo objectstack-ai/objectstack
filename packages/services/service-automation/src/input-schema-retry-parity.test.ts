@@ -28,7 +28,7 @@ import { AutomationEngine } from './engine.js';
  * NON-RETRYABLE and classifies as a NEVER-DISPATCHED exit under #9378, beside
  * `FLOW_DISABLED` / `FLOW_NO_START_NODE`. So the refusal is asserted as
  * `success: false` + its own ADR-0112 `code` (`FLOW_INPUT_SCHEMA_INVALID`,
- * registered by #11504) + the guard's own message, with `status` ABSENT —
+ * registered by commit f90e82024) + the guard's own message, with `status` ABSENT —
  * that absence is the transport's discriminator, so an edit that stamps
  * `'failed'` on this exit "for consistency" must fail here. `execute()`
  * refuses ONCE and never hands the throw to `retryExecution`: one refusal
@@ -74,7 +74,9 @@ function countingFlowEngine(opts: {
                 id: 'work',
                 type: 'script' as any,
                 label: 'Work',
-                config: opts.config,
+                // `function` is the key the script executor contract requires;
+                // the flow parse refuses a script node without it (#20316).
+                config: { function: 'noop', ...opts.config },
                 inputSchema: opts.inputSchema,
             },
             { id: 'end', type: 'end', label: 'End' },

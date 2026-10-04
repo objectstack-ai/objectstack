@@ -38,7 +38,7 @@ import { assertListComparandShapes, type Cube } from '@objectstack/spec/data';
 import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -49,7 +49,7 @@ interface Refusal extends Error {
   status?: unknown;
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;
@@ -183,8 +183,11 @@ describe('[#19888] the neighbouring shapes compile exactly as before', () => {
     ['null under $eq — the same predicate', { stage: { $eq: null } }, leaf('stage', 'notSet', [])],
     ['a list under $in — the prescribed remedy', { stage: { $in: ['won', 'lost'] } }, leaf('stage', 'in', ['won', 'lost'])],
     ['the empty $in — the FALSE constant', { stage: { $in: [] } }, { kind: 'const', value: false }],
-    ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'const', value: true }],
-    ['a nested-relation scalar', { acct: { region: 'NA' } }, leaf('acct.region', 'equals', ['NA'])],
+    // [ADR-0053 D-D1, amended — #5930 step 3] The TRUE constant, inside the
+    // shared lowering's NULL escape (`$nin` is negative-polarity): TRUE still.
+    ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'or', children: [leaf('stage', 'notSet', []), { kind: 'const', value: true }] }],
+    // [#20887] Accepted, and carried as written for the engine (it used to flatten to `acct.region`).
+    ['a nested-relation scalar', { acct: { region: 'NA' } }, { kind: 'relation', member: 'acct', condition: { region: 'NA' } }],
     ['a field reference under $eq (served on the engine path)', { amount: { $eq: { $field: 'budget' } } }, leaf('amount', 'equals', [{ $field: 'budget' }])],
   ];
 
@@ -237,9 +240,9 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    ['id', 'stage'].map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
+    ['id', 'stage'].map((n) => [n, { label: n, type: 'string', sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 describe('[#19888] every analytics face refuses before anything runs (real engine)', () => {

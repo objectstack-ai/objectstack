@@ -26,7 +26,7 @@
  *
  * Five short sentences, and everything below is the MINIMAL faithful reading of
  * them — `transform`'s now says out loud, at the point of authoring, what this
- * module and the E7 publish gate have always answered at rejection time (#6065).
+ * module and the E7 publish gate have always answered at rejection time (commit 026101660).
  * Where the text is silent this module takes the least expressive option
  * available and says so here, because the alternative — inventing expression
  * power (a template language, JSONPath, wildcards, conditionals) — would put a
@@ -232,7 +232,8 @@ function reject(message: string, hint: string): EndpointMappingRejection {
 const PATH_HINT =
     "`source` and `target` are dot-separated field paths ('user.profile.email'). An empty path, an empty "
     + "segment ('a..b') and the JavaScript prototype keys (__proto__, prototype, constructor) are refused; "
-    + 'the publish gate rejects the same shapes (#5040 E7).';
+    + 'the publish gate rejects the same shapes, so a declaration that reaches this check was stored without '
+    + 'passing that gate (for example through a direct metadata register() call).';
 
 /**
  * Whether this runtime can serve a key's declaration AT ALL — data-independent,
@@ -263,8 +264,8 @@ export function mappingDeclarationRejection(
                 `Endpoint '${endpoint.name}' declares ${at}.transform ('${entry.transform}'), which this runtime `
                 + 'does not execute.',
                 'A mapping entry moves and renames fields by dot path; there is no transformation-function '
-                + "registry in this runtime, so `transform` is rejected at publish (#5040 §3.4, E7) rather than "
-                + 'parsed and ignored. Drop the key, or shape the value where it is produced.',
+                + "registry in this runtime, so `transform` is rejected at publish rather than parsed and "
+                + 'ignored. Drop the key, or shape the value where it is produced.',
             );
         }
 

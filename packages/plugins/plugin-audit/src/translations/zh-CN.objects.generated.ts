@@ -39,7 +39,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "执行人",
+        label: "用户",
         help: "执行该操作的用户（系统操作时为 null）"
       },
       actor: {
@@ -122,7 +122,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       type: {
         label: "类型",
-        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive (maintainer ruling 2026-08-24, #11507).",
+        help: "Activity kind. The declared options are the platform BUILT-IN set of an open vocabulary, not a closed enum: metadata authors may contribute their own values (sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an undeclared value is stored verbatim rather than rejected. Consumers must render an unknown value instead of assuming this list is exhaustive: the vocabulary is open by decision, not a gap awaiting enforcement.",
         options: {
           created: "已创建",
           updated: "已更新",
@@ -175,8 +175,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "指向活动目标的可选深度链接"
       },
       environment_id: {
-        label: "项目",
-        help: "项目上下文（多项目部署）"
+        label: "环境",
+        help: "环境上下文（多环境部署）"
       },
       metadata: {
         label: "元数据",
@@ -215,11 +215,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       mentions: {
         label: "提及",
-        help: "@mention 对象的 JSON 数组"
+        help: "评论中被 @ 提及的用户 ID 的 JSON 数组"
       },
       reactions: {
         label: "回应",
-        help: "表情回应对象的 JSON 数组"
+        help: "将每个表情映射到对其做出回应的用户 ID 列表的 JSON 对象"
       },
       is_edited: {
         label: "已编辑"

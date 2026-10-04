@@ -121,7 +121,7 @@ export const ANALYTICS_DATE_RANGE_EXPLICIT_WINDOW: readonly [string, string] = [
  * The kit's only array case used to be the two-element window above, so the
  * arity itself was governed NOWHERE and every face was free to invent a
  * reading for the rest. Four faces in one package had invented three —
- * MEASURED on `abc4b83ce` (#17124), one authored document over the same rows:
+ * MEASURED on `abc4b83ce` (the defect commit 86c505286 fixed), one authored document over the same rows:
  * `['2026-01-01']` was a point window, an upper bound left unwritten, and a
  * window dropped to ALL OF HISTORY, depending on which backend answered. A
  * fifth face — `driver-memory`'s cube face — dropped it too (#17596, measured

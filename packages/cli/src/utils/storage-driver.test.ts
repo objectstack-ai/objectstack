@@ -25,7 +25,7 @@ import {
   TURSO_DRIVER_INSTALL_COMMAND,
   UnsupportedDriverError,
 } from './storage-driver.js';
-// #6268: the OTHER host's bindings, imported under their own names so the
+// Commit 68f5eccb1: the OTHER host's bindings, imported under their own names so the
 // identity assertions below compare two real module paths rather than one alias
 // of the same import. `@objectstack/runtime` resolves to the BUILT package here,
 // exactly as it does for `storage-driver.ts` itself — which is what makes the
@@ -54,16 +54,31 @@ describe('inferDriverTypeFromUrl', () => {
     expect(inferDriverTypeFromUrl('./app.sqlite')).toBe('sqlite');
   });
 
-  // #3276: the mingo in-memory engine has its own `memory://` URL scheme.
-  it('maps the memory:// (and mingo://) scheme to the mingo `memory` kind', () => {
-    expect(inferDriverTypeFromUrl('memory://')).toBe('memory');
-    expect(inferDriverTypeFromUrl('memory://ignored-host')).toBe('memory');
-    expect(inferDriverTypeFromUrl('mingo://')).toBe('memory');
-  });
+  // The in-memory (mingo) engine's schemes are REFUSED at inference: the engine
+  // is no longer a boot store. Asserted on the error's TYPE and on what it names
+  // (the URL and the two SQLite replacements), never on its prose.
+  it.each(['memory://', 'memory://ignored-host', 'mingo://', 'MINGO://x'])(
+    'refuses %s at inference, naming the SQLite replacements',
+    (url) => {
+      let err: unknown;
+      try {
+        inferDriverTypeFromUrl(url);
+      } catch (e) {
+        err = e;
+      }
+      expect(err, `inferDriverTypeFromUrl accepted ${url}`).toBeInstanceOf(UnsupportedDriverError);
+      const refusal = err as UnsupportedDriverError;
+      // Not a kind this resolver produces — the allowlist pin's oracle reads this.
+      expect(refusal.recognized).toBe(false);
+      expect(refusal.message).toContain(`"${url}"`);
+      expect(refusal.message).toContain('--fresh');
+      expect(refusal.message).toContain(':memory:');
+    },
+  );
 
   // The sqlite `:memory:` PSEUDO-FILE is SQLite's own in-memory mode — NOT the
-  // mingo engine. It must stay `sqlite`, distinct from the `memory://` scheme.
-  it('keeps sqlite `:memory:` mapped to sqlite (distinct from memory://)', () => {
+  // mingo engine. It stays `sqlite`, and it is the replacement the refusal names.
+  it('keeps sqlite `:memory:` mapped to sqlite (the replacement, distinct from memory://)', () => {
     expect(inferDriverTypeFromUrl(':memory:')).toBe('sqlite');
   });
 
@@ -76,40 +91,47 @@ describe('inferDriverTypeFromUrl', () => {
 
 describe('resolveDriverType', () => {
   it('lets an explicit driver win over URL inference (and normalizes case/space)', () => {
-    expect(resolveDriverType('memory', 'postgres://h/db')).toBe('memory');
-    expect(resolveDriverType('  MEMORY  ', undefined)).toBe('memory');
+    expect(resolveDriverType('sqlite', 'postgres://h/db')).toBe('sqlite');
+    expect(resolveDriverType('  SQLITE  ', undefined)).toBe('sqlite');
     expect(resolveDriverType('Postgres', 'mongodb://h/db')).toBe('postgres');
   });
 
   it('falls back to URL inference when no explicit driver is set', () => {
     expect(resolveDriverType(undefined, 'mongodb://h/db')).toBe('mongodb');
-    expect(resolveDriverType('', 'memory://')).toBe('memory');
+    expect(resolveDriverType('', ':memory:')).toBe('sqlite');
     expect(resolveDriverType('   ', undefined)).toBe('');
+    // …and inference's refusal reaches the caller through this function too.
+    expect(() => resolveDriverType('', 'memory://')).toThrow(UnsupportedDriverError);
   });
 });
 
 describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () => {
-  // ── #3276: the regression the memory branch exists to fix ──────────────────
-  // `memory` must declare the mingo InMemoryDriver — NOT fall through to the
-  // dev SQLite `:memory:` default. Remove the `memory` branch and this goes
-  // red: in dev it resolves to the sqlite dev-default, in prod to null.
-  it('declares the mingo memory driver for `memory` in DEV and PROD', () => {
-    for (const isDev of [true, false]) {
-      const r = resolveStorageDefinition('memory', { isDev });
-      expect(r).not.toBeNull();
-      expect(r!.driverId).toBe('memory');
-      expect(r!.label).toBe('InMemoryDriver');
-      expect(r!.trackName).toBe('MemoryDriver');
-      expect(r!.displayUrl).toBe('(in-memory)');
-      // Never provisions a telemetry sibling.
-      expect(r!.sqliteFilePath).toBeUndefined();
-    }
-  });
-
-  it('accepts the `mingo` and `in-memory` aliases', () => {
-    expect(resolveStorageDefinition('mingo', { isDev: false })!.driverId).toBe('memory');
-    expect(resolveStorageDefinition('in-memory', { isDev: false })!.driverId).toBe('memory');
-  });
+  // ── The retired in-memory engine ───────────────────────────────────────────
+  // #3276's lesson still holds — a `memory` selection must NOT fall through to the
+  // dev SQLite `:memory:` default in silence — but the answer is now a refusal,
+  // not the mingo driver: the engine is no longer a boot store. Delete the
+  // refusal and dev resolves the sqlite dev default (a silent different engine),
+  // prod resolves null; either way no `UnsupportedDriverError` is thrown.
+  it.each(['memory', 'mingo', 'in-memory', 'inmemory'])(
+    'refuses `%s` in DEV and PROD, naming the SQLite replacements instead of a typo list',
+    (spelling) => {
+      for (const isDev of [true, false]) {
+        let err: unknown;
+        try {
+          resolveStorageDefinition(spelling, { isDev });
+        } catch (e) {
+          err = e;
+        }
+        expect(err, `${spelling} (isDev=${isDev}) was not refused`).toBeInstanceOf(UnsupportedDriverError);
+        const refusal = err as UnsupportedDriverError;
+        expect(refusal.recognized).toBe(false);
+        expect(refusal.driverType).toBe(spelling);
+        expect(refusal.message).toContain('--fresh');
+        expect(refusal.message).toContain(':memory:');
+        expect(refusal.message).not.toContain('Supported drivers:');
+      }
+    },
+  );
 
   it('declares mongodb from the URL it was given', () => {
     const r = resolveStorageDefinition('mongodb', {
@@ -121,7 +143,7 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(r!.trackName).toBe('MongoDBDriver');
   });
 
-  // VERDICT FLIPPED by #6345 fork 2 (maintainer ruling, 2026-08-09). This pin
+  // VERDICT FLIPPED by commit e2798fab7's fork 2 (maintainer ruling, 2026-08-09). This pin
   // used to assert `config: { url: 'mongodb://localhost:27017/objectstack' }` for
   // a mongodb selection with no URL — a DSN the CLI invented, naming a host the
   // operator never did. It is the same defect as postgres's `url: undefined`
@@ -183,10 +205,10 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(resolveStorageDefinition('', { isDev: false })).toBeNull();
   });
 
-  // VERDICT FLIPPED by #6345 fork 1. `'nonsense'` used to share the `''` answer —
+  // VERDICT FLIPPED by commit e2798fab7's fork 1. `'nonsense'` used to share the `''` answer —
   // null in prod, and in DEV the trailing SQLite default, i.e.
   // `os dev --database-driver sqlite3` silently booted SQLite while `os migrate`
-  // refused the same value by name (#6344 killed the silent fallback on that
+  // refused the same value by name (commit cfb549db8 killed the silent fallback on that
   // side only). The two are not the same input: `''` means "nobody chose", while
   // a non-empty value can only have come from an operator naming a driver, since
   // URL inference yields a canonical id or `''`. So the two answers separate.
@@ -488,7 +510,7 @@ describe('#7314 — the shared libSQL config builder against the real TursoDrive
   });
 });
 
-// #6268 — the loader has ONE owner (`@objectstack/runtime`), and this file's
+// Commit 68f5eccb1 — the loader has ONE owner (`@objectstack/runtime`), and this file's
 // exports are that owner's declarations rather than hand-aligned copies.
 //
 // The property under test is CLASS IDENTITY, not wording. `serve.ts:1136` decides
@@ -564,7 +586,7 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
   // The one thing the convergence deliberately did NOT move: the dynamic
   // import's specifier, whose RESOLUTION ROOT is the module that evaluates it.
   // `@objectstack/driver-turso` is an optional PEER of `@objectstack/cli` and,
-  // since #12943, of `@objectstack/runtime` too — an optional peer names the
+  // since commit 090f2302e, of `@objectstack/runtime` too — an optional peer names the
   // relationship and installs nothing, so the package still sits in whichever
   // tree the operator installed it into. Had the CLI taken the runtime's default
   // thunk, an operator who ran the exact install command this error prints would
@@ -575,7 +597,7 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
   // runtime half USED to be pinned from the other side by
   // `standalone-stack.libsql.test.ts`, where a `libsql://` boot with no injected
   // thunk took the missing-package arm because nothing linked the package under
-  // the runtime. #12943's optional peer makes pnpm link it there too, so that
+  // the runtime. Commit 090f2302e's optional peer makes pnpm link it there too, so that
   // case now STAGES the absence rather than relying on the layout to supply it.
   // The pair still asserts that the two roots are distinct; what neither can
   // assert any more is that one of them is empty.

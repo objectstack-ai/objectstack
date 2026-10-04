@@ -65,10 +65,13 @@ import { isSplitEntry, SPLIT_ENTRIES, type SplitEntry } from './split-entries';
  * `no JSON Schema`, `without the schema machinery`) returns the `meta-spelling`
  * citations below and nothing for either of them; the only text that mentions
  * their missing directory at all is a comment in `build-docs.ts` §2 recording
- * it as an asymmetry that comment's guard deliberately does NOT act on. Both
- * are titled `... Protocol` in `CATEGORY_TITLES` — the same word every
- * category WITH a schema closure is titled with — where `meta-spelling` is
- * titled `Meta-Spelling Vocabulary` for exactly this reason.
+ * it as an asymmetry that comment's guard deliberately does NOT act on. Neither
+ * is titled with the schema-free word in `CATEGORY_TITLES`: `conversions` is
+ * `... Protocol` — the word every category WITH a schema closure is titled
+ * with — and `migrations`, a published entry since the #20646 split, is
+ * `Migrations Entry` (the `api-assembled` word for a published entry that is
+ * not a protocol namespace), where `meta-spelling` is titled
+ * `Meta-Spelling Vocabulary` for exactly this reason.
  *
  * `migrations` is the further one from an exemption, not the nearer: its
  * `spec-changes.ts` exports five real Zod schemas, so "no schema closure" is

@@ -265,7 +265,7 @@ describe('requiresFeature lowering', () => {
     expect(bare).not.toHaveProperty('requiresFeature');
   });
 
-  // #5970 gave `visible` a boolean arm, so the lowering now meets two literals
+  // Commit 97e7e3caa gave `visible` a boolean arm, so the lowering now meets two literals
   // it never could before. Boolean algebra decides both, in opposite directions.
   it('treats `visible: true` as the explicit default — lowers to the gate alone', () => {
     const result = ActionSchema.parse({
@@ -301,7 +301,7 @@ describe('requiresFeature lowering', () => {
   });
 });
 
-// ── #5970 — `visible` / `disabled` speak ONE shape ────────────────────────────
+// ── commit 97e7e3caa — `visible` / `disabled` speak ONE shape ─────────────────
 // Ruled 2026-08-06: both keys are `boolean | string(CEL) | {dialect, source}`.
 // Before this, `visible` had no boolean arm while `disabled` did, so the very
 // common `visible: true` was a spec-side parse error that objectui's `ActionDef`
@@ -351,7 +351,7 @@ describe('ActionSchema — visible/disabled unified condition shape', () => {
       });
 
       // The widening must not shrink the rejection surface by one shape. Each
-      // of these was rejected before #5970 and is asserted to still be.
+      // of these was rejected before commit 97e7e3caa and is asserted to still be.
       it.each([
         ['an empty CEL string', ''],
         ['a number', 1],
@@ -418,7 +418,7 @@ describe('ActionSchema', () => {
       const action: ActionType = {
         name: 'delete_record',
         label: 'Delete',
-        icon: 'trash-2',
+        icon: 'trash',
         target: 'delete_handler',
       };
 
@@ -806,7 +806,7 @@ describe('ActionSchema', () => {
       const deleteAction: ActionType = {
         name: 'delete_record',
         label: 'Delete',
-        icon: 'trash-2',
+        icon: 'trash',
         type: 'script',
         locations: ['record_more'],
         target: 'deleteRecord',
@@ -1109,14 +1109,37 @@ describe('ActionSchema - ai block (ADR-0011)', () => {
   });
 });
 
-describe('Action ARIA Integration', () => {
-  it('should accept action with ARIA attributes', () => {
-    expect(() => ActionSchema.parse({
+// #20323 — inverted in place, not respelled: this block pinned exactly the
+// acceptance the retirement removes, and there is no spelling of `aria` the
+// action shape accepts any more. The prescription itself, and the carriers it
+// names, are pinned with the rest of the family in `aria-carrier-tombstones.test.ts`.
+describe('Action ARIA Integration (retired — #20323)', () => {
+  it('refuses an action carrying `aria`, with the tombstone prescription', () => {
+    const result = ActionSchema.safeParse({
       name: 'accessible_action',
       label: 'Delete',
       target: 'noop',
       aria: { ariaLabel: 'Delete this record permanently', role: 'button' },
-    })).not.toThrow();
+    });
+    expect(result.success, 'an authored `action.aria` must be refused').toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'aria');
+    expect(issue, 'the refusal sits at the retired key').toBeDefined();
+    // The tombstone's own issue kind — a `never` slot at `aria` — not the
+    // strict shape's generic `unrecognized_keys` at the root, which is what a
+    // bare deletion would answer, without the prescription below.
+    expect(issue!.code).toBe('invalid_type');
+    expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(false);
+    expect(issue!.message).toMatch(/`action\.aria` was removed in @objectstack\/spec 17\.5\.0.*Delete the key\./s);
+  });
+
+  it('control: the same action without `aria` parses, and keeps its accessible name in `label`', () => {
+    const parsed = ActionSchema.parse({
+      name: 'accessible_action',
+      label: 'Delete',
+      target: 'noop',
+    });
+    expect(parsed.label).toBe('Delete');
+    expect(parsed).not.toHaveProperty('aria');
   });
 });
 

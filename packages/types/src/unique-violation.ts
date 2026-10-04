@@ -119,12 +119,12 @@ interface UniqueViolationSignature {
  *    (from `service-messaging`).
  *  - `1062` — the same MySQL condition on the channel mysql2 *also* sets. The
  *    one addition, and not a new dialect: `@objectstack/metadata`'s
- *    `driver-error-classification.ts` (this package since #13279; it was
+ *    `driver-error-classification.ts` (this package since commit 6a180e42d; it was
  *    `metadata/src/utils/schema-sync-errors.ts`) already reads `errno`
  *    alongside `code` for exactly
  *    these drivers, so a code-only read is a known gap rather than a decision.
  *  - `UNIQUE_VIOLATION` — the PLATFORM's own registered code
- *    (`error-code-ledger.zod.ts`), added by #13197 when `driver-memory` grew
+ *    (`error-code-ledger.zod.ts`), added by commit 56c093c4d when `driver-memory` grew
  *    field-level uniqueness. It is not a dialect and not a heuristic: it is
  *    the value the platform already uses to MEAN "unique violation", so a
  *    limb reading it is a tautology, with none of the false-positive risk the
@@ -189,7 +189,7 @@ interface UniqueViolationSignature {
  * path. A dialect added later needs its violation spelling added HERE, measured
  * off a thrown error — not a loosened limb.
  *
- * ## Why an in-process driver's refusal had to be recognised here (#13197)
+ * ## Why an in-process driver's refusal had to be recognised here (commit 56c093c4d)
  *
  * A driver that raises a conflict this predicate does not recognise is not
  * merely "less well mapped" — it WEDGES the engine's autonumber resync.
@@ -197,7 +197,7 @@ interface UniqueViolationSignature {
  * the store and re-issues only when `isUniqueViolationError` says the rejection
  * was a conflict; when it says no, the error propagates with the counter still
  * warm, so the next insert collides too, one number at a time — #5495's PROBE3
- * storm, which that branch exists to eliminate. Before #13197 `driver-memory`
+ * storm, which that branch exists to eliminate. Before commit 56c093c4d `driver-memory`
  * enforced no uniqueness at all and the question never arose; the moment it
  * refuses a duplicate, an unrecognised refusal would trade a silent duplicate
  * for a non-converging insert loop. Recognising the platform's own code is what

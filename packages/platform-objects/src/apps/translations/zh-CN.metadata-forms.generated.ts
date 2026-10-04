@@ -64,6 +64,42 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "系统内置",
         helpText: "系统对象（受保护，不可删除；共享默认为公开）"
       },
+      highlightFields: {
+        label: "重点字段",
+        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列、卡片、子记录预览和详情页的重点信息条。不是本对象字段的名称会在发布时被拒绝。"
+      },
+      searchableFields: {
+        label: "可搜索字段",
+        helpText: "$search 查询匹配的字段名（ADR-0061）：记录选择器、列表快速搜索和全局搜索的默认范围，视图可以再收窄。未设置时，搜索使用名称/标题字段加上短文本字段。每一项都必须是本对象已存储的字段——未知的名称或虚拟的 formula 字段会在发布时被拒绝。"
+      },
+      fieldGroups: {
+        label: "字段分组",
+        helpText: "对本对象的字段进行分组的有序分区，用于录入表单和记录详情页（ADR-0085）；数组顺序即显示顺序。字段在自身的 group 设置中填写分组的键即可加入该分组。未归入任何分组的字段排在各分组之后；没有任何字段加入的分组不会显示。"
+      },
+      "fieldGroups.key": {
+        label: "键",
+        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。字段通过填写此键加入分组，因此重命名它会使这些字段变为未分组。"
+      },
+      "fieldGroups.label": {
+        label: "显示名称",
+        helpText: "该分组所在分区的标题文字。"
+      },
+      "fieldGroups.icon": {
+        label: "图标",
+        helpText: "在记录详情页的标题旁显示的 Lucide 图标名称（例如 \"banknote\"）。录入表单不显示它。"
+      },
+      "fieldGroups.description": {
+        label: "描述",
+        helpText: "显示在标题下方的文字，出现在录入表单和记录详情页上。"
+      },
+      "fieldGroups.collapse": {
+        label: "折叠",
+        helpText: "该分区能否折叠，作用于录入表单和记录详情页。未设置：none。"
+      },
+      "fieldGroups.visibleWhen": {
+        label: "可见条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.type == 'invoice'）——仅当其为 TRUE 时，录入表单才显示整个分组（包括标题）。"
+      },
       fields: {
         label: "字段",
         helpText: "添加该对象将存储的列"
@@ -257,9 +293,45 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "校验规则",
         helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"
       },
+      activityMilestones: {
+        label: "活动里程碑",
+        helpText: "由字段到达某个值触发的时间线条目（ADR-0052 §5b.2）：当一次更新把被监视的字段变为该值时，审计插件会把该里程碑的摘要写入记录的活动时间线，代替字段变更条目。第一个匹配的里程碑生效。"
+      },
+      "activityMilestones.field": {
+        label: "字段",
+        helpText: "要监视的本对象字段名（例如 status）。保存或发布时不会检查它：不是本对象字段的名称永远不会触发。"
+      },
+      "activityMilestones.value": {
+        label: "值",
+        helpText: "字段必须变为的存储值，按文本精确比较——对于选择字段，填写选项值而不是其标签（例如 done）。数字或布尔字段上的里程碑永远不会触发。"
+      },
+      "activityMilestones.summary": {
+        label: "摘要",
+        helpText: "时间线文本（例如 \"Deal won: {name}\"）。{field_name} 标记取更新后记录中的值；查找、主从或用户字段的标记显示被引用记录的标题；不指向任何字段的标记显示为空。"
+      },
+      "activityMilestones.type": {
+        label: "类型",
+        helpText: "时间线条目的活动类型：内置类型（如 completed）或你自己的词，按原样存储。未设置：updated。"
+      },
       datasource: {
         label: "数据源",
         helpText: "目标数据源 ID（默认：\"default\"）"
+      },
+      indexes: {
+        label: "索引",
+        helpText: "本对象数据表上的数据库索引。SQL 驱动在同步数据表时创建表中尚不存在的索引；同步从不删除索引。"
+      },
+      "indexes.name": {
+        label: "名称",
+        helpText: "物理索引名。未设置：根据表名和列名生成（例如 idx_task_status）。"
+      },
+      "indexes.fields": {
+        label: "字段",
+        helpText: "本对象的列名，按键的顺序排列（例如 status、owner）。保存时不会检查它们；发布和 os validate 会拒绝不是本对象字段的名称。若某个字段不是已存储的列（例如公式字段），SQL 驱动会跳过整个索引，并在服务器日志中记录一条错误。"
+      },
+      "indexes.unique": {
+        label: "唯一",
+        helpText: "唯一性范围（ADR-0120）。未设置：不唯一。已弃用的裸 true（等同于 global）不在选项中；带有它的索引会保留该值，直到你选择一个范围。"
       },
       ownership: {
         label: "归属模型",
@@ -269,9 +341,73 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "共享模型",
         helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。"
       },
+      access: {
+        label: "访问策略",
+        helpText: "通配授权策略（ADR-0066 D2）。不声明时按 public 处理。它决定权限集的 '*' 对象授权是否覆盖本对象；用户之间的记录可见性由 sharingModel 决定。"
+      },
+      "access.default": {
+        label: "默认暴露级别",
+        helpText: "public：被 '*' 通配授权覆盖。private：需要显式的逐对象授权，并且不受通配行级安全策略约束。"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用方访问本对象必须持有的能力（权限集的 systemPermissions），在增删改查授权之外额外检查（ADR-0066 D3）。列表限制所有操作；{read, create, update, delete} 映射只限制其中列出的操作。不声明或为空：不设能力门槛。"
+      },
+      publicSharing: {
+        label: "公开分享",
+        helpText: "分享链接策略：本对象的记录能否通过任何持有者都能打开的链接发布，以及发布的条件。它不同于 sharingModel——后者与指定的用户和团队共享。未设置或关闭：无法创建链接，也没有链接能打开。"
+      },
+      "publicSharing.enabled": {
+        label: "已启用",
+        helpText: "允许为本对象的记录创建分享链接。每次访问链接时都会检查：关闭后所有已有链接都无法打开，重新开启后又会恢复服务。关闭（默认）：此处其他设置均不生效。"
+      },
+      "publicSharing.allowedAudiences": {
+        label: "允许的受众",
+        helpText: "新链接可以指定的受众；其他受众会被拒绝。未设置：仅限链接。每种受众都仍需要链接本身：signed in 还需要一位已登录的用户，email 还需要收件人地址在该链接的名单上。"
+      },
+      "publicSharing.allowedPermissions": {
+        label: "允许的权限",
+        helpText: "新链接可以授予的权限级别；其他级别会被拒绝。未设置：仅查看。"
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "最长有效天数",
+        helpText: "新链接可请求的最晚过期时间，按从现在起的天数计；更晚的会被拒绝。未设置：365。它不会强制设置过期时间：创建时未设置过期时间的链接永不过期。"
+      },
+      "publicSharing.redactFields": {
+        label: "脱敏字段",
+        helpText: "通过链接提供的每条记录中都会移除的本对象字段名，与受众无关；所有者自身的访问不受影响。不是本对象字段的名称会在发布时被拒绝。"
+      },
+      "publicSharing.eligibility": {
+        label: "资格条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status == 'published'）：仅当其为 TRUE 时才会创建链接；记录不再符合条件后，已有链接将无法打开。无法编译或求值出错的谓词会拒绝该链接。"
+      },
       managedBy: {
         label: "生命周期归属",
         helpText: "生命周期分类：platform（用户可增删改查）、config（管理员编写）、system-data（平台定义结构、管理员/用户可写数据）、engine-owned（引擎独占，用户不可写）、append-only（审计）、better-auth（身份）。UI 客户端据此推导 CRUD 能力，因此它决定用户在该对象记录上能做什么。"
+      },
+      userActions: {
+        label: "用户操作",
+        helpText: "UI 客户端在本对象的记录上提供哪些通用入口（新建、导入、编辑、删除、导出），逐项覆盖 managedBy 的默认值。未设置的入口保持该默认值：platform 提供全部五项；config 和 system-data 提供除导入外的全部；engine-owned、append-only 和 better-auth 只提供导出。未改动过的开关不写入任何值，所以即使默认提供该入口，它也显示为关闭。在 engine-owned 或 append-only 对象上，打开某个入口还会允许用户通过数据 API 执行该写入。用户仍需要相应的权限。"
+      },
+      "userActions.create": {
+        label: "新建",
+        helpText: "“新建”按钮：打开则显示，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按当前范围内的记录控制该按钮，请在源码中编写该对象，它在每个工具栏上求值一次（在相关列表上是宿主记录）。"
+      },
+      "userActions.import": {
+        label: "导入",
+        helpText: "CSV 导入入口：打开则显示，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按当前范围内的记录控制该入口，请在源码中编写该对象，它在每个工具栏上求值一次。"
+      },
+      "userActions.edit": {
+        label: "编辑",
+        helpText: "编辑已有记录（行内和表单中）：打开则提供，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按每一行自身的记录控制，请在源码中编写该对象。"
+      },
+      "userActions.delete": {
+        label: "删除",
+        helpText: "行删除和批量删除：打开则提供，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按每一行自身的记录控制，请在源码中编写该对象。"
+      },
+      "userActions.exportCsv": {
+        label: "导出 CSV",
+        helpText: "CSV 导出入口。未设置：显示，因为每个 managedBy 类别默认都提供导出。"
       },
       editMode: {
         label: "编辑方式",
@@ -444,6 +580,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数位",
         helpText: "小数部分位数"
       },
+      useGrouping: {
+        label: "千位分隔符",
+        helpText: "显示值时的数字分组（千位分隔符）。未设置：由渲染端决定；未改动过的开关不写入任何值，所以即使渲染端会分组，它也显示为关闭。关闭：从不分组，例如年份或 ID。开启：始终分组。"
+      },
+      currencyConfig: {
+        label: "货币配置",
+        helpText: "此字段使用哪种货币。未设置时为 dynamic 模式。两种模式下存储的值都是一个纯数字。"
+      },
+      "currencyConfig.currencyMode": {
+        label: "货币模式",
+        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。"
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "默认货币",
+        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。默认为 CNY。dynamic 模式下不读取。"
+      },
       step: {
         label: "步进值",
         helpText: "滑块的步进增量（默认 1）。仅渲染端使用：写入路径不会拒绝偏离步进网格的值。"
@@ -451,6 +603,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxSize: {
         label: "最大文件大小",
         helpText: "允许的最大文件大小，单位为字节（正整数）。写入时在服务端按已记录的文件大小校验——没有记录大小的文件不会被它拦下。"
+      },
+      accept: {
+        label: "允许的文件类型",
+        helpText: "允许上传的类型，可写 MIME 类型、type/* 通配符或 .ext 后缀（例如 image/*、.pdf）。提供给文件选择器，并在写入时于服务器端对照已存储的文件再次检查。未设置：任何类型。"
       },
       dimensions: {
         label: "向量维度",
@@ -518,13 +674,49 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "选择器每页行数",
         helpText: "记录选择对话框每页显示的行数——正整数，默认 10。"
       },
+      lookupColumns: {
+        label: "Lookup 列",
+        helpText: "记录选择器表格的列：被引用对象的字段名，或 {field, label, width, type} 条目（例如 [\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]）。未设置：从被引用对象推导。"
+      },
+      lookupFilters: {
+        label: "Lookup 筛选条件",
+        helpText: "选择器候选记录的基础筛选，写作被引用对象上的 {field, operator, value} 规则——operator 取 eq、ne、gt、lt、gte、lte、contains、in、notIn 之一（例如 [{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]）。作用于每一种选择器界面，并与 dependsOn 筛选以 AND 组合。"
+      },
+      dependsOn: {
+        label: "依赖字段",
+        helpText: "此字段的可选项所依赖的同一记录上的字段：在它们都有值之前，表单会暂缓此字段，任一变化时重新计算。lookup 用它们筛选候选记录——写字段名时筛选被引用对象上同名的字段，{field, param} 则指定另一个字段。选项类字段在此列出父字段名；逐项规则写在各选项的 visibleWhen 中。"
+      },
       relatedListTitle: {
         label: "关联列表标题",
         helpText: "该关系在父记录详情页上关联列表的标题。"
       },
+      relatedListColumns: {
+        label: "相关列表列",
+        helpText: "父记录详情页上此关系的相关列表的列，写作本对象（即子对象）的字段名，例如 name、status。未设置：从子对象推导。只写名称——标签、单元格类型和格式都来自子对象的字段定义。"
+      },
       inlineTitle: {
         label: "内嵌表格标题",
         helpText: "父记录上内嵌主从表格的标题。"
+      },
+      inlineColumns: {
+        label: "内嵌表格列",
+        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当本字段设置了 inlineEdit（在源码中编写）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
+      },
+      "inlineColumns.name": {
+        label: "名称",
+        helpText: "该列显示和编辑的本（子）对象字段（例如 quantity）。保存或发布时不会检查它：不是本对象字段的名称会显示为普通文本列。"
+      },
+      "inlineColumns.label": {
+        label: "标签",
+        helpText: "列标题。未设置：使用该字段自身的标签。"
+      },
+      "inlineColumns.width": {
+        label: "宽度",
+        helpText: "固定列宽，单位为像素。未设置：按单元格类型确定宽度，文本列自适应伸展，数字、日期和选择列保持较窄。"
+      },
+      "inlineColumns.defaultHidden": {
+        label: "默认隐藏",
+        helpText: "让该列起初收在表格的列选择器中，而不是显示在屏幕上；用户可以将其显示出来。字段为必填的列始终显示。"
       },
       inlineAmountField: {
         label: "内嵌合计字段",
@@ -566,6 +758,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部 ID",
         helpText: "标记为外部 ID 用于 upsert 操作"
       },
+      storage: {
+        label: "存储约束",
+        helpText: "物理存储约束（ADR-0113）：写入契约刻意不隐含的 DDL。未设置：不要求任何约束。"
+      },
+      "storage.notNull": {
+        label: "非空（NOT NULL）",
+        helpText: "在该列上生成数据库 NOT NULL 约束。未设置时，即使 required 为真该列仍可为空——必填由引擎在写入时保证。对已存在空值的行声明它是一次破坏性迁移，受 schema drift 流程把关（先回填）。与 requiredWhen 同时声明会被拒绝。"
+      },
       readonly: {
         label: "只读",
         helpText: "在表单中只读"
@@ -582,9 +782,25 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "可排序",
         helpText: "允许按此字段排序"
       },
+      visibleWhen: {
+        label: "可见条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.type == 'invoice'）——仅当其为 TRUE 时表单才显示此字段。"
+      },
+      readonlyWhen: {
+        label: "只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status == 'paid'）——为 TRUE 时字段只读，并在服务器端强制执行：更新中对已锁定字段的修改会被丢弃，保留已存储的值。只读取记录自身的列；objectstack validate 会拒绝经由引用字段的读取。"
+      },
+      requiredWhen: {
+        label: "必填条件",
+        helpText: "基于记录的 CEL 谓词——为 TRUE 时字段必填，并在服务器端作为状态转换门槛执行：若写入前记录合规，而写入后缺少该值，则拒绝写入；因此原本就缺少该值的行，其无关编辑仍可通过。若需要每次写入都必须满足的规则，请使用 validations 中的 script 规则。与 storage.notNull 同时声明会被拒绝。"
+      },
       maskingRule: {
         label: "脱敏规则",
         helpText: "部分脱敏:预设('phone'、'id_card'、'bank_account'、'email'、'name')或 {\"keepHead\": n, \"keepTail\": m}。未持有该字段 requiredPermissions 的调用者将看到脱敏值"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用方读取或编辑此字段必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D3）。不持有时，读取到的值会被掩码（设置了 maskingRule 时为部分掩码），编辑会被拒绝。为空或未设置：不设能力门槛。"
       },
       internal: {
         label: "不对外返回",
@@ -710,6 +926,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   seed: {
     label: "种子数据",
     description: "发布时应用的预置/初始化数据"
+  },
+  picklist: {
+    label: "共享选项集",
+    description: "选择字段按名称引用的共享选项列表"
   },
   mapping: {
     label: "导入映射",
@@ -890,37 +1110,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       userFilters: {
         label: "用户筛选器",
         helpText: "快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设"
-      },
-      tabs: {
-        label: "标签页",
-        helpText: "视图内筛选标签页——每个标签页应用各自的筛选规则"
-      },
-      "tabs.name": {
-        label: "名称"
-      },
-      "tabs.label": {
-        label: "显示名称"
-      },
-      "tabs.icon": {
-        label: "图标"
-      },
-      "tabs.view": {
-        label: "列表视图"
-      },
-      "tabs.filter": {
-        label: "筛选"
-      },
-      "tabs.order": {
-        label: "显示顺序"
-      },
-      "tabs.pinned": {
-        label: "固定"
-      },
-      "tabs.isDefault": {
-        label: "默认标签页"
-      },
-      "tabs.visible": {
-        label: "可见"
       },
       appearance: {
         label: "外观",
@@ -1515,6 +1704,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "声明式写入",
         helpText: "对单条记录的声明式字段写入：'update' 会把 `patch`（合并在已收集的 `params` 之下）应用到当前记录，并且以调用方的身份执行——绝不提权，因此调用方的权限、对象的钩子与校验都会像用户手动编辑那样触发。"
       },
+      patch: {
+        label: "静态字段值（patch）",
+        helpText: "更新写入当前记录的静态字段值，例如 {\"status\": \"done\"}——合并在 `params` 收集的值之下，同名参数优先。以调用方身份写入：对象的权限、钩子和校验规则都会像用户编辑一样生效。"
+      },
       undoable: {
         label: "可撤销",
         helpText: "更新成功后提供“撤销”入口。撤销捕获的是该动作写入的每个字段的原值——也就是合并后的写入集合，即 `params` 之下的 `patch`。没有声明 `operation` 的动作没有写入集合，因此也没有可捕获的内容。"
@@ -1523,6 +1716,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "批量分发契约",
         helpText: "该动作主体所依据的批量分发契约：'perRecord' 为每条选中的记录各发一次调用，并带上该行的 recordId；'aggregate' 对整批选中只发一次调用，所有 id 都在 params._selectedIds 里。不填则按逐条记录分发。"
       },
+      description: {
+        label: "描述",
+        helpText: "显示在此动作参数对话框标题下方的说明文字。对于会收集参数的动作，确认问题应写在这里而不是 confirmText 中——一个对话框，而不是两个。它不是 ai.description，后者是 AI 智能体读取的文字。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"
@@ -1530,6 +1727,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       successMessage: {
         label: "成功消息",
         helpText: "执行成功后的提示信息"
+      },
+      errorMessage: {
+        label: "错误消息",
+        helpText: "动作失败时显示的错误消息，替代原始错误信息。"
       },
       refreshAfter: {
         label: "完成后刷新",
@@ -1567,6 +1768,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "所需认证特性",
         helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
       },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作路由会以 403 拒绝其他调用方（script、flow 和 modal 动作，以及 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作由浏览器直接调用其端点，因此该端点必须自行再次检查。"
+      },
       ai: {
         label: "AI 暴露",
         helpText: "AI 暴露（需显式开启）：设置 ai.exposed=true 并填写 ai.description（≥40 个字符），此操作即可被代理调用。"
@@ -1582,6 +1787,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       bodyShape: {
         label: "请求体结构",
         helpText: "请求体的组织形式（扁平或嵌套）"
+      },
+      bodyExtra: {
+        label: "附加请求体（bodyExtra）",
+        helpText: "此 api 动作的静态请求体字段，最后合并，因此会覆盖收集到的参数（例如 {\"resend\": true}）。页面变量标记（写在双花括号中的 page.NAME）由运行时解析。请求负载写在这里，不要写在 params 中。"
       }
     }
   },
@@ -1597,7 +1806,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
       },
       joined_blocks: {
-        label: "关联对象",
+        label: "joined 报表分块",
         description: "叠加进同一张报表的其他数据集分块（仅 joined 报表）"
       },
       filter_and_chart: {
@@ -1652,7 +1861,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "分块",
-        helpText: "joined 报表的联合查询块"
+        helpText: "绑定数据集的子报表（仅 joined 报表）"
       },
       "blocks.name": {
         label: "名称"
@@ -2047,7 +2256,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       tab_and_row_level_security: {
         label: "标签页与行级安全",
-        description: "导航可见性与共享规则"
+        description: "标签页可见性与行级安全策略"
       }
     },
     fields: {
@@ -2078,6 +2287,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       systemPermissions: {
         label: "系统权限",
         helpText: "系统能力键列表"
+      },
+      adminScope: {
+        label: "委派管理范围",
+        helpText: "委派管理（ADR-0090 D12）：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments、manageBindings 和 authorEnvironmentSets 默认为 false；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
       },
       objects: {
         label: "对象权限",
@@ -2139,7 +2352,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       capabilities: {
         label: "能力配置",
-        description: "代理可使用的技能、工具与知识来源"
+        description: "代理可使用的技能与知识来源"
       },
       access: {
         label: "访问与安全",
@@ -2181,15 +2394,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "规划",
-        helpText: "自主推理配置（策略、最大迭代、是否重规划）"
+        helpText: "自主推理配置：代理停止前的最大推理迭代次数（1–100，默认 10）。"
       },
       memory: {
         label: "记忆",
-        helpText: "记忆管理（短期、长期、反思）"
+        helpText: "长期记忆：按用户保存的提炼笔记，在每次会话前召回，并每隔 reflectionInterval 次已送达的交互由一次反思写入。启用长期记忆时，maxEntries 与 reflectionInterval 为必填。由云端 AI 运行时强制执行。"
       },
-      lifecycle: {
-        label: "生命周期",
-        helpText: "定义会话流程的状态机"
+      structuredOutput: {
+        label: "结构化输出",
+        helpText: "代理最终回答的输出契约：JSON 格式、用于校验回答的 JSON Schema、重试、回退格式与转换步骤。由云端 AI 运行时强制执行。"
       },
       skills: {
         label: "技能",

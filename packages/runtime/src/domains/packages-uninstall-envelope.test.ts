@@ -66,17 +66,30 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
+// [#20492] The caller acts in an organization: an uninstall that names none is
+// refused before the registry is touched (as the persisted delete itself
+// does), so it would never reach the persisted outcomes this file pins.
 const authed = (caps: string[] = ['manage_metadata']): any => ({
     request: {},
     environmentId: 'platform',
-    executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: caps },
+    executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: caps, tenantId: 'org_acme' },
 });
 
 function make(deletePackageResult: any, opts: { registryRemoved?: boolean } = {}) {
+    // [#21276] The door reads existence with `getPackage` before it asks
+    // `deletePackage`, and withdraws only afterwards, so both verbs read one
+    // `registered` flag: `registryRemoved: false` is a package the registry
+    // does not hold, exactly as `SchemaRegistry` would answer it.
+    let registered = opts.registryRemoved ?? true;
+    const pkg = { id: 'com.example.pkg-a', manifest: { id: 'com.example.pkg-a', name: 'A' } };
     const registry = {
         getAllPackages: vi.fn().mockReturnValue([]),
-        getPackage: vi.fn().mockReturnValue({ id: 'com.example.pkg-a', manifest: { id: 'com.example.pkg-a', name: 'A' } }),
-        uninstallPackage: vi.fn().mockReturnValue(opts.registryRemoved ?? true),
+        getPackage: vi.fn(() => (registered ? pkg : undefined)),
+        uninstallPackage: vi.fn(() => {
+            const removed = registered;
+            registered = false;
+            return removed;
+        }),
     };
     const protocol = {
         deletePackage: vi.fn().mockResolvedValue(deletePackageResult),

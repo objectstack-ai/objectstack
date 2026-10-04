@@ -35,12 +35,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The repo's one comment/code separator (#9367). The four shape assertions
-// below used to match against RAW `SERVE_SOURCE` (#10514): a trailing comment
+// below used to match against RAW `SERVE_SOURCE` (until commit 5359a9b4c): a trailing comment
 // describing the old call shape (e.g. quoting a reverted
 // `checkMultiNodeAllowed(replicas)`) was indistinguishable from the real call.
 // `interfaceFields()` further down does its own narrower, brace-matched strip
 // over an `export interface` body and is deliberately left alone — out of
-// scope for #10514, noted there so a future re-derivation doesn't read it as
+// scope for commit 5359a9b4c, noted there so a future re-derivation doesn't read it as
 // the same defect.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
@@ -54,7 +54,7 @@ const SERVE_SOURCE = readFileSync(resolve(HERE, 'serve.ts'), 'utf8');
 
 /**
  * `SERVE_SOURCE` with every comment span blanked (offsets preserved) — what
- * the four shape assertions below actually match against (#10514), so a
+ * the four shape assertions below actually match against (commit 5359a9b4c), so a
  * comment naming `checkMultiNodeAllowed(…)` cannot satisfy — or hide behind —
  * any of them. `interfaceFields()` still reads raw `SERVE_SOURCE`; see the
  * import comment above for why that is out of scope here.
@@ -185,11 +185,11 @@ describe('os serve ↔ multi-node gate', () => {
 });
 
 /**
- * Vacuity proof (#10514): a synthetic regression shaped exactly like the
+ * Vacuity proof (commit 5359a9b4c): a synthetic regression shaped exactly like the
  * issue's own repro — the zero-arg call reintroduced, with a trailing comment
  * quoting the OLD argued call, the way a careless revert reads. Both legs are
  * shown so the RAW leg's wrong verdict — what this pin's assertions would
- * have produced before #10514 — is visible next to the MASKED leg's correct
+ * have produced before commit 5359a9b4c — is visible next to the MASKED leg's correct
  * one, not just asserted.
  */
 describe('the shape assertions ignore a comment that quotes the old call (#10514)', () => {
@@ -199,7 +199,7 @@ describe('the shape assertions ignore a comment that quotes the old call (#10514
       '// checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS)) used to be called here',
     ].join('\n');
 
-    // Pre-#10514 (raw): the negative assertion correctly catches the bad
+    // Before commit 5359a9b4c (raw): the negative assertion correctly catches the bad
     // shape…
     expect(regressed).toMatch(/checkMultiNodeAllowed\(\s*\)/);
     // …but the positive assertion is ALSO satisfied — by the comment alone —
@@ -208,7 +208,7 @@ describe('the shape assertions ignore a comment that quotes the old call (#10514
     // catch.
     expect(regressed).toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);
 
-    // Post-#10514 (masked): the comment is blanked, so the positive assertion
+    // Since commit 5359a9b4c (masked): the comment is blanked, so the positive assertion
     // correctly fails to find an argued call — the regression is no longer
     // hidden.
     expect(maskComments(regressed)).not.toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);

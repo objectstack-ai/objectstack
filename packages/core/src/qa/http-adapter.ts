@@ -2,7 +2,7 @@
 
 import * as QA from '@objectstack/spec/qa';
 import { RestApiConfigSchema, CrudEndpointsConfigSchema } from '@objectstack/spec/api';
-import { TestExecutionAdapter } from './adapter.js';
+import type { TargetServices, TestExecutionAdapter } from './adapter.js';
 
 /** Memoised {@link conventionMounts} — the schemas are `lazySchema`, so build them once. */
 let conventionCache: { apiBase: string; dataPath: string } | undefined;
@@ -64,24 +64,107 @@ interface ResolvedDataMount {
   readonly why: string;
 }
 
+/**
+ * What the run's one discovery probe returned.
+ *
+ * The probe used to be read for `routes.data` and dropped. It now keeps the
+ * document, because `requires.services` is judged against the SAME document's
+ * `services` map (#20289, ruled B) — one probe answers both questions, and a
+ * second request for the second question would be a second chance for the two
+ * answers to disagree.
+ */
+interface DiscoveryRead {
+  /** `GET {baseUrl}{apiBase}/discovery` — the URL probed. */
+  readonly probeUrl: string;
+  /** The HTTP status, when the server answered at all. */
+  readonly status?: number;
+  /**
+   * The discovery document, unwrapped from the dispatcher bridge's
+   * `{ data: … }` envelope; absent when the probe yielded none.
+   */
+  readonly document?: { readonly routes?: Record<string, unknown>; readonly services?: unknown };
+  /** One clause naming the probe and its outcome. */
+  readonly why: string;
+}
+
 export class HttpTestAdapter implements TestExecutionAdapter {
   /**
    * The single discovery probe of a run, memoised as the in-flight promise so
-   * concurrent record actions share one request rather than racing N.
+   * concurrent record actions — and the `requires.services` judgement — share
+   * one request rather than racing N.
    *
    * `os test` builds ONE adapter for the whole run (`packages/cli/src/commands/
    * test.ts`) and hands it to every suite, so instance scope IS run scope.
    */
+  private discoveryPromise?: Promise<DiscoveryRead>;
+  /** The data mount derived from that probe, memoised so its fallback warns once. */
   private mountPromise?: Promise<ResolvedDataMount>;
 
   constructor(private baseUrl: string, private authToken?: string) {}
 
+  /** The run's discovery read; probes at most once per adapter. */
+  private discovery(): Promise<DiscoveryRead> {
+    if (this.discoveryPromise === undefined) {
+      this.discoveryPromise = this.readDiscovery();
+    }
+    return this.discoveryPromise;
+  }
+
   /** The resolved data mount; probes at most once per adapter. */
   private dataMount(): Promise<ResolvedDataMount> {
     if (this.mountPromise === undefined) {
-      this.mountPromise = this.resolveDataMount();
+      this.mountPromise = this.discovery().then((read) => this.resolveDataMount(read));
     }
     return this.mountPromise;
+  }
+
+  /**
+   * The target's declared services, for the runner's `requires.services`
+   * judgement — the `services` map of the discovery document this adapter
+   * probes once per run anyway (ADR-0076 D12: discovery advertises only what
+   * is mounted). Asked only when a scenario declares a service requirement, so
+   * a suite that declares none keeps the probe count it had: zero for an
+   * `api_call`-only suite, one otherwise.
+   */
+  async readTargetServices(): Promise<TargetServices> {
+    const read = await this.discovery();
+    const services = read.document?.services;
+    if (services !== null && typeof services === 'object' && !Array.isArray(services)) {
+      return { services: services as Record<string, unknown>, source: `GET ${read.probeUrl} advertised services` };
+    }
+    return {
+      source: read.document
+        ? `GET ${read.probeUrl} answered ${read.status} but carried no services map`
+        : read.why,
+    };
+  }
+
+  /** Issue the one discovery request of the run and keep what it returned. */
+  private async readDiscovery(): Promise<DiscoveryRead> {
+    const { apiBase } = conventionMounts();
+    const probeUrl = `${this.baseUrl}${apiBase}/discovery`;
+    try {
+      const headers: Record<string, string> = {};
+      if (this.authToken) {
+        headers['Authorization'] = `Bearer ${this.authToken}`;
+      }
+      const response = await fetch(probeUrl, { method: 'GET', headers });
+      if (!response.ok) {
+        return { probeUrl, status: response.status, why: `GET ${probeUrl} answered ${response.status}` };
+      }
+      const body = await response.json();
+      // `@objectstack/rest` answers the document bare; the dispatcher bridge
+      // wraps it as `{ data: … }`. Pick the object that actually carries the
+      // document's own keys rather than `body.data || body` — the document's
+      // own `routes.data` key makes the looser test ambiguous to read here.
+      const isDocument = (value: unknown): value is { routes?: Record<string, unknown>; services?: unknown } =>
+        value !== null && typeof value === 'object' && ('routes' in value || 'services' in value);
+      const inner = (body as { data?: unknown } | null)?.data;
+      const document = isDocument(body) ? body : isDocument(inner) ? inner : undefined;
+      return { probeUrl, status: response.status, document, why: `GET ${probeUrl} answered ${response.status}` };
+    } catch (error) {
+      return { probeUrl, why: `GET ${probeUrl} could not be reached (${(error as Error).message})` };
+    }
   }
 
   /**
@@ -120,40 +203,23 @@ export class HttpTestAdapter implements TestExecutionAdapter {
    * the remedy. `api_call` takes the path it is given and is unaffected either
    * way — it stays the escape hatch for a host this cannot reach.
    */
-  private async resolveDataMount(): Promise<ResolvedDataMount> {
-    const { apiBase, dataPath } = conventionMounts();
-    const probeUrl = `${this.baseUrl}${apiBase}/discovery`;
+  private resolveDataMount(read: DiscoveryRead): ResolvedDataMount {
+    const { dataPath } = conventionMounts();
+    const { probeUrl } = read;
     let why: string;
 
-    try {
-      const headers: Record<string, string> = {};
-      if (this.authToken) {
-        headers['Authorization'] = `Bearer ${this.authToken}`;
+    if (read.status !== undefined && read.status >= 200 && read.status < 300) {
+      const advertised = read.document?.routes?.data;
+      if (typeof advertised === 'string' && advertised.length > 0) {
+        return {
+          path: advertised,
+          source: 'discovery',
+          why: `GET ${probeUrl} advertised routes.data`,
+        };
       }
-      const response = await fetch(probeUrl, { method: 'GET', headers });
-      if (response.ok) {
-        const body = await response.json();
-        // `@objectstack/rest` answers the document bare; the dispatcher bridge
-        // wraps it as `{ data: … }`. Pick the object that actually carries
-        // `routes` rather than `body.data || body` — the document's own
-        // `routes.data` key makes the looser test ambiguous to read here.
-        const doc = (body && typeof body === 'object' && 'routes' in body)
-          ? (body as { routes?: Record<string, unknown> })
-          : ((body as { data?: { routes?: Record<string, unknown> } } | null)?.data);
-        const advertised = doc?.routes?.data;
-        if (typeof advertised === 'string' && advertised.length > 0) {
-          return {
-            path: advertised,
-            source: 'discovery',
-            why: `GET ${probeUrl} advertised routes.data`,
-          };
-        }
-        why = `GET ${probeUrl} answered ${response.status} but carried no routes.data`;
-      } else {
-        why = `GET ${probeUrl} answered ${response.status}`;
-      }
-    } catch (error) {
-      why = `GET ${probeUrl} could not be reached (${(error as Error).message})`;
+      why = `GET ${probeUrl} answered ${read.status} but carried no routes.data`;
+    } else {
+      why = read.why;
     }
 
     const mount: ResolvedDataMount = { path: dataPath, source: 'convention', why };

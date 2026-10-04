@@ -7,7 +7,7 @@
 // The defect, measured on `origin/main` (aef1b7e64) before the fix
 // ---------------------------------------------------------------------------
 // A metadata app's sandboxed hook on `sys_metadata` may refuse a read and mark
-// its refusal with `userMessage` — the #9934 producer-side opt-in where the
+// its refusal with `userMessage` — the producer-side opt-in of commit 79c46da90, where the
 // field's PRESENCE is the marking (maintainer ruling 2026-08-19,
 // objectui#5210 option 1). `metadataStoreUnavailableError` built a fresh error
 // carrying only `code` / `status` / `cause`, and `declaredUserMessage` reads
@@ -127,7 +127,7 @@ const STORE_UNAVAILABLE_MESSAGE =
 // ---------------------------------------------------------------------------
 
 /**
- * What a sandboxed hook that MARKS its refusal produces. The canonical #9934
+ * What a sandboxed hook that MARKS its refusal produces. The canonical (commit 79c46da90)
  * authoring shape is `const e = new Error(msg); e.userMessage = msg`, and the
  * QuickJS side-channel carries `code` / `status` / `userMessage` out of the VM
  * onto `SandboxError`. The `message` here is deliberately the sandbox's own
@@ -301,7 +301,7 @@ describe('[#12536 §1] a producer-marked refusal is classified as a refusal, not
         const caught = await captureThrow(() => p.getMetaItems({ type: 'object' } as any));
 
         // 400 is not chosen here — it is `error-response.ts`'s `declared ?? 400`
-        // for a sandbox hook refusal that named no status (#9967), reused so the
+        // for a sandbox hook refusal that named no status (commit 8f266f1cd), reused so the
         // two doors classify one undeclared refusal identically.
         expect(caught.status).toBe(400);
         // ADR-0112 D4: whatever code ships must be in the closed vocabulary.

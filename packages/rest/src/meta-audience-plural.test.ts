@@ -134,7 +134,7 @@ describe('the same spelling sensitivity on the other per-type gates', () => {
 });
 
 // ---------------------------------------------------------------------------
-// [#6241] The same gate, one branch further in: the CACHED read path.
+// [commit 83a3b1f2e] The same gate, one branch further in: the CACHED read path.
 //
 // Everything above tests a protocol double with no `getMetaItemCached`, so the
 // single-item read always fell through to the uncached branch — the branch that

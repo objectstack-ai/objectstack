@@ -99,12 +99,12 @@ const CUBE: Cube = {
   name: 'texts',
   title: 'Texts',
   sql: 'rows',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    name: { label: 'Name', type: 'string', sql: 'name' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const query = (where: unknown): AnalyticsQuery =>
@@ -366,7 +366,7 @@ describe('[#15780] the three compilers, EXECUTED on a real SQLite engine', () =>
       'ASCII-only: a lower-case non-ASCII comparand does NOT match its upper-case row',
       'ASCII-only: an upper-case non-ASCII comparand does NOT match its lower-case row',
       '$icontains treats % as a literal character, not a LIKE wildcard',
-      'icontains (the infix/view spelling, #8934) lowers to $icontains — % stays a LITERAL through that door too',
+      'icontains (the infix/view spelling, ruled never an alias of ilike) lowers to $icontains — % stays a LITERAL through that door too',
       '$icontains treats _ as a literal character, not a single-character wildcard',
       '$icontains treats . as a literal character, not a regex metacharacter',
     ]);

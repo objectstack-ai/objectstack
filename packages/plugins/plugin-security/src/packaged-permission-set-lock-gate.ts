@@ -2,7 +2,7 @@
 
 /**
  * THE METADATA-DOOR REGISTRATION of the packaged-permission-set lock
- * (#11843; maintainer ruling 2026-08-25, verbatim: 「11843 同意」 — option B:
+ * (commit 5619aace3; maintainer ruling 2026-08-25, verbatim: 「11843 同意」 — option B:
  * keep NARROW, move the lock).
  *
  * `packaged-permission-set-lock.ts` refuses a write that targets a

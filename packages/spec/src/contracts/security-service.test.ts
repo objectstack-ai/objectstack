@@ -231,6 +231,59 @@ describe('Security Service Contract', () => {
     await expect(nothingDisclosable.getMetadataReadableFields?.('deal', { userId: 'u1' })).resolves.toEqual([]);
   });
 
+  it('getWritableFields is OPTIONAL — absence degrades to getReadableFields, and the two answers differ', async () => {
+    const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name', 'locked'] });
+    expect(typeof withoutIt.getWritableFields).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getWritableFields('deal', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // A field the caller reads but may not edit is in the read projection and
+    // not in the write one — which is why a fallback must be stated.
+    const withIt = makeService({
+      getReadableFields: async () => ['id', 'name', 'locked'],
+      getWritableFields: async (_object, context) => (context?.isSystem ? ['id', 'name', 'locked'] : ['name']),
+    });
+    await expect(withIt.getWritableFields?.('deal', { userId: 'u1' })).resolves.toEqual(['name']);
+    await expect(withIt.getWritableFields?.('deal', { isSystem: true })).resolves.toEqual(['id', 'name', 'locked']);
+
+    // The same two empty answers as the read side.
+    await expect(makeService({ getWritableFields: async () => undefined }).getWritableFields?.('deal', {}))
+      .resolves.toBeUndefined();
+    await expect(makeService({ getWritableFields: async () => [] }).getWritableFields?.('deal', {}))
+      .resolves.toEqual([]);
+  });
+
+  it('[#20935] getQueryableFields is OPTIONAL — and a field served masked is readable but NOT queryable', async () => {
+    const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name', 'masked'] });
+    expect(typeof withoutIt.getQueryableFields).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getQueryableFields('deal', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The masked field is in the read projection (it is served, masked) and
+    // out of the query one — which is why the read projection alone is never
+    // the fallback for this answer. The query answer is a subset of the read one.
+    const withIt = makeService({
+      getReadableFields: async () => ['id', 'name', 'masked'],
+      getQueryableFields: async (_object, context) => (context?.isSystem ? ['id', 'name', 'masked'] : ['id', 'name']),
+    });
+    const readable = await withIt.getReadableFields('deal', { userId: 'u1' });
+    const queryable = await withIt.getQueryableFields?.('deal', { userId: 'u1' });
+    expect(readable).toContain('masked');
+    expect(queryable).not.toContain('masked');
+    expect(queryable?.every((f) => readable?.includes(f))).toBe(true);
+    await expect(withIt.getQueryableFields?.('deal', { isSystem: true })).resolves.toEqual(['id', 'name', 'masked']);
+
+    // The same two empty answers as the read side.
+    await expect(makeService({ getQueryableFields: async () => undefined }).getQueryableFields?.('deal', {}))
+      .resolves.toBeUndefined();
+    await expect(makeService({ getQueryableFields: async () => [] }).getQueryableFields?.('deal', {}))
+      .resolves.toEqual([]);
+  });
+
   it('[#7616] resolvePermissionSetsForContext is OPTIONAL — absence keeps the consumer on its own resolution (compile-time)', () => {
     // THE structural pin behind "a consumer must keep its local resolution as
     // the fallback until a floor version carrying this method can be assumed".

@@ -49,24 +49,38 @@ name: Release
 #                                          an `if:` someone can get wrong.
 #                                          NOT on push — see the section below.
 #   push to main  →  `release-integrity`   audits ONLY the version at
-#                                          `github.sha`. Never publishes, never
-#                                          pushes a tag. May backfill GitHub
+#                                          `github.sha`, and names the VERSION
+#                                          COMMIT — the landing that brought
+#                                          main to that version; when it queues
+#                                          the publish, it also warns of every
+#                                          changeset that commit carries but did
+#                                          not consume. Never publishes,
+#                                          never pushes a tag. May backfill GitHub
 #                                          Releases / the ADR-0087 D4 asset /
 #                                          the runtime image — but only for a
 #                                          version ALREADY fully on npm, which
 #                                          is repair that cannot mint anything.
 #                 →  `publish`            the ONLY job that runs
 #                                          `changeset publish` or pushes a
-#                                          version tag. It starts only when
-#                                          `release-integrity` reports that
-#                                          main's version is ABSENT from npm —
-#                                          i.e. the Version Packages PR has just
-#                                          merged — and it is then held, whole,
-#                                          at `environment: release` until a
-#                                          required reviewer approves it.
+#                                          version tag. It starts only on the
+#                                          push that CARRIES the version commit,
+#                                          while that version is absent from
+#                                          npm (ADR-0125 D1 as amended
+#                                          2026-09-29), is then held, whole, at
+#                                          `environment: release` until a
+#                                          required reviewer approves it, and
+#                                          checks out and publishes THE VERSION
+#                                          COMMIT — never a later push's head.
+#                 →  `stale-prompts`      cancels a push-lane publish prompt
+#                                          still waiting for a version that is
+#                                          already on npm. Mints nothing; never
+#                                          touches a job that has started.
 #   workflow_dispatch → `publish`          the repair lane. Takes no version;
-#   (WITHOUT                                audits main exactly as the push lane
-#    `refresh_version_pr`)                  does. Same environment gate.
+#   (WITHOUT                                audits main the same way, minus the
+#    `refresh_version_pr`)                  push range (a dispatch is one human
+#                                          act, not one per landing), and
+#                                          publishes the same version commit.
+#                                          Same environment gate.
 #
 # WHY `version-pr` LEFT THE PUSH TRIGGER (#11233, 2026-08-23)
 # ----------------------------------------------------------
@@ -729,7 +743,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ══════════════════════════════════════════════════════════════════════════
-  # PUSH LANE 2 — release integrity audit. Reads github.sha ONLY. Never mints.
+  # PUSH LANE 2 — release integrity audit. Never mints. Reads github.sha and the
+  # version commit it selects, both out of the object database; every backfill
+  # builds from that version commit's tree, as the publish job does.
   # ══════════════════════════════════════════════════════════════════════════
   release-integrity:
     name: Release integrity (audit + no-mint backfill)
@@ -759,9 +775,14 @@ jobs:
     # earlier one and a THIRD push arrives, this job is cancelled — and `publish`
     # needs it, so the release quietly does not queue. It is narrow (the landing
     # run has to be the pending one, not the running one) and it is visible (no
-    # approval request arrives) and it is recoverable without any special
-    # handling: the version is still absent from npm, so the `workflow_dispatch`
-    # repair lane re-audits and queues the same deployment.
+    # approval request arrives, and every later push's audit says in its notice
+    # that main's version is unpublished and was not queued THERE) and it is
+    # recoverable without any special handling: the version is still absent
+    # from npm, so the `workflow_dispatch` repair lane re-audits and queues the
+    # same deployment, on the same version commit. ⚠️ Until 2026-09-29 the next
+    # landing re-queued it by accident — that accident was the defect the
+    # amended D1 removes (every landing queued a publish of its OWN head), so
+    # the dispatch is now the only recovery, by design.
     concurrency:
       group: release-integrity-${{ github.ref }}
       cancel-in-progress: false
@@ -769,19 +790,39 @@ jobs:
       # `contents: write` is for GitHub Releases, never for refs: this job runs
       # no `git push` of any kind.
       contents: write
+      # `actions: read` is the Releases backfill's guard: the audit reads this
+      # workflow's runs and their jobs to ask whether the same version's
+      # publish is in flight in another run. Reads only, never a cancel.
+      actions: read
     outputs:
       # "the docker job must build" — set only when npm ALREADY has this
-      # version and its runtime image is missing.
+      # version's WHOLE fixed group and its runtime image is missing.
       published: ${{ steps.audit.outputs.image-missing }}
       cli-version: ${{ steps.audit.outputs.version }}
-      # THE release predicate (ADR-0125 D1): 'true' exactly when main's
-      # @objectstack/cli version is absent from npm — i.e. the Version Packages
-      # PR has just merged and nothing has shipped it yet. False on every
-      # ordinary landing, which is why an ordinary merge queues no deployment.
+      # The commit `publish` checks out: the newest first-parent commit at which
+      # @objectstack/cli's version differs from its parent's — the landing that
+      # brought main to the version above (ADR-0125 D1 as amended 2026-09-29).
+      # Computed on every audited event, because it is what the approval
+      # authorises on both lanes.
+      version-commit: ${{ steps.audit.outputs.version-commit }}
+      # THE release predicate (ADR-0125 D1, amended 2026-09-29): on a push,
+      # 'true' exactly when THIS push carries the version commit and that
+      # version is absent from npm; on the repair dispatch, exactly when the
+      # version is absent from npm. The old predicate — "absent from npm" alone
+      # — stayed true on every landing until the publish finished, so each one
+      # queued its own publish of its own head (17.5.0 shipped 8 PRs past its
+      # version commit). A later landing now queues nothing and evicts nothing.
       publish-pending: ${{ steps.audit.outputs.publish-pending }}
     steps:
+      # `fetch-depth: 0` is load-bearing: the version commit is found by walking
+      # main's first-parent history, and the push range by ancestry against
+      # `github.event.before`. On a shallow clone the graft boundary would read
+      # as "the version changed here" — scripts/release-pending-publish.mjs
+      # refuses a shallow clone rather than answer from one.
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -801,6 +842,10 @@ jobs:
         id: audit
         env:
           SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          # On a push, main's tip before this push landed (all zeros on a branch
+          # creation); empty on a dispatch, which has no push range.
+          BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=$(git show "${SHA}:packages/cli/package.json" | jq -r '.version')
@@ -822,36 +867,115 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "main (${SHA}) carries @objectstack/cli@${version}"
 
+          # ── the version commit, and whether THIS event queues its publish ─
+          # ADR-0125 D1 as amended 2026-09-29. The logic, and the pins that hold
+          # it (a version commit then two landings, a merge-queue batch, a
+          # published version, a force-push, a shallow clone), live in
+          # scripts/release-pending-publish.mjs, whose --self-test lint.yml
+          # runs. It also asks npm (present / absent / unknown), so the npm
+          # branch below reads its answer rather than asking twice.
+          if ! selection=$(node scripts/release-pending-publish.mjs select --event "$EVENT" --head "$SHA" ${BEFORE:+--before "$BEFORE"}); then
+            echo "::error::could not select the version commit for ${SHA} (reason above). Refusing to decide whether a release is pending."
+            exit 1
+          fi
+          jq . <<<"$selection"
+          selected_version=$(jq -r '.version' <<<"$selection")
+          version_commit=$(jq -r '.versionCommit' <<<"$selection")
+          npm_state=$(jq -r '.npm' <<<"$selection")
+          pending=$(jq -r '.pending' <<<"$selection")
+          reason=$(jq -r '.reason' <<<"$selection")
+          range_detail=$(jq -r '.range.detail' <<<"$selection")
+          if [ "$selected_version" != "$version" ]; then
+            echo "::error::the version-commit walk read @objectstack/cli@${selected_version} at ${SHA}, this step read ${version}. Two readers of one object disagree; refusing to act on either."
+            exit 1
+          fi
+          echo "version-commit=${version_commit}" >> "$GITHUB_OUTPUT"
+          echo "version commit: ${version_commit} — the landing that brought main to ${version}"
+
           # ── npm ───────────────────────────────────────────────────────────
-          if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
-            # THE predicate (ADR-0125 D1). Not on npm = the Version Packages PR
-            # has just merged and nothing has shipped it. This job still cannot
-            # publish anything — it says so and stays green; the `publish` job
-            # below reads this output, and IT stops dead on the `release`
-            # environment until a required reviewer approves it.
-            echo "publish-pending=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::main carries @objectstack/cli@${version}, which is NOT on npm. A deployment is queued and is waiting for a maintainer to approve the 'release' environment."
+          # `unknown` (npm could not be read) keeps this step's historical
+          # reading, "not on npm": no backfill runs off a guess, and a pending
+          # publish is a prompt a human still has to approve.
+          if [ "$npm_state" != 'present' ]; then
+            if [ "$pending" = 'true' ]; then
+              # THE predicate (ADR-0125 D1, amended). This push carries the
+              # version commit and nothing has shipped it. This job still cannot
+              # publish anything — it says so and stays green; the `publish` job
+              # below reads this output, and IT stops dead on the `release`
+              # environment until a required reviewer approves it.
+              echo "publish-pending=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::main carries @objectstack/cli@${version}, which is NOT on npm; this ${EVENT} queues its publish on the version commit ${version_commit}. A deployment is queued and is waiting for a maintainer to approve the 'release' environment."
+              {
+                echo "## Release ${version} is waiting for your approval"
+                echo
+                echo "main (\`${SHA}\`) carries **@objectstack/cli@${version}**, which is not on npm."
+                echo "Its version commit is \`${version_commit}\`."
+                echo
+                echo "The **Publish ${version} to npm** job below is held at the \`release\`"
+                echo "environment gate. Nothing has been checked out, built or published —"
+                echo "GitHub holds the whole job until a required reviewer approves it."
+                echo
+                echo "**Review this before approving:** approving publishes the tree of the"
+                echo "version commit \`${version_commit}\` — the commit that brought main to"
+                echo "${version}, i.e. what the Version Packages PR decided — and nothing that"
+                echo "landed after it, whatever main's head is by then."
+              } >> "$GITHUB_STEP_SUMMARY"
+
+              # ── what ${version} ships without a CHANGELOG entry (#21361) ───
+              # The merge queue lands the Version Packages PR on top of the
+              # current main, and the PR cannot be refreshed while queued, so
+              # the version commit's tree can carry landings whose changesets
+              # it never consumed: their code ships in this release and its
+              # CHANGELOG does not name them (17.3.0 through 17.6.0 each did).
+              # This is the run that queues the publish, so the approver reads
+              # the list here, before the release is cut. A warning annotation:
+              # the level this job gives every finding that leaves the release
+              # incomplete without stopping it (the Releases, the D4 asset, the
+              # image, an unreadable range). It REPORTS and never refuses, so
+              # it neither fails this step nor holds the publish job. A report
+              # that cannot be measured says so in an error annotation (a
+              # shallow clone is refused, never answered from a graft
+              # boundary), and the publish stays queued all the same.
+              if ! node scripts/release-pending-publish.mjs unconsumed --version-commit "$version_commit" --version "$version"; then
+                echo "The changesets the version commit ${version_commit} did not consume were NOT MEASURED (reason above). This report never holds a release, so the publish of ${version} stays queued."
+                {
+                  echo
+                  echo "**Changesets: NOT MEASURED.** Whether ${version}'s CHANGELOG leaves out a change that landed in"
+                  echo "the version commit's tree is unknown; the reason is in this step's log."
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
+              exit 0
+            fi
+            echo "publish-pending=false" >> "$GITHUB_OUTPUT"
+            case "$reason" in
+              version-commit-landed-earlier)
+                echo "::notice::main carries @objectstack/cli@${version}, not on npm, and its version commit ${version_commit} landed before this push (${range_detail}). Its publish prompt belongs to the push that carried it; this push queues none and evicts none. If no 'Publish ${version} to npm' prompt is waiting, dispatch this workflow (the repair lane) to queue it on ${version_commit}."
+                ;;
+              range-unreadable)
+                echo "::warning::main carries @objectstack/cli@${version}, not on npm, and this push's range cannot be read (${range_detail}), so it queues no publish rather than guess whether it carried the version commit ${version_commit}. If no 'Publish ${version} to npm' prompt is waiting, dispatch this workflow (the repair lane) to queue it."
+                ;;
+              *)
+                echo "::error::the predicate answered '${reason}' for an unpublished version; this step has no branch for it. Refusing to guess."
+                exit 1
+                ;;
+            esac
             {
-              echo "## Release ${version} is waiting for your approval"
+              echo "## Release ${version} is not queued by this push"
               echo
               echo "main (\`${SHA}\`) carries **@objectstack/cli@${version}**, which is not on npm."
-              echo
-              echo "The **Publish ${version} to npm** job below is held at the \`release\`"
-              echo "environment gate. Nothing has been checked out, built or published —"
-              echo "GitHub holds the whole job until a required reviewer approves it."
-              echo
-              echo "**Review this before approving:** the version above is read from the"
-              echo "object database at \`${SHA}\`, so it is what main actually carries."
-              echo "Approving publishes exactly it."
+              echo "Its version commit is \`${version_commit}\`; ${range_detail}."
+              echo "Only the push that carries the version commit queues its publish."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "publish-pending=false" >> "$GITHUB_OUTPUT"
           echo "npm: @objectstack/cli@${version} is present."
 
-          # From here on, every repair is over an ALREADY-PUBLISHED version, so
-          # none of it can mint anything. This is the #4900 case — published,
-          # then died before the Releases / D4 asset / image existed.
+          # Every repair below is over an ALREADY-PUBLISHED version, so none of
+          # it can mint anything. This is the #4900 case — published, then died
+          # before the Releases / D4 asset / image existed. "Published" means
+          # the WHOLE fixed group, and that is read further down, before any
+          # backfill is requested: `cli` on npm only says a publish STARTED.
 
           # ── GitHub Releases + the ADR-0087 D4 asset ───────────────────────
           # Two anchors, not all 69: @objectstack/cli is the fixed group's
@@ -865,17 +989,12 @@ jobs:
             gh release view "@objectstack/spec@${version}" --json assets \
               --jq '.assets[].name' 2>/dev/null | grep -qx 'spec-changes.json' || releases_ok=false
           fi
-          if [ "$releases_ok" = true ]; then
-            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
-          else
-            echo "::warning::@objectstack/cli@${version} is on npm but its GitHub Releases or the ADR-0087 D4 asset are incomplete (#4900) — backfilling."
-            echo "releases-missing=true" >> "$GITHUB_OUTPUT"
-          fi
 
           # ── runtime image ─────────────────────────────────────────────────
           # A failed probe counts as MISSING on purpose: a redundant rebuild
           # costs a few minutes, a wrongly-skipped one leaves a published npm
           # version with no image and nothing to say so.
+          image_ok=false
           if token=$(curl -fsS "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY}:pull&service=ghcr.io" 2>/dev/null) \
             && token=$(node -p 'JSON.parse(process.argv[1]).token' "$token" 2>/dev/null) \
             && curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
@@ -883,21 +1002,168 @@ jobs:
                  -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
                  "https://ghcr.io/v2/${GITHUB_REPOSITORY}/manifests/$version" 2>/dev/null
           then
-            echo "ghcr: image for $version is present — release is complete."
+            image_ok=true
+          fi
+
+          if [ "$releases_ok" = true ] && [ "$image_ok" = true ]; then
+            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
+            echo "ghcr: image for $version is present — nothing to backfill."
             exit 0
           fi
-          echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
-          echo "image-missing=true" >> "$GITHUB_OUTPUT"
+
+          # ── the WHOLE fixed group, before any backfill (#20627) ──────────
+          # `cli` on npm is not "the publish is complete": `changeset publish`
+          # commits the 69 packages over minutes and cli is not the last. npm's
+          # own `time` on 17.5.0: cli 07:58:57Z, console 08:05:24Z, spec — the
+          # last — 08:09:33Z. A landing audited at 08:05:53Z read cli, took this
+          # backfill, and its image build went red installing a group npm did
+          # not have yet. So no backfill is requested until every package is on
+          # npm, read by the ONE definition of "published" the publish job's
+          # own post-publish check uses — scripts/release-verify-npm.mjs, asked
+          # once (`--probe`) instead of waited on for 15 minutes. Its set is the
+          # VERSION COMMIT's workspace, the tree the publish job checked out and
+          # verified; this push's tree may carry a package no release of
+          # ${version} contains, which would read as absent forever.
+          #
+          # Asked only when something IS missing, so the common path (nothing
+          # to repair) pays no 69 registry reads. The cli reading above stays
+          # the PUBLISH predicate on purpose: which push queues a publish is
+          # ADR-0125 D1's question, and a publish that stopped partway already
+          # has its repair — the `force` dispatch (D4) — not a push.
+          vc_tree="${RUNNER_TEMP}/release-version-commit"
+          git worktree add --quiet --detach "$vc_tree" "$version_commit"
+          # The backfill steps below build from this tree, not from this
+          # checkout (github.sha), so it is handed to them by name.
+          echo "version-tree=${vc_tree}" >> "$GITHUB_OUTPUT"
+          if ! group=$(RELEASE_VERSION="$version" node scripts/release-verify-npm.mjs --probe --root "$vc_tree"); then
+            echo "::error::could not read whether the whole fixed group of ${version} is on npm (reason above). Refusing to request a backfill nobody measured."
+            exit 1
+          fi
+          jq -c . <<<"$group"
+          group_state=$(jq -r '.state' <<<"$group")
+          group_checked=$(jq -r '.checked' <<<"$group")
+          group_short=$(jq -r '.missing | length' <<<"$group")
+          group_names=$(jq -r '[.missing[] | "\(.name)@\(.version)"] | (.[:5] | join(", ")) + (if length > 5 then ", and \(length - 5) more" else "" end)' <<<"$group")
+          case "$group_state" in
+            published)
+              echo "npm: all ${group_checked} package(s) of the ${version} fixed group are present."
+              ;;
+            unpublished)
+              echo "::notice::@objectstack/cli@${version} is on npm, but ${group_short} of ${group_checked} package(s) of its fixed group are not yet (${group_names}). A publish of ${version} is still shipping, or one stopped partway. Nothing is backfilled from a partly published group: the publish job creates the Releases, the ADR-0087 D4 asset and the runtime image itself, and a landing after the group is complete backfills whatever it did not. A publish that stopped partway is red in its own run, naming what is missing; dispatch this workflow with 'force' to finish it (ADR-0125 D4)."
+              {
+                echo "## Release ${version} is not fully on npm yet"
+                echo
+                echo "main (\`${SHA}\`) carries **@objectstack/cli@${version}**, which is on npm, but"
+                echo "${group_short} of ${group_checked} packages of its fixed group are not: ${group_names}."
+                echo "No GitHub Release, ADR-0087 D4 asset or runtime image is backfilled from a"
+                echo "partly published group."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            unknown)
+              echo "::warning::@objectstack/cli@${version} is on npm, but npm could not be read for ${group_short} of ${group_checked} package(s) of its fixed group (${group_names}), so whether the whole group is published is unknown. Nothing is backfilled off a guess; the next landing reads again."
+              exit 0
+              ;;
+            *)
+              echo "::error::the group probe answered '${group_state}'; this step has no branch for it. Refusing to guess."
+              exit 1
+              ;;
+          esac
+
+          # ── the publish in flight, before any backfill ────────────────────
+          # npm settles BEFORE the publish job reaches its own "Create GitHub
+          # Releases" step, and before that run's `docker` job even exists (it
+          # needs `publish`, so GitHub creates it when the publish job
+          # completes). A landing audited in that window found the group
+          # complete and wrote beside the publishing run. On 17.6.0 the publish
+          # of run 36955885276 wrote its Releases 03:03:47Z -> 03:05:42Z, this
+          # backfill in run 36958423332 started writing them at 03:04:37Z, and
+          # five tags got two Release objects each; and both runs built and
+          # pushed the 17.6.0 image, 03:05:49Z -> 03:10:02Z beside 03:05:48Z ->
+          # 03:09:18Z. The writers are in different runs, so no `needs:` can
+          # order them; the publishing run creates its Releases, D4 asset and
+          # image, and a landing after it finishes backfills whatever it did
+          # not. scripts/release-pending-publish.mjs `in-flight` (its
+          # --self-test, run by lint.yml, holds the rule) answers both in one
+          # read: `.state` for the publish job, `.docker.state` for that run's
+          # image build, in flight from the approval until its docker job
+          # completes. Anything it cannot read answers `in-flight`, so nothing
+          # is backfilled off a guess. It only ever leaves `releases-missing`
+          # and `image-missing` unset: this step stays green.
+          flight_asked=true
+          flight=$(GITHUB_TOKEN="$GH_TOKEN" node scripts/release-pending-publish.mjs in-flight --version "$version" --version-commit "$version_commit" --head "$SHA" --workflow release.yml) || flight_asked=false
+          if [ "$flight_asked" = true ]; then
+            jq -c . <<<"$flight"
+          fi
+          if [ "$releases_ok" = true ]; then
+            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
+          elif [ "$flight_asked" != true ]; then
+            echo "::warning::${version}'s GitHub Releases or ADR-0087 D4 asset are incomplete, and whether its publish is still in flight could not be asked (reason above). Nothing is backfilled off a guess; the next landing reads again."
+          elif [ "$(jq -r '.state' <<<"$flight")" != 'clear' ]; then
+            if [ "$(jq -r '.reason' <<<"$flight")" = 'publish-in-flight' ]; then
+              echo "::notice::${version}'s GitHub Releases or ADR-0087 D4 asset are incomplete, but its publish is still in flight ($(jq -r '.detail' <<<"$flight")). That run creates them; nothing is backfilled beside it. A landing after it finishes backfills whatever it did not."
+            else
+              echo "::warning::${version}'s GitHub Releases or ADR-0087 D4 asset are incomplete, and whether its publish is still in flight could not be read ($(jq -r '.detail' <<<"$flight")). Nothing is backfilled off a guess; the next landing reads again."
+            fi
+          else
+            echo "::warning::${version} is on npm but its GitHub Releases or the ADR-0087 D4 asset are incomplete (#4900) — backfilling."
+            echo "releases-missing=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$image_ok" = true ]; then
+            echo "ghcr: image for $version is present."
+          elif [ "$flight_asked" != true ]; then
+            echo "::warning::No ghcr image for ${version} (or the registry could not be probed), and whether its publishing run is still building it could not be asked (reason above). No Docker job is requested off a guess; the next landing reads again."
+          elif [ "$(jq -r '.docker.state' <<<"$flight")" != 'clear' ]; then
+            if [ "$(jq -r '.docker.reason' <<<"$flight")" = 'docker-in-flight' ]; then
+              echo "::notice::No ghcr image for ${version} yet, but its publishing run has not finished building it ($(jq -r '.docker.detail' <<<"$flight")). That run pushes the image; no Docker job is requested beside it. A landing after it finishes requests one if the image is still missing."
+            else
+              echo "::warning::No ghcr image for ${version} (or the registry could not be probed), and whether its publishing run is still building it could not be read ($(jq -r '.docker.detail' <<<"$flight")). No Docker job is requested off a guess; the next landing reads again."
+            fi
+          else
+            echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
+            echo "image-missing=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # Everything below is skipped on the overwhelmingly common path (nothing to
       # repair), which is why the install is here rather than at the top of the job.
+      #
+      # ── Every backfill builds from the VERSION COMMIT's tree ─────────────
+      # The publish job checks out the version commit and runs that commit's
+      # own scripts over that commit's own tree (ADR-0125 D1 as amended
+      # 2026-09-29). A repair describes the same release, so the steps below
+      # run in the worktree the audit made of the version commit (its
+      # `version-tree` output), with that commit's lockfile and tooling, and
+      # never in this checkout. This checkout is `github.sha`, the head of
+      # whichever push is being audited. A landing after the version commit
+      # that touched packages/spec/src would otherwise make the D4 asset
+      # describe a tree npm did not ship, and a Release created here would
+      # point its CHANGELOG link, and any tag it has to create, at that landing.
+      #
+      # The checkout itself is NOT swapped: the audit above reads `github.sha`
+      # and its tripwire reads this workspace, and both stay as they are. Each
+      # step re-asserts that its tree is the version commit and refuses
+      # otherwise, because an empty `version-tree` would leave the step in
+      # this checkout, which is the defect, with nothing said.
+      #
+      # Pinned by battery 13 of `node scripts/release-verify-npm.mjs
+      # --self-test` (lint.yml runs it): these steps' own text runs after the
+      # audit's, and a landing that moved packages/spec/src is the fixture.
       - name: Setup pnpm
         if: steps.audit.outputs.releases-missing == 'true'
         uses: ./.github/actions/setup-pnpm
 
-      - name: Install dependencies
+      - name: Install dependencies (the version commit's tree)
         if: steps.audit.outputs.releases-missing == 'true'
-        run: pnpm install --frozen-lockfile
+        env:
+          VERSION_COMMIT: ${{ steps.audit.outputs.version-commit }}
+          VERSION_TREE: ${{ steps.audit.outputs.version-tree }}
+        run: |
+          if [ -z "$VERSION_TREE" ] || [ "$(git -C "$VERSION_TREE" rev-parse HEAD 2>/dev/null)" != "$VERSION_COMMIT" ]; then
+            echo "::error::the version commit's tree ('${VERSION_TREE}') is not at the version commit '${VERSION_COMMIT}'. Refusing to backfill from any other tree."
+            exit 1
+          fi
+          cd "$VERSION_TREE"
+          pnpm install --frozen-lockfile
 
       - name: Backfill GitHub Releases (bodies truncated to the API limit)
         if: steps.audit.outputs.releases-missing == 'true'
@@ -908,24 +1174,116 @@ jobs:
           # Changesets `fixed` group releases every public package at one
           # version, which check-changeset-fixed.mjs gates.
           RELEASE_VERSION: ${{ steps.audit.outputs.version }}
-        run: node scripts/release-github-releases.mjs
+          VERSION_COMMIT: ${{ steps.audit.outputs.version-commit }}
+          VERSION_TREE: ${{ steps.audit.outputs.version-tree }}
+        # The script reads every package and CHANGELOG.md from the tree it
+        # lives in, and takes `GITHUB_SHA` as each Release's `target_commitish`
+        # and as the ref of its CHANGELOG permalink. Both must be the version
+        # commit. GitHub ignores `target_commitish` when the tag already exists,
+        # but a publish that died before its tag push leaves no tag, and the
+        # Release then CREATES it at `target_commitish`. So the version
+        # commit's own script runs in its own tree, with GITHUB_SHA set for that
+        # one process only.
+        run: |
+          if [ -z "$VERSION_TREE" ] || [ "$(git -C "$VERSION_TREE" rev-parse HEAD 2>/dev/null)" != "$VERSION_COMMIT" ]; then
+            echo "::error::the version commit's tree ('${VERSION_TREE}') is not at the version commit '${VERSION_COMMIT}'. Refusing to backfill from any other tree."
+            exit 1
+          fi
+          cd "$VERSION_TREE"
+          GITHUB_SHA="$VERSION_COMMIT" node scripts/release-github-releases.mjs
 
       - name: Backfill spec-changes.json on the GitHub Release (ADR-0087 D4)
         # Ordering is load-bearing: `gh release upload` needs the Release the
         # step above creates.
         #
         # `--prepare` regenerates the manifest against the previously published
-        # tarball exactly as the publish lane does, so the asset this repair
-        # uploads carries the same per-release section the npm artifact does.
-        # It cannot repair the npm artifact itself — that tarball is immutable —
-        # and this lane never publishes one.
+        # tarball exactly as the publish job does: in the version commit's
+        # tree, with that commit's generator. So the asset this repair uploads
+        # carries the same per-release section the npm artifact does. It cannot
+        # repair the npm artifact itself — that tarball is immutable — and this
+        # lane never publishes one.
         if: steps.audit.outputs.releases-missing == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.audit.outputs.version }}
+          VERSION_COMMIT: ${{ steps.audit.outputs.version-commit }}
+          VERSION_TREE: ${{ steps.audit.outputs.version-tree }}
         run: |
+          if [ -z "$VERSION_TREE" ] || [ "$(git -C "$VERSION_TREE" rev-parse HEAD 2>/dev/null)" != "$VERSION_COMMIT" ]; then
+            echo "::error::the version commit's tree ('${VERSION_TREE}') is not at the version commit '${VERSION_COMMIT}'. Refusing to backfill from any other tree."
+            exit 1
+          fi
+          cd "$VERSION_TREE"
           bash scripts/release-spec-changes.sh --prepare
           bash scripts/release-spec-changes.sh --attach
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # PUSH LANE 3 — stale approval prompts. Cancels; never publishes, never
+  # approves, never touches a job that has started.
+  # ══════════════════════════════════════════════════════════════════════════
+  stale-prompts:
+    name: Cancel publish prompts for versions already on npm
+    # ADR-0125 D1 as amended 2026-09-29: a prompt for a version that is already
+    # published does not stay waiting.
+    #
+    # WHY IT MUST BE CANCELLED, NOT MERELY REPORTED — measured on the runs, not
+    # assumed: the publish job that holds `release-publish-<ref>` waits at the
+    # `release` environment WHILE HOLDING the group, and every later publish
+    # job pends behind it. So a prompt left waiting after its version shipped
+    # is not just a lookalike, it HIDES the next real one: 17.4.0's run
+    # 34308599522 waited 20 days, was the only visible prompt when 17.5.0 was
+    # queued, and was approved by mistake; 17.5.0 then left run 36539819278
+    # waiting at 08:11Z, after cli@17.5.0 reached npm at 07:58:57Z.
+    #
+    # What is cancelled, exactly (scripts/release-pending-publish.mjs `sweep`,
+    # pinned by its --self-test): a WAITING run of this workflow, not this run,
+    # started by `push`, whose `Publish VERSION to npm (awaiting approval)` job
+    # is waiting at the `release` environment, with VERSION present on npm.
+    #   - A dispatch run is never touched: it is a human's own act, and the D4
+    #     `force` repair legitimately waits for a version whose CLI is on npm.
+    #   - A job GitHub holds at an environment has run no step, so this never
+    #     interrupts a publish; the one it cancels could publish nothing — and
+    #     if an approval lands in the second before the cancel, `publish`'s own
+    #     guard refuses a push-lane release that is already on npm.
+    # Rejecting instead was measured and is not available: the review endpoint
+    # answers only a REQUIRED REVIEWER of the environment, which the workflow
+    # token is not (and must not become).
+    #
+    # Same two events as `release-integrity`, for the same reason: bookkeeping
+    # events get no release machinery. Not `needs`-ed by `publish` and needing
+    # nothing itself: a failed read here must be loud (a red job on main) but
+    # must never be able to hold up a release, and the order does not matter —
+    # a publish job queued behind a stale holder takes the group the moment
+    # the holder is cancelled.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)
+    runs-on: ubuntu-latest
+    permissions:
+      # `actions: write` is the cancel (POST .../runs/{id}/cancel); it also
+      # covers the reads (the waiting-runs list, the runs at each version
+      # commit's push, each named run, its jobs and its pending deployments).
+      # `contents: read` is the checkout.
+      actions: write
+      contents: read
+    steps:
+      # `fetch-depth: 0`: a push-lane prompt can only hang on the push that
+      # carried a version commit, and the sweep finds those on main's
+      # first-parent history; it refuses a shallow clone.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Cancel waiting publish prompts whose version is already on npm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-pending-publish.mjs sweep --workflow release.yml
 
   # ══════════════════════════════════════════════════════════════════════════
   # HUMAN LANE — the ONLY job in this repository that publishes.
@@ -958,8 +1316,10 @@ jobs:
     #   trigger to `workflow_dispatch` in the SAME change; do not leave this
     #   running.
     environment: release
-    # `publish-pending` is the whole trigger predicate: true exactly when main's
-    # version is absent from npm. Unset (an audit that died before deciding)
+    # `publish-pending` is the whole trigger predicate: on a push, true exactly
+    # when that push carries the version commit and the version is absent from
+    # npm; on the repair dispatch, when the version is absent from npm (ADR-0125
+    # D1 as amended 2026-09-29). Unset (an audit that died before deciding)
     # compares false, so this fails CLOSED. `force` is dispatch-only and exists
     # for the partial-publish repair D4 describes.
     #
@@ -985,6 +1345,17 @@ jobs:
     runs-on: ubuntu-latest
     # One publish at a time per ref, and never cancelled — a run cancelled
     # mid-`changeset publish` is the state that leaves a fixed group half on npm.
+    #
+    # ⚠️ ADR-0125 D5's eviction applies to THIS group too, and did, until the
+    # 2026-09-29 amendment of D1. Measured on the runs: the job holding the
+    # group waits at the `release` environment WHILE HOLDING it; every later
+    # publish job pends behind it and evicts the pending one before it. While
+    # the predicate was "absent from npm", every landing queued one, so the
+    # prompt moved under the maintainer and whichever was pending last shipped
+    # ITS head. Now only the push carrying the version commit queues a publish,
+    # so the group holds one job per version and nothing evicts it; and a job
+    # left holding the group for a version already on npm is cancelled by
+    # `stale-prompts` above, never by `cancel-in-progress`.
     concurrency:
       group: release-publish-${{ github.ref }}
       cancel-in-progress: false
@@ -994,8 +1365,21 @@ jobs:
       published: ${{ steps.publish.outputs.published }}
       cli-version: ${{ steps.guards.outputs.version }}
     steps:
+      # THE VERSION COMMIT, not `github.sha` (ADR-0125 D1 as amended
+      # 2026-09-29). `github.sha` is the head of whichever push queued this run;
+      # the version commit is the landing that brought main to the version the
+      # approval screen names — the tree the Version Packages PR decided to
+      # release. On 17.5.0 the two were eight PRs apart, one of them breaking.
+      #
+      # `fetch-depth: 0` is load-bearing for the guard below: "the version
+      # commit is on main" is an ancestry test against the freshly fetched
+      # `origin/main`, and on a shallow clone a non-ancestor answer is not
+      # evidence of anything.
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-integrity.outputs.version-commit }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -1013,33 +1397,71 @@ jobs:
       # runs `changeset version`; this job publishes what the ref carries, or it
       # fails.
       # ──────────────────────────────────────────────────────────────────────
-      - name: Guard the approved release (branch, and the tree matches the commit)
+      - name: Guard the approved release (branch, version commit, and the tree matches it)
         id: guards
         env:
           # What release-integrity read out of the object database at
           # github.sha, and what the approval screen named. Read through env,
           # never interpolated into the shell.
           AUDITED: ${{ needs.release-integrity.outputs.cli-version }}
+          # The commit the checkout above was asked for. Empty would make
+          # `ref:` fall back to github.sha — the very defect — so it is refused.
+          VERSION_COMMIT: ${{ needs.release-integrity.outputs.version-commit }}
+          # 'true' only on the dispatch-only D4 repair, whose whole point is a
+          # version whose CLI is already on npm.
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
         run: |
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
             echo "::error::the publish lane may only run on main (got ${GITHUB_REF}). Publishing from any other ref would tag and ship code that never landed."
             exit 1
           fi
 
-          # R2's tripwire, kept (ADR-0125 D1). The typed version is gone, so
-          # this is now the ONLY thing standing between an approval and a
-          # publish of something main does not carry. It is the exact assertion
-          # the 2026-08-03 recover-publish step lacked when it shipped rc.3 off
-          # a re-versioned workspace: read the version from the OBJECT DATABASE
-          # at github.sha and refuse if the checked-out tree disagrees.
-          committed=$(git show "${GITHUB_SHA}:packages/cli/package.json" | jq -r '.version')
+          # ── the version commit (ADR-0125 D1 as amended 2026-09-29) ────────
+          # Every assertion here fails closed: the checkout must be the commit
+          # the audit selected, that commit must already be on main, and it must
+          # be the commit that CHANGED the version — not merely one carrying it.
+          if ! printf '%s' "$VERSION_COMMIT" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error::release-integrity named no version commit ('${VERSION_COMMIT}'). An empty ref would check out github.sha — the head of whichever push queued this run — so refusing."
+            exit 1
+          fi
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$VERSION_COMMIT" ]; then
+            echo "::error::the workspace is at ${head}, not the version commit ${VERSION_COMMIT}. Refusing to publish a tree nobody selected."
+            exit 1
+          fi
+          if [ "$(git rev-parse --is-shallow-repository)" != 'false' ]; then
+            echo "::error::shallow clone: an ancestry answer here would not be evidence. The checkout above must keep fetch-depth: 0."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$VERSION_COMMIT" refs/remotes/origin/main; then
+            echo "::error::the version commit ${VERSION_COMMIT} is not on main as fetched just now. Publishing it would tag and ship code that never landed."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$VERSION_COMMIT" "$GITHUB_SHA"; then
+            echo "::error::the version commit ${VERSION_COMMIT} is not an ancestor of ${GITHUB_SHA}, the head it was selected from."
+            exit 1
+          fi
+
+          # R2's tripwire, kept (ADR-0125 D1), now against the version commit.
+          # The typed version is gone, so this is the thing standing between an
+          # approval and a publish of something main does not carry. It is the
+          # exact assertion the 2026-08-03 recover-publish step lacked when it
+          # shipped rc.3 off a re-versioned workspace: read the version from the
+          # OBJECT DATABASE at the commit being published and refuse if the
+          # checked-out tree disagrees.
+          committed=$(git show "${VERSION_COMMIT}:packages/cli/package.json" | jq -r '.version')
           declared=$(jq -r '.version' packages/cli/package.json)
           if [ -z "$committed" ] || [ "$committed" = "null" ]; then
-            echo "::error::could not read @objectstack/cli version at ${GITHUB_SHA}"
+            echo "::error::could not read @objectstack/cli version at ${VERSION_COMMIT}"
             exit 1
           fi
           if [ "$declared" != "$committed" ]; then
-            echo "::error::workspace carries @objectstack/cli@${declared} but ${GITHUB_SHA} carries ${committed} — something re-versioned this workspace (#6170). Refusing to publish a version main does not have."
+            echo "::error::workspace carries @objectstack/cli@${declared} but ${VERSION_COMMIT} carries ${committed} — something re-versioned this workspace (#6170). Refusing to publish a version main does not have."
+            exit 1
+          fi
+          parent=$(git show "${VERSION_COMMIT}^1:packages/cli/package.json" 2>/dev/null | jq -r '.version' || true)
+          if [ "$parent" = "$committed" ]; then
+            echo "::error::${VERSION_COMMIT} carries @objectstack/cli@${committed} but so does its parent, so it is not the commit that changed the version. Refusing to publish from anything but the version commit."
             exit 1
           fi
 
@@ -1047,17 +1469,44 @@ jobs:
           # moved since, the human approved a different release than the one
           # about to ship — refuse rather than ship the surprise.
           if [ -n "$AUDITED" ] && [ "$AUDITED" != "$committed" ]; then
-            echo "::error::the release approved was @objectstack/cli@${AUDITED} but ${GITHUB_SHA} carries ${committed}. Refusing to publish a version nobody approved."
+            echo "::error::the release approved was @objectstack/cli@${AUDITED} but ${VERSION_COMMIT} carries ${committed}. Refusing to publish a version nobody approved."
             exit 1
           fi
 
+          # ── a stale prompt, approved anyway ───────────────────────────────
+          # A prompt can outlive its release: queued while the version was
+          # absent, approved after some other run shipped it. The 17.4.0 prompt
+          # of run 34308599522 was approved that way, in place of 17.5.0's.
+          # Approving one must publish nothing and say so. `force` is exempt —
+          # a partial publish leaves the CLI canary on npm by definition. An
+          # unreadable registry is not evidence of staleness: `changeset
+          # publish` skips an already-published version by itself.
+          #
+          # The same three-way reading as classifyNpmView() in
+          # scripts/release-pending-publish.mjs, INLINED on purpose: this guard
+          # runs before the checked-out tree is trusted, so it executes nothing
+          # from that tree — git, jq and npm only, as the rest of it does. (The
+          # version commit's tree may also predate the script.)
+          if [ "$FORCE" != 'true' ]; then
+            if npm_out=$(npm view "@objectstack/cli@${committed}" version 2>"${RUNNER_TEMP}/npm-view.err"); then
+              if [ "$(printf '%s' "$npm_out" | tr -d '[:space:]')" = "$committed" ]; then
+                echo "::error::@objectstack/cli@${committed} is already on npm, so this approval prompt was stale when it was approved — nothing is published from it. If a newer release is due, its own 'Publish VERSION to npm' prompt is the one to approve; if ${committed} is only partly published, dispatch this workflow with 'force' (ADR-0125 D4)."
+                exit 1
+              fi
+            elif ! grep -q 'E404' "${RUNNER_TEMP}/npm-view.err"; then
+              cat "${RUNNER_TEMP}/npm-view.err"
+              echo "::warning::npm could not be read to confirm @objectstack/cli@${committed} is still unpublished; continuing, since changeset publish skips any version the registry already has."
+            fi
+          fi
+
           echo "version=$committed" >> "$GITHUB_OUTPUT"
-          echo "Publishing @objectstack/cli@${committed} from ${GITHUB_SHA} (approved on the 'release' environment)."
+          echo "Publishing @objectstack/cli@${committed} from its version commit ${VERSION_COMMIT} (approved on the 'release' environment; this run was queued by ${GITHUB_SHA})."
           {
             echo "## Publishing ${committed}"
             echo
-            echo "- ref: \`${GITHUB_REF}\` @ \`${GITHUB_SHA}\`"
-            echo "- started by: \`${GITHUB_ACTOR}\` (\`${GITHUB_EVENT_NAME}\`)"
+            echo "- version commit: \`${VERSION_COMMIT}\` — the tree that is built, tagged and published"
+            echo "- queued by: \`${GITHUB_REF}\` @ \`${GITHUB_SHA}\` (\`${GITHUB_EVENT_NAME}\`)"
+            echo "- started by: \`${GITHUB_ACTOR}\`"
             echo "- authorised by: the \`release\` environment approval on this run —"
             echo "  see the run's deployment history for the reviewer and timestamp"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1082,12 +1531,22 @@ jobs:
       # push and warmed the cache for everyone; it now runs only when a human
       # publishes. lint.yml's "Save Turbo cache (main only)" is the seeder. The
       # key is namespaced by `github.job`, which changed from `release` to
-      # `publish` — the first release after this PR builds cold once.
+      # `publish` — the first release after this PR builds cold once. Keyed on
+      # the VERSION COMMIT, the tree actually built, not on `github.sha`
+      # (ADR-0125 D1 as amended 2026-09-29); turbo re-hashes its inputs either
+      # way, so the key names the entry and decides nothing about correctness.
+      #
+      # ⚠️ From the checkout on, the steps are this FILE at `github.sha` while
+      # the scripts they run are the VERSION COMMIT's. On the version push the
+      # two are the same commit or a merge-queue batch apart; on a repair
+      # dispatch they can be further apart. A step naming a script the version
+      # commit predates fails on the missing file, which is the right failure:
+      # a release is built by the version commit's own tooling.
       - name: Setup Turbo cache
         uses: actions/cache@v6
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ needs.release-integrity.outputs.version-commit }}
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-${{ github.job }}-
@@ -1120,9 +1579,38 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      # ci.yml's Console Pin Gate (#4290) uses this exact key, so the pin bump's
-      # PR run and this job share one build — keep the two in step if either
-      # input set changes.
+      - name: Read the spec's declared zod range (Console dist key input)
+        id: spec-zod
+        # Fails rather than keying on an empty or `undefined` range: a key that
+        # silently stopped carrying the range would restore across a zod move.
+        run: |
+          node -e '
+            const range = require("./packages/spec/package.json").dependencies?.zod;
+            if (typeof range !== "string" || range.trim() === "") {
+              console.error("packages/spec/package.json declares no dependencies.zod, so the Console dist key cannot carry it.");
+              process.exit(1);
+            }
+            console.log("range=" + range.trim());
+          ' >> "$GITHUB_OUTPUT"
+
+      # This key hashes the pin and the build script, and carries the spec's
+      # DECLARED zod range (the step above). ci.yml's Console Pin Gate (#4290)
+      # hashes a SUPERSET of the files: those two, the probe scripts and the
+      # spec's entry layout (#20765). So the two workflows no longer share dist
+      # entries, and each one builds its own on a miss. Keeping this key narrower
+      # is deliberate.
+      # Following ci.yml would rebuild the console on every Version Packages
+      # merge, and publishing a cached console whose spec content lags is the
+      # existing cache design.
+      #
+      # The zod range is the one spec input the cached dist is NOT allowed to
+      # lag (#21108). The console bundles a single zod instance, the console's
+      # own copy, and its build refuses a console zod outside the injected spec's
+      # declared `zod` range (objectui#11353). A dist restored after that range
+      # moved would publish a console the build never judged against it. The
+      # range is read out of packages/spec/package.json, not hashed with it: the
+      # file's `version` moves on every Version Packages merge, and hashing the
+      # whole file would turn every publish into a cold console rebuild.
       #
       # Split restore/save, matching ci.yml, and not the combined actions/cache
       # action: the combined form's post-step saves even when the job FAILED,
@@ -1135,7 +1623,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
 
       - name: Build vendored @objectstack/console SPA
         # Clones objectstack-ai/objectui at the SHA pinned in .objectui-sha,
@@ -1159,7 +1647,7 @@ jobs:
       # (no dist, or a dist no build ever stamped) is wrong on a publish lane.
       - name: Verify the restored Console dist bundles this tree's spec
         env:
-          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
         run: pnpm check:console-injection --require-stamp
 
       # Reached only with every console assertion above green: Actions steps
@@ -1171,7 +1659,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
 
       - name: Downstream backward-compat smoke (live hotcrm)
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must

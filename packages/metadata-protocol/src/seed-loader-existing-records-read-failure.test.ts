@@ -66,7 +66,7 @@ function createLogger() {
  * is what turns "the seed proceeded" into "the seed proceeded AND the injected
  * throw fired".
  *
- * [#13324] It also accepts a FUNCTION of the object name, because the loader
+ * [commit 4cda78c9b] It also accepts a FUNCTION of the object name, because the loader
  * reads more than one table on this path (`sys_organization` for the sole-org
  * probe, then the seeded object) and a missing-table fault names the table it
  * was raised for. A single fixed value phrased for one of them is a fault that

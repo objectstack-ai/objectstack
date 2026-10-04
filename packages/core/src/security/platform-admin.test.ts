@@ -23,6 +23,17 @@ import {
   setPlatformAdminConfigSink,
   type PlatformAdminConfigSink,
 } from './platform-admin.js';
+// The security entry is loaded HERE, at module top, and not by a dynamic import
+// inside the case that probes it below. That import loads the entry's whole
+// re-export graph (signatures, sandbox, permission enforcement), and inside a
+// case the load is charged to vitest's per-case budget (5000ms by default), so
+// the pin's verdict would turn on how loaded the machine is. At module top the
+// same load is charged to the COLLECT phase, where no per-case budget applies.
+// The case loses nothing: it asserts export presence and absence only, and the
+// entry only re-exports, so loading it earlier observes no env this file's
+// hooks set or clear. Same reasoning as the core precedent
+// `packages/core/src/service-resolution-discriminator.contract.test.ts`.
+import * as securityEntry from './index.js';
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 
@@ -275,8 +286,8 @@ describe('[#11663 L5] the legacy-grant deprecation pointer is retired', () => {
     expect('resolvePlatformAdminEmails' in mod).toBe(true);
   });
 
-  it("⛔ nor by `@objectstack/core`'s security entry — the published surface lost them", async () => {
-    const entry: Record<string, unknown> = await import('./index.js');
+  it("⛔ nor by `@objectstack/core`'s security entry — the published surface lost them", () => {
+    const entry: Record<string, unknown> = securityEntry;
     expect('reportLegacyPlatformAdminGrant' in entry).toBe(false);
     expect('resetLegacyPlatformAdminGrantReport' in entry).toBe(false);
     // Positive control on the same entry: its sibling config exports are still

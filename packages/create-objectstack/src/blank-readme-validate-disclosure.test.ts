@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
-// Pins #10322 part 3 — the substantive half, per triage: the generated
+// Pins the README half of commit 8d21f7a76 — the substantive half, per triage: the generated
 // `AGENTS.md` calls `validate` the command you must never skip ("Never report
 // a metadata change as done until `npm run validate` passes"), and the
 // newcomer's primary doc, the blank template's own README, must name it where
@@ -47,7 +47,7 @@ describe('blank template README names `validate` at first touch (#10322)', () =>
   });
 
   it('names one consistent package manager throughout — no bare npm mixed into a pnpm doc', () => {
-    // #10322 part 1: pick one and say it everywhere. The blank template
+    // The package-manager half of commit 8d21f7a76: pick one and say it everywhere. The blank template
     // already used pnpm consistently; this pin keeps it that way. Excludes
     // the `engines.pnpm` prose about pnpm-version floors living in
     // template-consistency.test.ts, and non-pm words like "npm" never occur

@@ -10,12 +10,14 @@ import type {
   ShareLinkAudience,
 } from '@objectstack/spec/contracts';
 /**
- * [#6206 / #6430 — maintainer ruling A] Every method here that adjudicates
+ * [commit 8e13ca876 / #6430 — maintainer ruling A] Every method here that adjudicates
  * access takes the FULL envelope. The route-local `ShareLinkExecutionContext`
  * is the HTTP layer's 401 vocabulary and is deliberately not named in this
  * file: the contexts this file receives are forwarded into `engine.find`, where
  * `accessible_org_ids` (ADR-0105 D2), `posture` (ADR-0095 D2), `org_user_ids`,
- * `systemPermissions` and `tabPermissions` are all read.
+ * `systemPermissions` and `tabPermissions` are all read. One read is exempt by
+ * ruling: the caller's OWN share-link list, which ADR-0111 rules self-scoped
+ * and `listLinks` reads under the system context (see `isLinkCreator`).
  */
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Expression } from '@objectstack/spec';
@@ -31,7 +33,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 // published from the lean `./core` entry, so there is no structural reason to
 // keep a copy. `declared-fields.ts`'s doc comment is the canonical statement of
 // the rule; this seam defers to it instead of restating it.
-import { materializeDeclaredFields } from '@objectstack/objectql/core';
+import { materializeDeclaredFields, readInternalColumn } from '@objectstack/objectql/core';
 // [#14935] The ONE reading of `publicSharing.enabled`, imported from the
 // package that DECLARES the key rather than spelled out again here. This file
 // exported its own copy (#14637) and `@objectstack/runtime` kept a documented
@@ -62,10 +64,35 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 const SHARE_LINK_SWEEP_SUBJECT = {
   table: 'sys_share_link',
   noun: 'share-link',
-  issue: '#5190',
+  issue: 'a share link is a bearer token, so a reused record id must not inherit it',
 } as const;
 
 /** URL-safe alphabet (RFC 4648 base64url minus padding). 64 symbols. */
+/**
+ * [#21197] Read one of `sys_share_link`'s two `internal: true` columns
+ * (`token`, `password_hash`) for rows the engine handed back — one value per
+ * row, in the rows' order (`null` where the column is unset).
+ *
+ * Both columns are declared `internal`, so every `engine.find` in this plugin,
+ * system context included, returns rows WITHOUT them. This plugin's own routes
+ * still need them: redemption verifies a password against the stored hash, and
+ * the creator's link list hands back each token so the console can build the
+ * URL. The dereference is objectql's one `readInternalColumn` — stripped
+ * versus unset decided by the engine's registered declaration, recovery
+ * through the privileged accessor, and FAIL-CLOSED where the strip ran and the
+ * value cannot be recovered (for `password_hash`, "unset" would mean "no
+ * password"). Named here so the routes and the service read the two columns
+ * one way; the runtime's dispatcher twin of the redemption probe calls the
+ * same objectql helper.
+ */
+export function readShareLinkInternalColumn(
+  engine: Pick<SharingEngine, 'resolveInternalField' | 'getSchema'>,
+  rows: readonly Record<string, unknown>[],
+  field: 'token' | 'password_hash',
+): Promise<unknown[]> {
+  return readInternalColumn(engine, 'sys_share_link', rows, field);
+}
+
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
 /** ~144 bits of entropy at 24 chars — well above the OWASP recommendation. */
@@ -259,7 +286,7 @@ async function defaultVerifyPassword(password: string, hash: string): Promise<bo
  * verdict is about THIS record (it does not qualify yet), while an unevaluable
  * predicate is broken for every record of the object until its author fixes it.
  *
- * ## [#13608] Both seams call THIS function
+ * ## [commit fc9ba76a5] Both seams call THIS function
  *
  * `createLink` calls it to refuse the MINT; `resolveToken` calls it again
  * before SERVING, through `stillEligible`. One implementation, so the two
@@ -344,6 +371,29 @@ function makeError(status: number, code: string, message: string): Error {
   return err;
 }
 
+/**
+ * [#21328] THE creator rule — "the caller created this link" — and the only
+ * place it is written. Two methods ask it and both read this one predicate:
+ * `revokeLink` (the creator may revoke their own link) and `listLinks` (is
+ * this the caller's own list, and which rows are theirs). One predicate, so
+ * the authority to revoke a link and the right to see it in your own list
+ * cannot drift apart.
+ *
+ * Keyed on the caller's OWN user identity, and only on a non-empty one. A
+ * context with no user identity is the creator of nothing: compared bare,
+ * `undefined === undefined` would make every row whose `created_by` a driver
+ * omitted "theirs", and `'' === ''` every row minted under an empty identity.
+ * The system bypass is deliberately not part of the rule — it is a different
+ * authority, and each caller states it beside this check.
+ */
+function isLinkCreator(
+  row: { created_by?: unknown } | null | undefined,
+  context: ExecutionContext,
+): boolean {
+  const caller = context.userId;
+  return typeof caller === 'string' && caller.length > 0 && row?.created_by === caller;
+}
+
 export interface ShareLinkServiceOptions {
   engine: SharingEngine;
   /** Override the default SHA-256 hasher with argon2 / bcrypt for production. */
@@ -372,11 +422,32 @@ export interface ShareLinkServiceOptions {
    * creator. Absent → only the creator (and system) may revoke, the pre-D8
    * behaviour, so a deployment without the sharing service degrades safely.
    *
-   * [#6206] An ENFORCEMENT probe — it decides a 403, and resolves ownership /
+   * [commit 8e13ca876] An ENFORCEMENT probe — it decides a 403, and resolves ownership /
    * hierarchy scope under the context it is given — so it receives the caller's
    * COMPLETE envelope, exactly like the visibility read in `createLink`.
    */
   canManageShares?: (
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ) => Promise<boolean>;
+  /**
+   * [ADR-0111 D8 rule 1 — ruling 5950188467, A′] Late-bound mint-authority
+   * probe (the sharing service's `canMintWithoutVisibility`): may the caller
+   * mint on a record their visibility read refused, because they are its
+   * OWNER or hold the explicit Modify-All bypass? `createLink` asks it only
+   * after that read refused. It answers with `canManageShares`' own owner and
+   * bypass branches and never with its hierarchy-depth branch. It is withheld
+   * where an organization wall is in force, and it answers `false` when the
+   * refusal was the object's capability AND-gate (`requiredPermissions`,
+   * ADR-0066 D3), which is a hard stop the alternatives do not pass.
+   *
+   * Absent → visibility alone admits (the pre-A′ rule), so a deployment
+   * without the sharing service never widens who may mint. A throwing probe
+   * is a refusal. It receives the caller's COMPLETE envelope, like every
+   * enforcement probe here.
+   */
+  canMintWithoutVisibility?: (
     object: string,
     recordId: string,
     context: ExecutionContext,
@@ -424,6 +495,7 @@ export class ShareLinkService implements IShareLinkService {
     recordId: string,
     context: ExecutionContext,
   ) => Promise<boolean>;
+  private readonly canMintWithoutVisibility?: ShareLinkServiceOptions['canMintWithoutVisibility'];
   private readonly logger?: ShareLinkServiceOptions['logger'];
   /**
    * [#12981] Latched by the FIRST refused usage stamp on this instance and
@@ -438,6 +510,7 @@ export class ShareLinkService implements IShareLinkService {
     this.hashPassword = opts.hashPassword ?? defaultHashPassword;
     this.verifyPassword = opts.verifyPassword ?? defaultVerifyPassword;
     this.canManageShares = opts.canManageShares;
+    this.canMintWithoutVisibility = opts.canMintWithoutVisibility;
     this.logger = opts.logger;
   }
 
@@ -451,11 +524,13 @@ export class ShareLinkService implements IShareLinkService {
     const schema = this.engine.getSchema?.(input.object);
     const policy = getPolicy(schema);
 
-    // [ADR-0111 D8] Mint authority = the object's `publicSharing` opt-in (this
-    // check) AND the caller's visibility of the record (the RLS-scoped read
-    // below). An object that opts into publicSharing deliberately delegates
-    // re-share power to anyone who can SEE the record — a stated decision, not
-    // an accident. Objects that do not opt in cannot be link-shared at all.
+    // [ADR-0111 D8 rule 1] Mint authority = the object's `publicSharing` opt-in
+    // (this check, FIRST) AND — after the request-shape checks below — the
+    // caller's authority over the record: visibility (the RLS-scoped read), or
+    // the record owner, or an explicit Modify-All bypass (ruling 5950188467,
+    // A′). An object that opts into publicSharing deliberately delegates
+    // re-share power to anyone who can SEE the record. Objects that do not opt
+    // in cannot be link-shared at all, by their owner included.
     if (!policy.enabled && !this.permissive && !context.isSystem) {
       throw makeError(
         422,
@@ -487,13 +562,14 @@ export class ShareLinkService implements IShareLinkService {
     }
 
     // Confirm the target record exists AND — for an HTTP caller — that the
-    // caller may actually SEE it. [Finding-2] Reading under the caller's own
-    // context (positions/permissions/RLS) means you can only mint a link for a
-    // record you can access; a client can no longer share arbitrary rows of a
-    // publicSharing-enabled object it cannot see. Internal (isSystem) callers
+    // caller holds authority over it. [Finding-2] Reading under the caller's
+    // own context (positions/permissions/RLS) means a client can no longer
+    // share arbitrary rows of a publicSharing-enabled object it cannot see;
+    // the only callers who mint past a refused read are the record's owner and
+    // an explicit Modify-All holder (A′, below). Internal (isSystem) callers
     // read under the system context as before.
     //
-    // [#6206] `context` is passed through UNCHANGED — it is the caller's whole
+    // [commit 8e13ca876] `context` is passed through UNCHANGED — it is the caller's whole
     // resolved envelope and every dimension of it is an input to this read:
     // Layer 0 reads `accessible_org_ids` under the `group` posture (ADR-0105
     // D2, where an absent set denies), Layer 1 reads positions / permissions /
@@ -506,32 +582,67 @@ export class ShareLinkService implements IShareLinkService {
     // a second query being issued, and it widens ONLY then, so an object
     // without the key keeps the exact `id`-only read it always had.
     const eligibility = policy.enabled ? policy.eligibility : undefined;
-    const exists = await this.engine.find(input.object, {
-      where: { id: input.recordId },
-      ...(eligibility ? {} : { fields: ['id'] }),
-      limit: 1,
-      context: context.isSystem ? SYSTEM_CTX : context,
-    } as any);
-    if (!Array.isArray(exists) || exists.length === 0) {
+    const readRecord = async (readContext: ExecutionContext | typeof SYSTEM_CTX) => {
+      const rows = await this.engine.find(input.object, {
+        where: { id: input.recordId },
+        ...(eligibility ? {} : { fields: ['id'] }),
+        limit: 1,
+        context: readContext,
+      } as any);
+      return Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+    };
+
+    // Visibility first. A refusal the read THROWS (the CRUD gate's, on an
+    // object the caller holds no read grant on) is kept, not swallowed: it is
+    // re-thrown below unless an alternative admits, so a caller refused before
+    // A′ is refused with the same envelope after it.
+    let record: Record<string, unknown> | undefined;
+    let visibilityRefusal: unknown;
+    try {
+      record = await readRecord(context.isSystem ? SYSTEM_CTX : context);
+    } catch (err) {
+      visibilityRefusal = err;
+    }
+
+    // [ruling 5950188467, A′] The owner and Modify-All alternatives, asked only
+    // once visibility has refused. The probe is the sharing service's
+    // `canMintWithoutVisibility`: `canManageShares`' owner and bypass branches
+    // WITHOUT its hierarchy-depth branch — a hierarchy manager still needs
+    // visibility to mint — withheld under an organization wall, and never past
+    // a capability the object requires (ADR-0066 D3): when the read was refused
+    // for a missing `requiredPermissions` capability, the probe answers `false`
+    // and that refusal is re-thrown as it came. Admitted, the record is read
+    // under the system context: the caller's authority is established, and the
+    // eligibility gate below must judge the row the anonymous holder will be
+    // served (`resolveToken` reads it the same way).
+    //
+    // A system caller reaches the probe only when its own system-context read
+    // found nothing or failed, and the probe grants it nothing it lacks: it
+    // admits only on a row it re-reads under that same system context. So a
+    // missing record still answers a system caller 404, and a failing read
+    // still fails.
+    if (!record && this.canMintWithoutVisibility) {
+      const admitted = await this.canMintWithoutVisibility(input.object, input.recordId, context)
+        .catch(() => false);
+      if (admitted) record = await readRecord(SYSTEM_CTX);
+    }
+
+    if (!record) {
+      if (visibilityRefusal !== undefined) throw visibilityRefusal;
       // Don't distinguish "missing" from "not visible" for an untrusted caller.
       throw context.isSystem
         ? makeError(404, 'RECORD_NOT_FOUND', `${input.object}/${input.recordId} does not exist`)
         : makeError(403, 'FORBIDDEN', `Not permitted to share ${input.object}/${input.recordId}`);
     }
 
-    // [#7861] The declared eligibility gate. Placed AFTER the visibility read
-    // (it needs the record, and a caller who cannot see the row must not learn
-    // anything about its contents from the refusal) and BEFORE the insert, so
-    // an ineligible link is never MINTED — which is the only placement that
-    // helps, since `resolveToken` serves an existing row anonymously under
-    // `SYSTEM_CTX` with no auth check to fall back on.
+    // [#7861] The declared eligibility gate. Placed AFTER the authority check
+    // (it needs the record, and a caller with no authority over the row must
+    // not learn anything about its contents from the refusal) and BEFORE the
+    // insert, so an ineligible link is never MINTED — which is the only
+    // placement that helps, since `resolveToken` serves an existing row
+    // anonymously under `SYSTEM_CTX` with no auth check to fall back on.
     if (eligibility) {
-      assertEligible(
-        eligibility,
-        (exists[0] ?? {}) as Record<string, unknown>,
-        schema,
-        input.object,
-      );
+      assertEligible(eligibility, record, schema, input.object);
     }
 
     const maxDays = policy.maxExpiryDays ?? DEFAULT_MAX_EXPIRY_DAYS;
@@ -587,7 +698,10 @@ export class ShareLinkService implements IShareLinkService {
     //     Modify-All admin): a link someone else minted on your record is your
     //     record's exposure to kill, not only its creator's. Probed via the
     //     late-bound sharing service; absent → creator-only (pre-D8 behaviour).
-    let permitted = context.isSystem === true || row.created_by === context.userId;
+    //
+    // [#21328] The creator half is `isLinkCreator` — the same rule
+    // `listLinks` reads to decide which links are the caller's own.
+    let permitted = context.isSystem === true || isLinkCreator(row, context);
     if (!permitted && this.canManageShares && row.object_name && row.record_id) {
       permitted = await this.canManageShares(String(row.object_name), String(row.record_id), context)
         .catch(() => false);
@@ -607,19 +721,62 @@ export class ShareLinkService implements IShareLinkService {
     filter: ListShareLinksFilter,
     context: ExecutionContext,
   ): Promise<ShareLink[]> {
+    // [#21328] ADR-0111's surface table rules this list SELF-SCOPED: a caller
+    // lists the links they created. Both doors (`share-link-routes.ts` and the
+    // runtime's `/share-links` domain) force `createdBy` to the caller for
+    // exactly that reason — but the read below ran under the caller's context,
+    // so it also demanded an object-level grant on `sys_share_link` that the
+    // platform's member baseline does not carry. Every plain member's list was
+    // refused, on every object, and the console's Share dialog (which loads
+    // this list on open) failed for all of them, while an admin's answered.
+    //
+    // So the caller's OWN list is read under the system context, and only it.
+    // The elevation fires when the creator filter IS the caller, by the creator
+    // rule — which already refuses a context with no user identity, so an
+    // identity-less caller never takes this path. Every other shape keeps
+    // today's read under the caller's context: no creator filter, a foreign
+    // creator, an empty or absent identity, and an admin listing someone
+    // else's links. A system caller keeps its own bypass, as before; asking
+    // for its own links returns the same rows either way.
+    //
+    // Two things keep the system read narrow, and neither trusts the filter
+    // value: the `created_by` constraint is the caller's identity, written
+    // server-side, and every row it returns must pass `isLinkCreator` before it
+    // leaves — the same predicate `revokeLink` grants a creator's revoke with.
+    // The projection is the one this method has always returned: the engine
+    // strips both `internal` columns under any context, the token comes back
+    // through the privileged accessor below, and the password hash never does.
+    const selfScoped = isLinkCreator({ created_by: filter.createdBy }, context);
+
     const where: Record<string, unknown> = {};
     if (filter.object) where.object_name = filter.object;
     if (filter.recordId) where.record_id = filter.recordId;
-    if (filter.createdBy) where.created_by = filter.createdBy;
+    if (selfScoped) where.created_by = context.userId;
+    else if (filter.createdBy) where.created_by = filter.createdBy;
     if (!filter.includeRevoked) where.revoked_at = null;
 
     const rows = await this.engine.find('sys_share_link', {
       where,
       limit: 200,
       orderBy: [{ field: 'created_at', order: 'desc' }],
-      context: context.isSystem ? SYSTEM_CTX : context,
+      context: context.isSystem || selfScoped ? SYSTEM_CTX : context,
     } as any);
-    return Array.isArray(rows) ? (rows as ShareLink[]) : [];
+    const found = Array.isArray(rows) ? (rows as ShareLink[]) : [];
+    const links = selfScoped ? found.filter((link) => isLinkCreator(link, context)) : found;
+    // [#21197] The caller's own links (the route forces `createdBy` to the
+    // caller), and the console builds and copies each link's URL from its
+    // token — so the tokens come back through the privileged accessor. The
+    // hash does NOT: no list consumer verifies a password, and the console
+    // types the row without it.
+    const tokens = await readShareLinkInternalColumn(
+      this.engine,
+      links as unknown as Record<string, unknown>[],
+      'token',
+    );
+    links.forEach((link, i) => {
+      if (typeof tokens[i] === 'string') link.token = tokens[i] as string;
+    });
+    return links;
   }
 
   async resolveToken(
@@ -635,6 +792,12 @@ export class ShareLinkService implements IShareLinkService {
     } as any);
     const row = Array.isArray(rows) ? (rows[0] as ShareLink | undefined) : undefined;
     if (!row) return null;
+    // [#21197] `token` is `internal`, so the row comes back without it. The
+    // holder PRESENTED it and the lookup matched on it, so it is echoed back
+    // rather than re-read: the redemption route answers it to the holder, and
+    // the console's shared page addresses the link's companion routes by it.
+    const asStored = row as unknown as Record<string, unknown>;
+    if (!('token' in asStored)) asStored.token = token;
 
     if (row.revoked_at) return null;
     if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
@@ -647,13 +810,23 @@ export class ShareLinkService implements IShareLinkService {
       if (!supplied || !allow.includes(supplied)) return null;
     }
 
-    if (row.password_hash) {
+    // [#21197] `password_hash` is `internal`, so the row comes back without
+    // it, and reading `row.password_hash` would read EVERY link as
+    // unprotected. Recovered through the privileged accessor (fail-closed:
+    // see `readShareLinkInternalColumn`) into a local, never onto the row —
+    // the returned link carries no hash.
+    const [passwordHash] = await readShareLinkInternalColumn(
+      this.engine,
+      [row as unknown as Record<string, unknown>],
+      'password_hash',
+    );
+    if (passwordHash) {
       if (!probe.providedPassword) return null;
-      const ok = await this.verifyPassword(probe.providedPassword, row.password_hash);
+      const ok = await this.verifyPassword(probe.providedPassword, String(passwordHash));
       if (!ok) return null;
     }
 
-    // [#13608] The object's policy is read HERE, before the record probe,
+    // [commit fc9ba76a5] The object's policy is read HERE, before the record probe,
     // because it decides that probe's projection. `redactFields` is still
     // computed from it below, unchanged.
     const schema = this.engine.getSchema?.(row.object_name);
@@ -674,7 +847,7 @@ export class ShareLinkService implements IShareLinkService {
     // serving the record in full after the block was turned off. The
     // maintainer ruled (2026-09-01, on #14033) that the switch is a standing
     // policy: re-read on every redemption, a block that is off stops every
-    // existing token on it — retroactively, on deploy, as #13608 was — and
+    // existing token on it — retroactively, on deploy, as commit fc9ba76a5 was — and
     // re-enabling the block restores them. Not a revocation: no row moves.
     //
     // ## What the gate does NOT ask
@@ -738,7 +911,7 @@ export class ShareLinkService implements IShareLinkService {
     // no query) and BEFORE the usage stamp, so a dead record never bumps
     // `use_count` / `last_used_at` either.
     //
-    // [#13608] It is ONE read either way: when the object declares an
+    // [commit fc9ba76a5] It is ONE read either way: when the object declares an
     // eligibility predicate the projection widens from `['id']` to the whole
     // row instead of a second query being issued — the same shape, for the
     // same reason, as the widening in `createLink`.
@@ -749,7 +922,7 @@ export class ShareLinkService implements IShareLinkService {
     );
     if (!record) return null;
 
-    // [#13608] Re-evaluate `publicSharing.eligibility` BEFORE serving.
+    // [commit fc9ba76a5] Re-evaluate `publicSharing.eligibility` BEFORE serving.
     //
     // ## Why a mint-time gate was not enough
     //
@@ -838,7 +1011,7 @@ export class ShareLinkService implements IShareLinkService {
    * other request under flapping storage, i.e. the per-request flood again.
    * Later refusals are silent BY DESIGN, and the one line says so.
    *
-   * ## The sink, and why `error` is reachable here (#13398 class ruling)
+   * ## The sink, and why `error` is reachable here (published-sink level ruling, commit 953a81f4a)
    *
    * `ShareLinkServiceOptions['logger']` is the `{ info?, warn, error? }` shape
    * — `error` optional, `warn` required and guaranteed (#9754 / #10556) — the
@@ -871,7 +1044,7 @@ export class ShareLinkService implements IShareLinkService {
   }
 
   /**
-   * [#5190 / #13608] Read the shared record at redemption time: the existence
+   * [#5190 / commit fc9ba76a5] Read the shared record at redemption time: the existence
    * probe, and — when the object declares an eligibility predicate — the row
    * that predicate is judged on. `null` means "do not serve".
    *
@@ -887,7 +1060,7 @@ export class ShareLinkService implements IShareLinkService {
    * fails — and for the same principle. Neither acts on an unanswered question;
    * for a grant the safe direction is "deny", for a deletion it is "keep".
    *
-   * [#13608] `withRecord` widens the projection from `['id']` to the whole row
+   * [commit fc9ba76a5] `withRecord` widens the projection from `['id']` to the whole row
    * rather than issuing a second query, and it widens ONLY when a predicate is
    * there to read it: an object with no `eligibility` key keeps the exact
    * `id`-only probe it has always had.
@@ -913,7 +1086,7 @@ export class ShareLinkService implements IShareLinkService {
   }
 
   /**
-   * [#13608] The redemption half of the eligibility gate.
+   * [commit fc9ba76a5] The redemption half of the eligibility gate.
    *
    * ## It is the MINT gate, called again
    *

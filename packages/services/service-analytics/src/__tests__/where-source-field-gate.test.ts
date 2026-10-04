@@ -336,12 +336,12 @@ describe('#5669 — the gate: a `where` over a missing field is a 400, not a dri
             name: 'account_cube',
             title: 'Accounts',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                industry: { name: 'industry', label: 'Industry', type: 'string', sql: 'industry' },
-                legacy: { name: 'legacy', label: 'Legacy', type: 'string', sql: 'dropped_column' },
+                industry: { label: 'Industry', type: 'string', sql: 'industry' },
+                legacy: { label: 'Legacy', type: 'string', sql: 'dropped_column' },
             },
-            public: false,
+            public: true,
         };
         const { service, aggregated } = makeService({ cubes: [authored] });
 
@@ -440,9 +440,9 @@ describe('#5669 — the dataset face: refused before SQL exists, so nothing can 
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived], native: true });
 
@@ -510,11 +510,11 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'renamed_cube',
             title: 'Renamed',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
+                assessed: { label: 'Assessed', type: 'time', sql: 'assessed_at' },
             },
-            public: false,
+            public: true,
         };
         const { service, aggregated, filters } = makeService({ cubes: [authored] });
 
@@ -538,11 +538,11 @@ describe('#5669 — what the gate must NOT do', () => {
             title: 'Measures',
             sql: 'crm_account',
             measures: {
-                count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-                revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'annual_revenue' },
+                count: { label: 'Count', type: 'count', sql: '*' },
+                revenue: { label: 'Revenue', type: 'sum', sql: 'annual_revenue' },
             },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service, aggregated, filters } = makeService({ cubes: [authored] });
 
@@ -569,9 +569,9 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM crm_account WHERE active = 1',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived] });
 
@@ -602,9 +602,9 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'joined_cube',
             title: 'Joined',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [joined] });
 
@@ -622,36 +622,43 @@ describe('#5669 — what the gate must NOT do', () => {
         expect(settled.param).toBe('where');
     });
 
-    it('reads a NESTED relation filter as the same dotted member the strategies do', async () => {
-        // `{owner: {region: 'NA'}}` is the object spelling of the same traversal —
-        // `fieldLeaves` flattens it to the member `owner.region`, so reading the
-        // TREE (rather than the raw top-level keys) is what keeps the two
-        // spellings judged alike. A gate over raw keys would have judged `owner`,
-        // a field the object does not have, and 400'd a legal relation filter;
-        // measured here, both spellings reach ObjectQL's identical cross-object
-        // decline instead.
+    it('judges a NESTED relation filter by its relation field, a column of the object — and hands it to the engine as written', async () => {
+        // [#20887] REPLACED. This case used to read `{owner: {region: 'NA'}}` as
+        // the dotted member `owner.region` (the door flattened it), so the gate
+        // stood down and the query reached ObjectQL's cross-object decline, exactly
+        // like the dotted spelling above; it argued that judging the raw key
+        // `owner` would 400 "a legal relation filter". The nested form is the
+        // ENGINE's now — served in `where` by reading the related object as the
+        // caller, capped (#20802's ruling) — and in that form `owner` IS what is
+        // judged: it names a relation field OF THE QUERIED OBJECT (the ruling's
+        // words). So the gate reads the member `owner`, and it is legal exactly
+        // when the object declares it.
         const joined: Cube = {
             name: 'joined_cube',
             title: 'Joined',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
-        const { service } = makeService({ cubes: [joined] });
+        const where = { owner: { region: 'NA' } };
 
+        // Declared: the query reaches the engine with the condition as written.
+        const declared = makeService({ cubes: [joined], fields: [...ACCOUNT_FIELDS, 'owner'] });
+        expect(await settle(declared.service.query({ cube: 'joined_cube', measures: ['count'], where } as any))).toEqual({});
+        expect(declared.filters).toHaveLength(1);
+        expect(JSON.stringify(declared.filters[0])).toContain('{"owner":{"region":"NA"}}');
+        expect(JSON.stringify(declared.filters[0])).not.toContain('owner.region');
+
+        // Not declared: refused in this gate's envelope, naming the relation field.
+        const undeclared = makeService({ cubes: [joined] });
         const settled = await settle(
-            service.query({ cube: 'joined_cube', measures: ['count'], where: { owner: { region: 'NA' } } } as any),
+            undeclared.service.query({ cube: 'joined_cube', measures: ['count'], where } as any),
         );
-
-        // [#5716] Same substitution as the case above: `code !== 'INVALID_FIELD'`
-        // no longer separates the two producers, `field` does.
-        expect(settled.message).toMatch(/cross-object filter \("owner\.region"\)/);
-        expect(settled.message).not.toMatch(/constrains field 'owner'/);
-        expect(settled.field).toBeUndefined();
-        // Both spellings reach the SAME refusal, envelope included — which is the
-        // invariant this case is really about.
-        expect(settled.member).toBe('owner.region');
+        expect(settled.code).toBe('INVALID_FIELD');
+        expect(settled.field).toBe('owner');
+        expect(settled.message).toMatch(/constrains field 'owner'/);
+        expect(undeclared.filters).toEqual([]);
     });
 
     it('stands down for a dotted member on the INFERENCE path, exactly as the shipped dimension gate does', async () => {
@@ -698,16 +705,15 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'computed_cube',
             title: 'Computed',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
                 bucket: {
-                    name: 'bucket',
                     label: 'Bucket',
                     type: 'string',
                     sql: "CASE WHEN annual_revenue > 0 THEN 'yes' ELSE 'no' END",
                 },
             },
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [computed] });
 

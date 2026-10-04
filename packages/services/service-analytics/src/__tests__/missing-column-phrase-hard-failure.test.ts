@@ -95,7 +95,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { AnalyticsService } from '../analytics-service.js';
 
-const EMPTY = { rows: [], fields: [], totals: [] };
+/** The degraded answer: no rows — and, like every dataset answer, its base object (#20644). */
+const EMPTY = { rows: [], fields: [], totals: [], object: 'opportunity' };
 
 const dataset = DatasetSchema.parse({
   name: 'sales',
@@ -165,9 +166,11 @@ const CORPUS: Array<[row: string, wording: string, outcome: Outcome]> = [
   ['09 rest unknown object', "Object 'ghost' is not registered", 'topology'],
   [
     '10 analytics CUBE_NOT_FOUND (#3867)',
-    "Cube 'ghost' not found: no cube is registered under that name, and it is not a " +
-      'registered object either (a cube can only be auto-inferred from a registered object). ' +
-      "Define a Cube in your stack, or check the object name.",
+    "Cube 'ghost' not found: the analytics API exposes no cube under that name, and it is not a " +
+      'registered object either (a cube can only be auto-inferred from a registered object). A cube ' +
+      'declared `public: false` is hidden from the analytics API and answers exactly like a missing one. ' +
+      'Define a Cube in your stack, check the object name, or remove `public: false` from the cube to ' +
+      'expose it.',
     'empty',
   ],
   [

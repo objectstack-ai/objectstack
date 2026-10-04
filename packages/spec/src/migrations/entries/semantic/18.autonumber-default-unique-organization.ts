@@ -24,9 +24,10 @@ export const entry: SemanticMigration = {
     + 'conflicting key groups with row counts, and `os migrate plan` reports the blocked '
     + '`create_index` with the same groups (ADR-0120 D4) — but which of the duplicate rows keeps '
     + 'the number is a business decision no migration entry can make. Maintainer ruling '
-    + '2026-08-31 (hotcrm#1301): an auto-number that may repeat is not an identifier, so unique '
-    + 'is the platform default and opting out is the declaration, not the other way round '
-    + '(#13894).',
+    + '2026-08-31, on a downstream CRM\'s measurement that eight of its nine auto-numbered '
+    + 'business identifiers could be issued twice: an auto-number that may repeat is not an '
+    + 'identifier, so unique is the platform default and opting out is the declaration, not '
+    + 'the other way round.',
   acceptanceCriteria:
     'Every `autonumber` field without an authored `unique` parses to `unique: \'organization\'` '
     + '(`FieldSchema.parse({ type: \'autonumber\' }).unique === \'organization\'`, and through '

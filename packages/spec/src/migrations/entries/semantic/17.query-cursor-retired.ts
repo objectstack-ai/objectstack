@@ -17,7 +17,7 @@ export const entry: SemanticMigration = {
     + 'reserved REST parameter set; a first-class cursor, if ever designed, will be a '
     + 'response-minted opaque token — a different API, so keeping this one preserved a '
     + 'wrong design rather than a roadmap. A REQUEST surface, never stored; nothing to '
-    + 'rewrite. ADR-0049 / ADR-0078, #4286.',
+    + 'rewrite. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No caller sends `cursor` and no SDK call site uses `QueryBuilder.cursor()`; deep '
     + 'pagination expresses the keyset as a `where` predicate on the sort key. A query '

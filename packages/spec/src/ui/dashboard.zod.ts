@@ -10,7 +10,7 @@ import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { DateGranularity } from '../data/query.zod';
 import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
-import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
+import { ChartTypeSchema, ChartConfigSchema, type ChartType } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
@@ -214,16 +214,48 @@ const WIDGET_HISTORY =
   + 'shipping inert metadata; a stale or mis-layered key is now a loud parse error.';
 
 /**
- * Widget `options` — the renderer-extras escape hatch, with the keys that
- * reach the ANALYTICS QUERY declared explicitly (framework#3588).
+ * Widget `options` — an open bag, with the keys that reach the ANALYTICS QUERY
+ * declared explicitly (framework#3588).
  *
- * The bag stays open (`passthrough`): presentation-only settings the renderer
- * understands — `icon`, `trend`, `columns`, `striped`, `density`, … — are
- * carried through untouched and are none of the spec's business. What the
- * declared keys below buy is a real contract for the four that are NOT
- * presentation-only: they change the SQL the dataset query compiles to, so a
- * typo (`sortDirection`, `granularity`) is now an author-time type error
- * instead of an option that reads as if it works and silently does nothing.
+ * The bag stays open (`passthrough`), but an undeclared key in it is NOT a
+ * renderer setting. `dataset` is required, so every widget renders through
+ * objectui's dataset-bound path (`DatasetWidget`), and that path is meant to
+ * read exactly the five keys declared below. Any other key parses and reaches
+ * no renderer. The #20960 census measured that at objectui `main` `5262f7dd`
+ * over every key this repo's examples wrote here (`format`, `currency`,
+ * `color`, `suffix`, `showLegend`, `horizontal`, `showDataLabels`): none is
+ * read on that path — only the legacy inline arm, which a widget carrying a
+ * `dataset` never reaches, spreads the bag into component props — so each was
+ * removed from its producer rather than declared.
+ *
+ * `description` — the metric sub-caption — is RETIRED, not left undeclared:
+ * no authored source ever wrote it, its only writer was `translateDashboard`'s
+ * overlay of a `subCaption` bundle entry, and ruling C on objectui#11389
+ * (reversing #5428 item 4) retired it at both ends, objectstack first
+ * (#21257). The overlay is gone, `subCaption` is a tombstone on the widget
+ * translation node (`system/translation.zod.ts`), and objectui#11389 drops the
+ * renderer's read. A widget keeps ONE authored description,
+ * `widget.description`, rendered as the card-header subtitle; a caption under a
+ * metric's value, if a named user ever needs one, returns as a declared
+ * widget-level key outside `options`, never as `options.description`.
+ *
+ * ⛔ A key is declared here only with both a writer and a read site on the
+ * dataset-bound path, and it then joins `CONSUMED_WIDGET_OPTION_KEYS` in
+ * `@objectstack/sdui-parser` (`check:widget-option-census`).
+ *
+ * Presentation has declared homes instead: a number's face is the dataset
+ * MEASURE's `format` + `currency`, a tile's accent is the widget's
+ * `colorVariant`, and a chart's look is the widget's `chartConfig`.
+ *
+ * What the declared keys below buy is a real contract for the four that are
+ * NOT presentation-only: they change the SQL the dataset query compiles to, so
+ * a wrong VALUE for one (`sortOrder: 'sideways'`) is an author-time type error
+ * and a parse error. A misspelled KEY is neither: the bag is open, so
+ * `sortDirection` or `granularity` compiles and parses like any other extra
+ * and changes nothing. What names it is the `unconsumed-widget-option`
+ * warning `os validate`, `os build` and `os lint` raise for a key the
+ * dataset-bound path does not read — a warning, so none of the three fails on
+ * it.
  *
  * The dashboard/report renderer lowers these into the `DatasetSelection` it
  * posts (`dateGranularity`, `order`, `limit`); see the field docs on
@@ -676,6 +708,248 @@ export function checkDashboardWidgetMetricMeasureArity(
 }
 
 /**
+ * The widget `type`s that DECLARE a rendering for several measures on a widget
+ * with NO dimension — the multi-measure set. One exported constant, and the only
+ * list of it anywhere: {@link checkDashboardWidgetChartMeasureArity}
+ * reads it, that check's refusal text reads it, the `values` doc string reads it,
+ * and objectui's `.shape` mirror is to import it rather than restate it.
+ *
+ * What each member renders when `dimensions` is empty or absent:
+ *
+ * | type | the several measures become |
+ * |---|---|
+ * | `table` | one row, one column per measure |
+ * | `pivot` | one row of measure columns |
+ * | `bar` / `column` / `horizontal-bar` | one bar per measure — the bar family's orientations |
+ * | `line` / `area` | one series per measure |
+ * | `combo` | one series per measure, mixed marks on shared axes |
+ *
+ * Every other member of `ChartTypeSchema` is outside the set, and a dimensionless
+ * widget of one of them carrying two or more measures is refused — by exactly
+ * one of two checks: the metric FAMILY (`SINGLE_MEASURE_WIDGET_TYPES` above) by
+ * {@link checkDashboardWidgetMetricMeasureArity}, which refuses a second measure
+ * at ANY dimensionality, and the remaining seven — `pie`, `donut`, `funnel`,
+ * `scatter`, `radar`, `treemap`, `sankey`, named here as a reading, never as a
+ * list any code consults — by the chart check's dimensionless arm. Those seven,
+ * with nothing to split by, drew `values[0]` and dropped the rest. Five of them
+ * also draw one series WITH a dimension, and that check refuses those at any
+ * dimensionality ({@link SINGLE_SERIES_CHART_TYPES}).
+ *
+ * Widening is free and is the direction this constant moves: a type that gains a
+ * DECLARED multi-measure rendering (a radar of measures, a funnel of measure
+ * stages) joins here with no migration, because a narrowing that is later
+ * relaxed costs an author nothing. ⛔ Never add a member to make a document
+ * parse — only when a renderer draws every measure.
+ *
+ * `satisfies readonly ChartType[]`, so a member that is not a declared widget
+ * type is a compile error rather than a silent no-op entry.
+ */
+export const DASHBOARD_WIDGET_MULTI_MEASURE_TYPES = [
+  'table',
+  'pivot',
+  'bar',
+  'column',
+  'horizontal-bar',
+  'line',
+  'area',
+  'combo',
+] as const satisfies readonly ChartType[];
+
+/**
+ * The chart `type`s that draw ONE series whatever the widget's `dimensions` —
+ * the single-series set. Module-private, like the metric family's list above,
+ * and the only list of it in this package:
+ * {@link checkDashboardWidgetChartMeasureArity} reads it, that check's refusal
+ * text reads it, and the `values` doc string reads it.
+ *
+ * Measured in objectui's shared chart renderer (`AdvancedChartImpl` in
+ * `@object-ui/plugin-charts`, at the `.objectui-sha` pin `89cad75d5570`): the
+ * `pie` / `donut`, `funnel`, `treemap` and `sankey` arms each bind
+ * `series[0]?.dataKey` and read no other series, so a widget of one of these
+ * types WITH a dimension draws its first measure per bucket and drops every
+ * other one, although the dataset widget hands each measure on as a series. The
+ * other two types the dimensionless arm refuses sit outside it: `radar` draws
+ * every series, and `scatter` refuses a second series out loud, on the chart.
+ *
+ * Every member is outside {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES} and the
+ * metric family, so on a DIMENSIONLESS widget the dimensionless arm already
+ * answers for it; this set decides only the widget that declares a dimension.
+ *
+ * Shrinking is free and is the direction this constant moves, the mirror of the
+ * multi-measure set's widening: a type whose renderer gains a declared rendering
+ * for several measures WITH a dimension leaves here with no migration. ⛔ Never
+ * remove a member to make a document parse — only when a renderer draws every
+ * measure.
+ */
+const SINGLE_SERIES_CHART_TYPES = [
+  'pie',
+  'donut',
+  'funnel',
+  'treemap',
+  'sankey',
+] as const satisfies readonly ChartType[];
+
+/**
+ * objectui#8894 ruling D, applied to the chart families — a chart widget
+ * declares two or more measures only on a type that renders them. One check,
+ * two arms:
+ *
+ *  - the DIMENSIONLESS arm: with no dimension, several measures only on a type
+ *    in {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES};
+ *  - the SINGLE-SERIES arm: on a type in {@link SINGLE_SERIES_CHART_TYPES}
+ *    (`pie` / `donut` / `funnel` / `treemap` / `sankey`), one measure whatever
+ *    the dimension.
+ *
+ * It was exported as `checkDashboardWidgetDimensionlessMeasureArity` until the
+ * second arm landed. That name said a widget WITH a dimension was outside the
+ * check, which stopped being true, and a name is the first thing a reader — or
+ * a mirror deciding which exports to chain — reasons from.
+ *
+ * ## What was wrong
+ *
+ * `values` is `z.array(z.string()).min(1)`, and outside the metric family it has
+ * no upper bound at all. With NO dimension, `pie`, `donut`, `funnel`, `scatter`,
+ * `radar`, `treemap` and `sankey` have one mark to draw and drew `values[0]`: the
+ * rest were selected, queried, and dropped on the floor by the renderer. Every
+ * door accepted the document. That is the declared≠delivered shape ADR-0049
+ * exists to end, and it is the case ruling D judged — 「协议不正确的应该先修改协议」:
+ * the protocol is fixed where it admits measures a widget type cannot render,
+ * rather than a display semantics being invented for `values[1..]`.
+ *
+ * A dimension does not rescue five of them. A `pie` with `dimensions: ['stage']`
+ * and `values: ['revenue', 'cost']` drew one slice per stage for `revenue` and no
+ * trace of `cost` (objectui#11417's rendered probe), because the renderer binds
+ * the first series on those arms ({@link SINGLE_SERIES_CHART_TYPES} carries the
+ * reading). Triage's ruling there extended this rule to the dimensioned arm for
+ * those five — the spec refuses, the renderer does not invent: a pie of several
+ * measures has zero measured pull.
+ *
+ * ## The rule, exactly
+ *
+ * Both arms first require that `values` carries two or more measures and that
+ * `type` is a declared `ChartTypeSchema` member outside the metric family — that
+ * family is refused by {@link checkDashboardWidgetMetricMeasureArity} already, at
+ * any dimensionality, and a second issue on the same `values` would change that
+ * existing refusal from one issue to two. Then:
+ *
+ *  1. **Dimensionless arm** — `dimensions` is absent or empty, and `type` is
+ *     outside {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES}. "Outside the metric
+ *     family and the multi-measure set" is computed from `ChartTypeSchema` and
+ *     the two sets, so no third list exists to drift.
+ *  2. **Single-series arm** — `dimensions` is declared and non-empty, and `type`
+ *     is in {@link SINGLE_SERIES_CHART_TYPES}.
+ *
+ * At most ONE `custom` issue at `values`, naming the widget's `id`, the count and
+ * the type. The arms are exclusive on `dimensions`, so a dimensionless `pie`
+ * keeps the dimensionless refusal word for word; the single-series refusal says
+ * the type draws one series whatever its `dimensions`. Both steer to the shapes
+ * that DO render several measures: `table`, a bar-family type, or one widget per
+ * measure.
+ *
+ * Same spelling as the metric check and for the same measured reason: an
+ * object-level check on the strict object, attached by identifier, not a
+ * per-`type` union arm — a union collapses every other diagnostic on this door
+ * into one bare `Invalid input` (the metric check's docblock carries the table).
+ *
+ * ## What this check deliberately does NOT reach
+ *
+ *  1. **`scatter` and `radar` WITH a dimension.** Two measures on either parse
+ *     exactly as before — `radar` draws every series, `scatter` says out loud
+ *     that it draws one, and the ruling named the five. Every member of
+ *     {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES} parses as before WITH a
+ *     dimension too.
+ *  2. **The EMPTY and the single `values`.** `values: []` keeps the field's own
+ *     `too_small`, and one measure is the legal document on every type.
+ *  3. **A widget that declares no `type`.** It resolves to `metric`, a family
+ *     member, so it is the metric check's to refuse, not this one's.
+ *  4. **A `type` outside `ChartTypeSchema`.** Through this schema's door zod
+ *     treats that `invalid_value` as aborting and the check never runs. For a
+ *     mirror that re-attaches this export onto a WIDER type enum (objectui adds
+ *     `list` / `custom` and its component widget types), condition 3 keeps the
+ *     export from judging types the spec does not declare: it refuses exactly what
+ *     the spec's door refuses, never more and never less.
+ *  5. **Whether the measures EXIST in the bound dataset.** A fact about the
+ *     dataset, unreachable from this schema.
+ *  6. **objectui's CLIENT-SIDE authoring door**, a `.shape` mirror that runs only
+ *     the checks it imports and chains: until it chains this export, its editor
+ *     keeps accepting a two-measure `pie`, with or without a dimension, and the
+ *     author meets the refusal at PUBLISH.
+ */
+export function checkDashboardWidgetChartMeasureArity(
+  widget: { id?: unknown; type?: unknown; dimensions?: unknown; values?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const values = widget.values;
+  // Not an array, empty, or one measure: the field's own `.min(1)` owns the
+  // first two verdicts and one measure is legal on every type. Non-coverage 2.
+  if (!Array.isArray(values) || values.length <= 1) return;
+
+  // `?? WIDGET_TYPE_DEFAULT` is UNREACHABLE through this schema's own door —
+  // zod applies `type`'s default before object-level checks. It is here for the
+  // mirror whose `type` carries no default, so the export never judges a
+  // typeless widget differently from the door it is exported from: the default
+  // is a metric-family member, which returns just below.
+  const type = widget.type ?? WIDGET_TYPE_DEFAULT;
+  if (typeof type !== 'string') return;
+  // The metric family is the sibling check's, at every dimensionality.
+  if ((SINGLE_MEASURE_WIDGET_TYPES as readonly string[]).includes(type)) return;
+  // A type the spec does not declare is not this export's to judge. Non-coverage 4.
+  if (!(ChartTypeSchema.options as readonly string[]).includes(type)) return;
+
+  const widgetName = typeof widget.id === 'string' && widget.id.length > 0
+    ? '`' + widget.id + '`'
+    : 'this widget';
+
+  // Arm 2, the single-series arm: a declared dimension. Through this door a
+  // non-array `dimensions` is the field's own `invalid_type` and the check never
+  // runs; called directly, anything but absent-or-empty counts as declared, since
+  // these types draw one series whatever the dimension is.
+  const dimensions = widget.dimensions;
+  if (dimensions !== undefined && !(Array.isArray(dimensions) && dimensions.length === 0)) {
+    if (!(SINGLE_SERIES_CHART_TYPES as readonly string[]).includes(type)) return;
+    const singleSeriesTypes = SINGLE_SERIES_CHART_TYPES.map((t) => '`' + t + '`').join(' / ');
+    ctx.addIssue({
+      code: 'custom',
+      path: ['values'],
+      message:
+        'Widget ' + widgetName + ' declares ' + values.length + ' measures on `type: '
+        + `'${type}'`
+        + '`, a single-series type (' + singleSeriesTypes + ') that draws ONE series whatever its '
+        + '`dimensions`: it binds `values[0]`, and every measure after it is queried and then '
+        + 'dropped on the floor by the renderer. '
+        + "Write `type: 'table'` for a column per measure, or a bar-family type (`bar` / `column` / "
+        + '`horizontal-bar`) for one bar per measure in each category — or keep `type: '
+        + `'${type}'`
+        + '` and give each measure its own widget, with its own `id` (and `layout`, if you pin '
+        + 'positions).',
+    });
+    return;
+  }
+
+  // Arm 1, the dimensionless arm: nothing to split by, so several measures only
+  // on a type that declares a rendering for them.
+  if ((DASHBOARD_WIDGET_MULTI_MEASURE_TYPES as readonly string[]).includes(type)) return;
+  const multiMeasureTypes = DASHBOARD_WIDGET_MULTI_MEASURE_TYPES.map((t) => '`' + t + '`').join(' / ');
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['values'],
+    message:
+      'Widget ' + widgetName + ' declares ' + values.length + ' measures with no `dimensions` on `type: '
+      + `'${type}'`
+      + "`, and that type declares no rendering for several measures without a dimension: with "
+      + 'nothing to split by it draws `values[0]`, and every measure after it is queried and then '
+      + 'dropped on the floor by the renderer. The types that DO render several measures on a '
+      + 'dimensionless widget are ' + multiMeasureTypes + '. '
+      + "Write `type: 'table'` for a row of measures, or a bar-family type (`bar` / `column` / "
+      + '`horizontal-bar`) for one bar per measure — or keep `type: '
+      + `'${type}'`
+      + '` and give each measure its own widget, with its own `id` (and `layout`, if you pin '
+      + 'positions).',
+  });
+}
+
+/**
  * The prescription each structural `chartConfig` key carries on a dashboard
  * widget. One builder rather than four literals, because all four refusals say
  * the same thing and differ only in the key and in where the intent belongs —
@@ -683,7 +957,7 @@ export function checkDashboardWidgetMetricMeasureArity(
  * class-wide, so one spelling is one thing to keep right.
  *
  * ⚠️ The version sentence names the **npm release** this ships in, never the
- * protocol major (ADR-0087, 「Amended 2026-09-13 (#18003) — the level half」):
+ * protocol major (ADR-0087, its 2026-09-13 amendment, 「the level half」):
  * the migration entries below are numbered at protocol 18 while
  * `@objectstack/spec` is on the 17.x line, and the two differ by construction
  * while the launch window holds.
@@ -1005,9 +1279,24 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * every measure after `values[0]` on the floor, so the second one is now a
    * parse error rather than a queried-and-discarded column
    * ({@link checkDashboardWidgetMetricMeasureArity}).
+   *
+   * With NO `dimensions`, two or more only on a type in
+   * {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES} — the types that render several
+   * measures with nothing to split by; every other chart type drew `values[0]`
+   * and dropped the rest. And on a SINGLE-SERIES type —
+   * {@link SINGLE_SERIES_CHART_TYPES}: `pie` / `donut` / `funnel` / `treemap` /
+   * `sankey` — exactly one WITH a dimension too, because those draw one series
+   * whatever the dimension ({@link checkDashboardWidgetChartMeasureArity}).
    */
   values: z.array(z.string()).min(1)
-    .describe('Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family)')
+    .describe(
+      'Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family '
+      + 'and on the single-series '
+      + SINGLE_SERIES_CHART_TYPES.join('/')
+      + '; with no dimensions, two or more only on '
+      + DASHBOARD_WIDGET_MULTI_MEASURE_TYPES.join('/')
+      + ')',
+    )
     .meta({ title: 'Values' }),
 
   /**
@@ -1162,7 +1451,14 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // objectui#8894 ruling D — the metric FAMILY takes exactly one measure. Same
   // idiom, same reason: `values`'s arity is decided by its sibling `type` one
   // level up, so the rule has to run where both keys are in scope.
-  .superRefine(checkDashboardWidgetMetricMeasureArity));
+  .superRefine(checkDashboardWidgetMetricMeasureArity)
+  // Ruling D's principle on the chart families — a dimensionless widget takes
+  // several measures only on a type in `DASHBOARD_WIDGET_MULTI_MEASURE_TYPES`,
+  // and a single-series type (`pie` / `donut` / `funnel` / `treemap` /
+  // `sankey`) takes one whatever its dimension. Three siblings decide it
+  // (`dimensions`, `values`, `type`), so it too runs at the object, attached by
+  // identifier.
+  .superRefine(checkDashboardWidgetChartMeasureArity));
 
 /**
  * Dashboard date-range presets — the named windows a dashboard date filter may

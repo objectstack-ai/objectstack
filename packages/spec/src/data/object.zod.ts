@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema } from './field.zod';
+import { FieldSchema, type FieldType } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -54,8 +54,8 @@ export const LEGACY_API_METHOD_GUIDANCE: Record<LegacyApiMethod, string> = {
   aggregate: "declare ['list'] — `aggregate` derives from list",
   history: "declare ['get'] with `enable.trackHistory: true` — `history` derives from get ∧ trackHistory",
   search: "declare ['list'] (with `searchable` not false) — `search` derives from list ∧ searchable",
-  restore: "delete the value — `restore` never derives (`enable.trash` retired, #2377); it returns only with a real recycle bin (#3146, parked)",
-  purge: "delete the value — `purge` never derives (`enable.trash` retired, #2377)",
+  restore: "delete the value — `restore` never derives (`enable.trash` was retired because no runtime ever read it); it returns only with a real recycle bin, and that soft-delete work is parked",
+  purge: "delete the value — `purge` never derives (`enable.trash` was retired because no runtime ever read it)",
   import: "declare ['create'] and/or ['update'] — `import` derives from create ∨ update (writeMode-precise at the gate)",
   export: "declare ['list'] — `export` derives from list",
 };
@@ -459,8 +459,8 @@ export const IndexSchema = lazySchema(() => strictObject({
       'does for `sys_metadata`).',
   },
 }, {
-  name: z.string().optional().describe('Index name (auto-generated if not provided)'),
-  fields: z.array(z.string()).describe('Fields included in the index'),
+  name: z.string().optional().describe('Index name (auto-generated if not provided)').meta({ title: 'Name' }),
+  fields: z.array(z.string()).describe('Fields included in the index').meta({ title: 'Fields' }),
   // Unique scope on a DECLARED index (ADR-0120 D1, amending #3696):
   //
   //   - `'global'` — the VERBATIM contract: materialized over exactly the
@@ -487,7 +487,7 @@ export const IndexSchema = lazySchema(() => strictObject({
   // `fields: ['organization_id', 'code']`" survives as valid legacy input,
   // but new code says `unique: 'organization'` — the hand-written composite
   // is NOT NULL-safe (#5030).
-  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
+  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'").meta({ title: 'Unique' }),
 
   // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
   // Kept LAST in the shape on purpose — see the #5606 note in the block
@@ -815,7 +815,7 @@ const lifecycleDuration = (what: string) =>
   z.string().regex(LIFECYCLE_DURATION_REGEX, `${what} must be a duration literal like '6h', '14d', '12w' or '7y'`);
 
 /**
- * [#10165] The `onlyWhen` row-filter value union, shared by
+ * [commit 801296050] The `onlyWhen` row-filter value union, shared by
  * `retention.onlyWhen` and `ttl.onlyWhen` — ONE shape on purpose: the two
  * blocks are mirrors (maintainer ruling 2026-08-20, option A: give `ttl` an
  * `onlyWhen` mirroring `retention`'s), and the runtime enforces them through
@@ -1002,8 +1002,8 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       message: `lifecycle.archive.after ('${lc.archive.after}') must equal retention.maxAge ('${lc.retention.maxAge}') — the hot window ends where the archive begins`,
     });
   }
-  // [#10527] The retention + ttl + archive triple — the alignment above, one
-  // policy wider. Since [#10347] the Archiver selects the rows it moves by the
+  // [commit 5649efbf9] The retention + ttl + archive triple — the alignment above, one
+  // policy wider. Since [commit 530c1df65] the Archiver selects the rows it moves by the
   // ttl cutoff (`ttl.field` older than `ttl.expireAfter`) whenever `ttl` is
   // declared, and by `created_at`/`archive.after` only when it is not — so on
   // this triple the age bound (`retention.maxAge`, pinned equal to
@@ -1033,20 +1033,20 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       message: 'lifecycle.retention.onlyWhen cannot be combined with archive — the Archiver moves rows by age alone and would archive rows the filter protects',
     });
   }
-  // [#10165] ttl.onlyWhen mirrors both of retention.onlyWhen's conflicts, from
+  // [commit 801296050] ttl.onlyWhen mirrors both of retention.onlyWhen's conflicts, from
   // the Reaper's actual semantics rather than by symmetry alone:
   // - rotation: the Rotator DROPs whole physical shards; a shard is dropped by
   //   age with no row read, so rows the filter protects go down with it.
   // - archive: `reapObject` returns into `archiveObject` before the ttl reap
   //   ever runs, so with `archive` declared the filter guards a code path that
-  //   is never executed (declared ≠ enforced). Since [#10347] the Archiver does
+  //   is never executed (declared ≠ enforced). Since [commit 530c1df65] the Archiver does
   //   apply the declared ttl window itself — it selects candidates by
   //   `ttl.field` past `ttl.expireAfter` instead of `created_at` past
   //   `archive.after` — but its candidate read is that cutoff and nothing else
   //   (`where: { [ttl.field]: { $lt: cutoff } }`, no `onlyWhen` spread the way
   //   `reap()` spreads it into its scope), so every due row is copied and
   //   hot-deleted whether or not the filter names it. That is the whole of what
-  //   [#10347] changed here: the WINDOW an author declares now carries over to
+  //   [commit 530c1df65] changed here: the WINDOW an author declares now carries over to
   //   the Archiver, the FILTER still does not — so the refusal stands, on a
   //   narrower reason than the "moves rows by age alone" this bullet used to
   //   give. Whether `onlyWhen` should become meaningful under `archive` (the
@@ -1159,16 +1159,16 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   key: z.string().regex(FIELD_GROUP_KEY_PATTERN, {
     message: 'Field group key must be lowercase snake_case (e.g., "contact_info", "billing", "system")',
-  }).describe('Group machine key (snake_case). Referenced by Field.group, and by a layout section\'s `group`.'),
+  }).describe('Group machine key (snake_case). Referenced by Field.group, and by a layout section\'s `group`.').meta({ title: 'Key' }),
 
   /** Human-readable label displayed as the group header. */
-  label: z.string().describe('Group display label'),
+  label: z.string().describe('Group display label').meta({ title: 'Label' }),
 
   /** Optional Lucide/Material icon name for the group header. */
-  icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header'),
+  icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header').meta({ title: 'Icon' }),
 
   /** Optional description / help text shown under the group header. */
-  description: z.string().optional().describe('Optional description shown under the group header'),
+  description: z.string().optional().describe('Optional description shown under the group header').meta({ title: 'Description' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -1185,7 +1185,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
     "Section visibility predicate (CEL) — the whole group (header included) is shown only when TRUE, else hidden (fail-closed). e.g. P`record.type == 'invoice'`",
-  ),
+  ).meta({ title: 'Visible When' }),
 
   /**
    * [ADR-0085] Collapse behaviour of the group's rendered section, on every
@@ -1196,18 +1196,18 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * keys the spec rejected).
    */
   collapse: z.enum(['none', 'expanded', 'collapsed']).optional().default('none')
-    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed)."),
+    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed).").meta({ title: 'Collapse' }),
 
   /**
    * @deprecated [ADR-0085 → `collapse`] Accepted as a parse-time alias:
    * `defaultExpanded: false` maps to `collapse: 'collapsed'`, `true` to
    * `'expanded'`, when `collapse` is absent. New metadata sets `collapse`.
    */
-  defaultExpanded: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'expanded', false → 'collapsed'."),
+  defaultExpanded: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'expanded', false → 'collapsed'.").meta({ title: 'Default Expanded' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsed`); mapped onto `collapse` at parse. */
-  collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum."),
+  collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum.").meta({ title: 'Collapsible' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsible`); mapped onto `collapse` at parse. */
-  collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum."),
+  collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum.").meta({ title: 'Collapsed' }),
 }));
 
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
@@ -1580,6 +1580,79 @@ function refuseForeignTreeReference(ownName: unknown, fields: unknown, ctx: z.Re
   }
 }
 
+/**
+ * The field types an object's `imageField` may name: the two whose stored
+ * value IS a picture. One list, read by the refusal below and spelled into its
+ * prescription, so the accepted set and the text that names it cannot drift.
+ */
+const IMAGE_FIELD_TYPES: readonly FieldType[] = ['image', 'avatar'];
+
+/**
+ * [#21182 — ruling A on objectstack-ai/hotcrm#1199] `imageField`, when
+ * present, must name a field THIS object declares whose type is `image` or
+ * `avatar`.
+ *
+ * Judged here for the reason {@link refuseForeignTreeReference} is: only the
+ * object holds the field map the pointer resolves against, and every authoring
+ * door parses through this schema — `defineStack({ objects })` binds it
+ * element-wise (`ObjectSchema.create()` runs the same parse), `os validate`
+ * parses the stack through `ObjectStackDefinitionSchema`, and the metadata
+ * save door resolves the `object` type to this schema
+ * (`getMetadataTypeSchema('object')`). So a bad pointer is refused loudly at
+ * authoring and at publish alike, and no reader of the key ever needs a
+ * tolerance for one (Prime Directive #12).
+ *
+ * Two refusals, each one located issue at `['imageField']`:
+ *
+ *  - the name is not a key of `fields` — a pointer into nothing;
+ *  - the name resolves, and the field is any type but `image` / `avatar` — a
+ *    `text` URL column or a `file` attachment is not a declared picture, and a
+ *    renderer that guessed it was would be the consumer-side tolerance this
+ *    rule exists to make unnecessary.
+ *
+ * Judged against the AUTHORED field map only. No registry-injected system
+ * column is an `image` or `avatar` field, so widening the existence half to
+ * the injected set (the #5378 move the semantic-role lints make) could only
+ * turn "not declared" into "wrong type" for the same refused value. Not judged
+ * on `ObjectExtensionSchema`: an extension cannot declare `imageField` (its
+ * strict shape refuses the key), so the pointer is only ever the owning
+ * object's own. Pinned in `object-image-field.test.ts`.
+ */
+function refuseNonPictureImageField(
+  ownName: unknown,
+  imageField: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (typeof imageField !== 'string') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const accepted = IMAGE_FIELD_TYPES.map((t) => `\`${t}\``).join(' or ');
+  const prescription =
+    `\`imageField\` must name a field of this object whose type is ${accepted} — point it at one `
+    + '(declare one with `Field.image()` or `Field.avatar()` if the object has none), or remove `imageField`.';
+  const declared = fields !== null && typeof fields === 'object'
+    && Object.prototype.hasOwnProperty.call(fields, imageField);
+  if (!declared) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['imageField'],
+      message:
+        `\`imageField\` names \`${imageField}\`, but object \`${objectName}\` declares no field `
+        + `\`${imageField}\`. ${prescription}`,
+    });
+    return;
+  }
+  const type = ((fields as Record<string, unknown>)[imageField] as { type?: unknown } | null)?.type;
+  if (typeof type === 'string' && (IMAGE_FIELD_TYPES as readonly string[]).includes(type)) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['imageField'],
+    message:
+      `\`imageField\` names \`${imageField}\`, a \`${String(type)}\` field on object \`${objectName}\`, `
+      + `which is not a picture. ${prescription}`,
+  });
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -1788,7 +1861,7 @@ const ObjectSchemaBase = strictObject(
       // `ui/view.zod.ts` declares its own `userActions` with a completely
       // disjoint vocabulary (sort/search/filter/refresh/rowHeight/group/
       // addRecordForm/editInline/hideFields/rowColor/buttons — the last three
-      // adopted at #11195), so an author who learned that block writes these
+      // adopted by commit b37231883), so an author who learned that block writes these
       // here. `group`/`hideFields`/`rowColor` were refused by name but without
       // a curated pointer until #11459 gave them one too, mirroring the other
       // four.
@@ -1954,45 +2027,58 @@ const ObjectSchemaBase = strictObject(
    * Data Model
    */
   fields: refuseRecordProtoKey(
-    z.record(
-      z.string()
-        .regex(/^[a-z_][a-z0-9_]*$/, {
-          message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+    // [#17852, #19346] The three JS-prototype names are refused by
+    // TWO mechanisms, because zod reaches them at two different depths:
+    //
+    //   - `__proto__` reaches NO schema at all — zod's record parser skips it
+    //     with an unconditional `continue` ABOVE the key schema — so it is
+    //     refused on the RAW input by `refuseRecordProtoKey` around this.
+    //   - `constructor` and `prototype` DO reach the parse (ordinary
+    //     lowercase words the snake_case regex below already admits) and are
+    //     refused HERE, on the RECORD, through the closed projection list's
+    //     `banned-keys` arm.
+    //
+    // ⭐ The arm — and not the key-schema `.refine()` it replaces (#19147) —
+    // is what carries the refusal into `packages/spec/json-schema/**`.
+    // `z.toJSONSchema()` has no arm for a `custom` check, so a rule written
+    // on the KEY schema was enforced by the runtime and ABSENT from the
+    // published file: nine `fields.out.keyType` rows in
+    // `dropped-refinements.baseline.json`, one per embedding schema, and a
+    // validator reading the published contract answered PASS on a document
+    // the platform refuses by name. Declared through `bannedKeys`, the same
+    // rule is published as `propertyNames` + `not` and those nine rows leave
+    // the ledger (#19346, closing a piece of #18670). The accept set is
+    // unchanged in both directions — `bannedKeys` reads OWN properties, which
+    // is exactly what the key schema judged.
+    //
+    // ⭐ [#20997] ONE refine PER NAME, each located AT its key
+    // (`fields.constructor`, `fields.prototype`) — the path the `__proto__`
+    // guard and the key grammar's `invalid_key` already report at, and the one
+    // `saveMetaItem`'s structured issues need for a Studio form to highlight
+    // the offending field. `.refine()`'s `path` is STATIC, so a single
+    // two-name predicate could only ever name the slot; one single-name
+    // predicate per name makes the path a constant again, and the name is ONE
+    // string read twice — into the ban and into the path — so the two cannot
+    // drift. ⛔ Not a `.superRefine()` with a computed path: that check holds
+    // no readable predicate, so the generator could not project it and the
+    // published file would go wide again (the nine rows above would return).
+    // The published keywords are the same rule, conjoined one clause per name
+    // (`not enum [a, b]` ≡ `not enum [a]` ∧ `not enum [b]`), and the message
+    // and `custom` code are byte-identical to the one-refine spelling.
+    (['constructor', 'prototype'] as const).reduce(
+      (record, reserved) =>
+        record.refine(bannedKeys([reserved]), {
+          message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
+          path: [reserved],
         }),
-      FieldSchema,
-    )
-      // [#17852, #19346] The three JS-prototype names are refused by
-      // TWO mechanisms, because zod reaches them at two different depths:
-      //
-      //   - `__proto__` reaches NO schema at all — zod's record parser skips it
-      //     with an unconditional `continue` ABOVE the key schema — so it is
-      //     refused on the RAW input by `refuseRecordProtoKey` below.
-      //   - `constructor` and `prototype` DO reach the parse (ordinary
-      //     lowercase words the snake_case regex above already admits) and are
-      //     refused HERE, on the RECORD, through the closed projection list's
-      //     `banned-keys` arm.
-      //
-      // ⭐ The arm — and not the key-schema `.refine()` it replaces (#19147) —
-      // is what carries the refusal into `packages/spec/json-schema/**`.
-      // `z.toJSONSchema()` has no arm for a `custom` check, so a rule written
-      // on the KEY schema was enforced by the runtime and ABSENT from the
-      // published file: nine `fields.out.keyType` rows in
-      // `dropped-refinements.baseline.json`, one per embedding schema, and a
-      // validator reading the published contract answered PASS on a document
-      // the platform refuses by name. Declared through `bannedKeys`, the same
-      // rule is published as `propertyNames` + `not` and those nine rows leave
-      // the ledger (#19346, closing a piece of #18670). The accept set is
-      // unchanged in both directions — `bannedKeys` reads OWN properties, which
-      // is exactly what the key schema judged.
-      //
-      // ⚠️ The refusal is located at the SLOT (`fields`, code `custom`) rather
-      // than at the offending key (`fields.constructor`, code `invalid_key`):
-      // a record-level predicate is the only shape the closed list can project,
-      // and `.refine()` carries no per-key path. The ban list is closed and two
-      // names long, so the message names both in full.
-      .refine(bannedKeys(['constructor', 'prototype']), {
-        message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
-      }),
+      z.record(
+        z.string()
+          .regex(/^[a-z_][a-z0-9_]*$/, {
+            message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+          }),
+        FieldSchema,
+      ),
+    ),
     'fields',
   ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused.'),
   indexes: z.array(IndexSchema).optional().describe('Database performance indexes'),
@@ -2117,10 +2203,10 @@ const ObjectSchemaBase = strictObject(
         'rule in `validations` or a hook.',
     },
   }, {
-    field: z.string().describe('Field to watch (typically a status/stage select).'),
-    value: z.string().describe('The value the field must transition INTO to fire the milestone.'),
-    summary: z.string().describe('Activity summary template; {field} tokens interpolate the record value. e.g. "Deal won: {name}".'),
-    type: z.string().optional().describe('Activity type for the emitted row (default "completed").'),
+    field: z.string().describe('Field to watch (typically a status/stage select).').meta({ title: 'Field' }),
+    value: z.string().describe('The value the field must transition INTO to fire the milestone.').meta({ title: 'Value' }),
+    summary: z.string().describe('Activity summary template; {field} tokens interpolate the record value. e.g. "Deal won: {name}".').meta({ title: 'Summary' }),
+    type: z.string().optional().describe('Activity type for the emitted row — left unset, it keeps the update row\'s kind, "updated" (a milestone only fires on an update).').meta({ title: 'Type' }),
   })).optional().describe('Declarative semantic activity milestones — emit a templated timeline row when a field transitions into a value, no hook code (ADR-0052 §5b.2).'),
 
   // ADR-0020: record state machines are not a separate `stateMachines` map —
@@ -2151,6 +2237,28 @@ const ObjectSchemaBase = strictObject(
    */
   displayNameField: z.string().optional().describe('[DEPRECATED → nameField] Field to use as the record display name (e.g., "name", "title"). Accepted as an alias for nameField.'),
   titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. Placeholders may be written {{field}} or {field} — the title renderers treat the two as equivalent, normalizing {{field}} to {field} before substituting; neither spelling is judged at parse time.'),
+  /**
+   * [#21182 — ruling A on objectstack-ai/hotcrm#1199] The record's PICTURE:
+   * names the field whose value the record page header — the record chrome
+   * every record detail page shares — draws beside the title. A sibling of
+   * `nameField`: `nameField` says which field is the record's name, this says
+   * which is its picture. One object-level declaration that every detail page
+   * reads, deliberately NOT a `page:header` prop (that header's own identity
+   * is drawn by the record chrome, which is why its `icon` was retired).
+   *
+   * - Must name a field of this object whose type is `image` or `avatar`;
+   *   anything else — an undeclared name, a `text` URL column, a `file` — is
+   *   refused at parse by `refuseNonPictureImageField`, so at every authoring
+   *   and publish door.
+   * - A record whose field is empty shows no picture. The reader draws nothing
+   *   in its place — no initials, no placeholder avatar.
+   *
+   * The reader is objectui's record chrome, and it does not read the key yet:
+   * the liveness ledger holds this row `planned` until it does, so an authored
+   * value is accepted, stored and served, and takes effect when the renderer
+   * lands with no re-authoring.
+   */
+  imageField: z.string().optional().describe('The record\'s picture: names the field the record page header (record chrome) is to draw beside the title — one object-level declaration every record detail page reads, not a per-page header prop. Must name a field of this object whose type is `image` or `avatar`; any other name is refused. A record whose field is empty shows no picture (no initials or placeholder). Pending renderer: the record chrome does not draw it yet.'),
   /**
    * [ADR-0085] Semantic role: the object's most important fields, in priority
    * order (the first entry wins wherever only one field fits, e.g. child-record
@@ -2186,7 +2294,7 @@ const ObjectSchemaBase = strictObject(
    * `recordFormNavigation.ts` branches on `editMode !== 'page'`, and
    * `AppContent`'s `handleEdit` dispatcher routes on it).
    *
-   * Declared here by the #11408 maintainer ruling (the measured residue of the
+   * Declared here by commit f11fc61c5's maintainer ruling (the measured residue of the
    * #10144 declare-or-rule-out census): objectui had published the key to
    * authors (CHANGELOG + live runtime read) while this strict parse rejected
    * it. objectui's `ObjectSchemaClientExtensions.editMode` mirror retires in a
@@ -2314,7 +2422,7 @@ const ObjectSchemaBase = strictObject(
     /**
      * Master switch — a STANDING policy held at every redemption, not a
      * mint-time check (#14033; the same shape as the `eligibility` predicate
-     * below, #13608).
+     * below, commit fc9ba76a5).
      *
      * When false (default), no share links can be issued for this object AND
      * no share link on it resolves: `resolveToken` re-reads this switch on
@@ -2351,7 +2459,7 @@ const ObjectSchemaBase = strictObject(
     /**
      * Optional CEL predicate over the candidate record. It is a STANDING
      * policy about which records may be reached anonymously, and the platform
-     * holds it at BOTH points in a link's life (#13608):
+     * holds it at BOTH points in a link's life (commit fc9ba76a5):
      *
      *   - **at mint** — `createLink` refuses with 422 when the predicate is
      *     false (e.g. "draft records cannot be shared") and writes no link row;
@@ -2363,7 +2471,7 @@ const ObjectSchemaBase = strictObject(
      * ⚠️ Tightening this policy therefore cuts off already-minted links, on
      * purpose — no revocation step, no grace period. That is the point of a
      * standing policy, and it is a behaviour change for deployments that
-     * shipped before #13608.
+     * shipped before commit fc9ba76a5.
      *
      * Fail-CLOSED at both points: a predicate that does not compile, that
      * faults on the record, or that answers anything other than `true` refuses
@@ -2419,6 +2527,10 @@ const ObjectSchemaBase = strictObject(
   // keeps this a `ZodObject` (zod 4 attaches checks in place), so `.shape` and
   // `create()`'s unknown-key walk are untouched; see the helper's docblock.
   refuseForeignTreeReference(object.name, object.fields, ctx);
+  // [#21182] `imageField` names a declared `image` / `avatar` field of THIS
+  // object — the same door, for the same reason: only the object holds the
+  // field map the pointer resolves against.
+  refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
 });
 
 /**
@@ -2715,7 +2827,7 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
 }
 
 /**
- * [#9138 — #8772 maintainer ruling, Direction 2 / ADR-0055] Under
+ * [#9138 — commit 75b7c240a, maintainer ruling Direction 2 / ADR-0055] Under
  * `sharingModel: 'controlled_by_parent'` the builder FORCES `required: true`
  * on every `master_detail` reference, and REFUSES an explicit
  * `required: false` there, loudly.
@@ -2728,7 +2840,7 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * `masterFK IN (accessible master ids)` can never match null — the row is
  * invisible to everyone — and every later by-id write answers
  * `422 MISSING_REQUIRED_FIELD`. Today only the security gate
- * (`assertControlledByParentWrite`) closes that shape, and #8772 measured that
+ * (`assertControlledByParentWrite`) closes that shape, and commit 75b7c240a records that
  * the declaration and the enforcement disagree. This makes the unsafe shape
  * impossible to NEWLY declare:
  *
@@ -2741,7 +2853,7 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * Lives at `create()` — the authoring surface (ADR-0077) — beside
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
  * `.parse()`/`.safeParse()`: metadata already at rest must keep loading.
- * Runtime tolerance is the other half of the #8772 ruling — the security
+ * Runtime tolerance is the other half of commit 75b7c240a's ruling — the security
  * gate's fallbacks stay, and the lint rule stays `warning` until v18 — so
  * publish-time refuses new declarations while runtime tolerates old ones.
  *
@@ -2907,7 +3019,7 @@ export const ObjectSchema = lazySchema(() => {
     // declared can never resolve — refuse at the authoring seam, beside its
     // sibling assertions, rather than one error per seeded row at load time.
     assertReferenceViaSiblingDeclared(cfg.name, cfg.fields);
-    // [#9138 — #8772 ruling, Direction 2] A `controlled_by_parent` object's
+    // [#9138 — commit 75b7c240a, ruling Direction 2] A `controlled_by_parent` object's
     // `master_detail` reference is forced `required: true` (an explicit
     // `required: false` throws, loudly) so the unsafe shape cannot be newly
     // declared. Raw `.parse()`/`.safeParse()` stay tolerant for metadata at

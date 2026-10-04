@@ -86,7 +86,7 @@ function metadataFor(objects: any[]) {
 }
 
 /**
- * [#10629] This fixture provisions its own business objects and nothing else,
+ * [commit 13a6cb4ad] This fixture provisions its own business objects and nothing else,
  * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -94,22 +94,27 @@ function metadataFor(objects: any[]) {
  * Withheld and asserted rather than muted; `expected-read-refusal-noise.ts`
  * says why.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 describe('[#8442] a REAL driver constraint violation is withheld from the seed response', () => {
   let dir: string | null = null;
   let engine: ObjectQL | null = null;
-  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest boot. */
   let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so a
     // failure here can never leave the engine running. The single test in this
     // file boots and writes, so the probe fires for it.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
     noise = null;
   });
 
@@ -120,7 +125,7 @@ describe('[#8442] a REAL driver constraint violation is withheld from the seed r
       connection: { filename: join(dir, 'data.sqlite') },
       useNullAsDefault: true,
     });
-    // [#10629] Installed on the REAL driver (the one that logs) before it runs
+    // [commit 13a6cb4ad] Installed on the REAL driver (the one that logs) before it runs
     // a statement — the `Object.create(real)` wrapper below resolves `logger`
     // through the prototype chain to this sink.
     noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);

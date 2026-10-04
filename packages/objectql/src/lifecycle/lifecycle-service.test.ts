@@ -764,7 +764,7 @@ describe('LifecycleService.sweep — unguarded reap batching (#5194)', () => {
   });
 
   it('ttl.onlyWhen {$null: true} spares tombstones and still reaps ordinary expired rows (#10165)', async () => {
-    // The #10165 acceptance criterion, both halves, against rows that really
+    // The acceptance criterion behind commit 801296050, both halves, against rows that really
     // disappear. A sys_session tombstone BACKDATES expires_at (#7732 stamps
     // `now - 1000`), so it looks maximally expired — without the filter it is
     // reaped first and hardest. Predicate-honouring store: the exclusion below
@@ -981,7 +981,7 @@ describe('LifecycleService.sweep — Archiver (P3)', () => {
   });
 
   /* ------------------------------------------------------------------ *
-   * [#10347] The Archiver honours a declared `ttl`.
+   * [commit 530c1df65] The Archiver honours a declared `ttl`.
    *
    * The property under test is "the declared ttl cutoff GOVERNED which rows
    * moved", and it is invisible to a suite that only asserts rows were
@@ -1145,7 +1145,7 @@ describe('LifecycleService.sweep — Archiver (P3)', () => {
 });
 
 /* ==================================================================== *
- * [#10528] The Archiver resolves its window through ADR-0057 P4
+ * [commit 7d483e1e5] The Archiver resolves its window through ADR-0057 P4
  * governance — the same `effectiveWindowMs` resolver the Reaper uses.
  *
  * Before this card the three legs below were not "partly wired", they were
@@ -1189,7 +1189,7 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     } as any,
   };
 
-  /** `ttl` + `archive` (no `retention`) — the pair #10347 made executable.
+  /** `ttl` + `archive` (no `retention`) — the pair commit 530c1df65 made executable.
    * Its due window is `ttl.expireAfter` on `ttl.field`, so the governance
    * key that governs it is `expireAfter`, not `maxAge`. */
   const TTL_ARCHIVE_OBJ: LifecycleObjectLike = {
@@ -1452,7 +1452,7 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
 
   it('DEFECT CONTROL (override): with ttl declared it is `expireAfter` that governs — on the ttl field', async () => {
     // Which override key applies follows which window SELECTION picks
-    // (#10347). A fix that always consulted `maxAge` would leave this red.
+    // (commit 530c1df65). A fix that always consulted `maxAge` would leave this red.
     const stores = governedStores({
       sys_audit_log: [
         { id: 'expired-400d', created_at: at(-2 * DAY), expires_at: at(-400 * DAY), organization_id: null },

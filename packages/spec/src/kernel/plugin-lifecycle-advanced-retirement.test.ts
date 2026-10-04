@@ -40,7 +40,7 @@ import {
 //
 // Form follows commit 2c86fe3ea / #4988 / #5055: resolved symbol identity over every
 // public entry via the build-time `export-origins/` artifact.
-describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
+describe('kernel/ AdvancedPluginLifecycleConfig retirement', () => {
   /** The 9 names the retired defs exported (3 schema consts + 6 types). */
   const RETIRED_NAMES = [
     'AdvancedPluginLifecycleConfigSchema',
@@ -96,11 +96,11 @@ describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
   const RETIRED_BY_12340 = ['DistributedStateConfigSchema', 'DistributedStateConfig',
     'DistributedStateConfigParsed'] as const;
 
-  it('[#12340] the distributed-state vocabulary has zero holders too', () => {
+  it('the distributed-state vocabulary has zero holders too', () => {
     // Anti-vacuity: the same baseline the sibling assertion relies on.
     expect(exportNamesOf('./kernel').length).toBeGreaterThan(50);
     for (const name of RETIRED_BY_12340) {
-      expect(holdersOf(name), `${name} must have zero holders after #12340`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
     }
     // The keep it was carved out of is UNTOUCHED — this is the assertion that
     // makes the removal a narrowing rather than the "too-wide sweep" the
@@ -121,7 +121,7 @@ describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
 
     // ── ABSENCE (every entry, not just ./kernel) ──────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #11825`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
       'GracefulDegradationSchema',
       'PluginUpdateStrategySchema',
     ]) {
-      expect(kernel, `${name} must not be exported after #11825`).not.toHaveProperty(name);
+      expect(kernel, `${name} must not be exported after its retirement`).not.toHaveProperty(name);
     }
     // Anti-vacuity: the barrel really resolved and still exports the kept
     // library vocabularies (the #4914 §2 keep, restated by this ruling).

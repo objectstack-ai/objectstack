@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13644] The declared referential-cleanup marker, OBSERVED FROM INSIDE A
+ * [commit 34ce8e7db] The declared referential-cleanup marker, OBSERVED FROM INSIDE A
  * SHIPPED BODY — the sandbox-reachability mandate of the adoption ruling.
  *
  * ## What is pinned, and why a kernel rig could not pin it
@@ -81,6 +81,8 @@ const PROBE_SOURCE = `
   });
 `;
 
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 describe('#13644 — a shipped body observes ctx.referentialFieldClear across the sandbox boundary', () => {
@@ -124,7 +126,7 @@ describe('#13644 — a shipped body observes ctx.referentialFieldClear across th
       body: { language: 'js', source: PROBE_SOURCE, capabilities: ['log'] },
     } as any], { packageId: 'probe' });
 
-    // The REST-shaped caller envelope — the corrected #13644 measurement's
+    // The REST-shaped caller envelope — the corrected measurement's (commit 34ce8e7db)
     // row 1, on which every other context member is identical between the
     // engine's cascade and the user's hand-clear.
     const CALLER = { userId: 'u_probe', isSystem: true };
@@ -169,7 +171,10 @@ describe('#13644 — a shipped body observes ctx.referentialFieldClear across th
     const cleared = (await engine.findOne('probe_rfc_note', { where: { id: n.id } })) as any;
     expect(cleared.account).toBeNull();
 
-    // [#10629] Withheld-noise pin, same as the sibling harnesses.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [commit 13a6cb4ad] Withheld-noise pin, same as the sibling harnesses.
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

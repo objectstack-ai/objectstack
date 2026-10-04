@@ -20,7 +20,8 @@ export const entry: SemanticMigration = {
     + 'until Y". A permission-set grant that needs a provenance note keeps `reason` '
     + '(free text), which remains declared on both grant tables',
   reason:
-    'Maintainer ruling 2026-08-18 (#9730), ADR-0049 enforce-or-remove: REMOVE. The '
+    'Maintainer ruling 2026-08-18 on the finding that the delegation gate never reads this '
+    + 'column on this object, ADR-0049 enforce-or-remove: REMOVE. The '
     + 'runtime delegation gate is structurally scoped to sys_user_position '
     + '(`isDelegationWrite` returns false for every other object, so '
     + '`assertSelfDelegation` is unreachable for this table), and the explain engine '

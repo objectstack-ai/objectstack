@@ -8,13 +8,16 @@ export const entry: SemanticMigration = {
   replacement: '`performance.schemaCacheTtlSeconds` (default 3600) — rename the key; the value '
     + '(seconds) is unchanged',
   reason:
-    'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
-    + 'batch #115), executing the #14478 rule per file. The key carried its unit (seconds) in a '
+    'Maintainer ruling A, 2026-09-11: the gate that reads a duration key\'s JSDoc lands last, '
+    + 'after its offenders are fixed file by file — so this entry executes, per file, the rule '
+    + 'that a duration number key carries its unit in '
+    + 'its name. The key carried its unit (seconds) in a '
     + 'source JSDoc only — "Schema cache TTL in seconds" — while `.describe()`, the text '
     + '`content/docs/references/**` publishes, said "Schema cache TTL" and named no unit at all. '
     + 'So the reader who most needs the unit, the reader of the published reference page, was the '
     + 'only reader who never saw it: 3600 is a plausible number of seconds and a plausible number '
-    + 'of milliseconds, and nothing on the page decided it. Under the #14478 gate, moving the unit '
+    + 'of milliseconds, and nothing on the page decided '
+    + 'it. Under that rule\'s gate, moving the unit '
     + 'into the describe alone is itself a violation (unit in prose, none in the name), so the key '
     + 'is renamed and the describe is corrected in the same stroke. Spelled `Ttl` and not `TTL`: '
     + 'counted on this tree, the suffixed family already spells it that way in every member '
@@ -28,9 +31,10 @@ export const entry: SemanticMigration = {
     + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
     + 'and its test the only occurrences are the four generated rows in '
     + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-    + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells it 0 '
-    + 'times across 8512 tracked files, against lit controls `TTL` 156 and `tenant` 1034 on the '
-    + 'same corpus (0 across 8303, against 156 and 987, at 62597c588).',
+    + 'objectui checkout — `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — spells it 0 '
+    + 'times across 7579 tracked files, against lit controls `TTL` 182 and `tenant` 1317 on the '
+    + 'same corpus (0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+    + 'and 987, at 62597c588).',
   acceptanceCriteria:
     'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
     + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '

@@ -14,8 +14,11 @@ import { z } from 'zod';
  * 
  * 1. **Declare** — Plugin's `package.json` includes an `oclif` config section
  *    declaring its commands directory and any topics.
- * 2. **Discover** — The main CLI (`@objectstack/cli`) lists the plugin in its
- *    `oclif.plugins` array, or users install it via `os plugins install <pkg>`.
+ * 2. **Discover** — oclif loads a plugin that the CLI's own `package.json`
+ *    lists in both `oclif.plugins` and `dependencies`. `@objectstack/cli`
+ *    lists none and ships no plugin manager, so `os plugins` is not a
+ *    command. To add a plugin's commands to `os`, build an `os` distribution:
+ *    a package whose own `package.json` lists the plugin in both places.
  * 3. **Load** — oclif automatically discovers and registers all Command classes
  *    exported from the plugin's commands directory.
  * 

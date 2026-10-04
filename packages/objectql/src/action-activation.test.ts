@@ -20,7 +20,7 @@
 //    would switch off an entire installation's actions on its first boot.
 // 4. **The write is durable BEFORE it is local.** A store that throws must
 //    leave the projection untouched, or the engine reports an activation state
-//    the ledger does not carry — the #10243 shape with persistence bolted on,
+//    the ledger does not carry — the env-wide toggle leak's shape with persistence bolted on,
 //    which ADR-0126 §7.2 exists to remove.
 // 5. **Survives re-registration**, which is the in-process half of "survives a
 //    restart": `resyncAuthoredActions` re-registers handlers on every

@@ -29,12 +29,15 @@
  *                   untouched on every face, `--strict` included: failing here
  *                   would break every project that has no manifest of its own,
  *                   and such a project has no remedy but to author one.
- *   - `unusable`  → a manifest the PROJECT put in place that cannot be read,
- *                   parsed, or carries no `components` map. REFUSED (exit 1),
- *                   never degraded: its author asked for full validation, and
- *                   the `{}` shape already crashed the gate with a bare
- *                   TypeError while `{ oops` passed it silently — one rule now
- *                   covers both, with the file and the reason named.
+ *   - `unusable`  → a manifest that is present but cannot be read, parsed, or
+ *                   carries no `components` map. REFUSED (exit 1), never
+ *                   degraded: its author asked for full validation, and the
+ *                   `{}` shape already crashed the gate with a bare TypeError
+ *                   while `{ oops` passed it silently — one rule now covers
+ *                   both, with the file and the reason named. The same rule
+ *                   holds for the copy `@objectstack/console` ships (below):
+ *                   a damaged install is refused with that remedy, never read
+ *                   as "not found".
  *
  * Both the notice and the refusal fire only when the run has a page the JSX
  * gate actually checks. With none, the manifest is read by nothing, so a
@@ -48,27 +51,62 @@
  * layout got no notice and a broken manifest passed at exit 0: the silent
  * degradation this module exists to end, one layout over (#20113 round 1).
  *
- * ⛔ The console leg's FAILURE semantics are deliberately unchanged: the
- * specifier below resolves to nothing today (the console's `exports` map does
- * not publish that subpath), and whatever makes it reachable owns what a broken
- * shipped copy should do. Until then a failure there reads as "not found", and
- * the `absent` notice names the location, so it is not silent either.
+ * ## The console leg is reached through `package.json` (#19922)
+ *
+ * The second place looked is the copy `@objectstack/console` ships in its
+ * `dist/` — objectui's public-tier registry at the pinned commit, copied in by
+ * `scripts/build-console.sh`. This leg used to ask for that file by its own
+ * subpath, which the console's `exports` map does not publish (it publishes
+ * `./package.json` alone): the resolve threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, a
+ * `catch` swallowed it, and a project with no manifest of its own was checked
+ * at parse level even where the console shipped the file. It now resolves the
+ * console's `package.json` from the CLI's OWN location and joins the file's
+ * path to it ({@link consoleSduiManifestPath}), which keeps `exports` closed.
+ *
+ * ## The project leg is read beside the config, not in the invoker's cwd (#20166)
+ *
+ * The first place looked is the project's own `sdui.manifest.json`, and the
+ * project is the directory of the config the command was given. `os validate
+ * path/to/objectstack.config.ts` locates everything else about that project
+ * from there — the capability preflight's `projectDir`, the access-matrix
+ * snapshot beside the config — so the manifest follows the same root. It used
+ * to follow the invoker's working directory instead: run from anywhere else,
+ * the command never read the project's own manifest, and a manifest that
+ * happened to sit in the invoker's directory judged a project it does not
+ * belong to. {@link resolveJsxGateManifest} therefore takes the project
+ * directory as a REQUIRED argument, with no working-directory default for a
+ * caller to fall into; `os validate`, `os build` and `os lint` hand it
+ * `dirname()` of the config path `loadConfig` resolved. A run started in the
+ * project's own directory is unchanged, because that directory is both.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import chalk from 'chalk';
 import type { AuthoringFinding } from '@objectstack/lint';
 import { artifactPackages, packageBodyAsStack } from './artifact-packages.js';
 import { printErrorToStderr, printInfo } from './format.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 
-/** The file the project provides, looked for in the working directory. */
+/** The file the project provides, looked for in the project directory: the config's own directory. */
 export const PROJECT_SDUI_MANIFEST_FILE = 'sdui.manifest.json';
 
-/** The copy shipped inside `@objectstack/console` — the second place looked. */
-export const CONSOLE_SDUI_MANIFEST_SPECIFIER = '@objectstack/console/dist/sdui.manifest.json';
+/**
+ * The copy shipped inside `@objectstack/console` — the second place looked —
+ * named as a package-relative path. ⛔ A name, not a specifier to resolve: the
+ * console's `exports` map publishes `./package.json` alone, so resolving this
+ * subpath throws `ERR_PACKAGE_PATH_NOT_EXPORTED`. {@link consoleSduiManifestPath}
+ * reaches the file; this spelling names it only when `@objectstack/console`
+ * itself cannot be resolved.
+ */
+export const CONSOLE_SDUI_MANIFEST = '@objectstack/console/dist/sdui.manifest.json';
+
+/** The one subpath the console's `exports` map publishes. */
+const CONSOLE_PACKAGE_JSON = '@objectstack/console/package.json';
+
+/** Where `scripts/build-console.sh` puts the manifest, relative to the console package root. */
+const CONSOLE_MANIFEST_IN_PACKAGE = 'dist/sdui.manifest.json';
 
 /**
  * The rule id the parse-level notice carries on every face: the `rule` of the
@@ -88,12 +126,18 @@ export type SduiManifestResolution =
     }
   | {
       readonly status: 'absent';
-      /** Every place looked, in order: an absolute path, then a package specifier. */
+      /**
+       * Every place looked, in order: the project's absolute path, then the
+       * console copy's — absolute when `@objectstack/console` resolves, else
+       * {@link CONSOLE_SDUI_MANIFEST}.
+       */
       readonly lookedAt: readonly string[];
     }
   | {
       readonly status: 'unusable';
-      /** The project manifest that exists but cannot be used. */
+      /** Whose file: the project's own, or the copy `@objectstack/console` ships. */
+      readonly source: 'project' | 'console';
+      /** The manifest file that exists but cannot be used. */
       readonly path: string;
       /** Why, as a clause: `it is not valid JSON (…)`. */
       readonly reason: string;
@@ -111,48 +155,122 @@ function isRecord(value: unknown): value is AnyRec {
  * manifest.components)`), so it is the shape floor — deeper checking is the
  * gate's own business once it has a manifest to check against.
  */
-function readManifestFile(path: string): SduiManifestResolution {
+function readManifestFile(path: string, source: 'project' | 'console'): SduiManifestResolution {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
   } catch (error) {
-    return { status: 'unusable', path, reason: `it could not be read (${(error as Error).message})` };
+    return { status: 'unusable', source, path, reason: `it could not be read (${(error as Error).message})` };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    return { status: 'unusable', path, reason: `it is not valid JSON (${(error as Error).message})` };
+    return { status: 'unusable', source, path, reason: `it is not valid JSON (${(error as Error).message})` };
   }
   if (!isRecord(parsed) || !isRecord(parsed.components)) {
-    return { status: 'unusable', path, reason: 'it is not a JSON object with a `components` map' };
+    return { status: 'unusable', source, path, reason: 'it is not a JSON object with a `components` map' };
   }
   return { status: 'resolved', manifest: parsed, path };
 }
 
 /**
- * The manifest for the project in `cwd`, or the reason there is none. Never
- * throws: what an `unusable` answer costs is the caller's decision
+ * Where `@objectstack/console` keeps the manifest it ships, as an absolute
+ * path, or `undefined` when that package cannot be resolved from `origin`.
+ * Whether the file exists there is the caller's question.
+ *
+ * Reached through the console's `package.json` plus a join — the way
+ * `resolveConsolePath()` already locates this static-asset package — because
+ * the file's own subpath is not in the console's `exports` (see
+ * {@link CONSOLE_SDUI_MANIFEST}).
+ *
+ * `origin` defaults to THIS module, so the console found is the CLI's own
+ * declared dependency, released in one fixed version group with it. ⛔ Not
+ * `cwd`: under pnpm a project that does not itself depend on
+ * `@objectstack/console` cannot resolve it from its own directory, and the
+ * gate's strength would then depend on hoisting. The parameter exists for the
+ * pins, which drive an installed-package layout.
+ */
+export function consoleSduiManifestPath(origin: string | URL = import.meta.url): string | undefined {
+  let packageJson: string;
+  try {
+    packageJson = createRequire(origin).resolve(CONSOLE_PACKAGE_JSON);
+  } catch {
+    return undefined;
+  }
+  return join(dirname(packageJson), CONSOLE_MANIFEST_IN_PACKAGE);
+}
+
+/**
+ * The manifest for the project whose directory is `cwd`, or the reason there
+ * is none: the project's own file first, then the copy `@objectstack/console`
+ * ships (located from `consoleOrigin`, see {@link consoleSduiManifestPath}).
+ * Never throws: what an `unusable` answer costs is the caller's decision
  * ({@link resolveJsxGateManifest} refuses it; `init`'s scaffold check, which
  * reads the INVOKER's directory rather than the project's, does not).
+ *
+ * ⚠️ Despite its name, `cwd` is the PROJECT directory — the directory of the
+ * config the command was given — whenever a command judges a project: the
+ * three authoring commands pass it through {@link resolveJsxGateManifest}.
+ * The working-directory default serves `init`'s scaffold check alone, whose
+ * module header records that reading as its own decision. ⛔ A new caller that
+ * has a config path passes that path's directory: never `process.cwd()`, and
+ * never the default.
  */
-export function resolveSduiManifest(cwd: string = process.cwd()): SduiManifestResolution {
+export function resolveSduiManifest(
+  cwd: string = process.cwd(),
+  consoleOrigin: string | URL = import.meta.url,
+): SduiManifestResolution {
   const projectManifest = join(cwd, PROJECT_SDUI_MANIFEST_FILE);
-  if (existsSync(projectManifest)) return readManifestFile(projectManifest);
+  if (existsSync(projectManifest)) return readManifestFile(projectManifest, 'project');
 
-  // Fall back to the manifest shipped inside @objectstack/console (built from
-  // objectui's public-tier registry; the CLI already depends on it). See the
-  // header: this leg's failure semantics are not this module's to change.
-  try {
-    const consoleManifest = createRequire(import.meta.url).resolve(CONSOLE_SDUI_MANIFEST_SPECIFIER);
-    if (existsSync(consoleManifest)) {
-      const fromConsole = readManifestFile(consoleManifest);
-      if (fromConsole.status === 'resolved') return fromConsole;
-    }
-  } catch {
-    /* not found — reported below as a place looked */
+  const consoleManifest = consoleSduiManifestPath(consoleOrigin);
+  if (consoleManifest !== undefined && existsSync(consoleManifest)) return readManifestFile(consoleManifest, 'console');
+  return { status: 'absent', lookedAt: [projectManifest, consoleManifest ?? CONSOLE_SDUI_MANIFEST] };
+}
+
+/**
+ * `os serve`'s half of the save door's page compile (#20312, ADR-0080 §5):
+ * hand the deployment's manifest to the runtime once, at boot, or say once why
+ * there is none.
+ *
+ * `register` receives the manifest when {@link resolveSduiManifest} answers
+ * `resolved` — `os serve` registers it under `@objectstack/metadata-protocol`'s
+ * `SDUI_MANIFEST_SERVICE`, where the save door reads it per publish and
+ * compiles every html page's `source` against it. For `absent` and `unusable`
+ * nothing is registered, the boot continues, and the returned line is the one
+ * thing the host prints: without a manifest the save door stores an html page
+ * as it always did, with its source and `requires` unjudged, and AGENTS.md
+ * "Route & surface ownership" rule 3 says that absence is said once at boot,
+ * naming the remedy. `undefined` when a manifest was registered.
+ *
+ * ⛔ An `unusable` manifest is not refused here the way the authoring commands
+ * refuse it ({@link resolveJsxGateManifest}): those judge a project, and their
+ * author asked for full validation; a server that refused to boot over it would
+ * take the whole deployment down for one damaged file. It is named in the line
+ * instead.
+ *
+ * `projectDir` is the directory of the config being served, as for the
+ * authoring commands; `resolution` is the pins' seam.
+ */
+export function registerDeploymentSduiManifest(
+  register: (manifest: unknown) => void,
+  projectDir: string,
+  resolution: SduiManifestResolution = resolveSduiManifest(projectDir),
+): string | undefined {
+  if (resolution.status === 'resolved') {
+    register(resolution.manifest);
+    return undefined;
   }
-  return { status: 'absent', lookedAt: [projectManifest, CONSOLE_SDUI_MANIFEST_SPECIFIER] };
+  const why =
+    resolution.status === 'unusable'
+      ? `${resolution.path} is not a usable SDUI component manifest: ${resolution.reason}`
+      : `no SDUI component manifest at ${resolution.lookedAt.join(' or ')}`;
+  return (
+    `Page source and \`requires\` not validated at save: ${why}. Html pages are stored without being ` +
+    `compiled against this deployment's components — add ${join(projectDir, PROJECT_SDUI_MANIFEST_FILE)} ` +
+    `or install @objectstack/console with its manifest.`
+  );
 }
 
 /**
@@ -262,10 +380,17 @@ export interface JsxGateManifest {
  * holds. Throws {@link SduiManifestRefusalError} for an `unusable` project
  * manifest when there is a page to check; see the header for the three
  * outcomes.
+ *
+ * `projectDir` is the directory of the config the command was given, and it
+ * is required: see the header for why the project leg is read there and not
+ * in the invoker's working directory (#20166). `resolution` is the pins'
+ * seam — an answer already made, standing in for the resolver's over
+ * `projectDir`.
  */
 export function resolveJsxGateManifest(
   stack: AnyRec,
-  resolution: SduiManifestResolution = resolveSduiManifest(),
+  projectDir: string,
+  resolution: SduiManifestResolution = resolveSduiManifest(projectDir),
 ): JsxGateManifest {
   if (resolution.status === 'resolved') return { sduiManifest: resolution.manifest, notices: [] };
   const pages = countJsxGatePages(stack);
@@ -276,7 +401,9 @@ export function resolveJsxGateManifest(
     const hints = [
       `  The JSX page gate reads this file to check the components and props of ${pages} kind:'html' ` +
         `page(s), and it does not fall back to parse-level checking while the file is present.`,
-      '  Fix the file (a JSON object with a `components` map), or remove it to check those pages at parse level only.',
+      resolution.source === 'project'
+        ? '  Fix the file (a JSON object with a `components` map), or remove it to check those pages at parse level only.'
+        : '  It is the copy @objectstack/console ships, so that install is damaged: reinstall @objectstack/console.',
     ];
     printErrorToStderr(message);
     console.error('');

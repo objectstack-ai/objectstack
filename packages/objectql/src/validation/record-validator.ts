@@ -25,7 +25,12 @@
  *  - `valueDomain`  a declared standard domain's membership, judged by the
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
- *  - `min` / `max`                        (number/currency/percent/rating/slider)
+ *  - number types   an array, boolean or object is `invalid_number`, never
+ *                   coerced (#20309); a number must be finite, and a string
+ *                   must be one the spec's numeric grammar reads
+ *                   (`parseNumericString`) — stored as that number
+ *  - `min` / `max`  (number/currency/percent/rating/slider/progress — `progress`
+ *                   since #20386; it takes neither `scale` nor `precision`)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
  *                   maintainer ruling 2026-08-11), on `number` / `percent` /
@@ -38,15 +43,40 @@
  *                   and the stored fraction carries the same quantity two
  *                   places further right (ruling batch #161 item 3 letter B,
  *                   2026-09-18).
+ *  - `precision`    more digits in total than the field's declared count →
+ *                   `max_precision` (#19992; rejection, never rounding), on
+ *                   `number` / `currency` / `percent` / `rating` / `slider`.
+ *                   The DECIMAL(p, s) reading: the value's digits counted at
+ *                   the decimal places the `scale` rule above applies (the
+ *                   value's own, when it applies none), so `precision: 5,
+ *                   scale: 2` refuses `1234.5`. A fraction-stored `percent` is
+ *                   always counted two places further right. No column change.
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
- *  - date / datetime: must be ISO-parsable
+ *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
+ *                   for a `date` and from 1000 to 9999 for a `datetime` (#20280);
+ *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481);
+ *                   a string's leading day exists, and a `datetime` string is
+ *                   an ISO 8601 spelling (#20525) — refused, never rolled over;
+ *                   a readable value outside its kind's years is refused with
+ *                   a sentence naming those years (#20846)
+ *  - time:          a zone-less wall clock `HH:MM[:SS[.f]]`, or an ISO instant
+ *                   with a four-digit UTC year (#20671); a `Z` / offset suffix
+ *                   on a time of day is refused with its own sentence
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
- * columns such as an injected `organization_id`) are never validated
- * here — the engine and the audit plugin manage them.
+ * columns such as an injected `organization_id`) are never REQUIRED here —
+ * the engine and the audit plugin supply them.
+ *
+ * [#21663] A `readonly` field's VALUE is still judged for its SHAPE when the
+ * engine's write path calls {@link validateRecordInScope} with `'include'` or
+ * `'only'` — see {@link ReadonlyValueScope} for which arms that is and why the
+ * engine does so only where the payload is final (after the readonly strip).
+ * The public {@link validateRecord} is unchanged. A `system`
+ * column that is NOT `readonly` (`owner_id`) and a lifecycle name with no
+ * `readonly` flag keep the full skip.
  *
  * On failure, a `ValidationError` is thrown with `.fields[]` holding
  * one entry per offending field. REST translates this into a
@@ -69,8 +99,11 @@ import {
   COMPUTED_VALUE_TYPES,
   NON_TEXT_STORED_VALUE_TYPES,
   percentScaleOf,
+  parseNumericString,
+  classifyFilterToken,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -242,6 +275,11 @@ interface FieldDef {
   /** Max decimal places for number types — enforced by rejection (#7501). */
   scale?: number;
   /**
+   * Max TOTAL digits for number types — the `p` of a DECIMAL(p, s), enforced
+   * by rejection (#19992). See {@link digitCountAt} for what is counted.
+   */
+  precision?: number;
+  /**
    * Standard value domain the WRITTEN value must be a member of (#14168) —
    * the same closed vocabulary and the same membership predicate a settings
    * specifier's `valueDomain` uses, so a time zone accepted in Settings is the
@@ -251,6 +289,14 @@ interface FieldDef {
    */
   valueDomain?: ValueDomain;
   options?: Array<{ value: string | number; label?: string } | string | number>;
+  /**
+   * The shared picklist the field takes its options from. The registry's fold
+   * writes that list's resolved options onto the field before it reaches this
+   * door (`SchemaRegistry.resolvePicklistOptions`), so `options` above IS the
+   * picklist's set; this key only lets a refusal name the list, and marks a
+   * field whose list did not resolve as one that accepts no value at all.
+   */
+  picklist?: string;
 }
 
 function isMissing(v: unknown): boolean {
@@ -300,6 +346,51 @@ function decimalPlacesOf(n: number): number {
   const fractionDigits = m[1] ? m[1].length : 0;
   const exponent = m[2] ? Number(m[2]) : 0;
   return Math.max(0, fractionDigits - exponent);
+}
+
+/**
+ * How many digits a finite number occupies when written with at least
+ * `minPlaces` decimal places — the count a declared `precision` bounds (#19992).
+ *
+ * The DECIMAL(p, s) reading, the one SQL and Salesforce ("Length" + "Decimal
+ * Places") share: `precision` counts every digit of the value, integer and
+ * fraction together, at the column's decimal places. So the count is the
+ * number of digits from the value's first non-zero digit down to its last
+ * decimal place, where "last decimal place" is `minPlaces` or the value's own
+ * last one, whichever is further right:
+ *
+ *  - `1234.5` at 2 places is `1234.50` → 6; `123.45` → 5; `5` → `5.00` → 3.
+ *    Hence `precision: 5, scale: 2` refuses `1234.5` and holds up to `999.99`.
+ *  - at 0 places the value's own digits count: `1e18` → 19, `100` → 3 (a
+ *    trailing zero of the INTEGER part is a digit), `0.05` → 1 (a leading zero
+ *    never is), `1.2345` → 5.
+ *  - zero occupies no digits, so it fits every declaration.
+ *
+ * Equivalently, a value `v` with at most `minPlaces` decimals needs more than
+ * `p` digits exactly when `|v| >= 10^(p - minPlaces)` — the DECIMAL(p, s)
+ * range — which is also what the count answers when `minPlaces` exceeds `p`
+ * (`precision: 1, scale: 2` holds `0.05` and refuses `0.1`), so no declaration
+ * the spec accepts is left without a meaning here.
+ *
+ * Measured from the canonical string form for the reasons {@link decimalPlacesOf}
+ * gives (no overflow, the count the client's own payload showed); exponent forms
+ * are normalized the same way (`1.23e+21` → 22 at 0 places, `1.5e-7` → 2).
+ * Callers guard `Number.isFinite` first.
+ */
+function digitCountAt(n: number, minPlaces: number): number {
+  const m = /^-?(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(String(n));
+  if (!m) return 0;
+  const fraction = m[2] ?? '';
+  // The value is int(mantissa) × 10^exponent.
+  let exponent = (m[3] ? Number(m[3]) : 0) - fraction.length;
+  const mantissa = (m[1] + fraction).replace(/^0+/, '');
+  if (mantissa === '') return 0; // zero
+  const significant = mantissa.replace(/0+$/, '');
+  exponent += mantissa.length - significant.length;
+  // Now `significant` has no leading or trailing zero, and the value's own
+  // decimal places are `max(0, -exponent)`.
+  const places = Math.max(minPlaces, -exponent, 0);
+  return significant.length + exponent + places;
 }
 
 /**
@@ -361,6 +452,12 @@ export function resolveFieldLabel(
  * is keyed by message, the wire by `code` — ADR-0114's vocabulary does not split
  * just because a sentence differs.
  *
+ * `messageParams` fills a sentence's words that are no constraint of THIS field
+ * — [#20846] the supported years of a `date` / `datetime`, a fact of the
+ * platform — so they are interpolated into the message and never shipped:
+ * `constraint` is the published payload, and a key added there for a sentence
+ * would widen it with no reader.
+ *
  * Exported because the object-level rule evaluator (`rule-validator.ts`) emits
  * into the SAME envelope and must localize its built-in messages the same way —
  * two constructors would drift.
@@ -378,6 +475,8 @@ export function buildFieldError(
     /** Catalog key; defaults to `code`. */
     messageKey?: string;
     options?: string[];
+    /** Interpolated into the message ONLY — never shipped (see above). */
+    messageParams?: Record<string, unknown>;
   },
   ctx?: ValidationMessageContext,
 ): FieldValidationError {
@@ -389,7 +488,11 @@ export function buildFieldError(
       field: args.field,
       // `value` rides the same interpolation namespace as the constraint keys,
       // so a template can say `{{value}}` without a second parameter channel.
-      params: { ...(args.constraint ?? {}), ...(args.value !== undefined ? { value: args.value } : {}) },
+      params: {
+        ...(args.messageParams ?? {}),
+        ...(args.constraint ?? {}),
+        ...(args.value !== undefined ? { value: args.value } : {}),
+      },
     },
     { locale: ctx?.locale, translate: ctx?.translate },
   );
@@ -434,10 +537,11 @@ function isMultiValueField(def: FieldDef): boolean {
  *
  * ## Why derived and not `key.startsWith('$')`
  *
- * The repo already carries five hand-rolled `keys.some(k => k.startsWith('$'))`
- * shape tests (`having-filter.ts`, `driver-memory`'s matcher and
- * `filter-refusal.ts`, `driver-mongodb`'s `mongodb-filter.ts`, `driver-turso`'s
- * `remote-transport.ts`). None of them is exported, and none is reachable from
+ * The repo already carries hand-rolled `keys.some(k => k.startsWith('$'))`
+ * shape tests: five when this was written (`having-filter.ts`, `driver-memory`'s
+ * matcher and `filter-refusal.ts`, `driver-mongodb`'s `mongodb-filter.ts`,
+ * `driver-turso`'s `remote-transport.ts`), four since commit `8fec76a2b` retired
+ * the matcher. None of them is exported, and none is reachable from
  * this package without inverting the layering — `@objectstack/objectql` depends
  * on no driver. Writing a sixth `startsWith('$')` here is the accident #5659
  * names: one question, N private answers, and the day one of them changes only
@@ -497,25 +601,100 @@ function valueMayBeAnObject(def: FieldDef): boolean {
  * without this the scalar used to be stored verbatim, silently corrupting
  * the column's shape for every consumer that expects an array.
  *
- * Only unambiguous scalars (string/number/boolean) are wrapped; anything
- * else (plain objects, nested garbage) is left untouched so that
- * `validateRecord` can reject it with `invalid_type`.
+ * [#21238] What a value becomes is `@objectstack/core`'s
+ * `multiValueStorageForm`, the one rule the row-level write `check` also puts
+ * the image it judges through: only unambiguous scalars (string/number/boolean)
+ * are wrapped, a blank is left as missing, and anything else (plain objects,
+ * nested garbage) is left untouched so that `validateRecord` can reject it with
+ * `invalid_type`. WHICH columns it is applied to is this door's: a declared
+ * multi-valued field (`isMultiValueField`), never a lifecycle column or one the
+ * engine owns (`system` / `readonly`) — except that [#21663] a `readonly`
+ * field is reached under the same {@link ReadonlyValueScope} the validator is
+ * handed, so a readonly value is judged in the form a non-readonly one is.
+ * ⛔ Pass `'include'` / `'only'` only AFTER the readonly strip: the strip keeps
+ * a key whose value is no longer the caller's, and a wrap here changes the
+ * value's identity.
  */
 export function normalizeMultiValueFields(
   objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
+  readonlyValues: ReadonlyValueScope = 'skip',
 ): void {
   if (!objectSchema?.fields || !data) return;
   for (const [name, value] of Object.entries(data)) {
-    if (SKIP_FIELDS.has(name) || isMissing(value)) continue;
     const def = objectSchema.fields[name];
-    if (!def || def.system || def.readonly || !isMultiValueField(def)) continue;
-    if (Array.isArray(value)) continue;
-    const t = typeof value;
-    if (t === 'string' || t === 'number' || t === 'boolean') {
-      data[name] = [value];
-    }
+    if (!def || !isMultiValueField(def) || !isInReadonlyScope(name, def, readonlyValues)) continue;
+    const stored = multiValueStorageForm(value);
+    if (stored !== value) data[name] = stored;
   }
+}
+
+/**
+ * [#21663] Which `readonly` field values a write-door call reaches, beside the
+ * fields a caller may write.
+ *
+ * ## Why the split exists
+ *
+ * The static readonly strip ({@link stripReadonlyFields} in
+ * `rule-validator.ts`) takes a NON-system caller's value off a readonly field,
+ * and a system write is exempt from it (seed replay, migration, a hook-owned
+ * stamp). The record validator skipped every readonly field outright, on the
+ * premise that the strip had already removed anything a caller sent. That
+ * premise is false for exactly the writers the strip exempts: under
+ * `isSystem` a readonly value went to the driver unjudged, so a seed's
+ * `'yesterday'` on a readonly `datetime` — or an unresolved `cel` envelope —
+ * was stored verbatim, while the same value on a non-readonly field was
+ * refused. Triage's ruling on #21663: the strip keeps its system exemption,
+ * and the value-shape check runs for every write.
+ *
+ * ## The three scopes
+ *
+ *  - `'skip'` — today's walk: a readonly field is not reached. The engine
+ *    passes it where the strip has NOT yet run (the update path's first
+ *    validation), because a caller's readonly value there is about to be
+ *    dropped, not stored: judging it would turn a whole-record write-back that
+ *    echoes a legacy stored value into a refusal.
+ *  - `'include'` — the caller-writable fields AND each readonly field's value,
+ *    for a payload that is FINAL (the insert path and the dry run, both after
+ *    their strips).
+ *  - `'only'` — readonly fields alone, for the update path's second pass after
+ *    its strip, whose caller-writable fields the first pass already judged.
+ *
+ * ## Which arms a readonly value reaches — its SHAPE, never its constraints
+ *
+ * A readonly value is judged by the per-type arms that ask "is this a value of
+ * the declared type at all", with the same wire code and the same sentence a
+ * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
+ * a number for a number-typed field, a boolean, an array for a multi-value
+ * field, no filter-operator object, and the ADR-0104 reference / media /
+ * structured-JSON shape under the object's own posture (warn-first until the
+ * deployment's evidence says otherwise). It is never REQUIRED.
+ *
+ * ⛔ It does NOT reach the author-declared constraints on top of the type:
+ * option membership (`invalid_option`), `maxLength` / `minLength`,
+ * `valueDomain`, `min` / `max` / `scale` / `precision`, or the email / url /
+ * phone formats (the spec's stored shape for those types is a plain string).
+ * Option membership is the load-bearing exclusion: `sys_activity.type` is a
+ * readonly `select` whose declared options are the BUILT-IN set of an open
+ * vocabulary, and the maintainer ruling recorded at commit 88b9d749a binds that
+ * an author-contributed value is stored, not refused — enforcing the enum on a
+ * system-owned write is a direction that ruling did not take.
+ *
+ * A `system` column that is not `readonly` (`owner_id`) and a lifecycle name
+ * with no `readonly` flag are not reached in any scope: neither is the
+ * system-exempt half of the strip this split repairs.
+ */
+export type ReadonlyValueScope = 'skip' | 'include' | 'only';
+
+/** A field the caller writes and `validateRecord` has always walked. */
+function isCallerWritableField(name: string, def: FieldDef): boolean {
+  return !SKIP_FIELDS.has(name) && !def.system && !def.readonly;
+}
+
+/** Is `def` reached under `scope`? See {@link ReadonlyValueScope}. */
+function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScope): boolean {
+  if (def.readonly === true) return scope !== 'skip';
+  return scope !== 'only' && isCallerWritableField(name, def);
 }
 
 /**
@@ -592,6 +771,101 @@ function normalizeBlankTypedRow(fields: Record<string, FieldDef>, row: unknown):
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
     if (!def || !NON_TEXT_STORED_VALUE_TYPES.has(def.type)) continue;
     (out ??= { ...row })[name] = null;
+  }
+  return out ?? row;
+}
+
+/**
+ * [#20309] The declared types the record validator's number arm judges: the
+ * spec's numeric class minus its server-computed class, both read as constants.
+ * One predicate for the arm and for {@link normalizeNumericStringValues}, so
+ * what is judged and what is rewritten cannot drift apart.
+ */
+function isJudgedNumberType(type: string): boolean {
+  return NUMERIC_VALUE_TYPES.has(type) && !COMPUTED_VALUE_TYPES.has(type);
+}
+
+/**
+ * [#20309] A STRING on a number-typed field that the platform's numeric grammar
+ * reads is written as the NUMBER it denotes — so what the record validator's
+ * number arm judges is what the driver stores.
+ *
+ * The grammar is the spec's one, `parseNumericString` (`@objectstack/spec/data`,
+ * #20336): a JSON number literal naming a finite double. The filter door
+ * narrows a comparand by the same reading. ⛔ No second grammar here: its case
+ * table (`NUMERIC_STRING_GRAMMAR_CASES`) decides hex, padded, exponent and
+ * every other form, and this function pre-decides none of them.
+ *
+ * "Number-typed" is exactly what the arm judges ({@link isJudgedNumberType}),
+ * on exactly the fields `validateRecord` walks: never a `SKIP_FIELDS` name or a
+ * `system` field, unless [#21663] it is `readonly` — whose value's shape is
+ * judged on every write ({@link ReadonlyValueScope}), so its numeric string is
+ * written as its number like any other. A value nobody judges is not
+ * rewritten. Safe ahead of the readonly strip, where this runs: it runs before
+ * the caller-value snapshot too, so the strip compares the rewritten value with
+ * itself and still drops a non-system caller's readonly key.
+ *
+ * ## Why the door has to say it
+ *
+ * The arm judged `Number(value)` while the write carried `value`, so an
+ * accepted string reached the driver as sent: memory stored `'12'` and read it
+ * back as the string `'12'`, while SQLite's column affinity stored the plain
+ * forms as numbers but kept `'0x10'` as TEXT (read back as 16). One write, two
+ * stored shapes. A shipped producer sends numeric strings — objectui's CSV
+ * import legacy per-row fallback posts the raw cell — so the census answer on
+ * #20309 accepts the grammar's strings and stores their number rather than
+ * refusing every string.
+ *
+ * ## What it does NOT touch
+ *
+ * ⛔ A string the grammar does not read: it stays as sent, and the number arm
+ * refuses it with `invalid_number`. (A blank never reaches here as a string on
+ * these types: {@link normalizeBlankTypedValues} made it `null` first.) ⛔ Every
+ * non-string value, of any type. ⛔ `summary` and the other computed types,
+ * whose value's shape is their producer's (the seat ruling on #20308).
+ *
+ * ## Where it runs
+ *
+ * Beside {@link normalizeBlankTypedValues}, at the same three points of
+ * `ObjectQL` — `insert()`, `update()` and `validate()` (the dry run) — before
+ * anything reads the payload, so the middleware, the caller snapshots, the
+ * hooks, the `readonlyWhen` locks and the validator all see the number. Every
+ * REST, batch and import door reaches the engine through those methods. ⛔ No
+ * driver copy. A value a `before*` hook writes after the door is the hook's
+ * own and is not rewritten; the arm still judges it by the same grammar.
+ *
+ * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
+ * them, pure — the same reference comes back when nothing changed, else a
+ * shallow copy (per row, and a copied array).
+ */
+export function normalizeNumericStringValues<T>(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: T,
+): T {
+  const fields = objectSchema?.fields;
+  if (!fields || !data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    let rows: unknown[] | undefined;
+    for (let i = 0; i < data.length; i++) {
+      const row = normalizeNumericStringRow(fields, data[i]);
+      if (row !== data[i]) (rows ??= data.slice())[i] = row;
+    }
+    return (rows ?? data) as T;
+  }
+  return normalizeNumericStringRow(fields, data) as T;
+}
+
+function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknown): unknown {
+  if (!isPlainRecord(row)) return row;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(row)) {
+    if (typeof value !== 'string') continue;
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+    if (!def || !isJudgedNumberType(def.type) || !isInReadonlyScope(name, def, 'include')) continue;
+    const n = parseNumericString(value);
+    if (n === undefined) continue;
+    (out ??= { ...row })[name] = n;
   }
   return out ?? row;
 }
@@ -682,6 +956,29 @@ function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message
   return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
 }
 
+/**
+ * [#20846] A supported year as a range sentence names it: four digits, the
+ * `YYYY` a value in that year is written with (`0001`, never `1`).
+ */
+function fourDigitYear(year: number): string {
+  return String(year).padStart(4, '0');
+}
+
+/**
+ * [#20671] Is this a time of day with a zone suffix — `"10:00Z"`,
+ * `"10:00:00+08:00"`, `"10:00-0530"` — whose wall clock is one the `time`
+ * rule reads once the suffix is dropped? It chooses the sentence of an
+ * `invalid_time` refusal, never the verdict: a `time` field carries no zone
+ * (ADR-0053 D-C1), so the sentence says to drop the suffix or to use a
+ * `datetime` field for an instant. The wall-clock half is judged by core's
+ * rule, the one the verdict asks, so `"25:00Z"` gets the plain sentence.
+ */
+function isZonedTimeOfDay(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const m = /^(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:[Zz]|[+-]\d{2}:?\d{2})$/.exec(value.trim());
+  return m !== null && !isUninterpretableTemporalComparand('time', m[1]);
+}
+
 function validateOne(
   name: string,
   def: FieldDef,
@@ -691,6 +988,10 @@ function validateOne(
   ctx?: ValidationMessageContext,
   valueStrict = false,
   onAdmitted?: AdmittedValueShapeViolationSink,
+  // [#21663] A `readonly` field's value: its type's SHAPE arms only, never a
+  // constraint — see {@link ReadonlyValueScope}. Each `if (shapeOnly) return
+  // null` below sits where an arm's shape test ends and its constraints begin.
+  shapeOnly = false,
 ): FieldValidationError | null {
   const fail = (
     code: FieldErrorCode,
@@ -698,7 +999,16 @@ function validateOne(
     messageKey?: string,
     options?: string[],
     value?: string | number | boolean,
-  ) => buildFieldError({ field: name, code, def, constraint, messageKey, options, value }, ctx);
+    messageParams?: Record<string, unknown>,
+  ) => buildFieldError({ field: name, code, def, constraint, messageKey, options, value, messageParams }, ctx);
+
+  // A field bound to a shared picklist is judged against the list's resolved
+  // options like any inline list; the refusal names the list. When the list
+  // did not resolve, the field has no options and accepts no value — refused
+  // rather than read as free-form, which would accept anything.
+  const picklist = typeof def.picklist === 'string' && def.picklist.length > 0 ? def.picklist : undefined;
+  const picklistUnresolved = () =>
+    fail('invalid_option', undefined, 'invalid_option_picklist_unresolved', undefined, undefined, { picklist });
 
   // ── required ────────────────────────────────────────────────────
   // `autonumber` is runtime-owned: the value is generated by the engine /
@@ -775,6 +1085,9 @@ function validateOne(
   // in driver-sql (the #11794 invariant). The email/url/phone format checks
   // below stay per-type conditions inside the branch.
   if (BOUNDED_STRING_FIELD_TYPES.has(t)) {
+    // A string type's stored shape is a string; everything below is a bound,
+    // a domain or a format the author declared on top of it.
+    if (shapeOnly) return null;
     const s = typeof value === 'string' ? value : String(value);
     if (def.maxLength !== undefined && s.length > def.maxLength) {
       return fail('max_length', { maxLength: def.maxLength, actual: s.length });
@@ -857,24 +1170,59 @@ function validateOne(
   // failed with `ERR_SUMMARY_RECOMPUTE` on memory and SQLite. A blank on a
   // `summary` is still `null` at the door (`normalizeBlankTypedValues` reads the
   // whole numeric class).
-  if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
-    const n = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(n)) {
+  //
+  // [#20309] A value that is neither a number nor a string is refused: an
+  // array, a boolean, a plain object, a `Date`. The arm used to judge
+  // `Number(value)` on every value while the write carried `value`, so each of
+  // these that JS coerces to a finite number passed and reached the driver as
+  // sent: `[500]` (SQLite stored the TEXT `'[500]'`, memory the array), `[]`,
+  // `true` / `false`. None is the spec's stored value for this class
+  // (`valueSchemaFor`: `z.number().finite()`) and none has a numeric reading
+  // to parse, so the arm refuses it and never silently alters it (the #7501
+  // posture). A number is judged as itself and written as itself.
+  //
+  // [#20309] A STRING is judged by the platform's one numeric grammar,
+  // `parseNumericString` (`@objectstack/spec/data`, #20336), never by
+  // `Number()` and ⛔ never by a second grammar here. `Number()` also read a
+  // radix literal (`'0x10'`), a whitespace-padded one (`' 12 '`) and the
+  // non-JSON spellings `'+5'` / `'.5'` / `'5.'` / `'007'` as finite, so those
+  // were accepted and are now `invalid_number`; the grammar's case table
+  // decides every form. An admitted string is judged as the number it denotes,
+  // and `normalizeNumericStringValues` has already written that number into
+  // the payload at the door, so the driver stores what was judged. `min`,
+  // `max`, `scale` and `precision` below read that number, as they read a
+  // number.
+  if (isJudgedNumberType(t)) {
+    if (typeof value !== 'number' && typeof value !== 'string') {
       return fail('invalid_number');
     }
-    // [#20308] `progress` joined the TYPE check above, and only that. The
-    // bounds and `scale` below keep the five types they always read: `scale`'s
-    // own contract names the types it is enforced on (`number`, `percent`,
-    // `rating`, `slider`), and `min` / `max` on `progress` were never enforced;
-    // starting to enforce either would narrow what a caller may write, which is
-    // a separate decision from "a numeric column holds a number".
-    if (t === 'progress') return null;
+    const n = typeof value === 'number' ? value : parseNumericString(value);
+    if (n === undefined || !Number.isFinite(n)) {
+      return fail('invalid_number');
+    }
+    if (shapeOnly) return null;
+    // `min` / `max` bind on every type through this door, `progress` included.
+    // [#20386] `progress` joined the TYPE check above in #20308 and, with this
+    // change, the bounds: `FieldSchema.min` / `max` declare 「Checked on the
+    // WRITTEN value only」 with no type exclusion, and triage 5865053231 ruled
+    // ENFORCE — a `progress` field that declares `max: 100` stored `150` (and
+    // `min: 0` stored `-5`) with 201 on memory and SQLite while `number`
+    // refused both. It answers the `number` field's codes, `min_value` /
+    // `max_value`. A narrowing of what a caller may write, shipped BREAKING.
     if (def.min !== undefined && n < def.min) {
       return fail('min_value', { min: def.min });
     }
     if (def.max !== undefined && n > def.max) {
       return fail('max_value', { max: def.max });
     }
+    // ⛔ …and only the bounds. `scale` and `precision` below keep the five
+    // types they always read, because each key's own contract names them:
+    // `scale` 「Applies to `number`, `percent`, `rating` and `slider` fields」,
+    // `precision` 「Enforced on writes of `number`, `currency`, `percent`,
+    // `rating` and `slider` fields … Not read on any other field type」.
+    // Starting either on `progress` would narrow a write that no contract
+    // names, so this return stays below the bounds and above both.
+    if (t === 'progress') return null;
     // ── `scale` — enforced by REJECTION, never rounding (#7501) ──
     // Maintainer ruling 2026-08-11: an over-scale value is refused the way an
     // out-of-range one is; silent rounding is silently altering data. Applies
@@ -912,6 +1260,12 @@ function validateOne(
     // write carries whatever decimals it carries, exactly as it always has on
     // a currency field that declared no `scale`. Enforcing a currency width on
     // writes (the first ruling's B′) was offered and NOT taken.
+    //
+    // `scaleAllowance` keeps the allowance this branch APPLIED (or `undefined`
+    // when it applies none), because the `precision` count below is taken at
+    // exactly those decimal places — one reading of the field's scale, never
+    // a second derivation of it.
+    let scaleAllowance: number | undefined;
     if (
       t !== 'currency' &&
       def.scale !== undefined &&
@@ -938,6 +1292,7 @@ function validateOne(
       const allowed = t === 'percent' && percentScaleOf(def) === 'fraction'
         ? def.scale + 2
         : def.scale;
+      scaleAllowance = allowed;
       const actual = decimalPlacesOf(n);
       if (actual > allowed) {
         // The envelope names the allowance that was APPLIED, not the raw
@@ -947,6 +1302,60 @@ function validateOne(
         // accepts 4 — a true refusal described by a false constraint, and the
         // `max_scale` message template renders both numbers verbatim.
         return fail('max_scale', { scale: allowed, actual });
+      }
+    }
+    // ── `precision` — enforced by REJECTION, never rounding (#19992) ──
+    // Triage on #19992 (ENFORCE, by the maintainer's #18900 ④ criterion
+    // 「主流平台有没有这个能力 —— 有 ⇒ 补消费端」): a total-digit bound is the
+    // mainstream DECIMAL(p, s) / Salesforce Length + Decimal Places, and the
+    // metadata designer writes it, so the declared count binds here — refused
+    // like `max_scale`, for the same reason: rounding is silently altering data.
+    // New writes only; a stored value above a count declared later rests.
+    //
+    // The count is `digitCountAt`: the value's digits from its first non-zero
+    // digit down to the decimal places the `scale` branch above applied — so
+    // `precision: 5, scale: 2` refuses `1234.5` (`1234.50`, 6 digits) and the
+    // integer part may carry `precision − scale` digits. With no allowance
+    // applied (no `scale` declared, or `currency`, whose `scale` is refused)
+    // the value's OWN decimal places count: a currency amount's written
+    // decimals are part of its total, while the decimals themselves stay
+    // unconstrained (ruling 乙, above) — only the total is bounded.
+    //
+    // ⛔ The one derived floor: a fraction-stored `percent` is counted at least
+    // two places right even with no `scale` declared — the same two-place
+    // shift the `scale + 2` allowance above encodes (ruling batch #161 item 3
+    // letter B). With it the count is that of the PERCENTAGE-POINT value as
+    // displayed and entered (`1000%` is stored `10`, counted `10.00`, 4 digits),
+    // so a percent's `precision` means one thing whether or not `scale` is
+    // declared. Read from `percentScaleOf`, never re-decided from `max`.
+    //
+    // Only a well-formed declaration is enforced, for the reason given for
+    // `scale` above; `FieldSchema` refuses a non-integer or negative count at
+    // parse (#8321). ⛔ No column follows: every numeric column stays the fixed
+    // NUMERIC_COLUMN_REPRESENTATION exact decimal, so this seam is the whole of
+    // the enforcement — sizing DDL from `precision` is a migration question
+    // this rule does not answer.
+    if (
+      def.precision !== undefined &&
+      Number.isInteger(def.precision) &&
+      def.precision >= 0
+    ) {
+      const minPlaces =
+        scaleAllowance ?? (t === 'percent' && percentScaleOf(def) === 'fraction' ? 2 : 0);
+      const actual = digitCountAt(n, minPlaces);
+      if (actual > def.precision) {
+        // The envelope names the decimal places the count was TAKEN at, as
+        // `max_scale` names its applied allowance. When the field's places
+        // padded the value (`1234.5` counted as `1234.50`) the sentence says
+        // so; otherwise the plain one — a user who typed 6 digits and reads
+        // "got 7" with no reason given has been handed a riddle.
+        const own = decimalPlacesOf(n);
+        const counted = Math.max(minPlaces, own);
+        return fail(
+          'max_precision',
+          { precision: def.precision, scale: counted, actual },
+          counted > own ? 'max_precision_scaled' : 'max_precision',
+        );
       }
     }
     return null;
@@ -961,29 +1370,111 @@ function validateOne(
 
   // ── date/datetime ───────────────────────────────────────────────
   if (t === 'date' || t === 'datetime') {
-    if (value instanceof Date) return null;
-    if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return null;
-    // Same wire code, two sentences: "a valid date" vs "a valid datetime".
-    return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
+    const readable = value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+    // …and the value is one `@objectstack/core`'s
+    // `isUninterpretableTemporalComparand` reads — the temporal-comparand
+    // door's rule, asked here rather than copied, so a value is refused as a
+    // written value exactly when it is refused as a comparand. What that one
+    // rule holds a `date` / `datetime` to:
+    //
+    // - [#20264] a year from 0001 to 9999 for a `date` and [#20280] from 1000
+    //   to 9999 for a `datetime`, MySQL's documented `DATETIME` floor, whatever
+    //   the spelling (a `Date` or a string; `isOutsideTemporalYearRange`). A
+    //   `datetime` stored below year 1000 before that floor is read as stored
+    //   and is not rewritten; a write that carries one is refused. A date written as
+    //   `+010000-01-01T00:00:00.000Z` has no leading `YYYY-MM-DD`, so the
+    //   storage rule kept it verbatim (a stored non-day, 201 on memory and
+    //   SQLite) and PostgreSQL refused it with a 500; year 0 is a 500 on
+    //   PostgreSQL on both kinds.
+    // - [#20481] a `date` STRING the `date` storage rule reads: a leading
+    //   `YYYY-MM-DD` (after trimming), which `temporalStorageForm` collapses to
+    //   that day. The rule hands every other string back unchanged, so
+    //   `"2026/07/15"`, `"07/15/2026"`, `"15 July 2026"` or `"2026-7-15"` —
+    //   each `Date.parse`-readable — was stored verbatim on memory and SQLite,
+    //   a non-day that sorts and compares as text beside real days, while
+    //   PostgreSQL read it by its `DateStyle` (`07/08/2026` is July 8 under
+    //   MDY and August 7 under DMY). No other spelling is canonicalised, on
+    //   purpose: `07/08/2026` names two days, and a guess stores the wrong one
+    //   silently.
+    // - [#20525] a STRING whose leading day exists, for a `date` and for the
+    //   day part of a `datetime`, and a `datetime` string in one of the ISO
+    //   8601 spellings the platform writes. `Date.parse` rolled an impossible
+    //   day over (`"2026-02-30T10:00:00Z"` was stored as March 2 on every
+    //   backend) and a `date` kept it verbatim (`"2026-02-30"`, a day that does
+    //   not exist, on memory and SQLite; a 500 on PostgreSQL); it read a
+    //   non-ISO `datetime` in the server process's zone. [#20549] Both
+    //   predicates moved into that rule, so the comparand door refuses them
+    //   too.
+    //
+    // Refused, never rolled over and never re-read: the same `invalid_date`
+    // wire code as every other value that is not a valid date, naming the
+    // field. The rule's two comparand-only exemptions never reach here: a
+    // blank is missing before this arm, and a `{placeholder}` is not
+    // `Date.parse`-readable. `readable` stays on top of the rule, and it is
+    // the one place the two doors differ: a NUMBER is refused as a written
+    // `date` / `datetime` (the stored form is text, never epoch milliseconds),
+    // while a comparand may be one. It also refuses a string with a real
+    // leading day and nothing `Date.parse` reads after it (`2026-07-15T25:00`),
+    // which the `date` rule reads as its day when it is a comparand. A `Date`
+    // names a real instant and is judged by its year only.
+    if (readable && !isUninterpretableTemporalComparand(t, value)) return null;
+    // Same wire code, four sentences: "a valid date" vs "a valid datetime",
+    // and [#20846] each kind's range sentence for a readable value whose year
+    // falls outside the kind's supported years — the class the one rule asks
+    // `isOutsideTemporalYearRange` about, whatever else is wrong with the value,
+    // which is the class the temporal-comparand door names by its years too.
+    // "Must be a valid datetime (ISO-8601)" is false for `0500-07-15T10:00:00Z`
+    // (valid ISO 8601) and sends its author to rewrite a spelling when no
+    // spelling of year 500 is admitted: the year is what is refused. The years
+    // are core's `SUPPORTED_TEMPORAL_YEARS`, the range that one predicate
+    // judges by, handed to the sentence as message-only parameters: ⛔ no new
+    // key on `constraint` (the published payload) and no literal year here or
+    // in the catalog. A value that is not `readable` — unparseable, or a
+    // number, which is never a written `date` / `datetime` whatever its year —
+    // keeps the ISO sentence.
+    const years = readable && isOutsideTemporalYearRange(value, t) ? SUPPORTED_TEMPORAL_YEARS[t] : undefined;
+    const sentence = t === 'datetime'
+      ? (years ? 'invalid_datetime_range' : 'invalid_datetime')
+      : (years ? 'invalid_date_range' : 'invalid_date');
+    return fail(
+      'invalid_date',
+      { type: t },
+      sentence,
+      undefined,
+      undefined,
+      years && { firstYear: fourDigitYear(years.first), lastYear: fourDigitYear(years.last) },
+    );
   }
 
   // ── time (time-of-day) ──────────────────────────────────────────
-  // A `Field.time` is a wall-clock time, NOT an instant — `Date.parse('14:30')`
-  // is NaN, so reusing the date branch rejected every valid time. Accept
-  // `HH:MM`, `HH:MM:SS`, optional fractional seconds and an optional Z/offset;
-  // also accept a Date or a full ISO datetime (callers that send a timestamp
-  // for a time field).
+  // A `Field.time` is a zone-less wall clock, NOT an instant (ADR-0053 D-C1).
+  // [#20671] Judged by `@objectstack/core`'s one rule, the one the date /
+  // datetime arm above asks, so a value is refused as a written `time` exactly
+  // when it is refused as a `time` comparand. What that rule reads:
+  //
+  // - a bare `HH:MM[:SS[.fraction]]` in range, stored as `HH:MM:SS`;
+  // - an instant in one of the ISO 8601 spellings a `datetime` is written in,
+  //   on a calendar day that exists, whose UTC year has four digits; the
+  //   storage rule keeps its UTC time of day. A `Date` is judged by that year.
+  //
+  // It replaced a private pair of patterns that admitted what the rule does not
+  // read. A time of day with a `Z` or an offset (`"10:00Z"`, `"10:00+08:00"`)
+  // was stored verbatim on memory and SQLite and as `"10:00:00"` on
+  // PostgreSQL, so one write read back two ways. A `hasDate` test with no
+  // anchor matched inside `"+010000-01-01T10:00:00Z"`, so an extended-year
+  // instant was stored verbatim on memory and SQLite and was a 500 on
+  // PostgreSQL. Each is refused now with `invalid_time`, never a 500. A zone
+  // suffix on a time of day gets its own sentence, which says what to do: drop
+  // the suffix, or use a `datetime` field for an instant.
+  //
+  // `readable` holds the write door to what the comparand door exempts. A
+  // number is refused as a written `time` (a comparand may be epoch
+  // milliseconds), and so is a `{placeholder}`, which is filter vocabulary and
+  // not a value. A blank is missing before this arm.
   if (t === 'time') {
-    if (value instanceof Date) return null;
-    if (typeof value === 'string') {
-      const timeOfDay = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/;
-      // Accept a valid time-of-day, OR a full datetime that carries a real date
-      // component. NOT a bare `Date.parse` check — `Date.parse('14:60')` returns
-      // a (bogus) number in Node, which would let malformed times through.
-      const hasDate = /\d{4}-\d{2}-\d{2}/.test(value);
-      if (timeOfDay.test(value.trim()) || (hasDate && !Number.isNaN(Date.parse(value)))) return null;
-    }
-    return fail('invalid_time');
+    const readable = value instanceof Date || (typeof value === 'string' && classifyFilterToken(value) === null);
+    if (readable && !isUninterpretableTemporalComparand(t, value)) return null;
+    return fail('invalid_time', undefined, isZonedTimeOfDay(value) ? 'invalid_time_zoned' : 'invalid_time');
   }
 
   // ── select / radio (single-value) ───────────────────────────────
@@ -1000,9 +1491,20 @@ function validateOne(
   // question from two authorities that happen to agree today, which is the
   // drift the one-definition ruling (#17469) closes.
   if ((t === 'select' || t === 'radio') && !isMultiValueField(def)) {
+    // Option membership is the whole arm, and it is a constraint: ⛔ never on
+    // a readonly value (the open-vocabulary ruling, see ReadonlyValueScope).
+    if (shapeOnly) return null;
     const allowed = optionValues(def.options);
+    if (picklist !== undefined && allowed.length === 0) return picklistUnresolved();
     if (allowed.length > 0 && !allowed.includes(String(value))) {
-      return fail('invalid_option', { allowed: allowed.join(', ') }, 'invalid_option', allowed);
+      return fail(
+        'invalid_option',
+        { allowed: allowed.join(', ') },
+        picklist !== undefined ? 'invalid_option_picklist' : 'invalid_option',
+        allowed,
+        undefined,
+        picklist !== undefined ? { picklist } : undefined,
+      );
     }
     return null;
   }
@@ -1015,19 +1517,25 @@ function validateOne(
     if (!Array.isArray(value)) {
       return fail('invalid_type', undefined, 'invalid_type_array');
     }
+    if (shapeOnly) return null;
     // Reference / attachment types carry IDs or storage keys, not options —
     // reference integrity is handled elsewhere.
     if (t === 'lookup' || t === 'user' || t === 'file' || t === 'image') return null;
     const allowed = optionValues(def.options);
-    if (allowed.length === 0) return null; // free-form (tags without options)
+    if (allowed.length === 0) {
+      // A picklist-bound field with no options is a list that did not
+      // resolve, never a free-form one: nothing it could hold has been offered.
+      return picklist !== undefined && value.length > 0 ? picklistUnresolved() : null;
+    }
     for (const v of value) {
       if (!allowed.includes(String(v))) {
         return fail(
           'invalid_option',
           { allowed: allowed.join(', ') },
-          'invalid_option_value',
+          picklist !== undefined ? 'invalid_option_value_picklist' : 'invalid_option_value',
           allowed,
           String(v),
+          picklist !== undefined ? { picklist } : undefined,
         );
       }
     }
@@ -1223,10 +1731,20 @@ export function valueShapeViolation(def: FieldDef, value: unknown): string | nul
 
 /**
  * Is this field one the value-shape scan covers, and one a client may write?
- * `system` / `readonly` / lifecycle columns are skipped for the same reason
- * `validateRecord` skips them — the engine owns them, so they are never
- * validated on a write and must never be counted as blocking a gate that
- * governs writes.
+ * `system` / `readonly` / lifecycle columns are skipped: the engine owns them,
+ * so a client never writes them and they must never be counted as blocking a
+ * gate that governs client writes.
+ *
+ * [#21663] That is no longer the same thing as "never validated on a write".
+ * A `readonly` reference / structured-JSON value IS judged on every write now
+ * ({@link ReadonlyValueScope}) — under the posture its object resolves, and
+ * this predicate is also what the engine's dormancy test counts, so an object
+ * whose only covered fields are readonly stays warn-first for them: the value
+ * is admitted, logged and reported to `onAdmittedValueShapeViolation`, never
+ * stored silently. ⛔ Widening this predicate to readonly columns is NOT the
+ * fix for that: every object carries injected readonly lookups (`created_by`,
+ * `updated_by`, `organization_id`), so it would make every object non-dormant
+ * — the defect the dormancy test was written to close.
  */
 export function isScannableValueShapeField(name: string, def: FieldDef | undefined): boolean {
   if (!def || SKIP_FIELDS.has(name) || def.system || def.readonly) return false;
@@ -1351,11 +1869,38 @@ export interface ValidateRecordOptions {
  * `fields` map of `{ [fieldName]: FieldDef }`.
  *
  * Returns void on success; throws `ValidationError` on failure.
+ *
+ * A `readonly` field is not reached here, exactly as before #21663: this
+ * public helper has no readonly strip to stand before or after, so it cannot
+ * say whether a readonly value on `data` is one a write would store. The
+ * engine's write path asks {@link validateRecordInScope}, which can.
  */
 export function validateRecord(
   objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   mode: Mode,
+  options: ValidateRecordOptions = {},
+): void {
+  validateRecordInScope(objectSchema, data, mode, 'skip', options);
+}
+
+/**
+ * [#21663] {@link validateRecord}, told where its payload stands relative to
+ * the readonly strip — see {@link ReadonlyValueScope} for the three scopes,
+ * the arms a readonly value reaches, and why it is never one of its
+ * constraints.
+ *
+ * Module-internal on purpose: re-exported from neither package entry, so the
+ * published `validateRecord` signature is unchanged. The scope is a fact only
+ * the engine's write path knows. ⛔ It passes `'include'` / `'only'` only
+ * where the payload is FINAL; a readonly value judged ahead of the strip may
+ * be one the strip is about to drop.
+ */
+export function validateRecordInScope(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  mode: Mode,
+  scope: ReadonlyValueScope,
   options: ValidateRecordOptions = {},
 ): void {
   if (!objectSchema?.fields || !data) return;
@@ -1371,18 +1916,26 @@ export function validateRecord(
     // Walk all declared fields — required check applies even when
     // the caller didn't supply the field at all.
     for (const [name, def] of Object.entries(fields)) {
-      if (SKIP_FIELDS.has(name)) continue;
-      if (def.system || def.readonly) continue;
-      const err = validateOne(name, def, data[name], false, mediaStrict, messages, valueStrict, onAdmitted);
+      if (!isInReadonlyScope(name, def, scope)) continue;
+      // [#21663] A readonly value: its SHAPE, never required (the engine owns
+      // its presence) and never a constraint — see ReadonlyValueScope.
+      const shapeOnly = def.readonly === true;
+      const err = validateOne(name, def, data[name], shapeOnly, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly);
       if (err) errors.push(err);
     }
   } else {
     // Update — validate only supplied fields; an OMITTED field never 400s.
     for (const [name, value] of Object.entries(data)) {
-      if (SKIP_FIELDS.has(name)) continue;
       const def = fields[name];
       if (!def) continue;
-      if (def.system || def.readonly) continue;
+      if (!isInReadonlyScope(name, def, scope)) continue;
+      if (def.readonly === true) {
+        // [#21663] Same as the insert walk: shape only, so no `required_cleared`
+        // either — clearing a readonly column is the engine's business.
+        const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict, onAdmitted, true);
+        if (err) errors.push(err);
+        continue;
+      }
       // ADR-0113 non-regression: a PATCH may not null OUT a required field.
       // The key is in the payload (we are iterating it), so a missing value
       // is an explicit clear, not an omission — the write would take the

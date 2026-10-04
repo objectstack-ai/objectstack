@@ -150,7 +150,9 @@ describe('temporalFilterValue dialect gating', () => {
  * bucketing silently — the loud failure SQLite did not give us.
  */
 describe('buildDateBucketExpr dialect gating (#3773)', () => {
-  const GRANULARITIES = ['day', 'month', 'quarter', 'year'] as const;
+  // [#21595] `week` joined when SQLite gained a `week` arm: every dialect now
+  // renders all five, so each gate below holds for the new expression too.
+  const GRANULARITIES = ['day', 'week', 'month', 'quarter', 'year'] as const;
   const expr = (d: ProbeDriver, field: string, g: string, table?: string) =>
     (d as any).buildDateBucketExpr(field, g, table) as { sql: string; bindings: any[] } | null;
 
@@ -190,6 +192,11 @@ describe('buildDateBucketExpr dialect gating (#3773)', () => {
       expect(expr(d, 'anything', g, 't')!.sql).not.toContain('unixepoch');
       // No table key at all (a caller outside the aggregate path) → plain form.
       expect(expr(d, 'at', g)!.sql).not.toContain('unixepoch');
+      // [#21595] A `Field.date` is its calendar day on SQLite, as on the other
+      // dialects since #21485: no arm, `week` included, reads it through a zone.
+      for (const zoned of [`'localtime'`, `'utc'`]) {
+        expect(expr(d, 'on', g, 't')!.sql.toLowerCase(), `sqlite ${g}`).not.toContain(zoned);
+      }
     }
   });
 
@@ -212,6 +219,35 @@ describe('buildDateBucketExpr dialect gating (#3773)', () => {
       expect(e.sql).toContain('convert_tz(??');
       expect(e.sql).not.toContain('unixepoch');
       expect(e.sql).not.toContain('/1000');
+    }
+  });
+
+  /**
+   * [#21485] The no-server half of the live pins in
+   * `sql-driver-21485-date-bucket-calendar-day.test.ts`, so a regression is red
+   * in every job, including the ones with no PostgreSQL or MySQL attached. A
+   * `Field.date` is a calendar day: its bucket names no zone and converts none.
+   * Each spelling refused below read the session's zone, and on a session east
+   * of UTC moved the day into the previous bucket.
+   *
+   * On PostgreSQL the day must reach `to_char` as a `timestamp`. A bare `date`
+   * there resolves `to_char(timestamptz, text)` through the implicit cast, so a
+   * `timestamptz` is back without the text naming it.
+   */
+  it('Postgres and MySQL bucket a declared Field.date with no zone conversion (#21485)', () => {
+    for (const client of ['pg', 'mysql2']) {
+      const d = makeDriver(client);
+      d.seedDate('t', 'on');
+      for (const g of GRANULARITIES) {
+        const sql = expr(d, 'on', g, 't')!.sql.toLowerCase();
+        for (const zoned of ['timestamptz', 'time zone', 'convert_tz', 'time_zone']) {
+          expect(sql, `${client} ${g}`).not.toContain(zoned);
+        }
+        if (client === 'pg') expect(sql, `${client} ${g}`).toContain('::date::timestamp,');
+        // The control: the same column with no declaration keeps the UTC-instant arm.
+        expect(expr(d, 'on', g)!.sql.toLowerCase(), `${client} ${g}, undeclared`)
+          .toContain(client === 'pg' ? `at time zone 'utc'` : 'convert_tz(');
+      }
     }
   });
 

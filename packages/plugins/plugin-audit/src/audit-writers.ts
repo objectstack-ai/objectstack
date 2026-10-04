@@ -11,7 +11,13 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 // character and leaks on the day it does; `secret-fields.ts` makes the same
 // argument for its own single definition. The `/core` subpath is the
 // engine-free surface of the same package.
-import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core';
+//
+// [#21197] `collectInternalReadFields` is the flag-keyed half of the same
+// contract: a field declared `internal: true` is "never returned on the generic
+// data path", and the engine's read path OMITS it. The ledger is a second exit
+// for the same value, so it honours the same declaration the same way — the
+// producer's declaration consumed, not a masking rule of this package's own.
+import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
 // [#7230] ADR-0079's record display-name contract, imported rather than
 // re-derived. `resolveDisplayField` IS the definition of "which field is this
 // object's human title" (`nameField` → deprecated `displayNameField` alias →
@@ -20,8 +26,33 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
 import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
-// [#8707 / #10101] The platform-row organization resolver, imported rather
-// than owned. It started life in THIS file (#8707, honouring #8287's ruling)
+// [#21120] The family-wide stored-metadata-body seam. `sys_metadata` /
+// `sys_metadata_history` rows carry a serialized metadata BODY in their
+// `metadata` column (a datasource body holds stored credential material), and
+// this writer COPIES the whole audited row into `sys_audit_log.new_value` /
+// `old_value` and `sys_activity.metadata` at write time — a second,
+// admin-readable, at-rest copy. The copy is projected through the one shared
+// redactor so the credential is withheld here exactly as it is on every read
+// exit; `collectMaskedReadFields` cannot reach it, because the credential is
+// nested inside the serialized column, not a top-level secret field of the
+// stored-metadata table. ⛔ No second redaction dialect — the credential
+// definition is `getMetadataTypeRedactor`'s, consumed through this seam.
+import {
+  isStoredMetadataBodyObject,
+  redactStoredMetadataBody,
+  STORED_METADATA_BODY_COLUMN,
+  STORED_METADATA_TYPE_COLUMN,
+} from '@objectstack/spec/kernel';
+// [#21207] The same rows' stored content-hash columns — defined beside the
+// at-rest rewrite that withholds the copies already written.
+import {
+  METADATA_DECISION_AUDIT_OBJECT,
+  STORED_METADATA_HASH_COLUMNS,
+  STORED_METADATA_HASH_NOTE_COLUMN,
+  withheldStoredHashTokens,
+} from './stored-metadata-body-migration.js';
+// [commit 1408fe385 / #10101] The platform-row organization resolver, imported rather
+// than owned. It started life in THIS file (commit 1408fe385, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
 // recorded on cloud#1395: ONE shared resolver for all three platform-row
 // writers (audit, approvals, automation runs) — a per-writer copy of the
@@ -39,6 +70,10 @@ import {
 // here would be a second de-facto vocabulary that disagrees with the shared one
 // the day a driver is added -- the same argument the imports above make.
 import { isMissingTableError } from '@objectstack/types';
+// [#21081] The name the activity row declares its text provenance under, owned
+// by the read side that redacts by it.
+import { ACTIVITY_TEXT_SOURCES_KEY, type ActivityTextSources } from './activity-field-redaction.js';
+import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -190,7 +225,7 @@ const SKIP_OBJECTS = new Set<string>([
  * #5038's bulk equivalents) had to answer "yes, a hook covers this object" for
  * every one of these tables and buy a row read for a handler that returns on
  * its first line. The knowledge existed; the contract had nowhere to put it
- * until #5928 / PR #6575 added `excludeObjects`.
+ * until #5928 / commit 69787f07b added `excludeObjects`.
  *
  * Why the negative face and not `object: [...]` with the complement: the object
  * universe is OPEN. `/meta` PUT registers new objects into a running engine and
@@ -223,7 +258,7 @@ const NOISE_FIELDS = new Set<string>([
 ]);
 
 /**
- * [#8144 / #8707 / #10101] `createFieldPresenceProbe` and
+ * [#8144 / commit 1408fe385 / #10101] `createFieldPresenceProbe` and
  * `resolveRecordOrganizationField` were defined HERE until #10101 promoted
  * them to `@objectstack/metadata-core` (the cloud#1395 ruling: one shared
  * platform-row organization resolver for audit, approvals and automation
@@ -233,8 +268,15 @@ const NOISE_FIELDS = new Set<string>([
  */
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
-/** Action name produced from a HookContext.event string. */
-function actionFor(event: string): 'create' | 'update' | 'delete' | null {
+/**
+ * Action name produced from a HookContext.event string.
+ *
+ * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
+ * whose snapshots are a parent record's field map, and the read side
+ * (`audit-log-field-redaction.ts`) narrows exactly those. A new record-write
+ * action does not compile until that list names it.
+ */
+function actionFor(event: string): LedgerRecordWriteAction | null {
   if (event === 'afterInsert') return 'create';
   if (event === 'afterUpdate') return 'update';
   if (event === 'afterDelete') return 'delete';
@@ -249,15 +291,19 @@ function activityTypeFor(action: 'create' | 'update' | 'delete'): 'created' | 'u
 /**
  * Compute the human-readable record label from a record by trying common
  * label fields. Falls back to record id.
+ *
+ * [#21081] Also answers WHICH field the label was read from (`null` for the id
+ * fallback), so the activity row can declare it: the label is a field value,
+ * and the read side serves it only to a reader served that field.
  */
-function recordLabel(record: any, id: string): string {
-  if (!record || typeof record !== 'object') return id;
+function recordLabel(record: any, id: string): { text: string; field: string | null } {
+  if (!record || typeof record !== 'object') return { text: id, field: null };
   const candidates = ['name', 'subject', 'title', 'full_name', 'label', 'first_name', 'company', 'email'];
   for (const k of candidates) {
     const v = record[k];
-    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'string' && v.trim()) return { text: v.trim(), field: k };
   }
-  return id;
+  return { text: id, field: null };
 }
 
 /**
@@ -577,6 +623,10 @@ function planTrackedLookupReads(
  * option value was the single remaining untranslated token inside it
  * (`阶段: Proposal → Closed Won` on a zh-CN page). Filling it makes the string
  * uniformly localized instead of half-localized, which is the whole defect.
+ *
+ * [#21081] Returns the fields it rendered beside the text — the same loop
+ * answers both, so the activity row's declaration of where its summary came
+ * from cannot drift from what was rendered.
  */
 function renderTrackedChangeSummary(
   objectName: string,
@@ -585,9 +635,10 @@ function renderTrackedChangeSummary(
   newVals: Record<string, any> | null,
   translate: (key: string, params?: Record<string, unknown>) => string | undefined,
   lookupTitles?: Map<string, Map<string, string>>,
-): string | null {
+): { text: string; fields: string[] } | null {
   if (!fields || !newVals) return null;
   const parts: string[] = [];
+  const rendered: string[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
@@ -610,8 +661,9 @@ function renderTrackedChangeSummary(
     );
     const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
     parts.push(`${label}: ${from} → ${to}`);
+    rendered.push(key);
   }
-  return parts.length > 0 ? parts.join('; ') : null;
+  return parts.length > 0 ? { text: parts.join('; '), fields: rendered } : null;
 }
 
 /**
@@ -748,22 +800,29 @@ function planMilestoneTokenReads(
  * the fix. Pinned in `audit-option-label-summary.test.ts` as a WITH-LOCALE
  * milestone case, because the pre-existing seam case in
  * `audit-milestone-summary.test.ts` boots with no locale and cannot bite here.
+ *
+ * [#21081] Returns, beside the text, every key whose value a token actually
+ * interpolated — a token may name a field the update never changed, so the
+ * diff cannot answer where a milestone summary came from; only this can.
  */
 function renderMilestoneSummary(
   template: string,
   fields: Record<string, any> | undefined | null,
   after: Record<string, any> | null,
   lookupTitles?: Map<string, Map<string, string>>,
-): string {
-  return template.replace(milestoneTokenRe(), (_match: string, key: string) => {
+): { text: string; fields: string[] } {
+  const interpolated = new Set<string>();
+  const text = template.replace(milestoneTokenRe(), (_match: string, key: string) => {
     const v = after ? after[key] : undefined;
     if (v === null || v === undefined || v === '') return '';
+    interpolated.add(key);
     const field = fields ? fields[key] : undefined;
     if (!field) return String(v);
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     return displayFieldValue(field, v, titlesFor);
   });
+  return { text, fields: [...interpolated] };
 }
 
 /**
@@ -786,7 +845,7 @@ function renderMilestoneSummary(
  * puts a CLOSED vocabulary there — SQLSTATE (`42P01`, `23505`), mysql2's
  * symbolic names (`ER_NO_SUCH_TABLE`), SQLite's `SQLITE_*` — and ADR-0112 does
  * the same for the engine's own refusals (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
- * the cause measured on #14927). None of them varies per row.
+ * the cause commit ab489388b records). None of them varies per row.
  *
  * So the key is bounded by two sets fixed at BOOT — the declared object
  * registry and the driver's code vocabulary — and by nothing that grows with
@@ -805,14 +864,24 @@ function renderMilestoneSummary(
  * ⛔ Deliberately NOT re-exported from the package barrel: the sharing is
  * internal to `@objectstack/plugin-audit` and the published surface is
  * unchanged by it.
+ *
+ * [#21262] `table` is the table whose insert was REFUSED, for a writer that
+ * writes more than one (`persistAuditTrailRow` writes the ledger row, then its
+ * `sys_activity` mirror). That writer's `error` line names the table and the
+ * row it lost, and every repeat folded under the key is described by that one
+ * line — so the key holds everything the line asserts. Without the table, a
+ * refusal by the OTHER table (same object, same code) would fold into a line
+ * naming the wrong table and the wrong lost row. Still bounded at boot: the
+ * writer's table set is closed. A single-table writer omits it, and its key is
+ * byte-identical to what it was.
  */
-export function auditFailureCauseKey(object: string, err: unknown): string {
+export function auditFailureCauseKey(object: string, err: unknown, table?: string): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   const bounded = typeof code === 'string' || typeof code === 'number' ? String(code) : '(no code)';
   // JSON rather than a separator character: an object name and a driver code
   // are both opaque here, and a key that can collide is a key that silences a
   // real second cause.
-  return JSON.stringify([object, bounded]);
+  return JSON.stringify(table === undefined ? [object, bounded] : [object, table, bounded]);
 }
 
 /**
@@ -829,6 +898,85 @@ export function auditFailureCauseKey(object: string, err: unknown): string {
 export function auditFailureCauseSummary(err: unknown, detail: string): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   return typeof code === 'string' || typeof code === 'number' ? `${String(code)}: ${detail}` : detail;
+}
+
+/**
+ * The two tables `persistAuditTrailRow` writes, in the order it writes them:
+ * the ledger row that records who did it, then its `sys_activity` mirror.
+ */
+type AuditTrailTable = 'sys_audit_log' | 'sys_activity';
+
+/**
+ * [#21262] Which insert `persistAuditTrailRow` had in flight. It starts on the
+ * ledger row and the writer advances it before the activity row, so after a
+ * throw it names the table whose insert was REFUSED. The WRITER is the
+ * authority on that, not the error: a SQLSTATE such as `42P01` with no phrase
+ * naming a relation is a missing-table verdict for any table name, and a
+ * constraint or tenancy refusal need not name a table at all.
+ */
+interface AuditTrailWriteProgress {
+  writing: AuditTrailTable;
+}
+
+/**
+ * [#21262] The FIRST LINE the operator reads when an audit-trail insert is
+ * refused: the table, the row that is lost, the counting unit, and the fix for
+ * the cause the evidence supports.
+ *
+ * Measured before this existed (MySQL `ER_NO_SUCH_TABLE`, the `sys_activity`
+ * table never created): every `sys_audit_log` row LANDED, and the line said
+ * the opposite — "only the `sys_audit_log` row … never landed" — then sent the
+ * operator to the telemetry-datasource split for a table whose DDL had been
+ * refused at boot. And it said "reported ONCE" while printing once per audited
+ * object, four times in that boot.
+ *
+ * ⛔ Operator text only. It quotes the driver's own message and code, and names
+ * the object and the table — never a value from the audited row.
+ */
+function auditWriteFailureLine(f: {
+  object: string;
+  /** `auditFailureCauseSummary(err, detail)` — the driver's code and message. */
+  summary: string;
+  refusedTable: AuditTrailTable;
+  /** A `sys_activity` row was due AFTER the refused ledger row, so it was never written either. */
+  activityRowLost: boolean;
+  /** The ledger table the error says does not exist, when it says so. */
+  missingTable: AuditTrailTable | undefined;
+}): string {
+  const consequence =
+    f.refusedTable === 'sys_audit_log'
+      ? `Audit write FAILED on \`sys_audit_log\` (${f.summary}) — the compliance trail is now INCOMPLETE. ` +
+        'The audited write itself SUCCEEDED and is on disk, so the API returned success and nothing downstream ' +
+        'looks broken; but the `sys_audit_log` row that records who did it never landed' +
+        (f.activityRowLost
+          ? ', and neither did its `sys_activity` timeline row, which is written only after it'
+          : '') +
+        ', and nothing retries it. '
+      : `Audit write FAILED on \`sys_activity\` (${f.summary}) — the activity timeline is now INCOMPLETE. ` +
+        'The audited write itself SUCCEEDED and is on disk, and so did its `sys_audit_log` row that records who ' +
+        'did it, so the API returned success and the compliance ledger is whole; only the `sys_activity` row — ' +
+        "the entry the record's activity timeline and the recent-activity feed show — never landed, and nothing " +
+        'retries it. ';
+  const once =
+    `Every later audited write of '${f.object}' that \`${f.refusedTable}\` refuses with this same code loses ` +
+    `its \`${f.refusedTable}\` row the same way. This line is printed ONCE per audited object, refused table ` +
+    'and error code: the same fault on another audited object prints its own line, and so does a different ' +
+    'code. Raise the log level to `debug` to see every repeat. ';
+  const fix =
+    f.missingTable !== undefined
+      ? `Fix: \`${f.missingTable}\` does not exist on the connection this write reached, and this line cannot ` +
+        'tell which of two causes that is, so check them in this order. (1) Schema sync never created it: the ' +
+        `boot log then carries \`Schema sync FAILED for object '${f.missingTable}'\` with the driver's refusal ` +
+        'of its DDL; fix that error and restart, and the table is created (a deployment that runs ' +
+        '`OS_SKIP_SCHEMA_SYNC` creates it out-of-band instead). (2) Otherwise it was created on a DIFFERENT ' +
+        'datasource than the one this write reached: its ADR-0057 §3.6 lifecycle class routes it to the ' +
+        'dedicated `telemetry` datasource whenever one is registered (`os dev` provisions one by default as a ' +
+        'SIBLING SQLite file), so on a fresh `os dev` boot the table exists in that sibling file and not in the ' +
+        'primary one; look there before concluding it was never created. Set `OS_TELEMETRY_DB=0` to keep ' +
+        'every lifecycle-classed object on the primary datasource.'
+      : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
+        'on — every audited write that hits it loses its row until it is resolved.';
+  return consequence + once + fix;
 }
 
 /**
@@ -856,15 +1004,24 @@ export function installAuditWriters(
    * (`scripts/check-durability-degradation-log-level.mjs`) in the same PR, per
    * the AGENTS.md rule — so a future edit cannot quietly walk the level back
    * down to `warn`.
+   *
+   * [#21262] `progress` is how the caller learns WHICH insert was refused: the
+   * writer advances it before the activity row, so after a throw it still names
+   * the table whose insert threw. ⛔ Not caught here — the failure must keep
+   * reaching the caller's `catch`, which is the site the gate holds at `error`.
    */
   const persistAuditTrailRow = async (
     api: any,
     auditRow: Record<string, any>,
     activityRow: Record<string, any> | undefined,
+    progress: AuditTrailWriteProgress,
   ): Promise<void> => {
     const sys = api.sudo();
     await sys.object('sys_audit_log').create(auditRow);
-    if (activityRow) await sys.object('sys_activity').create(activityRow);
+    if (activityRow) {
+      progress.writing = 'sys_activity';
+      await sys.object('sys_activity').create(activityRow);
+    }
   };
 
   /**
@@ -889,15 +1046,28 @@ export function installAuditWriters(
    * ⛔ The key is deliberately built from the error's `code`, NEVER its
    * message — see {@link auditFailureCauseKey} for why that is what keeps this
    * bounded, and why "log every failure at `error`" remains the wrong answer.
+   *
+   * [#21262] The counting unit is the audited OBJECT, the refused TABLE and the
+   * code. The object is #15166's granularity, kept: its own pin holds two
+   * objects failing the same way to two lines. The table joins because the
+   * line now names it (see {@link auditFailureCauseKey}). One missing table
+   * therefore prints once per audited object that writes through it, and the
+   * line says exactly that rather than "reported ONCE".
    */
   const reportedAuditFailureCauses = new Set<string>();
-  const reportAuditWriteFailure = (object: string, action: string, err: unknown): void => {
+  const reportAuditWriteFailure = (
+    object: string,
+    action: string,
+    err: unknown,
+    refusal: { table: AuditTrailTable; activityRowLost: boolean },
+  ): void => {
     const detail = String((err as any)?.message ?? err);
     const logger = (engine as any).logger;
+    const table = refusal.table;
     try {
-      const cause = auditFailureCauseKey(object, err);
+      const cause = auditFailureCauseKey(object, err, table);
       if (reportedAuditFailureCauses.has(cause)) {
-        logger?.debug?.('Audit write failed (already reported)', { object, action, err: detail, cause });
+        logger?.debug?.('Audit write failed (already reported)', { object, action, table, err: detail, cause });
         return;
       }
       reportedAuditFailureCauses.add(cause);
@@ -912,36 +1082,46 @@ export function installAuditWriters(
       // sentence named the telemetry-datasource split unconditionally, so the
       // measured `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` refusal sent its
       // operator to check a datasource that was working perfectly. The remedy
-      // below is the remedy for a MISSING TABLE, so it is printed for that
-      // cause and, for any other, replaced by the driver's own verdict.
+      // for a MISSING TABLE is printed for that cause and, for any other,
+      // replaced by the driver's own verdict.
       //
       // ⛔ Not deleted, and not weakened: `persistAuditTrailRow` writes
-      // `sys_audit_log` AND its `sys_activity` mirror, and ADR-0057 §3.6 routes
-      // both, so the question is asked about both tables.
-      const missingTable =
-        isMissingTableError(err, 'sys_audit_log') || isMissingTableError(err, 'sys_activity');
-      const message =
-        `Audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is now INCOMPLETE. ` +
-          'The audited write itself SUCCEEDED and is on disk, so the API returned success and nothing downstream ' +
-          'looks broken; only the `sys_audit_log` row that records who did it never landed, and nothing retries it. ' +
-          'Every subsequent audited write failing THIS WAY is losing its row the same way (this CAUSE is reported ' +
-          'ONCE — raise the log level to `debug` to see the rest; a DIFFERENT cause gets its own `error` line). ' +
-          (missingTable
-            ? 'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on. Its ADR-0057 §3.6 ' +
-              "lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` " +
-              'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
-              'executed against a DIFFERENT datasource than the one the table was created in — see framework#5226. ' +
-              'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.'
-            : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
-              'on — every audited write that hits it loses its row until it is resolved.');
+      // `sys_audit_log` AND its `sys_activity` mirror, so the question is asked
+      // about both tables.
+      //
+      // [#21262] …in a fixed order: the REFUSED table first. A SQLSTATE such as
+      // `42P01` with no phrase naming a relation answers "missing" for ANY table
+      // name, so asking in list order would name `sys_audit_log` for a refused
+      // `sys_activity` insert — the table would be inferred from a list, not
+      // read from the refused write. The other table is asked second, for an
+      // error whose phrase names it.
+      //
+      // And the missing-table remedy no longer asserts the datasource split.
+      // A table is just as missing when schema sync's DDL for it was refused at
+      // boot, and nothing in hand here tells the two apart (the boot's failure
+      // is logged, never recorded where this writer can read it), so the line
+      // names both and the order to check them in.
+      const otherTable: AuditTrailTable = table === 'sys_audit_log' ? 'sys_activity' : 'sys_audit_log';
+      const missingTable = isMissingTableError(err, table)
+        ? table
+        : isMissingTableError(err, otherTable)
+          ? otherTable
+          : undefined;
+      const message = auditWriteFailureLine({
+        object,
+        summary: auditFailureCauseSummary(err, detail),
+        refusedTable: table,
+        activityRowLost: refusal.activityRowLost,
+        missingTable,
+      });
       // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
       // NOTHING when the host injected one without it — the durability
       // degradation this text describes would then be reported by nobody at
       // all (#9657). Reach for `error`, fall back to `warn`, never to silence.
       if (logger?.error) {
-        logger.error(message, err instanceof Error ? err : new Error(detail), { object, action });
+        logger.error(message, err instanceof Error ? err : new Error(detail), { object, action, table });
       } else {
-        logger?.warn?.(message, { object, action, err: detail });
+        logger?.warn?.(message, { object, action, table, err: detail });
       }
     } catch {
       /* logging must never break the audited write */
@@ -1030,7 +1210,7 @@ export function installAuditWriters(
     return def;
   };
 
-  // [#8707 / #10101] The object's own organization COLUMN and value, through
+  // [commit 1408fe385 / #10101] The object's own organization COLUMN and value, through
   // the SHARED platform-row resolver (`@objectstack/metadata-core`) — one
   // memoized instance per installation, the same instance shape the approval
   // writer and the automation-run recorder hold. See
@@ -1123,6 +1303,10 @@ export function installAuditWriters(
       const titleField = resolveDisplayField(def as any);
       if (!titleField || titleField === 'id') continue;
       if (collectMaskedReadFields(def).includes(titleField)) continue;
+      // [#21197] Same composition `ledgerView` records by: an `internal` title
+      // column is withheld here too, by the declaration rather than by the
+      // engine strip happening to answer `undefined`.
+      if (collectInternalReadFields(def).includes(titleField)) continue;
       const ids = Array.from(idSet);
       try {
         const rows: any[] = await sys.object(objectName).find({
@@ -1159,8 +1343,11 @@ export function installAuditWriters(
    * function delivers the second half — same *view* — so levelling the two
    * sides levels them UPWARD rather than down to the raw store contents.
    *
-   * Two limbs, and only two, because only two field classes still differ once
-   * both sides are raw (each measured, not assumed):
+   * Two limbs for the raw-pipeline asymmetry, because only two field classes
+   * still differ once both sides are raw (each measured, not assumed) — plus a
+   * third, [#21197], that is about what the ledger may HOLD rather than about
+   * symmetry: a field declared `internal: true` is omitted from the view (see
+   * the limb's own note in the body). The limbs below are the first two:
    *
    *  1. **credential fields** (`secret`, and `password` off better-auth
    *     objects). The raw value is a `secret:` ref, or — for `password`, which
@@ -1202,7 +1389,7 @@ export function installAuditWriters(
   const ledgerView = (
     objectName: string,
     record: any,
-    { dropComputed }: { dropComputed: boolean },
+    { dropComputed, storedType }: { dropComputed: boolean; storedType?: string },
   ): Record<string, any> | null => {
     if (!record || typeof record !== 'object') return null;
     const out: Record<string, any> = { ...record };
@@ -1213,6 +1400,54 @@ export function installAuditWriters(
       // row does not carry is never invented.
       if (!(field in out)) continue;
       out[field] = out[field] == null ? null : SECRET_MASK;
+    }
+    // [#21197] Third limb: a field declared `internal: true` is OMITTED, on
+    // every side this view is taken for — create `new_value`, delete
+    // `old_value`, both halves of an update diff, the activity row's
+    // `{ old, new }` and the label source. It runs AFTER the mask, the engine's
+    // own order, so a field that is both credential-typed and flagged ends up
+    // omitted: the stricter disposition wins. Omitted rather than masked for
+    // the engine's reason — the mask says "a value is set", which on a
+    // `required` column carries nothing, and the declaration promises no value
+    // at all. An update that touched ONLY such a field still records its row
+    // (empty on both sides): the ledger records that a change happened, never
+    // the value — the same trail a masked credential rotation keeps.
+    for (const field of collectInternalReadFields(getObjectDef(objectName))) {
+      delete out[field];
+    }
+    // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
+    // is not a top-level secret field, so the mask above never touches it. The
+    // audit copy is a credential read exit exactly like `/meta`, so the body is
+    // projected through the one shared redactor before it is recorded. The
+    // `type` that selects the redactor is passed in from the FULL row
+    // (`storedType`), because an update diff carries only the changed keys and
+    // its subset may not include the `type` column. Fail CLOSED: a body the
+    // redactor cannot judge is DROPPED from the recorded view rather than
+    // copied raw — the ledger records a change without its credential, never
+    // the credential.
+    if (isStoredMetadataBodyObject(objectName) && STORED_METADATA_BODY_COLUMN in out) {
+      const type = storedType ?? out[STORED_METADATA_TYPE_COLUMN];
+      const outcome = redactStoredMetadataBody(type, out[STORED_METADATA_BODY_COLUMN]);
+      if (outcome.ok) out[STORED_METADATA_BODY_COLUMN] = outcome.body;
+      else delete out[STORED_METADATA_BODY_COLUMN];
+    }
+    // [#21207] …and the same row's stored CONTENT HASH is not copied at all
+    // (fork three, ruling A). It is a hash over the whole stored body, withheld
+    // credential material included, so a copy of it beside the projected body
+    // is an offline verifier, at rest and served to every ledger reader. A copy
+    // has no use for a version token, and the history table stays the lineage.
+    if (isStoredMetadataBodyObject(objectName)) {
+      for (const column of STORED_METADATA_HASH_COLUMNS) delete out[column];
+      // …and a change note that quotes one keeps its words, not the hash.
+      const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+      if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = withheldStoredHashTokens(note);
+    }
+    // The same for a decision-audit row's note: a conflict note written before
+    // the protocol withheld its hashes — and the rewrite of one by
+    // `os migrate audit-metadata-bodies`, whose own ledger copy would otherwise
+    // carry the old note's hashes straight back into the ledger.
+    if (objectName === METADATA_DECISION_AUDIT_OBJECT && typeof out.note === 'string') {
+      out.note = withheldStoredHashTokens(out.note);
     }
     if (dropComputed) {
       const defs = getFieldDefs(objectName);
@@ -1298,6 +1533,20 @@ export function installAuditWriters(
     const after: any = ctx.result;
     const before: any = (ctx as any).previous ?? null;
 
+    // [#21120] The metadata TYPE off the full row, read once from whichever
+    // side the action carries (create/update: `after`; delete: `before`). An
+    // update `diff` keeps only the changed keys, so its subset may not include
+    // the `type` column that selects the body's redactor — `ledgerView` is
+    // handed this so it can still project the `metadata` body. Non-stored
+    // objects ignore it.
+    const storedBodyType: string | undefined = isStoredMetadataBodyObject(ctx.object)
+      ? ((typeof after === 'object' && typeof after?.[STORED_METADATA_TYPE_COLUMN] === 'string'
+          ? after[STORED_METADATA_TYPE_COLUMN]
+          : typeof before === 'object' && typeof before?.[STORED_METADATA_TYPE_COLUMN] === 'string'
+            ? before[STORED_METADATA_TYPE_COLUMN]
+            : undefined) as string | undefined)
+      : undefined;
+
     // Resolve record id from after (insert/update) or before (delete) or input.
     let recordId: string | undefined =
       (typeof after === 'object' && after?.id) ||
@@ -1347,7 +1596,7 @@ export function installAuditWriters(
     // a strict sys_user lookup); the service principal lands on `actor`.
     const actorLabel: string | null =
       userId ?? (typeof sess.actor === 'string' && sess.actor.trim() ? sess.actor.trim() : null);
-    // [#8707, honouring #8287's ruling] The audited RECORD'S OWN organization
+    // [commit 1408fe385, honouring #8287's ruling] The audited RECORD'S OWN organization
     // wins; the acting session's active organization is the fallback. ⛔ Do not
     // flip this back to `sess.organizationId ?? recordOrgId`.
     //
@@ -1399,7 +1648,7 @@ export function installAuditWriters(
     // `readonly: true` (so `validateRecord` skips them) and this whole path is
     // wrapped in swallow-and-report.
     //
-    // It survived a careful review of exactly these lines because #8707
+    // It survived a careful review of exactly these lines because commit 1408fe385
     // reordered the two arms without evaluating either one: reordering two
     // expressions does not tell you whether they resolve. The pins in
     // `audit-writers.test.ts` (#9516 block) are what check this comment against
@@ -1409,7 +1658,7 @@ export function installAuditWriters(
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
     if (action === 'create') {
-      newValue = ledgerView(ctx.object, after, { dropComputed: true });
+      newValue = ledgerView(ctx.object, after, { dropComputed: true, storedType: storedBodyType });
     } else if (action === 'update') {
       // Detect on the raw values, record the masked ones — see the note on
       // `before`/`after` above. `diff` has already dropped computed fields, so
@@ -1417,10 +1666,10 @@ export function installAuditWriters(
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
       // If nothing meaningfully changed, skip the audit row to avoid noise.
       if (Object.keys(d.next).length === 0) return;
-      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false });
-      newValue = ledgerView(ctx.object, d.next, { dropComputed: false });
+      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false, storedType: storedBodyType });
+      newValue = ledgerView(ctx.object, d.next, { dropComputed: false, storedType: storedBodyType });
     } else if (action === 'delete') {
-      oldValue = ledgerView(ctx.object, before, { dropComputed: true });
+      oldValue = ledgerView(ctx.object, before, { dropComputed: true, storedType: storedBodyType });
     }
 
     const auditRow: Record<string, any> = {
@@ -1479,11 +1728,16 @@ export function installAuditWriters(
     // otherwise degrade to the bare id (#5504 names that exact symptom). The
     // mask still applies, so no credential value can reach a user-facing
     // activity summary through the label.
-    const label = recordLabel(
-      ledgerView(ctx.object, after, { dropComputed: false }) ??
-        ledgerView(ctx.object, before, { dropComputed: false }),
+    const { text: label, field: labelField } = recordLabel(
+      ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType }) ??
+        ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType }),
       recordId ?? '',
     );
+    // [#21081] Which parent fields each text column carries a value of — the
+    // declaration the read side redacts by (`activity-field-redaction.ts`). The
+    // label, and every summary that interpolates it, carry the label field.
+    const labelSources: string[] = labelField ? [labelField] : [];
+    let summarySources: string[] = labelSources;
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
     // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
@@ -1516,8 +1770,8 @@ export function installAuditWriters(
       // `value` is a secret's plaintext would be a leak in the metadata
       // itself, not a case worth preserving.
       const summaryFields = getFieldDefs(ctx.object);
-      const beforeView = ledgerView(ctx.object, before, { dropComputed: false });
-      const afterView = ledgerView(ctx.object, after, { dropComputed: false });
+      const beforeView = ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType });
+      const afterView = ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType });
       const milestone = matchMilestone(getObjectDef(ctx.object), beforeView, afterView);
       if (milestone) {
         // [#7290] The read is keyed on the tokens of the template that ACTUALLY
@@ -1536,7 +1790,9 @@ export function installAuditWriters(
           api,
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
         );
-        summary = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
+        const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
+        summary = rendered.text;
+        summarySources = rendered.fields;
         if (milestone.type) activityType = milestone.type;
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
@@ -1546,19 +1802,25 @@ export function installAuditWriters(
           api,
           planTrackedLookupReads(summaryFields, oldValue, newValue),
         );
-        summary =
-          renderTrackedChangeSummary(
-            ctx.object,
-            summaryFields,
-            oldValue,
-            newValue,
-            translate,
-            lookupTitles,
-          ) ??
-          translate('messages.activityUpdated', { object: objectDisplay, label }) ??
-          `Updated ${objectDisplay} "${label}"`;
+        const tracked = renderTrackedChangeSummary(
+          ctx.object,
+          summaryFields,
+          oldValue,
+          newValue,
+          translate,
+          lookupTitles,
+        );
+        if (tracked) {
+          summary = tracked.text;
+          summarySources = tracked.fields;
+        } else {
+          summary =
+            translate('messages.activityUpdated', { object: objectDisplay, label }) ??
+            `Updated ${objectDisplay} "${label}"`;
+        }
       }
     }
+    const textSources: ActivityTextSources = { summary: summarySources, record_label: labelSources };
 
     const activityRow: Record<string, any> = {
       type: activityType,
@@ -1571,7 +1833,9 @@ export function installAuditWriters(
       object_name: ctx.object,
       record_id: recordId ?? null,
       record_label: label,
-      metadata: newValue || oldValue ? safeStringify({ old: oldValue, new: newValue }) : null,
+      // [#21081] The change, plus the declaration of where the text columns
+      // came from. The read side strips the declaration before serving.
+      metadata: safeStringify({ old: oldValue, new: newValue, [ACTIVITY_TEXT_SOURCES_KEY]: textSources }),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)
@@ -1586,6 +1850,10 @@ export function installAuditWriters(
     // lever for activity-row growth (ADR-0057). The compliance audit row is
     // NOT gated — sys_audit_log capture stays unconditional.
     const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
+    const activityRowToWrite = activitiesEnabled ? activityRow : undefined;
+    // [#21262] The ledger row is written first; the writer advances this
+    // before the activity row, so after a throw it names the refused table.
+    const progress: AuditTrailWriteProgress = { writing: 'sys_audit_log' };
 
     try {
       // Assignment notifications are NOT emitted here (framework#3403). Deciding
@@ -1599,7 +1867,7 @@ export function installAuditWriters(
       // (Comment @mention notifications remain a platform behavior — they are
       //  handled separately by the sys_comment hook below, since SKIP_OBJECTS
       //  excludes it from this writer.)
-      await persistAuditTrailRow(api, auditRow, activitiesEnabled ? activityRow : undefined);
+      await persistAuditTrailRow(api, auditRow, activityRowToWrite, progress);
     } catch (err) {
       // #5226 — DURABILITY degradation, not a functional one, so it is reported
       // at `error` (AGENTS.md "Degradation log levels"): the audited write
@@ -1607,7 +1875,12 @@ export function installAuditWriters(
       // completely normal from the outside, while the compliance ledger entry
       // that claims to record it never landed. Nothing retries it, and the gap
       // surfaces — if ever — to an auditor who cannot connect it to this line.
-      reportAuditWriteFailure(ctx.object, action, err);
+      reportAuditWriteFailure(ctx.object, action, err, {
+        table: progress.writing,
+        // A refused ledger row means the activity row due after it was never
+        // attempted; a refused activity row means the ledger row landed.
+        activityRowLost: progress.writing === 'sys_audit_log' && activityRowToWrite !== undefined,
+      });
     }
   };
 
@@ -1689,7 +1962,7 @@ export function installAuditWriters(
    * the declaration whether or not a creation happened. On insert only, a
    * caller barred from *creating* an attachment on a `files: false` object
    * could *move* an existing one onto it. `attachment-access-hooks.ts`
-   * authorizes the re-point (#10091: the new `parent_object`/`parent_id`
+   * authorizes the re-point (commit da891e0ef: the new `parent_object`/`parent_id`
    * must be editable) — access, again, not capability.
    */
   const enforceFilesCapability = async (ctx: HookContext) => {

@@ -13,7 +13,7 @@
  * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
  * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
- * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310; CLI + runtime publish gate since #19370 |
+ * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310; CLI + runtime publish gate since commit a227afa41 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
  * | security-master-detail-ungranted(warn)  | framework#2700 os-tianshun-mtc#43|
@@ -461,7 +461,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           message:
             `custom object "${objName}" declares no sharingModel (OWD). The runtime fails ` +
             `CLOSED to 'private' (ADR-0090 D1), but the baseline must be an authored decision, ` +
-            `not an accident — this is the exact shape of the leave_request incident (objectui#2348).`,
+            `not an accident — this is the exact shape of the leave_request incident, where an object ` +
+            `with no sharingModel let an ordinary read/write grant read and edit every other user's records.`,
           hint:
             `Declare sharingModel explicitly: 'private' (owner + shares; recommended default), ` +
             `'public_read', 'public_read_write', or 'controlled_by_parent' (master-detail children).`,
@@ -523,7 +524,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           `can derive access from. ADR-0055 resolves the master through a required master_detail, then ` +
           `any master_detail, then a required lookup — each of which must also name a reference target — ` +
           `and this object matches none of the three. At runtime every read is DENIED and every write is ` +
-          `refused with 422 INVALID_METADATA (#7474), so the object is unusable rather than merely locked down.`,
+          `refused with 422 INVALID_METADATA, as a metadata defect rather than a permission denial, so the ` +
+          `object is unusable rather than merely locked down.`,
         hint:
           `Add the master relation this object is derived from, e.g. fields.parent: ` +
           `{ type: 'master_detail', reference: '<master_object>', required: true }. If the object has no ` +
@@ -821,7 +823,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // block's `runtimeTypes` widened: a door that refuses a permission set named
   // `role_manager` while a position named `sales_role` walks through — the
   // exact split the registry's #7220 pin refuses to build.
-  // [#19370] It has since crossed, whole, on its own entry — the two write
+  // [commit a227afa41] It has since crossed, whole, on its own entry — the two write
   // types are mapped and all five are declared there. The two entries remain
   // separate: that is what let each cross on its own evidence.
 
@@ -1099,7 +1101,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
  * the registry refuses to build it in either direction. The rule therefore
  * stayed behind WHOLE, on its own CLI-only registry entry.
  *
- * [#19370] It is now ACROSS, still whole and still its own entry: mapping
+ * [commit a227afa41] It is now ACROSS, still whole and still its own entry: mapping
  * `position` / `app` in `TYPE_TO_STACK_KEY` gives the gate a snapshot to build
  * for those two write types, and the entry declares all five write types the
  * six collections belong to. The split earned its keep exactly here — each

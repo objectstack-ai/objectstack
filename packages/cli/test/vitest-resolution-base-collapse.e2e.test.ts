@@ -59,7 +59,7 @@
  * That is what makes the control vacuous. The control for a base claim is "build
  * it the old way and show it fails" — and the old way does not fail here, so the
  * control is written green and reports nothing. Measured on this card: removing
- * #11157's fix from `serve.ts` entirely left the in-process `chalk` assertion in
+ * commit a4cb7817f's fix from `serve.ts` entirely left the in-process `chalk` assertion in
  * `src/commands/serve-config-plugin-host-resolution.test.ts` GREEN, while the
  * spawned-child pin of the same claim in `serve-host-fallback-base.e2e.test.ts`
  * went RED. Same tree, same ablation, opposite verdicts.

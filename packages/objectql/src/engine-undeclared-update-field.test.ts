@@ -298,13 +298,16 @@ describe('#8738 — the declared-field door on update()', () => {
   // place, and a reverse verification that turned one of these red would mean
   // the door had grown an opinion it is not allowed to have.
   describe('where the door deliberately has NO opinion (reused from #8737)', () => {
-    it('a registry-less host gets no verdict — the driver stays the backstop', async () => {
+    it('a registry-less host gets no field verdict — [#21516] the object itself is refused, nothing is written', async () => {
       const { engine, writes } = await makeEngine({ registration: 'none', missingColumns: ['zzz_nonexistent_field'] });
 
-      const refusal = await refusalOf(() => engine.update('acct', { id: 'row-1', zzz_nonexistent_field: 'x' } as any));
+      const refusal: any = await refusalOf(() => engine.update('acct', { id: 'row-1', zzz_nonexistent_field: 'x' } as any));
 
-      expect(writes).toHaveLength(1);
-      expect(String(refusal?.message)).toContain('has no column named zzz_nonexistent_field');
+      // The engine refuses a name the registry does not resolve with the data
+      // door's own envelope before any field door runs: still no opinion about
+      // the field, and the driver is no longer reached by that raw name.
+      expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
+      expect(writes).toHaveLength(0);
     });
 
     it('an EMPTY field map gets no verdict — an absence is not a prohibition', async () => {
@@ -328,7 +331,7 @@ describe('#8738 — the declared-field door on update()', () => {
       // inject `created_at` / `updated_at` itself and the case would prove
       // nothing about the door. `id` is the one name the registry does NOT
       // inject, so it is the door's tolerance being read here, and only its.
-      // [#13657] `description` is declared alongside `name` because this
+      // [commit b003cf2e8] `description` is declared alongside `name` because this
       // harness's own `beforeUpdate` hook STAMPS it (`derived-for-…`), and the
       // post-hook door now judges the hook's output too. Without the
       // declaration the fixture would be refused for the hook's key and this

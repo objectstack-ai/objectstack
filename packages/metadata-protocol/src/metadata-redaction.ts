@@ -66,9 +66,25 @@
  * belongs on that list first; that file is `packages/spec`'s to change.
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import type { MetadataTypeRedactor } from '@objectstack/spec/kernel';
+// [#21120] The family-wide stored-metadata-body primitives — the object set,
+// the object predicate, the column names and the body redactor — live in
+// `@objectstack/spec/kernel`, reachable by every surface in the family
+// (service-analytics, plugin-audit, the objectql engine) that does not depend
+// on this package. The data-door wrappers below (`storedMetadataBodyProjection`,
+// `redactStoredMetadataRow`'s `dropType`, `storedMetadataBodyGroupingRefusal`)
+// are this package's own, built ON that one definition — never a second one.
+import {
+    isStoredMetadataBodyObject,
+    redactStoredMetadataBody,
+    STORED_METADATA_BODY_COLUMN,
+    STORED_METADATA_TYPE_COLUMN,
+} from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+
+export { isStoredMetadataBodyObject };
 
 /**
  * Resolve the redactor for a request-shaped type name.
@@ -131,47 +147,262 @@ export function redactMetadataItems<T>(type: string, items: T[]): T[] {
     return items.map((item) => redactMetadataItem(type, item));
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** An element's identity for an array hop: a non-empty string `id`, or none. */
+function identityOf(element: unknown): string | undefined {
+    if (!isPlainRecord(element)) return undefined;
+    const id = element.id;
+    return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
 /**
- * Walk to the plain object that OWNS the last segment of `segments`.
+ * The ONE element of `array` whose identity is `elementId` — `undefined` when
+ * none carries it or more than one does. Two elements sharing an id cannot be
+ * told apart, so neither is chosen: guessing would graft a credential onto
+ * whichever of the two happened to come first.
+ */
+function elementWithIdentity(
+    array: readonly unknown[],
+    elementId: string,
+): { index: number; element: Record<string, unknown> } | undefined {
+    let found: { index: number; element: Record<string, unknown> } | undefined;
+    for (let index = 0; index < array.length; index += 1) {
+        if (identityOf(array[index]) !== elementId) continue;
+        if (found) return undefined;
+        found = { index, element: array[index] as Record<string, unknown> };
+    }
+    return found;
+}
+
+/**
+ * One container hop of a redacted path, resolved against the STORED body.
  *
- * `undefined` when any hop along the way is absent or is not a plain object —
- * which the caller must read as "this body does not speak to that path at all",
+ * A `redactedKeys` entry is dotted and item-relative, and a segment that lands
+ * on an ARRAY is the element's index in the body the redactor was handed — the
+ * row at rest (a flow's credential sits on `nodes.<i>.config`, #20552). An
+ * index is a position, and a position is not an identity: an author who
+ * reorders a flow's `nodes` sends the same start node back at another index,
+ * and grafting by position would put its credential on whichever node now sits
+ * where it used to. So an array hop is resolved ONCE, against the stored body,
+ * into an identity, and every body — served and incoming — is then walked by
+ * that identity, never by the index. Two kinds of identity:
+ *
+ *  - **the element's own `id`** (`{ elementId }`) — a flow node;
+ *  - **for an element with no `id`, the identified element below it on the
+ *    same path** (`{ anchor }`, #20590). A `parallel` block's branch carries no
+ *    `id`, and a credential inside one sits at
+ *    `nodes.<i>.config.branches.<b>.nodes.<j>.config.signingSecret`. The branch
+ *    is the one element of `branches` whose own walk down the rest of the
+ *    path reaches node `<j>`'s `id` — and a flow's node ids are one space
+ *    across every region (`FlowSchema`), so at most one branch does. `anchor`
+ *    is that walk: the hops from inside the element down to, and including,
+ *    the first identified element beneath it.
+ *
+ * An array hop that reaches neither — an element with no `id` and no
+ * identified element below it on the path, or an `id` shared with a sibling —
+ * resolves to nothing, and the path is skipped.
+ */
+type PathHop =
+    | { readonly key: string }
+    | { readonly elementId: string }
+    | { readonly anchor: readonly PathHop[] };
+
+/**
+ * Resolve every CONTAINER hop of `segments` (all but the last, which names the
+ * redacted key itself) against `stored`. `undefined` when the stored body does
+ * not reach that far, or an array hop has no identity — which the caller reads
+ * as "nothing at rest to carry".
+ */
+function resolveHops(stored: unknown, segments: readonly string[]): PathHop[] | undefined {
+    // First pass: key hops and `id` hops; `null` marks an element with no `id`.
+    const found: Array<PathHop | null> = [];
+    let node: unknown = stored;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+        const segment = segments[i] as string;
+        if (Array.isArray(node)) {
+            if (!/^(0|[1-9][0-9]*)$/.test(segment)) return undefined;
+            const element = node[Number(segment)];
+            if (!isPlainRecord(element)) return undefined;
+            const elementId = identityOf(element);
+            if (elementId !== undefined && !elementWithIdentity(node, elementId)) return undefined;
+            found.push(elementId === undefined ? null : { elementId });
+            node = element;
+            continue;
+        }
+        if (!isPlainRecord(node)) return undefined;
+        found.push({ key: segment });
+        node = node[segment];
+    }
+    // Second pass, from the end: anchor each id-less element on the first
+    // identified element below it. The anchor may itself cross an id-less
+    // element (a branch inside a branch), whose own anchor is already built.
+    const hops: PathHop[] = new Array(found.length);
+    let nextIdentified = -1;
+    for (let i = found.length - 1; i >= 0; i -= 1) {
+        const hop = found[i];
+        if (hop === null) {
+            if (nextIdentified < 0) return undefined;
+            hops[i] = { anchor: hops.slice(i + 1, nextIdentified + 1) };
+            continue;
+        }
+        hops[i] = hop as PathHop;
+        if ('elementId' in (hop as PathHop)) nextIdentified = i;
+    }
+    return hops;
+}
+
+/**
+ * Resolve ONE hop against `node`: the segment it stands for in THIS body (a
+ * key, or the element's index here) and the value it leads to. `undefined`
+ * when this body does not speak to the hop — the wrong kind of container, or
+ * an array hop no single element answers (none does, or two do and cannot be
+ * told apart: guessing would graft a credential onto whichever came first).
+ */
+function stepInto(node: unknown, hop: PathHop): { segment: string; next: unknown } | undefined {
+    if ('key' in hop) {
+        return isPlainRecord(node) ? { segment: hop.key, next: node[hop.key] } : undefined;
+    }
+    if (!Array.isArray(node)) return undefined;
+    let index: number | undefined;
+    for (let i = 0; i < node.length; i += 1) {
+        const hit = 'elementId' in hop
+            ? identityOf(node[i]) === hop.elementId
+            : isPlainRecord(node[i]) && containerAt(node[i], hop.anchor) !== undefined;
+        if (!hit) continue;
+        if (index !== undefined) return undefined;
+        index = i;
+    }
+    return index === undefined ? undefined : { segment: String(index), next: node[index] };
+}
+
+/**
+ * Walk `hops` in `root`: the plain object that OWNS the redacted key, and the
+ * concrete segments (a key, or an array index in THIS body) that reach it.
+ *
+ * `undefined` when any hop along the way is absent, is the wrong kind of
+ * container, or (for an array hop) is answered by no single element — which
+ * the caller must read as "this body does not speak to that path at all",
  * never as "the value is absent". The distinction is the whole guard: a PUT
  * body carrying no `config` key is an author removing the container, and
  * grafting `config.password` back onto it would MINT a config that holds
  * nothing but a credential.
  */
-function containerAt(root: unknown, segments: string[]): Record<string, unknown> | undefined {
+function locate(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Record<string, unknown> } | undefined {
+    const at: string[] = [];
     let node: unknown = root;
-    for (let i = 0; i < segments.length - 1; i += 1) {
-        if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
-        node = (node as Record<string, unknown>)[segments[i] as string];
+    for (const hop of hops) {
+        const step = stepInto(node, hop);
+        if (!step) return undefined;
+        at.push(step.segment);
+        node = step.next;
     }
-    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
-    return node as Record<string, unknown>;
+    return isPlainRecord(node) ? { at, container: node } : undefined;
+}
+
+/** {@link locate}, container only. */
+function containerAt(root: unknown, hops: readonly PathHop[]): Record<string, unknown> | undefined {
+    return locate(root, hops)?.container;
+}
+
+/** The value `at` names in `root`; every segment resolves (it came from a walk of `root`). */
+function valueAt(root: unknown, at: readonly string[]): unknown {
+    let node: unknown = root;
+    for (const segment of at) node = Array.isArray(node) ? node[Number(segment)] : (node as Record<string, unknown>)[segment];
+    return node;
 }
 
 /**
- * Copy-on-write set of `value` at `segments`, returning a new root and copying
- * only the containers along the path.
+ * [#20590 round 1] Where the redacted key's container sits in `root` when the
+ * STORED path to it no longer resolves there — because the element that owns
+ * it MOVED, keeping its identity: a flow node taken out of a `loop` body, or
+ * put into a `parallel` branch, keeps its `id`, its kind and the withheld form,
+ * and only the regions around it change. Skipping the graft there would drop
+ * the stored credential at save, silently.
  *
- * The incoming request body belongs to the caller (`saveMetaItem` hands the
- * same object to the audit trail and the registry write-through), so the
- * carry-forward must not mutate it in place.
+ * The owner is the path's deepest identified element (its last `elementId`
+ * hop). It is looked for by that `id` across the WHOLE body — but only among
+ * the elements that stand where the owner stood: the elements of an array
+ * held under the SAME key as the owner's own array in the stored path (for a
+ * flow node that key is `nodes`, so a node at the top level or in any region
+ * counts, and an edge or a config value that happens to carry the same `id`
+ * does not — a flow keeps node ids and edge ids in separate spaces, #20590
+ * round 2). The key is read from the stored hops, never named here. It is used
+ * only when exactly ONE such element carries that `id` — none, and the author
+ * removed it; two or more, and they cannot be told apart, so nothing is
+ * chosen. Uniqueness across the whole body is what keeps this safe for a type
+ * whose ids are not one space the way a flow's node ids are. From the owner,
+ * the rest of the path is walked as usual (the key hops down to the container,
+ * so an owner whose `config` the author removed still grafts nothing).
+ *
+ * An owner whose array is not held under a key — an array directly inside
+ * another array — has no key to scope by, and is not relocated.
+ *
+ * A path with no identified element — every datasource path, whose redactor
+ * never crosses an array — has no owner to find, and is unaffected.
  */
-function withValueAt(
-    root: Record<string, unknown>,
-    segments: string[],
-    value: unknown,
-): Record<string, unknown> {
-    const [head, ...rest] = segments as [string, ...string[]];
-    const next: Record<string, unknown> = { ...root };
-    if (rest.length === 0) {
-        next[head] = value;
+function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Record<string, unknown> } | undefined {
+    let owner = -1;
+    for (let i = hops.length - 1; i >= 0; i -= 1) {
+        if ('elementId' in (hops[i] as PathHop)) {
+            owner = i;
+            break;
+        }
+    }
+    if (owner < 1) return undefined;
+    const id = (hops[owner] as { elementId: string }).elementId;
+    // The key the owner's array is held under in the stored path.
+    const parent = hops[owner - 1] as PathHop;
+    if (!('key' in parent)) return undefined;
+    const arrayKey = parent.key;
+
+    const matches: string[][] = [];
+    const visit = (node: unknown, at: string[]): void => {
+        if (Array.isArray(node)) {
+            node.forEach((value, index) => visit(value, [...at, String(index)]));
+            return;
+        }
+        if (!isPlainRecord(node)) return;
+        for (const [key, value] of Object.entries(node)) {
+            if (!value || typeof value !== 'object') continue;
+            if (key === arrayKey && Array.isArray(value)) {
+                value.forEach((element, index) => {
+                    if (isPlainRecord(element) && element.id === id) matches.push([...at, key, String(index)]);
+                });
+            }
+            visit(value, [...at, key]);
+        }
+    };
+    visit(root, []);
+    if (matches.length !== 1) return undefined;
+
+    const ownerAt = matches[0] as string[];
+    const rest = locate(valueAt(root, ownerAt), hops.slice(owner + 1));
+    return rest ? { at: [...ownerAt, ...rest.at], container: rest.container } : undefined;
+}
+
+/**
+ * Copy-on-write set of `value` under `key` in the container `at` names,
+ * returning a new root and copying only the containers along the way — an
+ * array segment copies the array and replaces the one element it names.
+ *
+ * `at` came from a walk of `root`, so every segment resolves. The incoming
+ * request body belongs to the caller (`saveMetaItem` hands the same object to
+ * the audit trail and the registry write-through), so the carry-forward must
+ * not mutate it in place.
+ */
+function withValueAt(root: unknown, at: readonly string[], key: string, value: unknown): unknown {
+    if (at.length === 0) return { ...(root as Record<string, unknown>), [key]: value };
+    const [head, ...rest] = at as [string, ...string[]];
+    if (Array.isArray(root)) {
+        const next = root.slice();
+        next[Number(head)] = withValueAt(root[Number(head)], rest, key, value);
         return next;
     }
-    next[head] = withValueAt(root[head] as Record<string, unknown>, rest, value);
-    return next;
+    const record = root as Record<string, unknown>;
+    return { ...record, [head]: withValueAt(record[head], rest, key, value) };
 }
 
 /** Structural equality for the values a redactor hides (scalars in practice; general by construction). */
@@ -209,6 +440,33 @@ function sameValue(a: unknown, b: unknown): boolean {
  *  - the incoming body has no container for that path at all ⇒ nothing is
  *    grafted, because a removed container is also the author's word.
  *
+ * A path through an ARRAY (a flow's start node, `nodes.<i>.config.secret`,
+ * #20552) is walked by the stored element's `id`, not by its index, so a body
+ * that reorders the array still carries the value onto the element it came
+ * from — see {@link resolveHops}. An element with no `id` is walked by the
+ * identified element below it on the same path (a `parallel` branch, by the
+ * node inside it that holds the credential, #20590); one with neither, or an
+ * `id` shared with a sibling, is never carried into.
+ *
+ * ⛔ A carried value never lands where the read would SERVE it (#20590). The
+ * array hop follows an identity, while a redactor chooses what to withhold by
+ * whatever rule it has — a flow's by the node's KIND — and the two can
+ * disagree: an edit that keeps a node's `id` and changes its kind would have
+ * the stored credential grafted onto a node the next read serves whole. So
+ * the type's redactor is run over the grafted body, and a carried value whose
+ * path it no longer withholds is dropped rather than persisted. Changing the
+ * kind of the node that held a credential is the author's word about that
+ * credential: it is gone, and a kind that needs one asks for it again (an
+ * `api` flow's start node without a secret is refused at registration).
+ *
+ * A node MOVED across regions — out of a loop body, into a parallel branch —
+ * keeps its identity while the stored path around it stops resolving. Its
+ * container is then found by the owning element's `id` across the whole
+ * incoming body, exactly one match or none ({@link relocateById}), and the
+ * same position check decides whether the value lands: a moved node whose
+ * kind still holds the credential keeps it; one moved AND changed in kind
+ * does not.
+ *
  * ⚠️ The first case is genuinely INDISTINGUISHABLE, not merely treated as
  * equal: an author who hand-deletes `:password` from a URL sends exactly the
  * bytes the redaction served, and this function restores the stored password.
@@ -216,43 +474,581 @@ function sameValue(a: unknown, b: unknown): boolean {
  * deliberate choice of the safe side — preserving a credential an operator may
  * still depend on, over silently destroying one. The same ambiguity exists in
  * `restoreRedactedConfig`, and clearing a credential on purpose has an
- * unambiguous door: change it, or delete the row.
+ * unambiguous door: change it, or delete the row — or, where the type's
+ * redactor serves one value as written because it holds no credential, send
+ * that value (a flow's empty string, #20590): it differs from the absent key
+ * that was served, so it is the author's word and it wins.
  *
  * @param type     request-shaped metadata type (plural or singular).
  * @param incoming the body about to be persisted.
  * @param stored   the body currently at rest, RAW (never a served copy).
  */
 export function carryForwardRedactedValues<T>(type: string, incoming: T, stored: unknown): T {
-    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming;
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return incoming;
+    return planCarryForward(type, incoming, stored).out;
+}
+
+/**
+ * [#20611] WHERE {@link carryForwardRedactedValues} would restore a stored
+ * value into `incoming` — the landing positions, dotted and relative to
+ * `incoming` (`nodes.1.config.secret`: an array hop is the element's index in
+ * THIS body, which is where the carried value lands), and never the values.
+ *
+ * The answer the runtime authoring gate is handed, because the gate runs
+ * before the carry-forward on purpose — so that no gate handles a restored
+ * credential — and without it cannot tell a credential the read withheld and
+ * the row still holds from one that is missing. It is the SAME decision as the
+ * carry-forward's, computed by the same plan: the three outcomes, the identity
+ * walk, the relocation, the two-onto-one refusal and the position check that
+ * drops a value the read would not withhold where it lands. A position this
+ * returns is one the carry-forward fills; one it omits, the carry-forward
+ * leaves as the author sent it.
+ *
+ * @param type     request-shaped metadata type (plural or singular).
+ * @param incoming the body about to be persisted.
+ * @param stored   the body currently at rest, RAW (never a served copy).
+ */
+export function redactedPathsCarriedForward(type: string, incoming: unknown, stored: unknown): string[] {
+    return planCarryForward(type, incoming, stored).landed;
+}
+
+/**
+ * The one decision behind {@link carryForwardRedactedValues} and
+ * {@link redactedPathsCarriedForward}: the grafted body, and where each graft
+ * landed. `landed` is empty exactly when `out` is `incoming` by reference.
+ */
+function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out: T; landed: string[] } {
+    const unchanged = { out: incoming, landed: [] as string[] };
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return unchanged;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return unchanged;
     const redactor = redactorFor(type);
-    if (!redactor) return incoming;
+    if (!redactor) return unchanged;
 
     // What a read exit WOULD have served for the row at rest. Computed from the
     // stored body rather than remembered from a response, so the comparison
     // holds for any caller — Studio, the CLI, a raw `curl` — and needs no
     // session state.
     const served = redactor(stored as Record<string, unknown>);
-    if (served.redactedKeys.length === 0) return incoming;
+    if (served.redactedKeys.length === 0) return unchanged;
 
-    let out = incoming as unknown as Record<string, unknown>;
+    const grafts: Array<{ at: string[]; key: string; value: unknown }> = [];
     for (const path of served.redactedKeys) {
         // Dotted, item-relative — the registry's documented contract for
-        // `redactedKeys` (`config.password`).
+        // `redactedKeys` (`config.password`; an array hop is an index into the
+        // stored body, `nodes.0.config.secret`, resolved to an identity by
+        // {@link resolveHops}).
         const segments = path.split('.');
         const key = segments[segments.length - 1] as string;
+        const hops = resolveHops(stored, segments);
+        if (!hops) continue;
 
-        const storedParent = containerAt(stored, segments);
+        const storedParent = containerAt(stored, hops);
         const storedValue = storedParent?.[key];
         if (storedValue === undefined) continue;
 
-        const incomingParent = containerAt(out, segments);
-        if (!incomingParent) continue;
+        // Where the container sits in the incoming body: along the stored
+        // path, or — the node that owns it having MOVED — at the one element
+        // anywhere in the body that carries the owner's id (#20590 round 1).
+        const target = locate(incoming, hops) ?? relocateById(incoming, hops);
+        if (!target) continue;
 
-        const servedParent = containerAt(served.item, segments);
-        if (!sameValue(incomingParent[key], servedParent?.[key])) continue;
+        const servedParent = containerAt(served.item, hops);
+        if (!sameValue(target.container[key], servedParent?.[key])) continue;
 
-        out = withValueAt(out, segments, storedValue);
+        grafts.push({ at: target.at, key, value: storedValue });
     }
-    return out as unknown as T;
+
+    // Two stored paths landing on ONE incoming position cannot be told apart;
+    // neither is carried rather than one silently overwriting the other.
+    const landing = (graft: { at: readonly string[]; key: string }) => [...graft.at, graft.key].join('.');
+    const counts = new Map<string, number>();
+    for (const graft of grafts) counts.set(landing(graft), (counts.get(landing(graft)) ?? 0) + 1);
+
+    // [#20590] Keep only what the read would withhold where it now lands. A
+    // graft sets a leaf and moves no container, so each pass re-grafts the
+    // survivors onto the untouched incoming body; the set only shrinks, so
+    // this settles in at most one pass per graft.
+    let kept = grafts.filter((graft) => counts.get(landing(graft)) === 1);
+    for (;;) {
+        let out: unknown = incoming;
+        for (const graft of kept) out = withValueAt(out, graft.at, graft.key, graft.value);
+        if (kept.length === 0) return unchanged;
+        const withheld = new Set(redactor(out as Record<string, unknown>).redactedKeys);
+        const next = kept.filter((graft) => withheld.has(landing(graft)));
+        if (next.length === kept.length) return { out: out as T, landed: kept.map(landing) };
+        kept = next;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The generic data door: stored metadata ROWS, not metadata items (#21086)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#21086] The system objects whose `metadata` column stores one serialized
+ * metadata BODY, of the type the same row's `type` column names — the table
+ * every `/meta` read exit rehydrates from (`sys_metadata`) and its version
+ * snapshots (`sys_metadata_history`).
+ *
+ * Both are served by the generic data door as well (`apiMethods: ['get',
+ * 'list']`, for the Setup grids and the read-only "All Metadata" surface), and
+ * that door is a READ EXIT for the stored body exactly like `/meta` is: a row
+ * read there carries the same credential material {@link redactMetadataItem}
+ * withholds from every `/meta` answer. So the door serves the body through the
+ * same registry lookup, the same redactor, and nothing else — one definition of
+ * what a credential is, applied at one more exit, never a second rule set.
+ *
+ * Keyed by the canonical object name. The registry resolves an object only by
+ * that name (`computeFQN` is the identity), so a request that reaches either
+ * table spells it this way.
+ *
+ * ⛔ The generic door has no write path into either table (`apiMethods` admits
+ * no write verb; `sys_metadata_history` is append-only), so a redacted body
+ * read here can never be PUT back — no carry-forward inverse is owed, which is
+ * what makes a pure read projection a complete answer on this door.
+ *
+ * [#21120] The object set, the `isStoredMetadataBodyObject` predicate and the
+ * two column names are the family-wide definition in `@objectstack/spec/kernel`,
+ * imported above and re-exported — one set, consumed by every surface, so the
+ * audit, analytics and realtime exits cannot drift from this one.
+ */
+const STORED_BODY_COLUMN = STORED_METADATA_BODY_COLUMN;
+const STORED_TYPE_COLUMN = STORED_METADATA_TYPE_COLUMN;
+
+/**
+ * The projection to hand the engine for a read of `object`, given the caller's
+ * own (`fields`, already normalized to an array or absent).
+ *
+ * The redactor is chosen by the row's `type`, so a projection that names the
+ * body column but not the type column would leave the door nothing to choose
+ * with. The type column is read too in that case, and `addedType` tells the
+ * caller to take it back off the served rows ({@link redactStoredMetadataRow}'s
+ * `dropType`) — the caller gets exactly the columns it named. Every other
+ * projection, and every object outside the set, passes through unchanged.
+ */
+export function storedMetadataBodyProjection(
+    object: string,
+    fields: unknown,
+): { fields: unknown; addedType: boolean } {
+    if (!isStoredMetadataBodyObject(object) || !Array.isArray(fields)) return { fields, addedType: false };
+    if (!fields.includes(STORED_BODY_COLUMN) || fields.includes(STORED_TYPE_COLUMN)) {
+        return { fields, addedType: false };
+    }
+    return { fields: [...fields, STORED_TYPE_COLUMN], addedType: true };
+}
+
+/**
+ * Serve one row of a {@link STORED_METADATA_BODY_OBJECTS} table: its stored
+ * body becomes the body's type's read projection — the same object
+ * {@link redactMetadataItem} serves on `/meta` — and every other column is left
+ * as the engine returned it.
+ *
+ * The body column holds serialized JSON (a `textarea`); a driver that hands it
+ * back already parsed is served in the shape it arrived in. A row whose body
+ * needed no redaction is returned BY REFERENCE, so its stored bytes reach the
+ * caller unchanged; a redacted body is re-serialized, and only then.
+ *
+ * Fails closed on the two rows it cannot judge, by omitting the body rather
+ * than serving it: a body with no `type` beside it (no redactor can be chosen;
+ * {@link storedMetadataBodyProjection} keeps the door's own reads from reaching
+ * this), and a body that does not parse while its type HAS a redactor (the
+ * redactor cannot run, so nothing proves the body clean). A body whose type
+ * registers no redactor is served as stored, parseable or not — absence of a
+ * redactor is a fact about the type, the same reading `/meta` gives it.
+ *
+ * ⛔ Not caught: a throwing redactor fails the read, as on every `/meta` exit
+ * ({@link redactMetadataItem} takes that position and says why).
+ */
+export function redactStoredMetadataRow<T>(object: string, row: T, opts?: { dropType?: boolean }): T {
+    if (!isStoredMetadataBodyObject(object) || !isPlainRecord(row)) return row;
+    const dropType = opts?.dropType === true;
+    const strip = (record: Record<string, unknown>): Record<string, unknown> => {
+        if (!dropType) return record;
+        const { [STORED_TYPE_COLUMN]: _type, ...rest } = record;
+        return rest;
+    };
+
+    // [#21120] The body decision is the ONE shared primitive — same object set,
+    // same per-type redactor, same fail-closed rules — so this door cannot
+    // disagree with the audit / analytics / realtime exits about what a
+    // credential is. This function adds only the door-local wrinkles on top: the
+    // `dropType` strip of the type column `storedMetadataBodyProjection` asked
+    // for, and omitting the body on a fail-closed outcome.
+    const outcome = redactStoredMetadataBody(row[STORED_TYPE_COLUMN], row[STORED_BODY_COLUMN]);
+    if (!outcome.ok) {
+        const { [STORED_BODY_COLUMN]: _body, ...rest } = row;
+        return strip(rest) as T;
+    }
+    if (outcome.body === row[STORED_BODY_COLUMN]) return (dropType ? strip(row) : row) as T;
+    return strip({ ...row, [STORED_BODY_COLUMN]: outcome.body }) as T;
+}
+
+/** {@link redactStoredMetadataRow} over the rows of one read. Non-array input passes through. */
+export function redactStoredMetadataRows<T>(object: string, rows: T[], opts?: { dropType?: boolean }): T[] {
+    if (!Array.isArray(rows) || !isStoredMetadataBodyObject(object)) return rows;
+    return rows.map((row) => redactStoredMetadataRow(object, row, opts));
+}
+
+/**
+ * The refusal for a `groupBy` that names the stored body column of a
+ * {@link STORED_METADATA_BODY_OBJECTS} table, or `undefined` when there is
+ * none to make.
+ *
+ * A grouped answer serves each group's KEY, and here the key would be a whole
+ * stored body. It cannot be projected: the redactor is chosen per row by
+ * `type`, while a group key stands for every row that shares it, and a key
+ * rewritten after grouping no longer names the rows it counts. So the
+ * grouping is refused before the engine is asked, the posture the engine's own
+ * credential-aggregation guard takes for the same reason. `INVALID_FIELD` /
+ * 400, the code a refused grouping target already answers, located at the
+ * entry (`groupBy[i]`, or `groupBy[i].field` for the object form).
+ */
+export function storedMetadataBodyGroupingRefusal(object: string, groupBy: unknown): Error | undefined {
+    if (!isStoredMetadataBodyObject(object) || !Array.isArray(groupBy)) return undefined;
+    for (let i = 0; i < groupBy.length; i += 1) {
+        const entry = groupBy[i];
+        const objectForm = isPlainRecord(entry);
+        const field = objectForm ? entry.field : entry;
+        if (field !== STORED_BODY_COLUMN) continue;
+        const position = objectForm ? `groupBy[${i}].field` : `groupBy[${i}]`;
+        const err: any = new Error(
+            `Cannot group '${object}' by '${STORED_BODY_COLUMN}' (${position}): the query was not run. `
+            + `Each group key would be a whole stored metadata body, which this door serves only as `
+            + `its type's read projection, with stored credential material withheld, and a group key `
+            + `cannot be projected without changing which rows it counts. Group by '${STORED_TYPE_COLUMN}', `
+            + `'name' or another scalar column instead, and read the bodies with a plain list.`,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = STORED_BODY_COLUMN;
+        err.fields = [STORED_BODY_COLUMN];
+        err.object = object;
+        err.param = 'groupBy';
+        return err;
+    }
+    return undefined;
+}
+
+/**
+ * [#21120] The data door's FILTER / SORT refusal on the stored body column —
+ * maintainer ruling A, the further accept-set narrowing the grouping refusal
+ * (#21086) began.
+ *
+ * A filter on the body column EVALUATES the stored body row by row: a credential
+ * withheld from every served answer is still recoverable by prefix probing
+ * (`?filter={"metadata":{"$contains":"<guess>"}}` returns the row only when the
+ * guess is a prefix — a predicate oracle). A sort on it orders by the same
+ * stored bytes. Neither serves the body, so projecting it is no answer; the only
+ * answer is to refuse, the same posture the engine's own masked-field guard and
+ * the grouping refusal above take. Same family, shape and code: `INVALID_FIELD`
+ * / 400, naming the field, the object and the offending `param`.
+ *
+ * `filterFields` is the set of columns the caller's filters read
+ * (`collectStoredMetadataFilterFields`, `protocol.ts`: each key's head and each
+ * cross-field comparand's), and `sortFields` the fields its `orderBy` names.
+ * Filter is judged before sort — a query that does both reads "the filter was
+ * not run" first. `undefined` when neither names the body column.
+ */
+export function storedMetadataBodyPredicateRefusal(
+    object: string,
+    opts: { filterFields?: readonly unknown[]; sortFields?: readonly unknown[] },
+): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const namesBody = (fields: readonly unknown[] | undefined): boolean =>
+        Array.isArray(fields) && fields.some((f) => f === STORED_BODY_COLUMN);
+    const make = (param: 'filter' | 'sort', verb: string): Error => {
+        const err: any = new Error(
+            `Cannot ${verb} '${object}' by '${STORED_BODY_COLUMN}' (${param}): the query was not run. The `
+            + `${STORED_BODY_COLUMN} column holds a stored metadata body, served only as its type's read `
+            + `projection with stored credential material withheld. ${param === 'filter'
+                ? 'A filter on it evaluates the stored body row by row, which rebuilds a withheld credential by probing'
+                : 'A sort on it orders by the same stored bytes'}, so it is refused rather than evaluated. `
+            + `Filter or sort by '${STORED_TYPE_COLUMN}', 'name' or another scalar column instead.`,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = STORED_BODY_COLUMN;
+        err.fields = [STORED_BODY_COLUMN];
+        err.object = object;
+        err.param = param;
+        return err;
+    };
+    if (namesBody(opts.filterFields)) return make('filter', 'filter');
+    if (namesBody(opts.sortFields)) return make('sort', 'sort');
+    return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// The stored CONTENT HASH of the same rows: served keyed, never evaluated (#21207)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#21207] The columns of a {@link isStoredMetadataBodyObject} table that hold
+ * a stored CONTENT HASH of the body: `checksum` (both tables) and the history
+ * table's `previous_checksum` (the parent's hash).
+ *
+ * The hash is the canonical SHA-256 of the WHOLE stored body — withheld
+ * credential material included — and it stays that at rest: the repository's
+ * canonical-hashing invariant, the optimistic lock and the parent links are
+ * untouched (maintainer ruling B on #21207). What changes is what a caller is
+ * given. Served raw beside the projected body, it is an OFFLINE VERIFIER: a
+ * guess at the withheld material, hashed together with the served rest of the
+ * body, reproduces it exactly when the guess is right. Evaluated as a
+ * predicate, it is an online one. So every door that serves it serves the
+ * crypto provider's KEYED digest of the stored value ({@link servedContentHash}),
+ * every door that takes a version token back compares it in that same form, and
+ * a filter, sort, grouping or search on it is refused
+ * ({@link storedMetadataHashEvaluateRefusal}, {@link storedMetadataSearchRefusal}).
+ *
+ * Kept beside the body column's family primitives' consumer rather than in
+ * `@objectstack/spec/kernel` with them: that is the family's natural home, but
+ * outside the surface this card claimed. The surfaces that cannot import this
+ * package (`@objectstack/mcp`, `@objectstack/plugin-audit`,
+ * `@objectstack/service-analytics`) each name the same two columns, and
+ * `stored-metadata-body-family.pin.test.ts` pins this list to the columns the
+ * two object definitions declare.
+ */
+export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
+
+/**
+ * [#21207] The history table's free-text change note — which can QUOTE a stored
+ * content hash: with no message of its own, a draft's promotion recorded
+ * `publish draft (hash <the draft's stored hash>)`. The protocol now always
+ * states a hash-free message, so no new row carries one; rows already written
+ * do, so the column is served with each quoted hash in its served form
+ * ({@link serveStoredHashTokens}) and is never evaluated, exactly as the hash
+ * columns are.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
+
+/** Every column of a stored-metadata table that holds or can quote a stored content hash. */
+export const STORED_METADATA_HASH_BEARING_COLUMNS: readonly string[] = Object.freeze([
+    ...STORED_METADATA_HASH_COLUMNS,
+    STORED_METADATA_HASH_NOTE_COLUMN,
+]);
+
+/** An unkeyed content hash quoted in free text (the keyed form's `hmac-sha256:` prefix is not one). */
+const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
+
+/**
+ * Free text with every quoted stored content hash replaced by its served form:
+ * the keyed digest, or `(withheld)` when the caller holds no digest. Text that
+ * quotes none is returned as is.
+ */
+export async function serveStoredHashTokens(text: string, digest: StoredHashDigest | undefined): Promise<string> {
+    const quoted = text.match(QUOTED_STORED_HASH);
+    if (!quoted) return text;
+    const served = new Map<string, string>();
+    for (const stored of new Set(quoted)) served.set(stored, digest ? await digest(stored) : '(withheld)');
+    return text.replace(QUOTED_STORED_HASH, (stored) => served.get(stored) as string);
+}
+
+/** The keyed-digest primitive of the registered crypto provider (`ICryptoProvider.keyedDigest`). */
+export type StoredHashDigest = (plain: string) => Promise<string>;
+
+/**
+ * [#21207] The process key {@link ephemeralStoredHashDigest} keys under: 32
+ * random bytes, drawn on first use, held only in this module, never written,
+ * logged or served.
+ */
+let ephemeralDigestKey: Buffer | undefined;
+
+/**
+ * [#21207] The keyed digest the `/meta` doors serve and compare metadata
+ * version tokens under while NO crypto provider is registered: `hmac-sha256:`
+ * plus hex, the provider contract's own output shape, under a process-scoped
+ * ephemeral key.
+ *
+ * Why a key and not "serve nothing": a version token is an optimistic lock.
+ * Serving none hands every caller the same empty token, and a client that
+ * (rightly) sends no pin for an empty token turns every pinned write into an
+ * unpinned one, so the lock fails OPEN without a word. A token keyed under a
+ * secret nobody outside this process holds keeps the three properties the lock
+ * needs: it differs when the content differs; it is never the unkeyed stored
+ * hash, so it confirms no guess at withheld material offline; and no empty or
+ * withheld value ever equals it.
+ *
+ * What it costs: the key dies with the process. A token held across a restart,
+ * or across the moment a host registers a real provider (the doors read the
+ * provider per use), names no current version and is refused once with
+ * `409 METADATA_CONFLICT`; the next read or receipt serves the current one.
+ * Every protocol in one process shares this key, so per-environment protocols
+ * answer one another's tokens.
+ */
+export const ephemeralStoredHashDigest: StoredHashDigest = async (plain: string): Promise<string> => {
+    ephemeralDigestKey ??= randomBytes(32);
+    return `hmac-sha256:${createHmac('sha256', ephemeralDigestKey).update(plain, 'utf8').digest('hex')}`;
+};
+
+/**
+ * The form a stored content hash is SERVED in: the keyed digest of the stored
+ * value under a server-held key; `null` when nothing is stored (a delete
+ * event, a first version's parent); `undefined` (WITHHELD) when the caller
+ * holds no digest, or when the stored value is not a string this function can
+ * judge. ⛔ Never the stored value itself.
+ *
+ * A failing digest is not caught: a provider that cannot compute it fails the
+ * read rather than serving what it exists to replace.
+ */
+export async function servedContentHash(
+    stored: unknown,
+    digest: StoredHashDigest | undefined,
+): Promise<string | null | undefined> {
+    if (stored === null || stored === undefined) return null;
+    if (typeof stored !== 'string' || !digest) return undefined;
+    return digest(stored);
+}
+
+/**
+ * Serve one row of a stored-metadata table with its content-hash columns in
+ * their served form ({@link servedContentHash}): keyed, `null` kept `null`, and
+ * the column OMITTED when the value is withheld — and, when the caller holds no
+ * digest, both columns omitted outright. A row of any other object, and a row
+ * carrying neither column, is returned by reference.
+ */
+export async function serveStoredMetadataHashColumns<T>(
+    object: string,
+    row: T,
+    digest: StoredHashDigest | undefined,
+): Promise<T> {
+    if (!isStoredMetadataBodyObject(object) || !isPlainRecord(row)) return row;
+    if (!STORED_METADATA_HASH_BEARING_COLUMNS.some((column) => column in row)) return row;
+    const out: Record<string, unknown> = { ...row };
+    for (const column of STORED_METADATA_HASH_COLUMNS) {
+        if (!(column in out)) continue;
+        // No digest: the column is not served at all — a `null` included, so
+        // a reader cannot tell a withheld hash from an absent one either.
+        const served = digest ? await servedContentHash(out[column], digest) : undefined;
+        if (served === undefined) delete out[column];
+        else out[column] = served;
+    }
+    const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+    if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = await serveStoredHashTokens(note, digest);
+    return out as T;
+}
+
+/** {@link serveStoredMetadataHashColumns} over the rows of one read. Non-array input passes through. */
+export async function serveStoredMetadataHashColumnRows<T>(
+    object: string,
+    rows: T[],
+    digest: StoredHashDigest | undefined,
+): Promise<T[]> {
+    if (!Array.isArray(rows) || !isStoredMetadataBodyObject(object)) return rows;
+    return Promise.all(rows.map((row) => serveStoredMetadataHashColumns(object, row, digest)));
+}
+
+/** The content-hash column a field reference reaches — the column, or a dotted path headed by it. */
+function hashColumnOf(field: unknown): string | undefined {
+    if (typeof field !== 'string') return undefined;
+    const head = field.split('.')[0] as string;
+    return STORED_METADATA_HASH_BEARING_COLUMNS.includes(head) ? head : undefined;
+}
+
+/** The columns a refusal on these tables points the caller at instead. */
+const USABLE_COLUMNS = `'${STORED_TYPE_COLUMN}', 'name', 'state' or another scalar column`;
+
+/**
+ * [#21207] The data door's refusal to EVALUATE a content-hash column of a
+ * stored-metadata table — or the history table's change note, which can quote
+ * one ({@link STORED_METADATA_HASH_BEARING_COLUMNS}) — a grouping (whose keys would serve the stored
+ * values), a filter (an online verifier: a guessed hash matches exactly one
+ * row) or a sort (an order over the same values) — or `undefined` when none is
+ * named. Maintainer ruling A on #21207's second execution fork.
+ *
+ * The family's existing body-column refusals' shape, extended to these columns
+ * rather than a second dialect: `INVALID_FIELD` / 400 naming the field, the
+ * object and the offending `param`, judged in the data door's order — grouping,
+ * then filter, then sort — and naming the columns that remain usable. A dotted
+ * path headed by a hash column is caught too.
+ */
+export function storedMetadataHashEvaluateRefusal(
+    object: string,
+    opts: { groupBy?: unknown; filterFields?: readonly unknown[]; sortFields?: readonly unknown[] },
+): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const make = (param: 'groupBy' | 'filter' | 'sort', column: string, position?: string): Error => {
+        const doing = param === 'groupBy' ? 'group' : param;
+        const why = param === 'filter'
+            ? 'a filter on it compares a guess against the stored hash row by row, which confirms the guess'
+            : param === 'groupBy'
+                ? 'a group key would serve the stored value itself'
+                : 'a sort on it orders by the stored values';
+        const err: any = new Error(
+            `Cannot ${doing} '${object}' by '${column}' (${position ?? param}): the query was not run. The `
+            + `'${column}' column ${column === STORED_METADATA_HASH_NOTE_COLUMN
+                ? 'can quote the stored content hash of a metadata body'
+                : 'holds the stored content hash of a metadata body'}, computed over withheld `
+            + `credential material too, so this door serves it only in keyed form; ${why}. `
+            + `${doing === 'group' ? 'Group' : doing === 'filter' ? 'Filter' : 'Sort'} by ${USABLE_COLUMNS} instead.`,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = column;
+        err.fields = [column];
+        err.object = object;
+        err.param = param;
+        return err;
+    };
+    if (Array.isArray(opts.groupBy)) {
+        for (let i = 0; i < opts.groupBy.length; i += 1) {
+            const entry = opts.groupBy[i];
+            const objectForm = isPlainRecord(entry);
+            const column = hashColumnOf(objectForm ? entry.field : entry);
+            if (column) return make('groupBy', column, objectForm ? `groupBy[${i}].field` : `groupBy[${i}]`);
+        }
+    }
+    for (const field of opts.filterFields ?? []) {
+        const column = hashColumnOf(field);
+        if (column) return make('filter', column);
+    }
+    for (const field of opts.sortFields ?? []) {
+        const column = hashColumnOf(field);
+        if (column) return make('sort', column);
+    }
+    return undefined;
+}
+
+/**
+ * [#21207] The columns of a stored-metadata table a `search` never scans: the
+ * body column, the content-hash columns and the change note that can quote one. A search is a substring filter
+ * evaluated server-side over every scanned column, so over these columns it is
+ * the same verifier a filter is — over the stored hash, and over the stored
+ * body (a withheld credential rebuilt by prefix probing) — and the engine's
+ * auto-default search set includes every one of them, since all three are
+ * text columns.
+ */
+export const STORED_METADATA_UNSEARCHABLE_COLUMNS: readonly string[] = Object.freeze([
+    STORED_BODY_COLUMN,
+    ...STORED_METADATA_HASH_BEARING_COLUMNS,
+]);
+
+/**
+ * The refusal for an EXPLICIT search field list (`searchFields`, or the
+ * object-form `search.fields`) on a stored-metadata table that names a column
+ * of {@link STORED_METADATA_UNSEARCHABLE_COLUMNS}, or `undefined`. Same
+ * envelope as the evaluate refusals: `INVALID_FIELD` / 400.
+ */
+export function storedMetadataSearchRefusal(
+    object: string,
+    requested: readonly string[],
+    param: string,
+): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const column = requested.find((name) => STORED_METADATA_UNSEARCHABLE_COLUMNS.includes(name));
+    if (column === undefined) return undefined;
+    const err: any = new Error(
+        `Cannot search '${object}' in '${column}' (${param}): the query was not run. A search evaluates `
+        + `every column it scans row by row, and the '${column}' column holds ${column === STORED_BODY_COLUMN
+            ? 'a stored metadata body with credential material this door withholds'
+            : column === STORED_METADATA_HASH_NOTE_COLUMN
+                ? 'a change note that can quote a stored content hash, which this door serves only in keyed form'
+                : 'the stored content hash of a metadata body, which this door serves only in keyed form'}, so a `
+        + `search over it would answer guesses about withheld values. Search ${USABLE_COLUMNS} instead.`,
+    );
+    err.code = 'INVALID_FIELD';
+    err.status = 400;
+    err.field = column;
+    err.fields = [column];
+    err.object = object;
+    err.param = param;
+    return err;
 }

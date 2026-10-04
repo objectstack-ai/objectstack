@@ -16,7 +16,7 @@ import {
   // from one place. Re-exported below under its original name.
   ITEM_KEY_DISCRIMINATORS,
   readDiscriminatorValue as discriminatorValue,
-  // [#10062] The ADR-0029 D9.6 provenance pair, sunk into metadata-core for the
+  // [commit fa5d137ab] The ADR-0029 D9.6 provenance pair, sunk into metadata-core for the
   // same reason as the table above: `@objectstack/service-automation`'s flow
   // precedence asks the same question ("does a code package ship this name?")
   // and reached it by importing this package, which it does not declare — so
@@ -36,7 +36,7 @@ import {
   type ObjectFieldTypeRefusal,
   type ObjectFieldTypeViolation,
 } from '@objectstack/metadata-core';
-// [#8460] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
+// [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
 // this scalar been authored away from the packaged default?), and the ruling
 // required the same mechanism, not a second comparison shape.
@@ -64,6 +64,19 @@ import {
   formatNavContributionGroupDiagnostic,
   type NavContributionGroupDiagnostic,
 } from './nav-contribution-diagnostics.js';
+// The shared-picklist judgments (merge, served shape, unknown-name refusal) —
+// pure, so the registry and the engine plugin's load-time audit read one
+// spelling of each. See the module header.
+import {
+  collectPicklistReferences,
+  duplicatePicklistValueError,
+  findDuplicatePicklistValue,
+  mergePicklistOptions,
+  resolvePicklistFieldsOnto,
+  type PicklistContribution,
+  type PicklistOptionLike,
+  type PicklistReference,
+} from './picklist-resolution.js';
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
@@ -158,7 +171,7 @@ export function parseFQN(fqn: string): { namespace: string | undefined; shortNam
 
 /**
  * The three SCALAR props {@link mergeObjectDefinitions} resolves last-writer-wins
- * — the exact set the #8284 and #8460 rulings both cover, and the same three
+ * — the exact set the #8284 ruling and ADR-0029 D9.2a both cover, and the same three
  * {@link scalarOverridesPackagedBase} answers for.
  */
 const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const;
@@ -207,7 +220,7 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
  * priority 140 does not become the base layer") fails if this merge set is
  * widened to copy it through.
  *
- * [#8460] …the SCALAR override above is conditional. `tenantAuthored` names
+ * [ADR-0029 D9.2a] …the SCALAR override above is conditional. `tenantAuthored` names
  * the scalars the fold's BASE has authored away from the packaged owner's
  * value; an extender yields on those. See
  * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
@@ -235,7 +248,7 @@ function mergeObjectDefinitions(
     merged.indexes = [...(base.indexes || []), ...extension.indexes];
   }
 
-  // Override scalar props (last writer wins) — [#8460] unless the base has been
+  // Override scalar props (last writer wins) — [ADR-0029 D9.2a] unless the base has been
   // authored by the tenant, in which case the extender's packaged default yields.
   const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
   if (extension.label !== undefined && !yields('label')) merged.label = extension.label;
@@ -1069,8 +1082,9 @@ export function warnStrippedLegacyApiMethods(
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
     `[Registry] Object "${name}" declares retired legacy apiMethods value(s) ` +
-      `[${legacy.join(', ')}] in enable.apiMethods — since the enum shrink ` +
-      `(#3543) these are IGNORED: the effective API surface derives from the ` +
+      `[${legacy.join(', ')}] in enable.apiMethods — the authorable values are now the six ` +
+      `primitives only, because every other operation is derived from them or retired, so these ` +
+      `are IGNORED: the effective API surface derives from the ` +
       `six primitives (get/list/create/update/delete/bulk) alone ` +
       `(['create','update'] ⇒ upsert/import; ['list'] ⇒ aggregate/search/export; ` +
       `['get'] + trackHistory ⇒ history).` +
@@ -1496,7 +1510,7 @@ export const OBJECT_OWNERSHIP_CONFLICT_CODE = 'OBJECT_OWNERSHIP_CONFLICT' as con
  * install blow up later at table creation. Shareable platform namespaces
  * (`base`/`system`/`sys`) are exempt.
  *
- * [#14474] Carries the ADR-0112 envelope (`code` + `status`), like its sibling
+ * [commit df657d9df] Carries the ADR-0112 envelope (`code` + `status`), like its sibling
  * {@link ArtifactObjectNameConflictError} below. Unlike that sibling, this
  * refusal IS reachable from a wire: `POST /api/v1/packages`
  * (`packages/runtime/src/domains/packages.ts`) calls `installPackage` with no
@@ -1713,7 +1727,7 @@ export class ObjectOwnershipConflictError extends Error {
   }
 }
 
-// [#10062] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
+// [commit fa5d137ab] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
 // They now live in `@objectstack/metadata-core`
 // (`code-artifact-provenance.ts`), imported at the top of this file and
 // re-exported immediately below, so every caller's spelling — including
@@ -2047,6 +2061,18 @@ export class SchemaRegistry {
    * read in {@link getApp} / {@link getAllApps} by group id + priority.
    */
   private appNavContributions = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
+
+  /**
+   * `picklistExtensions` — the options other packages ADD to a picklist,
+   * keyed `target picklist → declaring package → value → option`.
+   *
+   * Keyed by package so a re-registration of the same package (a manifest
+   * replay, an HMR rebuild) replaces its own contribution instead of
+   * colliding with it, while a value two DIFFERENT contributors declare is
+   * refused ({@link registerPicklistExtension}). The owning list itself lives
+   * in the generic item store under type `picklist`, like every other kind.
+   */
+  private picklistExtensionContributions = new Map<string, Map<string, { packageId: string | undefined; options: Map<string, PicklistOptionLike> }>>();
 
   /**
    * Package ids that must be installed in a DISABLED state **when they have no
@@ -2422,7 +2448,7 @@ export class SchemaRegistry {
     contributors: ObjectContributor[],
     baseDefinition: ServiceObject,
   ): ServiceObject {
-    // [#8460] Computed ONCE, over the base the fold starts from — never
+    // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
     // scalar look "authored" to the next extender and silently invert
     // extender-vs-extender precedence (D9.3: declared numbers order peers).
@@ -2433,11 +2459,14 @@ export class SchemaRegistry {
         merged = mergeObjectDefinitions(merged, contrib.definition, tenantAuthored);
       }
     }
-    return merged;
+    // A picklist-bound field is served with its list's options resolved onto
+    // it — here, in the fold every object read and the write door share, so
+    // the set a client is offered and the set a write is judged by are one.
+    return this.resolvePicklistFields(merged);
   }
 
   /**
-   * [#8460] Which of the three fold scalars the BASE layer carries a
+   * [ADR-0029 D9.2a] Which of the three fold scalars the BASE layer carries a
    * TENANT-AUTHORED value for — i.e. one that no longer equals the packaged
    * owner's.
    *
@@ -2476,11 +2505,11 @@ export class SchemaRegistry {
    * {@link getPackagedObjectOwner} — whose extra `isCodeArtifactBody` test
    * (D9.8) would make this decline to protect a RUNTIME-authored object, i.e.
    * exactly the object whose owner row the tenant wrote by hand. The two agree
-   * wherever a packaged owner exists, which is every shape #8460 measured; they
+   * wherever a packaged owner exists, which is every shape the ADR-0029 D9.2a amendment records; they
    * differ only on a tenant-authored owner, and there the ruled sentence still
    * reads the same way — the tenant's own row is the explicit override and a
    * package's `objectExtensions` entry is the packaged default. The rejected
-   * alternative is the trap PR #8454 named one layer up, in its own form:
+   * alternative is the trap commit 427344c26 named one layer up, in its own form:
    * comparing against a body that already has extenders folded onto it
    * ({@link resolveOwnerLayer}) would report every extender's scalar as
    * "unchanged" and yield nothing, ever.
@@ -2561,9 +2590,13 @@ export class SchemaRegistry {
   foldObjectExtendersOnto<T>(name: string, base: T): T {
     if (base === null || typeof base !== 'object') return base;
     const fqn = this.resolveObjectKey(name);
-    if (fqn === undefined) return base;
+    // With nothing to fold, the body still gets its picklist-bound fields
+    // resolved — the same step the fold below ends with — so a body this
+    // registry never saw is served in the one shape every other read uses.
+    // By reference when no field names a picklist.
+    if (fqn === undefined) return this.resolvePicklistFields(base);
     const contributors = this.objectContributors.get(fqn);
-    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.resolvePicklistFields(base);
     return this.foldExtendersOntoDefinition(
       contributors,
       this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
@@ -3279,44 +3312,67 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#21276] Would uninstalling `packageId` be refused? Throws the refusal
+   * {@link unregisterObjectsByPackage} (and so {@link uninstallPackage}) would
+   * raise, and returns normally otherwise. It reads `objectContributors` and
+   * mutates nothing, so a caller can ask before a step it cannot take back:
+   * `deletePackage` (`@objectstack/metadata-protocol`) asks it before it
+   * deletes the stored `sys_packages` row, so an uninstall this registry would
+   * refuse is refused with nothing removed.
+   *
+   * [#7970] THE REFUSAL PASS — the whole decision, taken before a single
+   * contribution is removed. This check used to live inline in the mutation
+   * walk of {@link unregisterObjectsByPackage}, one object at a time, so a
+   * package owning `account` (free) and `contact` (extended by another
+   * package) lost `account` on the way to refusing over `contact`: the guard
+   * that exists to keep a registry whole was itself reached through a
+   * mutation, and nothing rolled it back. Same predicate and same iteration
+   * order as the inline check it replaced, so the same object still refuses
+   * with the same message.
+   *
+   * ⛔ ONE predicate: {@link unregisterObjectsByPackage} calls this method
+   * rather than keeping its own copy, so the question asked ahead and the
+   * refusal raised by the uninstall cannot disagree. `force` is not a
+   * parameter here: forcing means not asking, and stays the caller's choice.
+   *
+   * @throws Error if the package owns an object another package extends (ADR-0029)
+   */
+  assertPackageUninstallable(packageId: string): void {
+    for (const [fqn, contributors] of this.objectContributors.entries()) {
+      const ownedHere = contributors.some(
+        c => c.packageId === packageId && c.ownership === 'own'
+      );
+      if (!ownedHere) continue;
+      // Extenders from other packages
+      const otherExtenders = contributors.filter(
+        c => c.packageId !== packageId && c.ownership === 'extend'
+      );
+      if (otherExtenders.length > 0) {
+        throw new Error(
+          `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
+          `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
+        );
+      }
+    }
+  }
+
+  /**
    * Unregister all objects contributed by a package.
    *
    * [#7970] **Refuses before it mutates.** If any object this package owns is
    * extended by another package (ADR-0029), the call throws having removed
-   * nothing — the refusal is decided across every object first. Callers may
-   * therefore treat a throw as a no-op, which is what lets
-   * {@link uninstallPackage} run this verb ahead of its own mutations.
+   * nothing — the refusal is decided across every object first, by
+   * {@link assertPackageUninstallable}. Callers may therefore treat a throw as
+   * a no-op, which is what lets {@link uninstallPackage} run this verb ahead of
+   * its own mutations.
    *
    * @throws Error if trying to uninstall an owner that has extenders
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
-    // [#7970] REFUSAL PASS — the whole decision, taken before a single
-    // contribution is removed. This check used to live inline in the mutation
-    // walk below, one object at a time, so a package owning `account` (free)
-    // and `contact` (extended by another package) lost `account` on the way to
-    // refusing over `contact`: the guard that exists to keep a registry whole
-    // was itself reached through a mutation, and nothing rolled it back. Same
-    // predicate and same iteration order as the inline check it replaces, so
-    // the same object still refuses with the same message — what changed is
-    // only that no removal precedes the throw.
-    if (!force) {
-      for (const [fqn, contributors] of this.objectContributors.entries()) {
-        const ownedHere = contributors.some(
-          c => c.packageId === packageId && c.ownership === 'own'
-        );
-        if (!ownedHere) continue;
-        // Extenders from other packages
-        const otherExtenders = contributors.filter(
-          c => c.packageId !== packageId && c.ownership === 'extend'
-        );
-        if (otherExtenders.length > 0) {
-          throw new Error(
-            `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
-            `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
-          );
-        }
-      }
-    }
+    // [#7970] REFUSAL PASS — see {@link assertPackageUninstallable}, which holds
+    // the one copy of the predicate ([#21276] extracted so it can be asked
+    // without uninstalling).
+    if (!force) this.assertPackageUninstallable(packageId);
 
     // MUTATION PASS — carries no refusal of its own; the pass above already
     // proved every removal below is allowed. Keep it that way: a second copy of
@@ -3482,6 +3538,12 @@ export class SchemaRegistry {
     // Centralised with the artifact loader path in metadata/plugin.ts
     // so both load paths produce identical lock state.
     applyProtection(item as any, { packageId });
+
+    // A picklist's own values must not repeat any value its extensions
+    // already add — refused before anything is stored, like the extension
+    // side ({@link registerPicklistExtension}). Every resolved object depends
+    // on the list, so the merged-object cache is dropped once it lands (below).
+    if (type === 'picklist') this.assertPicklistValuesDistinct(baseName, item as any, packageId);
 
     // Spec-conformance DIAGNOSTIC — deliberately not a gate (#3903).
     //
@@ -3652,6 +3714,7 @@ export class SchemaRegistry {
     }
 
     collection.set(storageKey, item);
+    if (type === 'picklist') this.invalidateAll();
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
   }
 
@@ -3678,6 +3741,9 @@ export class SchemaRegistry {
    * Universal Unregister Method
    */
   unregisterItem(type: string, name: string) {
+    // Every resolved object may carry this list's options; the removal below
+    // is synchronous, so the next fold re-resolves against the store without it.
+    if (type === 'picklist') this.invalidateAll();
     const collection = this.metadata.get(type);
     if (!collection) {
       console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
@@ -3835,6 +3901,10 @@ export class SchemaRegistry {
     if (removed.length > 0) {
       this.log(`[Registry] Unregistered ${removed.length} item(s) from package: ${packageId}`);
     }
+    // The package's `picklistExtensions` leave with it, and every resolved
+    // object is re-derived without its lists and its added values.
+    const droppedExtensions = this.unregisterPicklistExtensionsByPackage(packageId);
+    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/'))) this.invalidateAll();
     return { removed, orphanedOverlays };
   }
 
@@ -4697,6 +4767,155 @@ export class SchemaRegistry {
   }
 
   // ==========================================
+  // Shared picklists
+  // ==========================================
+
+  /**
+   * Add a `picklistExtensions` entry's options to the picklist it names.
+   *
+   * ADDITIVE ONLY, and refused rather than resolved when it is not: a value
+   * the list already carries — from its owner or from another package's
+   * extension — throws `INVALID_METADATA` naming both declarations, and
+   * nothing is stored. Last-wins would let a second package silently replace
+   * an option the owner declared.
+   *
+   * The target need not be registered yet: packages register in dependency
+   * order, not picklist order, and an object resolves its options lazily on
+   * the next fold, so the extension is held until the list arrives. A target
+   * that never arrives is not this method's to judge — the boot audit
+   * ({@link findUnresolvedPicklistReferences}, {@link findOrphanPicklistExtensions})
+   * refuses the fields that name it and the extensions that extend it.
+   *
+   * Re-registration by the same package replaces that package's own
+   * contribution value by value, so a manifest replay is idempotent.
+   */
+  registerPicklistExtension(
+    extension: { extend: string; options: readonly PicklistOptionLike[] },
+    packageId?: string,
+  ): void {
+    const target = extension.extend;
+    const packageKey = packageId ?? '';
+    const own = this.picklistExtensionContributions.get(target)?.get(packageKey);
+    const merged = new Map<string, PicklistOptionLike>(own?.options);
+    for (const option of extension.options ?? []) {
+      if (option && typeof option === 'object' && option.value !== undefined) merged.set(String(option.value), option);
+    }
+    const candidate: PicklistContribution = { packageId, kind: 'extension', options: [...merged.values()] };
+    const others = this.picklistContributions(target).filter(
+      (c) => !(c.kind === 'extension' && (c.packageId ?? '') === packageKey),
+    );
+    // The candidate's own list first: a value repeated INSIDE this one entry
+    // is refused too, and against the owner's values it then reads in merge
+    // order (the list first, this extension second).
+    const repeated = findDuplicatePicklistValue([{ ...candidate, options: extension.options ?? [] }]);
+    const duplicate = repeated ?? findDuplicatePicklistValue([...others, candidate]);
+    if (duplicate) throw duplicatePicklistValueError(target, duplicate);
+
+    let byPackage = this.picklistExtensionContributions.get(target);
+    if (!byPackage) this.picklistExtensionContributions.set(target, byPackage = new Map());
+    byPackage.set(packageKey, { packageId, options: merged });
+    this.invalidateAll();
+    this.log(`[Registry] Registered picklist extension: ${target} (+${extension.options?.length ?? 0}) from ${packageId}`);
+  }
+
+  /**
+   * The resolved options of a picklist — its own, then every extension's, in
+   * registration order — or `undefined` when no picklist of that name is
+   * registered. Extensions held for an unregistered list resolve nothing on
+   * their own: a list exists only once its owner declares it.
+   */
+  resolvePicklistOptions(name: string): PicklistOptionLike[] | undefined {
+    const contributions = this.picklistContributions(name);
+    if (!contributions.some((c) => c.kind === 'picklist')) return undefined;
+    return mergePicklistOptions(contributions);
+  }
+
+  /**
+   * Every field of every packaged object that names a picklist no registered
+   * package declares — the load-time audit's input.
+   *
+   * Judged over the PACKAGED contributors only (`own` and `extend`), never an
+   * `overlay` and never a tenant-authored body: those come out of
+   * `sys_metadata`, and a stored row must not be able to fail a boot. A
+   * tenant field naming an unknown list is still never served options and
+   * never accepts a value — the fold drops whatever options it carried and
+   * the record validator refuses the field.
+   */
+  findUnresolvedPicklistReferences(): PicklistReference[] {
+    const unresolved: PicklistReference[] = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          if (this.resolvePicklistOptions(ref.picklist) === undefined) unresolved.push(ref);
+        }
+      }
+    }
+    return unresolved;
+  }
+
+  /**
+   * Every `picklistExtensions` entry whose target list no registered package
+   * declares — the second half of the load-time audit. Held extensions are
+   * legal while the boot fills; once it is sealed, one still held adds its
+   * options to nothing.
+   */
+  findOrphanPicklistExtensions(): Array<{ picklist: string; packageId: string | undefined }> {
+    const orphans: Array<{ picklist: string; packageId: string | undefined }> = [];
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      if (this.resolvePicklistOptions(target) !== undefined) continue;
+      for (const entry of byPackage.values()) orphans.push({ picklist: target, packageId: entry.packageId });
+    }
+    return orphans;
+  }
+
+  /** The owning list's options (when registered) followed by every extension's. */
+  private picklistContributions(name: string): PicklistContribution[] {
+    const contributions: PicklistContribution[] = [];
+    const base = this.getItem<{ options?: PicklistOptionLike[]; _packageId?: string }>('picklist', name);
+    if (base) {
+      contributions.push({ packageId: base._packageId, kind: 'picklist', options: Array.isArray(base.options) ? base.options : [] });
+    }
+    for (const entry of this.picklistExtensionContributions.get(name)?.values() ?? []) {
+      contributions.push({ packageId: entry.packageId, kind: 'extension', options: [...entry.options.values()] });
+    }
+    return contributions;
+  }
+
+  /**
+   * The list half of the additive rule: a picklist registered AFTER an
+   * extension already added one of its values is refused the same way, so the
+   * verdict does not depend on which package registered first.
+   */
+  private assertPicklistValuesDistinct(
+    name: string,
+    picklist: { options?: PicklistOptionLike[] },
+    packageId: string | undefined,
+  ): void {
+    const extensions = this.picklistContributions(name).filter((c) => c.kind === 'extension');
+    const duplicate = findDuplicatePicklistValue([
+      { packageId, kind: 'picklist', options: Array.isArray(picklist?.options) ? picklist.options : [] },
+      ...extensions,
+    ]);
+    if (duplicate) throw duplicatePicklistValueError(name, duplicate);
+  }
+
+  /** Resolve every picklist-bound field of a body (by reference when there is none). */
+  private resolvePicklistFields<T>(body: T): T {
+    return resolvePicklistFieldsOnto(body, (picklist) => this.resolvePicklistOptions(picklist));
+  }
+
+  /** Drop a package's `picklistExtensions`; `true` when it had any. */
+  private unregisterPicklistExtensionsByPackage(packageId: string): boolean {
+    let dropped = false;
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      if (byPackage.delete(packageId)) dropped = true;
+      if (byPackage.size === 0) this.picklistExtensionContributions.delete(target);
+    }
+    return dropped;
+  }
+
+  // ==========================================
   // Reset (for testing)
   // ==========================================
 
@@ -4746,6 +4965,7 @@ export class SchemaRegistry {
     this.namespaceRegistry.clear();
     this.metadata.clear();
     this.appNavContributions.clear();
+    this.picklistExtensionContributions.clear();
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }

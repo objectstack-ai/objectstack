@@ -4,7 +4,7 @@
  * #13438 — `isMissingTableError` prefers the table a driver DECLARED it targeted
  * over the caller-supplied `readObject`.
  *
- * The residual #13324 left behind: a caller names its OBJECT, a driver compiles
+ * The residual commit 4cda78c9b left behind: a caller names its OBJECT, a driver compiles
  * the statement against the PHYSICAL table, and for a federated object
  * (ADR-0015, `external.remoteName`) the two differ. `crm_order` reads
  * `legacy_orders`; when that remote is genuinely absent the phrase names
@@ -14,7 +14,7 @@
  * Maintainer ruling 2026-09-01 (option 2 on the card): the driver declares the
  * table it targeted on the envelope, the predicate prefers it. The pair the
  * ruling asks for is pinned here — an absent remote reads benign again, and a
- * DIFFERENT relation's error still reads not-benign (the #13324 narrowing must
+ * DIFFERENT relation's error still reads not-benign (the narrowing commit 4cda78c9b made must
  * not reopen) — with the declaration present. The driver's half (that
  * `driver-sql` really stamps `external.remoteName`, live, on each dialect) is
  * `packages/drivers/driver-sql/src/sql-driver-13438-federated-missing-remote-envelope.test.ts`.
@@ -181,7 +181,7 @@ describe('isMissingTableError — a declared targeted table beats the caller-sup
         });
 
         it('a declared node whose phrase mismatches is NOT rescued by a matching cause', () => {
-            // Same disposition #6347 and #13324 gave the exclusion: recognition
+            // Same disposition #6347 and commit 4cda78c9b gave the exclusion: recognition
             // ends the question rather than descending.
             const err = envelope(
                 Object.assign(new Error('no such table: main.absent_base'), {

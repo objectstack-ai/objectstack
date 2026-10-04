@@ -631,6 +631,94 @@ describe('translateAction — description + params (the declared-and-linted keys
   });
 });
 
+/**
+ * An action's copy is keyed on the action's OWN `objectName`. A bound action
+ * reads only `objects.<objectName>._actions.<name>`. An object-less action
+ * reads only `globalActions.<name>`, the group `TranslationDataSchema.globalActions`
+ * declares for object-less actions. A bound action never falls back to
+ * `globalActions`: the translation linter refuses that key as never read, and a
+ * fallback here would make the refused key work at runtime.
+ *
+ * Every row reads all four action lookups off one translated document: the
+ * field lookup (label / description / confirmText / successMessage), the
+ * resultDialog node, the outcome messages and the param node.
+ */
+describe('translateAction — the copy address is keyed on the action\'s own objectName', () => {
+  // One translated node; each row places it at one address.
+  const COPY = {
+    label: '关闭工单',
+    description: '关闭该工单。',
+    confirmText: '确认关闭？',
+    successMessage: '工单已关闭。',
+    outcomeMessages: { closed: '已关闭。' },
+    resultDialog: { title: '工单已关闭' },
+    params: { reason: { label: '原因' } },
+  };
+  // Parsed by the bundle schema, so each row's bundle is one an author can write.
+  const bundleOf = (data: Record<string, unknown>): TranslationBundle => ({
+    'zh-CN': TranslationDataSchema.parse(data),
+  });
+  const GLOBAL_ONLY = bundleOf({ globalActions: { close_case: COPY } });
+  const OWNER_SCOPED = bundleOf({ objects: { support_case: { _actions: { close_case: COPY } } } });
+  const OTHER_OBJECT = bundleOf({ objects: { support_queue: { _actions: { close_case: COPY } } } });
+
+  const OBJECT_LESS = {
+    name: 'close_case',
+    label: 'Close case',
+    description: 'Close this case.',
+    confirmText: 'Close it?',
+    successMessage: 'Case closed.',
+    outcomeMessages: { closed: 'Closed.' },
+    resultDialog: { title: 'Case closed' },
+    params: [{ name: 'reason', label: 'Reason' }],
+  };
+  const BOUND = { ...OBJECT_LESS, objectName: 'support_case' };
+
+  /** What each of the four lookups wrote onto the translated document. */
+  const read = (out: typeof OBJECT_LESS) => ({
+    field: [out.label, out.description, out.confirmText, out.successMessage],
+    resultDialog: out.resultDialog?.title,
+    outcomeMessages: out.outcomeMessages?.closed,
+    params: out.params?.[0]?.label,
+  });
+  const SOURCE_TEXT = read(OBJECT_LESS);
+  const COPY_TEXT = {
+    field: [COPY.label, COPY.description, COPY.confirmText, COPY.successMessage],
+    resultDialog: COPY.resultDialog.title,
+    outcomeMessages: COPY.outcomeMessages.closed,
+    params: COPY.params.reason.label,
+  };
+  const zh = { locale: 'zh-CN', fallbackChain: [] };
+
+  it('a bound action with copy only under globalActions keeps its source text', () => {
+    expect(read(translateAction(BOUND, GLOBAL_ONLY, zh))).toEqual(SOURCE_TEXT);
+    expect(resolveActionLabel(GLOBAL_ONLY, BOUND, zh)).toBe('Close case');
+  });
+
+  it('the same action resolves copy under its own objects.<objectName>._actions', () => {
+    expect(read(translateAction(BOUND, OWNER_SCOPED, zh))).toEqual(COPY_TEXT);
+  });
+
+  it('copy under another object is not read', () => {
+    expect(read(translateAction(BOUND, OTHER_OBJECT, zh))).toEqual(SOURCE_TEXT);
+  });
+
+  it('an object-less action resolves its globalActions copy', () => {
+    expect(read(translateAction(OBJECT_LESS, GLOBAL_ONLY, zh))).toEqual(COPY_TEXT);
+  });
+
+  it('an object-less action does not read an object\'s _actions', () => {
+    expect(read(translateAction(OBJECT_LESS, OWNER_SCOPED, zh))).toEqual(SOURCE_TEXT);
+  });
+
+  it('an inline action is bound to the object that declares it, so globalActions is not read for it', () => {
+    const inlineOn = (bundle: TranslationBundle) =>
+      translateMetadataDocument('object', { name: 'support_case', actions: [OBJECT_LESS] }, bundle, zh).actions[0];
+    expect(read(inlineOn(GLOBAL_ONLY))).toEqual(SOURCE_TEXT);
+    expect(read(inlineOn(OWNER_SCOPED))).toEqual(COPY_TEXT);
+  });
+});
+
 describe('translateMetadataDocument', () => {
   it('translates a view document', () => {
     const view = {
@@ -1047,11 +1135,14 @@ describe('translateDashboard', () => {
     expect(out.widgets[1].title).toBe('Other');
   });
 
-  // #7862 — `subCaption` overlays the metric widget's `options.description`,
-  // a DIFFERENT authored field from `widget.description` (#5428 item 4: two
-  // authored fields, two keys).
-  describe('widget subCaption (#7862)', () => {
-    const subBundle: TranslationBundle = {
+  // The metric sub-caption is RETIRED at both ends (#21257; ruling C on
+  // objectui#11389, which reverses #5428 item 4). Until then `translateDashboard`
+  // overlaid a `subCaption` bundle entry onto the widget's `options.description`
+  // (#7862); it now writes nothing into `options`. The bundle key is a
+  // tombstone, so a well-typed bundle cannot carry it — the residue below is
+  // cast, standing in for a stored row the conversion has not reached yet.
+  describe('widget options — the retired sub-caption overlay (#21257)', () => {
+    const residueBundle = {
       'zh-CN': {
         dashboards: {
           system_overview: {
@@ -1065,7 +1156,7 @@ describe('translateDashboard', () => {
           },
         },
       },
-    };
+    } as unknown as TranslationBundle;
     const metricDashboard = {
       name: 'system_overview',
       widgets: [
@@ -1074,43 +1165,30 @@ describe('translateDashboard', () => {
           type: 'metric',
           title: 'Total Users',
           description: 'Total registered users',
-          options: { description: 'vs last month', sortBy: 'created' },
-        },
-        {
-          id: 'widget_other',
-          type: 'metric',
-          title: 'Other',
-          description: 'Other card copy',
-          options: { description: 'untouched extra' },
+          options: { sortBy: 'created' },
         },
       ],
     };
 
-    it('overlays `options.description` and carries the other options keys through', () => {
-      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets[0].options).toEqual({ description: '较上月', sortBy: 'created' });
+    it('writes nothing into `options` — the bag is carried through by reference', () => {
+      const out = translateDashboard(metricDashboard, residueBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].options).toBe(metricDashboard.widgets[0].options);
+      expect(out.widgets[0].options).toEqual({ sortBy: 'created' });
     });
 
-    it('keeps the two authored fields on their own keys — `description` never reaches `options.description`, `subCaption` never reaches `widget.description`', () => {
-      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
+    it('a residual `subCaption` entry reaches neither `options.description` nor `widget.description`', () => {
+      const out = translateDashboard(metricDashboard, residueBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].options).not.toHaveProperty('description');
+      // `description` translates `widget.description` — the card-header
+      // subtitle, the one authored description a widget keeps.
       expect(out.widgets[0].description).toBe('系统中注册的用户总数');
-      expect(out.widgets[0].options?.description).toBe('较上月');
+      expect(out.widgets[0].title).toBe('用户总数');
     });
 
-    it('leaves `options` of a widget without a subCaption entry untouched (same reference semantics as title)', () => {
-      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets[1].options).toEqual({ description: 'untouched extra' });
-    });
-
-    it('does not mutate the input document', () => {
-      translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
-      expect(metricDashboard.widgets[0].options.description).toBe('vs last month');
-    });
-
-    it('creates the options bag when the bundle carries a subCaption and the widget has none — mirroring how a bundle-only `title` renders', () => {
+    it('creates no `options` bag on a widget that declares none', () => {
       const bare: DashboardLike = { name: 'system_overview', widgets: [{ id: 'widget_total_users' }] };
-      const out = translateDashboard(bare, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets?.[0]?.options).toEqual({ description: '较上月' });
+      const out = translateDashboard(bare, residueBundle, { locale: 'zh-CN' });
+      expect(out.widgets?.[0]).not.toHaveProperty('options');
     });
   });
 
@@ -1237,6 +1315,143 @@ describe('translateDashboard — global filters (#16772)', () => {
     expect(globalFilterKey({ field: 'category' })).toBe('category');
     expect(globalFilterKey({ name: '', field: 'category' })).toBe('category');
     expect(globalFilterKey({})).toBeUndefined();
+  });
+});
+
+describe('translateDashboard — the catalog loses to an explicit override (#20680, ADR-0029 D9.2a)', () => {
+  // What the package shipped — the catalog's subject.
+  const PACKAGED = {
+    name: 'system_overview',
+    label: 'System Overview',
+    description: 'Platform health',
+    widgets: [
+      { id: 'widget_total_users', title: 'Total Users', description: 'Registered users' },
+      { id: 'widget_organizations', title: 'Organizations' },
+    ],
+    globalFilters: [
+      { name: 'region', field: 'region', label: 'Region', options: [{ value: 'emea', label: 'EMEA' }, { value: 1, label: 'One' }] },
+    ],
+  };
+
+  // `en` repeats the shipped strings (what `platform-objects` ships); `zh-CN`
+  // translates them. Both, because the measured defect was in the SOURCE
+  // locale: an `en` reader got the shipped English back over the edit.
+  const BUNDLE: TranslationBundle = {
+    en: {
+      dashboards: {
+        system_overview: {
+          label: 'System Overview',
+          description: 'Platform health',
+          widgets: {
+            widget_total_users: { title: 'Total Users', description: 'Registered users' },
+            widget_organizations: { title: 'Organizations' },
+          },
+          globalFilters: { region: { label: 'Region', options: { emea: 'EMEA', '1': 'One' } } },
+        },
+      },
+    } as any,
+    'zh-CN': {
+      dashboards: {
+        system_overview: {
+          label: '系统概览',
+          description: '平台健康',
+          widgets: {
+            widget_total_users: { title: '用户总数', description: '注册用户' },
+            widget_organizations: { title: '组织' },
+            // An id the package does not ship — addressed only to prove a
+            // tenant-added widget keeps its own title.
+            widget_added: { title: 'MUST-NOT-APPLY' },
+          },
+          globalFilters: { region: { label: '区域', options: { emea: '欧洲', '1': '一' } } },
+        },
+      },
+    } as any,
+  };
+
+  const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+  const widget = (doc: any, id: string) => doc.widgets.find((w: any) => w.id === id);
+
+  it('an untouched document still gets the catalog — every string', () => {
+    const out: any = translateDashboard(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('系统概览');
+    expect(out.description).toBe('平台健康');
+    expect(widget(out, 'widget_total_users')).toMatchObject({ title: '用户总数', description: '注册用户' });
+    expect(widget(out, 'widget_organizations').title).toBe('组织');
+    expect(out.globalFilters[0].label).toBe('区域');
+    expect(out.globalFilters[0].options.map((o: any) => o.label)).toEqual(['欧洲', '一']);
+  });
+
+  it("an org overlay's edited widget title is served — in the SOURCE locale and in translation", () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    for (const locale of ['en', 'zh-CN']) {
+      const out: any = translateDashboard(doc, BUNDLE, { locale, packagedBase: PACKAGED });
+      expect(widget(out, 'widget_total_users').title, locale).toBe('Total Users (edited)');
+    }
+  });
+
+  it('judges each string SEPARATELY — an edited title leaves the other strings translated', () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_total_users').description).toBe('注册用户');
+    expect(widget(out, 'widget_organizations').title).toBe('组织');
+    expect(out.label).toBe('系统概览');
+  });
+
+  it('every translatable string follows the same rule — label, description, widget description, filter label, option label', () => {
+    const doc = clone(PACKAGED);
+    doc.label = 'Ops Overview';
+    doc.description = 'Our health';
+    doc.widgets[0].description = 'People';
+    doc.globalFilters[0].label = 'Territory';
+    doc.globalFilters[0].options[0].label = 'Europe';
+    const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('Ops Overview');
+    expect(out.description).toBe('Our health');
+    expect(widget(out, 'widget_total_users').description).toBe('People');
+    expect(out.globalFilters[0].label).toBe('Territory');
+    // The edited option keeps its label; its unedited sibling is still
+    // translated, matched by the value's string spelling (`1` against `'1'`).
+    expect(out.globalFilters[0].options.map((o: any) => o.label)).toEqual(['Europe', '一']);
+  });
+
+  it('a widget the package does not ship was authored after the fact and keeps its title', () => {
+    const doc: any = clone(PACKAGED);
+    doc.widgets.push({ id: 'widget_added', title: 'Added by the org' });
+    const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_added').title).toBe('Added by the org');
+  });
+
+  it('NO packaged base supplied → the pre-#20680 behaviour, catalog applies (the measured defect, as a control)', () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    expect(widget(translateDashboard(doc, BUNDLE, { locale: 'en' }), 'widget_total_users').title).toBe('Total Users');
+    expect(widget(translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: undefined }), 'widget_total_users').title).toBe('用户总数');
+    expect(widget(translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: null }), 'widget_total_users').title).toBe('用户总数');
+  });
+
+  it('the ruled edge — an edit back to exactly the shipped string is a no-op, and the catalog still applies', () => {
+    const out: any = translateDashboard(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_total_users').title).toBe('用户总数');
+  });
+
+  it('does not mutate either input document', () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(doc.widgets[0].title).toBe('Total Users (edited)');
+    expect(PACKAGED.widgets[0].title).toBe('Total Users');
+  });
+
+  it('reaches the generic dispatcher — translateMetadataDocument carries the base for a dashboard', () => {
+    // The serving layer never calls `translateDashboard` directly; a base that
+    // stopped at the dispatcher would leave the defect exactly where it was.
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    const out = translateMetadataDocument('dashboard', doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_total_users').title).toBe('Total Users (edited)');
+    expect(widget(out, 'widget_organizations').title).toBe('组织');
   });
 });
 
@@ -1392,7 +1607,7 @@ describe('translatePage', () => {
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
           { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
           // Was `element:form` until #9249 retired that element whole, then a
-          // bespoke type carrying the `submitLabel` pin pending #10926. That
+          // bespoke type carrying the `submitLabel` pin until commit d173125fb, whose
           // ruling retired the key from the copy face, so the node now pins
           // the NEGATIVE: a bespoke component's `submitLabel` is no longer
           // overlaid, however the bundle spells it.
@@ -1583,7 +1798,7 @@ describe('translatePage', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// #12961 — the descent into a container's declared `properties.children`
+// Commit 901355c3b — the descent into a container's declared `properties.children`
 //
 // Ruled 2026-08-29 (maintainer, verbatim 「同意」, option A): `translatePage`
 // descends into DECLARED `properties.children` arrays, so copy authored for a
@@ -1750,7 +1965,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
 
     it('descends into `items[].children` — the contract call the #12961 line left open, made by #16772', () => {
       // `page:tabs` / `page:accordion` nest their children one level deeper,
-      // under `properties.items[].children`. The #12961 ruling named
+      // under `properties.items[].children`. The 2026-08-29 ruling (commit 901355c3b) named
       // `properties.children` and recorded this one as "its own contract
       // call"; #16772 is that call, measured on a slotted contract page whose
       // seven tab panels held every related list the resolver never reached.
@@ -1764,13 +1979,19 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       expect((card(out).properties.items as any[])[0].label).toBe('Details');
     });
 
-    it('still does not descend into `footer` — the other back-compat spelling (#5775)', () => {
+    it('descends into `footer` — a declared, rendered slot, not a back-compat spelling (#20940)', () => {
+      // `PageCardProps.footer` is declared "Card footer components (slot)" and
+      // objectui's `PageCardRenderer` draws it under the body. It used to sit
+      // beside `body` here as "the other back-compat spelling", so its copy
+      // stayed in the source language while `os lint` judged the same node.
+      // The descent now reads the rows' one derived slot list
+      // (`pageComponentSlotPositions()`), which names `footer` and not `body`.
       const out = translatePage(
         nestedUnder({ footer: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }),
         kpiBundle,
         { locale: 'zh-CN' },
       );
-      expect((card(out).properties.footer as any[])[0].properties.label).toBe('Deals Won');
+      expect((card(out).properties.footer as any[])[0].properties.label).toBe('赢单数');
     });
 
     it('keeps the page-name header route region-level', () => {
@@ -1975,13 +2196,13 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// #13218 — walkAddressedPageComponents, THE shared addressed-component walk
+// Commit c45d8e6b4 — walkAddressedPageComponents, THE shared addressed-component walk
 // ────────────────────────────────────────────────────────────────────────────
 //
 // The exported contract behind both `translatePage` (above — its behaviour
 // through the walk is pinned by every fixture in that block) and the CLI
 // extractor's `collectExpectedEntries`. These pins address the walk DIRECTLY,
-// extractor-style, so each of the five converged invariants (#13218) has a
+// extractor-style, so each of the five converged invariants (commit c45d8e6b4) has a
 // red test naming it in the package that owns it; the cross-package
 // differential lives in `packages/cli/test/platform-page-i18n-parity.test.ts`.
 
@@ -1989,6 +2210,7 @@ import {
   walkAddressedPageComponents,
   type AddressedPageComponentContext,
 } from './i18n-resolver';
+import { ComponentPropsMap } from '../ui/component.zod';
 
 describe('walkAddressedPageComponents (#13218)', () => {
   /** Enumeration-style consumption: what the walk reports, in visit order. */
@@ -2053,7 +2275,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     ]);
   });
 
-  it('descends properties.children AND properties.items[].children — body and footer stay unvisited (#16772)', () => {
+  it('descends properties.children, properties.footer AND properties.items[].children — body stays unvisited (#16772, #20940)', () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -2069,13 +2291,48 @@ describe('walkAddressedPageComponents (#13218)', () => {
         }],
       }],
     };
-    // `children` first, then the panels — both one level below the container;
-    // `body` / `footer` are the renderer's back-compat fallback and are still
-    // not an authorable composition spelling.
+    // The authorable entries of `pageComponentSlotPositions()`, in its order:
+    // `children`, then the declared `footer` slot (#20940), then the panels —
+    // all one level below the container. `body` is the tombstoned spelling
+    // (#5775): the renderer's back-compat fallback, not an authorable one.
     expect(trace(doc)).toEqual([
       { id: 'card', nested: false, depth: 0, addressed: true },
       { id: 'in_children', nested: true, depth: 1, addressed: true },
+      { id: 'in_footer', nested: true, depth: 1, addressed: true },
       { id: 'in_items', nested: true, depth: 1, addressed: true },
+    ]);
+  });
+
+  it('hands a malformed node in a `page:card` footer to the visitor, so a consumer that judges what the walk visits judges it (#20940)', () => {
+    // The consumer shape objectui's validator has: judge each visited node's
+    // props against its `ComponentPropsMap` row. Before #20940 the footer was
+    // not descended, so the typo'd card below came back judged by nobody —
+    // while `os lint`, walking its own list, did judge it.
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'summary',
+          type: 'page:card',
+          properties: {
+            title: 'Summary',
+            children: [{ id: 'body_card', type: 'page:card', properties: { title: 'Body' } }],
+            footer: [{ id: 'footer_card', type: 'page:card', properties: { title: 'Totals', bordred: false } }],
+          },
+        }],
+      }],
+    };
+    const rows = ComponentPropsMap as unknown as Record<string, { safeParse(v: unknown): { success: boolean } }>;
+    const judged: { id: string | undefined; nested: boolean; clean: boolean }[] = [];
+    walkAddressedPageComponents(doc, (component, { id, nested }) => {
+      const row = rows[component.type as string];
+      if (row) judged.push({ id, nested, clean: row.safeParse(component.properties ?? {}).success });
+      return component;
+    });
+    expect(judged).toEqual([
+      { id: 'summary', nested: false, clean: true },
+      { id: 'body_card', nested: true, clean: true },
+      { id: 'footer_card', nested: true, clean: false },
     ]);
   });
 
@@ -3388,6 +3645,38 @@ describe('translateFlow (#11287)', () => {
     expect(screen.config.description).toBe('Review the details below.');
   });
 
+  it('translates a field\'s help text (`inlineHelpText`) key by key, beside its label and placeholder', () => {
+    // #17306: the screen dialog draws `inlineHelpText` under the control, and
+    // the per-field face carries it under the same key. A field whose bundle
+    // entry omits it keeps the authored help line; one with no help authored
+    // gets none invented from the bundle's neighbours.
+    const doc = leadConversion();
+    const fields = screenOf(doc).config.fields;
+    fields.find((f: any) => f.name === 'opportunityName').inlineHelpText = 'Shown on the quote';
+    fields.find((f: any) => f.name === 'opportunityAmount').inlineHelpText = 'Between 1 and 10';
+    const withHelp: FlowTestBundle = {
+      'zh-CN': {
+        flows: {
+          lead_conversion: {
+            screens: {
+              screen_1: {
+                fields: {
+                  opportunityName: { label: '商机名称', inlineHelpText: '显示在报价单上' },
+                  opportunityAmount: { label: '商机金额' },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const out = translateFlow(doc, withHelp, { locale: 'zh-CN' });
+    const byName = (n: string) => screenOf(out).config.fields.find((f: any) => f.name === n);
+    expect(byName('opportunityName')).toMatchObject({ label: '商机名称', inlineHelpText: '显示在报价单上' });
+    expect(byName('opportunityAmount')).toMatchObject({ label: '商机金额', inlineHelpText: 'Between 1 and 10' });
+    expect(byName('createOpportunity').inlineHelpText).toBeUndefined();
+  });
+
   it('negative control — a flow the bundle does not carry comes back unchanged (same reference)', () => {
     const doc = { ...leadConversion(), name: 'other_flow' };
     expect(translateFlow(doc, bundle, { locale: 'zh-CN' })).toBe(doc);
@@ -3855,6 +4144,232 @@ describe('translateView — bulkActionDefs (#14253)', () => {
       fallbackChain: ['zh-CN'],
     }) as any;
     expect(viaChain.config.bulkActionDefs.find((d: any) => d.name === 'skip').label).toBe('跳过');
+  });
+});
+
+import { translateView } from './i18n-resolver';
+
+describe('translateView — the catalog loses to an explicit override (#20731, ADR-0029 D9.2a)', () => {
+  // The view container as the package ships it. The served documents below are
+  // what `expandViewContainer` emits from it — the same composer the boot
+  // registers each packaged view with — so the base and the served view share
+  // one shape by construction.
+  const CONTAINER = {
+    listViews: {
+      in_progress: {
+        label: 'In Progress',
+        description: 'Tasks being worked on',
+        type: 'grid' as const,
+        data: { provider: 'object' as const, object: 'showcase_task' },
+        columns: [{ field: 'title' }],
+        bulkActionDefs: [
+          {
+            name: 'mark_done',
+            label: 'Mark done',
+            operation: 'update' as const,
+            patch: { status: 'done' },
+            confirmText: 'Mark the selected tasks done?',
+            confirmLabel: 'Mark them',
+            params: [{ name: 'note', type: 'text' as const, label: 'Note', help: 'Shown on the timeline', placeholder: 'Optional' }],
+          },
+          { name: 'skip', label: 'Skip', operation: 'update' as const, patch: { status: 'skipped' } },
+        ],
+      },
+      urgent: {
+        label: 'Urgent',
+        type: 'grid' as const,
+        data: { provider: 'object' as const, object: 'showcase_task' },
+        columns: [{ field: 'title' }],
+      },
+    },
+  };
+
+  const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+  const packagedView = (name: string): any => {
+    const item = expandViewContainer('showcase_task', CONTAINER).find((v) => v.name === name);
+    if (!item) throw new Error(`fixture missing ${name}`);
+    return item;
+  };
+  const PACKAGED = packagedView('showcase_task.in_progress');
+
+  // `en` repeats the shipped strings (a package that extracts its source
+  // locale), `zh-CN` translates them. The measured reading was in `zh-CN`; the
+  // `en` half proves the rule in the source locale too, where a repeated
+  // shipped string is exactly as able to overwrite an edit.
+  const BUNDLE: TranslationBundle = {
+    en: {
+      objects: {
+        showcase_task: {
+          _views: {
+            in_progress: {
+              label: 'In Progress',
+              description: 'Tasks being worked on',
+              bulkActions: {
+                mark_done: {
+                  label: 'Mark done',
+                  confirmText: 'Mark the selected tasks done?',
+                  confirmLabel: 'Mark them',
+                  params: { note: { label: 'Note', help: 'Shown on the timeline', placeholder: 'Optional' } },
+                },
+                skip: { label: 'Skip' },
+              },
+            },
+            urgent: { label: 'Urgent' },
+          },
+        },
+      },
+    } as any,
+    'zh-CN': {
+      objects: {
+        showcase_task: {
+          _views: {
+            in_progress: {
+              label: '进行中',
+              description: '正在处理的任务',
+              bulkActions: {
+                mark_done: {
+                  label: '标记完成',
+                  confirmText: '确定将所选任务标记为完成吗？',
+                  confirmLabel: '确认标记',
+                  // `added` is a param the package does not ship — addressed
+                  // only to prove a tenant-added param keeps its own label.
+                  params: { note: { label: '备注', help: '会显示在动态中', placeholder: '选填' }, added: { label: 'MUST-NOT-APPLY' } },
+                },
+                skip: { label: '跳过' },
+                // A def the package does not ship, for the same reason.
+                added_def: { label: 'MUST-NOT-APPLY' },
+              },
+            },
+            urgent: { label: '紧急' },
+          },
+        },
+      },
+    } as any,
+  };
+
+  const def = (view: any, name: string) => view.config.bulkActionDefs.find((d: any) => d.name === name);
+  const param = (view: any, defName: string, name: string) => def(view, defName).params.find((p: any) => p.name === name);
+
+  it('composes the identity this test is pinned to — the served name is qualified, the catalog key is bare', () => {
+    expect(PACKAGED.name).toBe('showcase_task.in_progress');
+    expect(PACKAGED.object).toBe('showcase_task');
+    expect(PACKAGED.label).toBe('In Progress');
+    // The catalog is addressed by the BARE key under the object; the base is
+    // the same registry item the served view is, handed in whole.
+    expect((BUNDLE['zh-CN'] as any).objects.showcase_task._views.in_progress.label).toBe('进行中');
+  });
+
+  it('an unedited view still gets the catalog — every string', () => {
+    const out: any = translateView(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('进行中');
+    expect(out.description).toBe('正在处理的任务');
+    expect(def(out, 'mark_done')).toMatchObject({ label: '标记完成', confirmText: '确定将所选任务标记为完成吗？', confirmLabel: '确认标记' });
+    expect(param(out, 'mark_done', 'note')).toMatchObject({ label: '备注', help: '会显示在动态中', placeholder: '选填' });
+    expect(def(out, 'skip').label).toBe('跳过');
+  });
+
+  it("an org overlay's edited label is served — in zh-CN and in the source locale", () => {
+    const doc = clone(PACKAGED);
+    doc.label = 'In Progress (edited)';
+    for (const locale of ['zh-CN', 'en']) {
+      const out: any = translateView(doc, BUNDLE, { locale, packagedBase: PACKAGED });
+      expect(out.label, locale).toBe('In Progress (edited)');
+    }
+  });
+
+  it('judges each string SEPARATELY — an edited label leaves the rest of the view translated', () => {
+    const doc = clone(PACKAGED);
+    doc.label = 'In Progress (edited)';
+    const out: any = translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.description).toBe('正在处理的任务');
+    expect(def(out, 'mark_done').label).toBe('标记完成');
+    expect(param(out, 'mark_done', 'note').help).toBe('会显示在动态中');
+    expect(def(out, 'skip').label).toBe('跳过');
+  });
+
+  it('every translatable string follows the same rule — description, def label / confirm prompt / confirm button, param label / help / placeholder', () => {
+    const doc = clone(PACKAGED);
+    doc.description = 'Our open work';
+    const markDone = def(doc, 'mark_done');
+    markDone.label = 'Close out';
+    markDone.confirmText = 'Close the selected tasks?';
+    markDone.confirmLabel = 'Close them';
+    const note = markDone.params[0];
+    note.label = 'Closing note';
+    note.help = 'Kept forever';
+    note.placeholder = 'Say why';
+    const out: any = translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('进行中');
+    expect(out.description).toBe('Our open work');
+    expect(def(out, 'mark_done')).toMatchObject({ label: 'Close out', confirmText: 'Close the selected tasks?', confirmLabel: 'Close them' });
+    expect(param(out, 'mark_done', 'note')).toMatchObject({ label: 'Closing note', help: 'Kept forever', placeholder: 'Say why' });
+    // The sibling def nobody edited is still translated.
+    expect(def(out, 'skip').label).toBe('跳过');
+  });
+
+  it('a def or param the package does not ship was authored after the fact and keeps its strings', () => {
+    const doc = clone(PACKAGED);
+    doc.config.bulkActionDefs.push({ name: 'added_def', label: 'Added by the org', operation: 'update', patch: {} });
+    def(doc, 'mark_done').params.push({ name: 'added', type: 'text', label: 'Added param' });
+    const out: any = translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(def(out, 'added_def').label).toBe('Added by the org');
+    expect(param(out, 'mark_done', 'added').label).toBe('Added param');
+    expect(param(out, 'mark_done', 'note').label).toBe('备注');
+  });
+
+  it('NO packaged base supplied → the pre-#20731 behaviour, catalog applies (the measured defect, as a control)', () => {
+    const doc = clone(PACKAGED);
+    doc.label = 'In Progress (edited)';
+    expect(translateView(doc, BUNDLE, { locale: 'zh-CN' }).label).toBe('进行中');
+    expect(translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: undefined }).label).toBe('进行中');
+    expect(translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: null }).label).toBe('进行中');
+    expect(translateView(doc, BUNDLE, { locale: 'en' }).label).toBe('In Progress');
+  });
+
+  it('a reset (the served view equals the packaged one again) restores the translated shipped label', () => {
+    const edited = clone(PACKAGED);
+    edited.label = 'In Progress (edited)';
+    expect(translateView(edited, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }).label).toBe('In Progress (edited)');
+    const reset = clone(PACKAGED);
+    expect(translateView(reset, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }).label).toBe('进行中');
+    expect(translateView(reset, BUNDLE, { locale: 'en', packagedBase: PACKAGED }).label).toBe('In Progress');
+  });
+
+  it('the ruled edge — an edit back to exactly the shipped string is a no-op, and a non-string label is never an override', () => {
+    const same = clone(PACKAGED);
+    same.label = 'In Progress';
+    expect(translateView(same, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }).label).toBe('进行中');
+    // An inline locale map is the author's own multilingual route, not a
+    // diverged string — the comparison answers only for a string.
+    const map: any = clone(PACKAGED);
+    map.label = { en: 'Doing', 'zh-CN': '处理中' };
+    expect(translateView(map, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }).label).toBe('进行中');
+  });
+
+  it('an unedited sibling view stays translated when handed its OWN base', () => {
+    const urgent = packagedView('showcase_task.urgent');
+    expect(translateView(clone(urgent), BUNDLE, { locale: 'zh-CN', packagedBase: urgent }).label).toBe('紧急');
+  });
+
+  it('does not mutate either input document', () => {
+    const doc = clone(PACKAGED);
+    doc.label = 'In Progress (edited)';
+    def(doc, 'mark_done').label = 'Close out';
+    const before = clone(doc);
+    const packagedBefore = clone(PACKAGED);
+    translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(doc).toEqual(before);
+    expect(PACKAGED).toEqual(packagedBefore);
+  });
+
+  it('reaches the generic dispatcher — translateMetadataDocument carries the base for a view', () => {
+    // The serving layer never calls `translateView` directly; a base that
+    // stopped at the dispatcher would leave the defect exactly where it was.
+    const doc = clone(PACKAGED);
+    doc.label = 'In Progress (edited)';
+    const out = translateMetadataDocument('view', doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('In Progress (edited)');
+    expect(def(out, 'mark_done').label).toBe('标记完成');
   });
 });
 

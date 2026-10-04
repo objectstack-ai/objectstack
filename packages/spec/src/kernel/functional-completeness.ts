@@ -187,7 +187,11 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
     });
   }
 
-  if (DEAD_WITHOUT_OPTIONS_ERROR.has(type) && !hasEntries(def.options)) {
+  // A `picklist` reference IS the field's option source (`data/picklist.zod.ts`):
+  // the served field carries the list's options resolved, so a picklist-bound
+  // choice is not the empty one this rule is about.
+  const hasOptionSource = hasEntries(def.options) || typeof def.picklist === 'string';
+  if (DEAD_WITHOUT_OPTIONS_ERROR.has(type) && !hasOptionSource) {
     out.push({
       rule: FIELD_CHOICE_WITHOUT_OPTIONS,
       severity: 'error',
@@ -196,9 +200,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
         `A \`${type}\` field with no \`options\` is a choice with nothing to choose: the form `
         + 'control is empty AND server-side value validation is disabled (`record-validator.ts` '
         + 'skips the check when the allowed list is empty), so any value writes through the API.',
-      fix: "options: [{ label: '…', value: '…' }]",
+      fix: "options: [{ label: '…', value: '…' }] — or picklist: '<name>' for a shared list",
     });
-  } else if (DEAD_WITHOUT_OPTIONS_WARNING.has(type) && !hasEntries(def.options)) {
+  } else if (DEAD_WITHOUT_OPTIONS_WARNING.has(type) && !hasOptionSource) {
     out.push({
       rule: FIELD_CHOICE_WITHOUT_OPTIONS,
       severity: 'warning',
@@ -274,7 +278,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   screen's second clause: `titleField` is NOT required). ⚠️ The screen's
  *   copy is LOCALISED at the pin: objectui#10101 (objectui `afb228418`), which
  *   the pin now contains, routes it through `tt('calendar.configRequired', …)`
- *   (`ObjectCalendar.tsx:1207-1208`), whose default and the `en` pack both
+ *   (`ObjectCalendar.tsx:1303-1304`), whose default and the `en` pack both
  *   read "Calendar configuration required. Please specify startDateField, …",
  *   while a non-English locale renders its own pack's words for the same
  *   screen (e.g. `zh`, `de`). The refusal itself — the `if (!calendarConfig)`
@@ -283,26 +287,113 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `ObjectCalendar.tsx`
- *   is byte-identical to `62597c588`, where it had changed only in its copy;
- *   `ListView.tsx` changed on this hop — objectui#10275's `$select` and the
- *   self-querying `gantt` / `tree` / `chart` filter and search of
- *   objectui#10037 / objectui#10250 — with its `case 'calendar'` arm
- *   untouched), so this describes the console this repo SHIPS and not only
- *   objectui's head.
+ *   (`.objectui-sha` = `2e818d0b5`, re-read 2026-10-04: `ObjectCalendar.tsx`
+ *   and `ListView.tsx` are byte-identical across the hop off `ab1879721`
+ *   (`git diff --quiet`), so every anchor held unmoved; re-read at
+ *   `ab1879721` 2026-10-03: on the hop off
+ *   `89cad75d5` `ObjectCalendar.tsx` changed in one comment line only, line
+ *   for line (`:1250`, objectui#11438 re-citing the installed spec as
+ *   17.6.0), so `getCalendarConfig` `:294`, the `if (!calendarConfig)` arm
+ *   `:1296` and its `tt(…)` lines `:1303-1304` did not move and are
+ *   byte-identical; `ListView.tsx` changed (objectui#10813's `isempty` /
+ *   `isnotempty` filter operators, objectui#11445's record-count family,
+ *   objectui#11227's resolved empty-state labels), every `case` arm
+ *   byte-identical and moved by 14; and the `en` / `zh` / `de`
+ *   `calendar.configRequired` strings did not change. At `89cad75d5`
+ *   (2026-10-02), on the hop off
+ *   `31971ff1e` `ObjectCalendar.tsx` and `ListView.tsx` are byte-identical,
+ *   so `getCalendarConfig` `:294`, the `if (!calendarConfig)` arm `:1296` and
+ *   its `tt(…)` lines `:1303-1304` did not move, every `case` arm is
+ *   byte-identical, and the `en` / `zh` / `de` `calendar.configRequired`
+ *   strings did not change. At `31971ff1e` (2026-10-01) `ObjectCalendar.tsx`
+ *   changed on the hop off `e420df310` only at its `navigation` read
+ *   (objectui#8652 declared the key and dropped that read's cast, 11
+ *   insertions, 19 deletions), below `getCalendarConfig`, which is
+ *   byte-identical and unmoved at `:294`, and above the `if (!calendarConfig)`
+ *   arm and its `tt(…)` lines, byte-identical and moved `:1304` → `:1296` and
+ *   `:1311-1312` → `:1303-1304`; `ListView.tsx` changed on this hop too
+ *   (objectui#10689's re-read on a harvested query input) with every `case`
+ *   arm byte-identical, and the `en` / `zh` / `de` pack strings did not
+ *   change. At `e420df310` (2026-09-30) `ObjectCalendar.tsx`
+ *   changed on the hop off `db11afd49` only in comments (6 insertions, 3
+ *   deletions, objectui#11073's 17.5.0 re-citations), so `getCalendarConfig`
+ *   is byte-identical and unmoved at `:294`, and the `if (!calendarConfig)`
+ *   arm and its `tt(…)` lines are byte-identical, moved `:1301` → `:1304` and
+ *   `:1308-1309` → `:1311-1312`; `ListView.tsx` changed on this hop too
+ *   (objectui#11021's searched grouped list among others) with every `case`
+ *   arm byte-identical, and the `en` / `zh` / `de` pack strings did not
+ *   change. At `db11afd49` (2026-09-29) `ObjectCalendar.tsx`
+ *   changed again on the hop off `dd3f7e1be` (18 insertions, 11 deletions:
+ *   objectui#11005's and its sibling's DST wall-clock moves, in
+ *   `toStoredDateValue` and the handlers below the config gate, plus comment
+ *   citations), while `getCalendarConfig` is byte-identical and unmoved at
+ *   `:294`, and the `if (!calendarConfig)` arm and its `tt(…)` lines are
+ *   byte-identical, moved `:1294` → `:1301` and `:1301-1302` → `:1308-1309`;
+ *   `ListView.tsx` changed only in comments and its region-aria read, with
+ *   every `case` arm byte-identical, and the `en` / `zh` / `de` pack strings
+ *   did not change. At `dd3f7e1be` (2026-09-28) `ObjectCalendar.tsx`
+ *   changed on that hop — objectui#10866's date-only day reads and writes,
+ *   the display-locale and invalidation re-reads of objectui#10668 /
+ *   objectui#10572, objectui#7508's row ceiling — while `getCalendarConfig`,
+ *   the `if (!calendarConfig)` arm and its `tt(…)` lines are byte-identical
+ *   to `f8a9d0fb0`, moved `:287` → `:294`, `:1200` → `:1294` and
+ *   `:1207-1208` → `:1301-1302`, and the `en` / `zh` / `de` pack strings did
+ *   not change (at `f8a9d0fb0` the file was byte-identical to `62597c588`,
+ *   where it had changed only in its copy); `ListView.tsx` changed too —
+ *   objectui#7189's server-side grid grouping and objectui#10370's map
+ *   `$select` projection among others — with its `case 'calendar'` arm
+ *   byte-identical), so this describes the console this repo SHIPS and not
+ *   only objectui's head.
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `f8a9d0fb0`, re-read
- *   2026-09-24; first measured at `87af769e9`, and both files were
- *   byte-identical to it at `62597c588`). On this hop `ListView.tsx`'s
- *   `case 'gantt'` gained the EFFECTIVE `filter` and the toolbar `search` /
- *   `searchableFields` (objectui#10037, objectui#10250) and `ObjectGantt.tsx`
- *   sends them as `$search` / `$searchFields`; neither touches the date
- *   bindings or the config gate read below. ① `ListView.tsx`'s
+ *   this repo builds against (`.objectui-sha` = `2e818d0b5`, re-read
+ *   2026-10-04: `ObjectGantt.tsx` and `ListView.tsx` are byte-identical across
+ *   the hop off `ab1879721`, so every anchor held unmoved; re-read at
+ *   `ab1879721` 2026-10-03; on the hop off `89cad75d5` `ObjectGantt.tsx` changed (8
+ *   insertions, 0 deletions: one import line and objectui#11475's storage
+ *   argument on the tooltip's `percent` row), none of it in `getGanttConfig`
+ *   or the refusal arm, which are byte-identical and moved `:608` → `:609`
+ *   and `:2298` → `:2306`, and `ListView.tsx`'s `case 'gantt'` is
+ *   byte-identical, moved by 14; at `89cad75d5` (2026-10-02), on the hop off
+ *   `31971ff1e` `ObjectGantt.tsx` changed (47
+ *   insertions, 10 deletions: objectui#11254's field-scale width on the
+ *   number and percent rows, objectui#11355's uncast shadowed-flat-key read,
+ *   one import line), none of it in `getGanttConfig` or the refusal arm, which
+ *   are byte-identical and moved `:607` → `:608` and `:2261` → `:2298`, and
+ *   `ListView.tsx` is byte-identical, `case 'gantt'` with it; at `31971ff1e`
+ *   (2026-10-01), on the hop off `e420df310` `ObjectGantt.tsx` is byte-identical,
+ *   so `getGanttConfig` `:607` and the `if (!ganttConfig)` arm `:2261` did not
+ *   move, and `ListView.tsx`'s `case 'gantt'` is byte-identical; at
+ *   `e420df310` (2026-09-30), on the hop off `db11afd49`, `ObjectGantt.tsx` changed again
+ *   (85 insertions, 26 deletions: objectui#11141's inclusive date-only end,
+ *   objectui#8348's record-source ladder and objectui#11070's `reference`
+ *   spelling), so `getGanttConfig` MOVED `:560` → `:607` and the
+ *   `if (!ganttConfig)` arm `:2202` → `:2261`, both byte-identical, and
+ *   `ListView.tsx`'s `case 'gantt'` is byte-identical; at `db11afd49`
+ *   (2026-09-29), on the hop off `dd3f7e1be`, `ObjectGantt.tsx` changed again
+ *   (14 insertions, 10 deletions: objectui#10866's zoned-chart DST day read
+ *   and write, and a comment citation), so `getGanttConfig` MOVED `:556` →
+ *   `:560` and the `if (!ganttConfig)` arm `:2198` → `:2202`, both
+ *   byte-identical, and `ListView.tsx`'s `case 'gantt'` is byte-identical;
+ *   first measured at `87af769e9`, both files byte-identical to
+ *   it at `62597c588`, and at `f8a9d0fb0` `case 'gantt'` gained the
+ *   EFFECTIVE `filter` and the toolbar `search` / `searchableFields`
+ *   (objectui#10037, objectui#10250), which `ObjectGantt.tsx` still sends as
+ *   `$search` / `$searchFields`). Both files changed on this hop:
+ *   `ObjectGantt.tsx` in its refetch and error handling (objectui#10035,
+ *   objectui#7237, objectui#10578, objectui#10633, objectui#7333) and in how
+ *   it reads and writes a date-only day (objectui#10866), `case 'gantt'` only
+ *   in a comment; `getGanttConfig` and the `if (!ganttConfig)` arm are
+ *   byte-identical to `f8a9d0fb0`, moved `:498` → `:556` and `:1973` →
+ *   `:2198` (`:560` and `:2202` at `db11afd49`, `:607` and `:2261` at `e420df310`), and none of it touches which date fields are bound or the
+ *   config gate read below. ① `ListView.tsx`'s
  *   `case 'gantt'` spreads `startDateField` / `endDateField` / `titleField`
  *   only when the view DECLARED them — the `'start_date'` / `'end_date'`
- *   floors were deleted by objectui#7070, and the `'progress'` /
+ *   floors were deleted by objectui#7070 (landing commit objectui
+ *   `5f4514f7b`, which the arm's comment cites in the issue's place at this
+ *   pin: objectui `fec3b1a8b` re-cited objectui#7070 because it answers
+ *   404), and the `'progress'` /
  *   `'dependencies'` floors by objectui#7499 (OMITTED, not refused: an absent
  *   progress or dependency binding is a legitimate state). ② `ObjectGantt`'s
  *   `getGanttConfig` takes its flat branch only when BOTH dates are present
@@ -312,12 +403,43 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `f8a9d0fb0`; `ObjectTimeline.tsx` is byte-identical to `87af769e9` and
- *   `62597c588` too, and `ListView.tsx`'s `case 'timeline'` did not move).
+ *   `2e818d0b5`; `ObjectTimeline.tsx` and `ListView.tsx` are byte-identical
+ *   across the hop off `ab1879721`, so every anchor held unmoved; on the hop
+ *   off `89cad75d5` `ObjectTimeline.tsx` is
+ *   byte-identical, so the start-date chain `:574-576` and the refusal arm
+ *   `:911` did not move, and `ListView.tsx`'s `case 'timeline'` and
+ *   `resolveTimelineDateBinding` are byte-identical, moved by 14 and by 9
+ *   (objectui#10813's filter operators above them). At `89cad75d5`, on the
+ *   hop off `31971ff1e` `ListView.tsx` is byte-identical,
+ *   `case 'timeline'` and `resolveTimelineDateBinding` with it, and
+ *   `ObjectTimeline.tsx` changed only in two `navigation` comments
+ *   (objectui#11293 / objectui#11168 slice 5, 16 insertions, 7 deletions:
+ *   an absent key opens nothing rather than resolving the hook's `page`), so
+ *   the start-date chain and the refusal arm are byte-identical and MOVED
+ *   `:568-570` → `:574-576` and `:902` → `:911`. At `31971ff1e`, on the hop
+ *   off `e420df310`, `ListView.tsx`'s `case 'timeline'`
+ *   and `resolveTimelineDateBinding` were byte-identical, and
+ *   `ObjectTimeline.tsx` changed above both reads (objectui#8654's typed
+ *   `navigation` member, 42 insertions, 2 deletions), so the start-date chain
+ *   and the refusal arm are byte-identical and MOVED `:533-535` → `:568-570`
+ *   and `:862` → `:902`. At `e420df310`, `ObjectTimeline.tsx`, `ListView.tsx`'s
+ *   `case 'timeline'` and `resolveTimelineDateBinding` were byte-identical to
+ *   `db11afd49`, so `:533-535` and `:862` did not move; they were
+ *   byte-identical to `dd3f7e1be` on the hop onto `db11afd49` too. At `dd3f7e1be`, `ObjectTimeline.tsx`, byte-identical from `87af769e9` through
+ *   `62597c588` to `f8a9d0fb0`, changed on this hop — objectui#6356's
+ *   declared timeline item, objectui#10222's retired `metaFields` read,
+ *   objectui#10866's date-only day in its sort and date buckets,
+ *   objectui#10530 / objectui#10663 / objectui#10684 — but its start-date
+ *   chain and its `if (!hasAuthoredItems && !startDateField)` refusal arm are
+ *   byte-identical, moved `:474-476` → `:533-535` and `:759` → `:862`;
+ *   `ListView.tsx`'s `case 'timeline'` changed only in a comment and
+ *   `resolveTimelineDateBinding` not at all).
  *   ① `ListView.tsx`'s `case 'timeline'` resolves the axis
  *   through `resolveTimelineDateBinding` and spreads it only when one was
  *   declared — the `startDateField || 'created_at'` floor was deleted by
- *   objectui#7070 step ③, on the ruling 日期轴永不虚构 (a date axis is never
+ *   objectui#7070 step ③ (landing commit objectui `04a67b9dc`, which the
+ *   arm's comment cites in the issue's place at this pin), on the ruling
+ *   日期轴永不虚构 (a date axis is never
  *   fabricated) — while its `titleField: dateBinding.titleField || 'name'`
  *   line is kept on purpose (a title is not an axis). ② `ObjectTimeline`'s
  *   start-date chain now ENDS without a literal rung, and with no authored
@@ -329,12 +451,46 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `f8a9d0fb0`; `ObjectMap.tsx` is byte-identical to
- *   `62597c588`, and changed on the hop before that, from `87af769e9`, only
- *   in a docblock and a dev-warning string, objectui `2252653d0`;
- *   `ListView.tsx`'s `case 'map'` did not move, and every read named below
- *   re-reads unchanged), both faces
- *   moved together in
+ *   pin (`.objectui-sha` = `2e818d0b5`; `ObjectMap.tsx` and `ListView.tsx`
+ *   are byte-identical across the hop off `ab1879721`, so every anchor held
+ *   unmoved; on the hop off `89cad75d5`
+ *   `ObjectMap.tsx` is byte-identical, so `getMapConfig` `:387`,
+ *   `hasCoordinateBinding` `:493` and the refusal arm `:1291` did not move,
+ *   and `ListView.tsx`'s `case 'map'` is byte-identical, moved by 14, with
+ *   `resolveListMapConfig` unmoved at `:146`. At `89cad75d5`, on the hop off
+ *   `31971ff1e` `ListView.tsx` is byte-identical, `case 'map'` and `resolveListMapConfig`
+ *   with it, and `ObjectMap.tsx` changed (11 insertions, 4 deletions) in
+ *   `warnOnShadowedFlatMapKeys`' cast (objectui#11355) and in `getMapConfig`'s
+ *   `style` precedence — `mapStyle` before `map.style` on the declared-block
+ *   return too (objectui#11168 slice 3) — which touches no coordinate read:
+ *   `getMapConfig` is unmoved at `:387` and still guesses no field name,
+ *   `hasCoordinateBinding` and the refusal arm are byte-identical and moved
+ *   `:486` → `:493` and `:1284` → `:1291`. At `31971ff1e` (2026-10-01)
+ *   `ObjectMap.tsx`, `ListView.tsx`'s `case 'map'` and `resolveListMapConfig`
+ *   were byte-identical to `e420df310`, so `getMapConfig` `:387`,
+ *   `hasCoordinateBinding` `:486` and the refusal arm `:1284` did not move.
+ *   At `e420df310`
+ *   `ObjectMap.tsx` changed only in the record-source docblock above
+ *   `getMapConfig` (16 insertions, 17 deletions, objectui#8348), so
+ *   `getMapConfig`, `hasCoordinateBinding` and the refusal arm are
+ *   byte-identical, each moved up one line: `:388` → `:387`, `:487` → `:486`,
+ *   `:1285` → `:1284`; `ListView.tsx`'s `case 'map'` and
+ *   `resolveListMapConfig` are byte-identical. At `db11afd49` `ObjectMap.tsx`
+ *   was byte-identical to `dd3f7e1be`, `getMapConfig` `:388`,
+ *   `hasCoordinateBinding` `:487` and the refusal arm `:1285` did not move,
+ *   and `ListView.tsx`'s `case 'map'` was byte-identical. At `dd3f7e1be`
+ *   `ObjectMap.tsx` changed on that hop —
+ *   objectui#10664's single expanded read keyed on the query it issues,
+ *   objectui#10623's invalidation re-read, objectui#7508's row ceiling among
+ *   others — but `getMapConfig` and `hasCoordinateBinding` are
+ *   byte-identical in code to `f8a9d0fb0` (one comment line now names the
+ *   ruling where it named objectui#7070), moved `:383` → `:388` and `:482` →
+ *   `:487`, and the refusal arm is byte-identical, moved `:1160` → `:1285`;
+ *   the file had been byte-identical from `62597c588` to `f8a9d0fb0`, and
+ *   changed from `87af769e9` only in a docblock and a dev-warning string,
+ *   objectui `2252653d0`; `ListView.tsx`'s `case 'map'` changed only in a
+ *   comment and `resolveListMapConfig` not at all, and every read named
+ *   below re-reads unchanged), both faces moved together in
  *   objectui#8169. ① `ListView.tsx`'s `case 'map'` forwards
  *   `resolveListMapConfig(schema)` and carries no `locationField || 'location'`
  *   floor any more. ② `ObjectMap`'s `getMapConfig` no longer guesses

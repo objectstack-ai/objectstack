@@ -100,7 +100,7 @@ describe('SqlDriver (SQLite Integration)', () => {
 
   it('should update an object', async () => {
     const [bob] = await driver.find('users', { where: { name: 'Bob' } });
-    // [#17690] `find()` publishes the contract's `Record<string, unknown>[]`
+    // [commit be5c60291] `find()` publishes the contract's `Record<string, unknown>[]`
     // now, so an id read off a row is narrowed before it is passed as one.
     assert(
       typeof bob.id === 'string' || typeof bob.id === 'number',

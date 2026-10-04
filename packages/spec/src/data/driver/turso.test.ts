@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The turso/libSQL config contract (#6345).
+ * The turso/libSQL config contract (commit e2798fab7).
  *
  * These assertions are what "`validateDriverConfig('turso')` flipped from
  * `{ known: false }` to `{ known: true }`" MEANS in practice: before this file
@@ -32,8 +32,10 @@ describe('TursoConfigSchema', () => {
       // #19977 preservation: what the driver accepts stays accepted.
       { url: 'LIBSQL://x.turso.io' },
       { url: 'FILE:./data/replica.db', syncUrl: 'libsql://x.turso.io' },
-      { url: 'file:./data/replica.db', mode: 'replica' },
-      { url: 'file:./data/app.db', mode: 'local', syncUrl: 'libsql://x.turso.io' },
+      { url: 'file:./data/replica.db', mode: 'replica', syncUrl: 'libsql://x.turso.io' },
+      // #20586: a forced `mode: 'local'` beside a NON-empty `syncUrl` left this
+      // list (refused on `mode`, below); an empty `syncUrl` is unset, so this stays.
+      { url: 'file:./data/app.db', mode: 'local', syncUrl: '' },
       { url: 'file:./data/app.db', mode: 'remote' },
       { url: './data/app.db', mode: 'remote' },
       { url: 'wss://x.turso.io' },
@@ -55,7 +57,7 @@ describe('TursoConfigSchema', () => {
   });
 
   // The exact failure this contract was written for: `token` is the plausible
-  // spelling, `authToken` is the real one, and before #6345 the misspelling was
+  // spelling, `authToken` is the real one, and before commit e2798fab7 the misspelling was
   // accepted in silence and the connection attempted unauthenticated. Until
   // #7990 the fix was a rename hint onto `authToken`; now that `authToken` is
   // itself unwritable the same spelling gets the credential refusal directly —
@@ -197,8 +199,12 @@ describe('TursoConfig.timeout carries its unit (#15680)', () => {
 });
 
 // #19977 — the transport refusals: every combination `new TursoDriver` refuses
-// at construction, plus `syncUrl` under a forced `mode: 'remote'` (which it
-// constructs and ignores), refused at authoring. Asserted on the envelope — the
+// at construction (since #20200 that includes `syncUrl` under a forced
+// `mode: 'remote'`, which it used to construct and ignore; since #20437 a
+// forced `mode: 'replica'` with no `syncUrl`, which it used to construct as a
+// replica that never synced; since #20586 a forced `mode: 'local'` beside a
+// `syncUrl`, which it used to construct as a `local` database and then sync
+// anyway), refused at authoring. Asserted on the envelope — the
 // issue code, the key it sits on, and the spelling it prescribes — never on a
 // bare `success: false`, which a schema refusing for some OTHER reason (a
 // credential, a placeholder) would satisfy identically. The driver-local mirror
@@ -312,7 +318,7 @@ describe('TursoConfigSchema refuses what the turso driver refuses (#19977)', () 
     }
   });
 
-  it("`syncUrl` under a forced `mode: 'remote'` — the driver ignores it, so it is refused on `syncUrl`", () => {
+  it("`syncUrl` under a forced `mode: 'remote'` — the driver refuses it when it starts, so it is refused on `syncUrl`", () => {
     for (const config of [
       { url: 'libsql://db.turso.io', mode: 'remote', syncUrl: 'libsql://db.turso.io' },
       { url: 'libsql://db.turso.io', mode: 'remote', syncUrl: 'libsql://db.turso.io', sync: { intervalSeconds: 60 } },
@@ -321,10 +327,148 @@ describe('TursoConfigSchema refuses what the turso driver refuses (#19977)', () 
       const { path, message } = refusal(config);
       expect(path).toBe('syncUrl');
       expect(message).toContain("`syncUrl` configures an embedded replica, but `mode: 'remote'`");
-      expect(message).toContain('never hands `syncUrl` to the remote client and runs no sync');
+      expect(message).toContain('builds no replica: the turso driver refuses this configuration when it starts.');
       expect(message).toContain('For a remote database, drop `syncUrl` (and `sync`).');
       expect(message).toContain("For an embedded replica, drop `mode` and point `url` at a local file beside `syncUrl`: `url: 'file:./data/replica.db'`.");
     }
+  });
+
+  // #20437 — a forced replica with nothing to replicate from. The driver used to
+  // build it as a replica and run it as a plain local database that never
+  // synced; both now refuse it, on `mode`, in one message.
+  describe("a forced `mode: 'replica'` with no `syncUrl` — refused on `mode`", () => {
+    const FIRST_SENTENCE =
+      "`mode: 'replica'` makes this datasource an embedded replica, a local file kept in sync with "
+      + 'the remote named in `syncUrl`, but no `syncUrl` is set: nothing would ever sync, so it would '
+      + 'run as a plain local database that never replicates — the turso driver refuses this '
+      + 'configuration when it starts.';
+
+    it('on a `file:` url in any case, beside an empty `syncUrl` or `timeoutMs`: add `syncUrl`, or drop `mode`', () => {
+      for (const config of [
+        { url: 'file:./data/replica.db', mode: 'replica' },
+        { url: 'FILE:./data/replica.db', mode: 'replica' },
+        { url: 'file:./data/replica.db', mode: 'replica', syncUrl: '' },
+        { url: ' file:./data/replica.db', mode: 'replica', timeoutMs: 5000 },
+      ]) {
+        const { path, message } = refusal(config);
+        expect(path, JSON.stringify(config)).toBe('mode');
+        expect(message.startsWith(FIRST_SENTENCE), message).toBe(true);
+        expect(message).toContain(
+          "For an embedded replica, name the remote in `syncUrl` beside the local file: "
+          + "`url: 'file:./data/replica.db'` with `syncUrl` set to the `libsql://` or `https://` Turso endpoint.",
+        );
+        expect(message).toContain("For a plain local database, drop `mode: 'replica'`.");
+      }
+    });
+
+    it('a url another refusal takes keeps that refusal, on `url`', () => {
+      for (const url of ['libsql://db.turso.io', ':memory:', './data/replica.db']) {
+        const { path, message } = refusal({ url, mode: 'replica' });
+        expect(path, url).toBe('url');
+        expect(message.startsWith(FIRST_SENTENCE)).toBe(false);
+      }
+    });
+
+    it('beside `sync`: both refusals stand, `sync` first — the one the constructor throws', () => {
+      const result = TursoConfigSchema.safeParse({ url: 'file:./data/replica.db', mode: 'replica', sync: { intervalSeconds: 60 } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['sync', 'mode']);
+      expect(result.error!.issues[1].message.startsWith(FIRST_SENTENCE)).toBe(true);
+    });
+
+    it('reaches both authoring doors: `DatasourceSchema` (re-pathed under `config`) and `validateDriverConfig`', () => {
+      const config = { url: 'file:./data/replica.db', mode: 'replica' };
+      const datasource = DatasourceSchema.safeParse({ name: 'edge', driver: 'turso', config });
+      expect(datasource.success).toBe(false);
+      const issue = datasource.error!.issues.find((i) => i.path.join('.') === 'config.mode');
+      expect(issue, JSON.stringify(datasource.error!.issues)).toBeDefined();
+      expect(issue!.message.startsWith(FIRST_SENTENCE)).toBe(true);
+
+      const verdict = validateDriverConfig('turso', config);
+      expect(verdict.known).toBe(true);
+      expect(verdict.known && verdict.issues.map((i) => i.path.join('.'))).toEqual(['mode']);
+    });
+
+    it('controls: a forced replica beside `syncUrl`, and a `file:` url with no `mode`, stay accepted', () => {
+      for (const config of [
+        { url: 'file:./data/replica.db', mode: 'replica', syncUrl: 'libsql://db.turso.io' },
+        { url: 'file:./data/app.db' },
+        { url: 'file:./data/app.db', mode: 'local' },
+      ]) {
+        const result = TursoConfigSchema.safeParse(config);
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      }
+    });
+  });
+
+  // #20586 — the same defect the other way round: a forced local mode beside a
+  // remote to replicate from. The driver used to label it local and sync it
+  // anyway; both now refuse it, on `mode`, in one message.
+  describe("a forced `mode: 'local'` beside a `syncUrl` — refused on `mode`", () => {
+    const FIRST_SENTENCE =
+      "`mode: 'local'` makes this datasource a plain local database, but `syncUrl` names a remote to "
+      + 'replicate from: the database would still be synced with that remote as an embedded replica, '
+      + 'so the declared local mode would be ignored — the turso driver refuses this configuration '
+      + 'when it starts.';
+
+    it('on a `file:` url in any case or an in-memory url, beside `sync` or `timeoutMs`: drop `mode`, or drop `syncUrl`', () => {
+      for (const config of [
+        { url: 'file:./data/app.db', mode: 'local', syncUrl: 'libsql://db.turso.io' },
+        { url: 'FILE:./data/app.db', mode: 'local', syncUrl: 'libsql://db.turso.io' },
+        { url: ' file:./data/app.db', mode: 'local', syncUrl: 'https://db.turso.io', timeoutMs: 5000 },
+        { url: 'file:./data/app.db', mode: 'local', syncUrl: 'libsql://db.turso.io', sync: { intervalSeconds: 60 } },
+        { url: ':memory:', mode: 'local', syncUrl: 'libsql://db.turso.io' },
+        { url: 'file::memory:', mode: 'local', syncUrl: 'libsql://db.turso.io' },
+      ]) {
+        const { path, message } = refusal(config);
+        expect(path, JSON.stringify(config)).toBe('mode');
+        expect(message.startsWith(FIRST_SENTENCE), message).toBe(true);
+        expect(message).toContain(
+          "For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: `url: 'file:./data/replica.db'`.",
+        );
+        expect(message).toContain('For a plain local database, drop `syncUrl` (and `sync`).');
+      }
+    });
+
+    it('never echoes either url', () => {
+      const { message } = refusal({ url: 'file:./private-dir/app.db', mode: 'local', syncUrl: 'libsql://private-host.turso.io' });
+      expect(message).not.toContain('private-dir');
+      expect(message).not.toContain('private-host');
+    });
+
+    it('a url another refusal takes keeps that refusal, on `url`', () => {
+      for (const url of ['libsql://db.turso.io', 'https://db.turso.io', './data/app.db']) {
+        const { path, message } = refusal({ url, mode: 'local', syncUrl: 'libsql://db.turso.io' });
+        expect(path, url).toBe('url');
+        expect(message.startsWith(FIRST_SENTENCE)).toBe(false);
+      }
+    });
+
+    it('reaches both authoring doors: `DatasourceSchema` (re-pathed under `config`) and `validateDriverConfig`', () => {
+      const config = { url: 'file:./data/app.db', mode: 'local', syncUrl: 'libsql://db.turso.io' };
+      const datasource = DatasourceSchema.safeParse({ name: 'edge', driver: 'turso', config });
+      expect(datasource.success).toBe(false);
+      const issue = datasource.error!.issues.find((i) => i.path.join('.') === 'config.mode');
+      expect(issue, JSON.stringify(datasource.error!.issues)).toBeDefined();
+      expect(issue!.message.startsWith(FIRST_SENTENCE)).toBe(true);
+
+      const verdict = validateDriverConfig('turso', config);
+      expect(verdict.known).toBe(true);
+      expect(verdict.known && verdict.issues.map((i) => i.path.join('.'))).toEqual(['mode']);
+    });
+
+    it('controls: the unforced `file:` + `syncUrl` replica, and a forced local mode with no or an empty `syncUrl`, stay accepted', () => {
+      for (const config of [
+        { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io' },
+        { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io', sync: { intervalSeconds: 60 } },
+        { url: 'file:./data/app.db', mode: 'local' },
+        { url: 'file:./data/app.db', mode: 'local', syncUrl: '' },
+        { url: ':memory:', mode: 'local' },
+      ]) {
+        const result = TursoConfigSchema.safeParse(config);
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      }
+    });
   });
 
   it('the pre-existing `sync`-without-`syncUrl` refusal is unchanged, and stands beside a transport refusal', () => {

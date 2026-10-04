@@ -48,7 +48,7 @@
  * `ensureDefaultOrganization`). Install that plugin to get
  * multi-tenant bootstrap.
  *
- * ## Provenance of the seeded permission-set rows (#8692, ruled 2026-08-15)
+ * ## Provenance of the seeded permission-set rows (commit 712e185db, ruled 2026-08-15)
  *
  * The seed insert stamps `managed_by: 'platform'` **explicitly**, so a fresh
  * install's default sets are platform-owned and `os meta resync` reconciles
@@ -60,7 +60,7 @@
  * ⚠️ **Installs created BEFORE that ruling carry `'admin'` on these rows.**
  * The pre-ruling insert omitted `managed_by` altogether, so the value came from
  * the declared `defaultValue: 'admin'` in `objects/sys-permission-set.object.ts`
- * — measured on a real engine (#8804: a seeded row stored `'admin'`, and a real
+ * — measured on a real engine (commit db923a3a8: a seeded row stored `'admin'`, and a real
  * resync returned `resynced 0 / resyncSkipped 8`, skipping every shipped
  * default set).
  *
@@ -263,9 +263,9 @@ interface BootstrapOptions {
    * silently stale (a changed default set is served with its OLD value until a
    * `--fresh` wipe). Only platform-owned rows (`managed_by` absent or
    * `'platform'`) are overwritten. Rows carrying any other provenance are left
-   * alone: `'user'` / `'admin'` (taken over in Setup — or, on a pre-#8692
-   * install, seeded before the platform stamped its own rows) and `'package'`
-   * (owned by package metadata).
+   * alone: `'user'` / `'admin'` (taken over in Setup — or, on an install older
+   * than commit 712e185db, seeded before the platform stamped its own rows) and
+   * `'package'` (owned by package metadata).
    */
   resync?: boolean;
   /**
@@ -285,7 +285,7 @@ interface BootstrapOptions {
 const SYSTEM_CTX = { isSystem: true };
 
 /**
- * [#16682] The `single`-posture candidate scan's page size and hard ceiling —
+ * [commit 9b9581b11] The `single`-posture candidate scan's page size and hard ceiling —
  * what replaced the bare `50` at the promotion read.
  *
  * ## The cap's disposition
@@ -311,7 +311,7 @@ export const PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE = 200;
 export const PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING = 5000;
 
 /**
- * [#16861] The `already_have_admin` guard's page size and hard ceiling — what
+ * [commit 1c83ca226] The `already_have_admin` guard's page size and hard ceiling — what
  * replaced the bare, unordered `50` at the HOLDERS read, one read above the
  * candidate scan.
  *
@@ -438,7 +438,7 @@ function genId(prefix: string): string {
  * it (the `resolveEngineUpdateDispatch` pattern).
  *
  * [#11974 / #11663 L4] NARROWED with the walled elevation's retirement. The
- * #11343 `update` arm (payload touching `email_verified` / `email`) existed
+ * `update` arm of commit c0714eb5d (payload touching `email_verified` / `email`) existed
  * for exactly one reason: walled elevation was a WRITE that had to be
  * re-attempted after the owner's verifying update. Under walled postures the
  * bootstrap no longer writes a grant at all — standing is derived from config
@@ -470,7 +470,7 @@ function genId(prefix: string): string {
  *    difference between "the first real sign-up is promoted" and "no platform
  *    admin is ever promoted".
  *  - `single` + `sys_user` update touching `email` / `email_verified`, ONLY
- *    while an owner address is declared: [#16682, maintainer ruling of
+ *    while an owner address is declared: [commit 9b9581b11, maintainer ruling of
  *    2026-09-08, decision batch #100] the `single` leg now consults
  *    `OS_PLATFORM_OWNER_EMAIL` and promotes only a VERIFIED holder of a
  *    declared address. So the verifying write is an INPUT to this function's
@@ -499,7 +499,7 @@ export function shouldReplayBootstrapFor(opCtx: {
   const op = opCtx?.operation;
   if (op === 'create' || op === 'insert') return true;
   if (op !== 'update' || opCtx.object !== 'sys_user') return false;
-  // [#16682] The verifying write, and only where it can decide something.
+  // [commit 9b9581b11] The verifying write, and only where it can decide something.
   const data = opCtx.data;
   if (!data || typeof data !== 'object') return false;
   if (!('email_verified' in data) && !('email' in data)) return false;
@@ -515,7 +515,7 @@ export function shouldReplayBootstrapFor(opCtx: {
  * (`id`, `name`, `active`, `managed_by`, `package_id`) are deliberately NOT
  * here — resync reconciles the declaration, never the ownership.
  *
- * [#8692] `managed_by` must stay out of this helper even though the seed insert
+ * [commit 712e185db] `managed_by` must stay out of this helper even though the seed insert
  * now stamps it. Both paths share these fields, so adding it here would make
  * every resync RESTAMP the row it reconciles -- silently converting a legacy
  * `admin`-owned row (which may be a real Setup takeover) into a platform-owned
@@ -538,6 +538,176 @@ function platformOwnedFields(ps: PermissionSet): Record<string, any> {
     // [ADR-0090 D12] Delegated-admin scope travels with the set row.
     admin_scope: (ps as any).adminScope ? JSON.stringify((ps as any).adminScope) : null,
   };
+}
+
+/**
+ * The permission set whose unscoped grant makes a user the platform admin under
+ * `single`. Named once so the bootstrap's guard and
+ * {@link findExistingPlatformAdmin} cannot ask about two different sets.
+ */
+const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
+
+/**
+ * Who ALREADY holds the unscoped platform-admin grant (commit 1c83ca226) — the
+ * one rule both {@link bootstrapPlatformAdmin}'s `already_have_admin` guard and
+ * {@link findExistingPlatformAdmin} answer with.
+ *
+ * The read was once `tryFind(ql, 'sys_user_permission_set', {
+ * permission_set_id: adminPsId }, 50)` — no `orderBy`, cap 50 — with the
+ * predicate that actually decides (`!organization_id`) applied CLIENT-SIDE to
+ * whatever 50 rows the driver produced first. `admin_full_access` is not only
+ * the platform-admin set: every ORGANIZATION-SCOPED grant of it writes a row
+ * carrying the same `permission_set_id`, so this population grows with the
+ * number of ORG admins, not with the number of platform admins. A tenant with
+ * fifty-odd of them filled the window with rows that all fail the filter, the
+ * short-circuit did not fire, a SECOND unscoped grant was minted, and
+ * `claimSeedOwnership` re-owned the seeded business records to the newly
+ * promoted user — silently, because the boot logs a successful promotion
+ * exactly as it does on a genuinely fresh install. What fails open there is
+ * #14348 case D: 「Moving an already-granted platform admin is reserved to the
+ * maintainer.」
+ *
+ * ## Why this is TWO reads and not `organization_id: null` in the `where`
+ *
+ * The card's suggested one-line narrowing was MEASURED before it was taken,
+ * and on its own it would have RELAXED this guard. Null matching itself is
+ * uniform across the families that can be measured — each answers "the column
+ * holds no value":
+ *
+ *     driver-sql (better-sqlite3)  via ObjectQL + these real objects  -> the unscoped row only
+ *     driver-sqlite-wasm           via ObjectQL + these real objects  -> the unscoped row only
+ *     driver-memory                driver face                       -> null-valued AND key-absent rows
+ *     driver-mongodb               translator (its own live suites    -> `{organization_id: null}`,
+ *                                  need a 123 MB binary download)        Mongo's null-or-missing reading
+ *
+ * What is NOT uniform is the narrowed read against THIS code's own predicate.
+ * `organization_id: ''` is storable on both SQL families and reads back as
+ * `''`: `!organization_id` counts that row UNSCOPED, and `where: {
+ * organization_id: null }` does NOT return it. A narrowing that REPLACED the
+ * client-side predicate would therefore stop seeing a legacy unscoped holder
+ * stored that way, fire less often, and mint the second grant. ⛔ So the
+ * predicate is untouched and the READ is what changed:
+ *
+ *   Leg A — ask the driver the narrow question. Independent of how many
+ *           org-scoped grants exist, so no org-admin count can crowd the
+ *           answer out of a window.
+ *   Leg B — only when leg A found nobody: scan the grant population for this
+ *           set, ORDERED so each page is a deterministic slice rather than
+ *           "whatever the driver produced first", bounded, and reporting
+ *           `truncated` at the bound with the number of rows examined. This is
+ *           the leg that still sees a `''`-shaped legacy row.
+ *
+ * Both legs are strictly ADDITIVE to what the old read could see, so the
+ * guard can only fire MORE often than before, never less.
+ *
+ * ## Several holders
+ *
+ * Leg A's rows arrive ordered by grant-row `id` ({@link ADMIN_GRANT_SCAN_ORDER})
+ * and the FIRST unscoped human row wins, so with two platform admins the answer
+ * is the holder of the grant row whose `id` sorts first — deterministic on every
+ * driver that honours the order, and the same answer for every caller.
+ *
+ * The seed-data owner `usr_system` (provisioned by the SeedLoader, see
+ * runtime/app-plugin.ts `ensureSeedIdentity`) never counts — otherwise a DB
+ * where it was wrongly promoted would block every real admin forever.
+ * Ignoring it here makes the bootstrap self-healing on restart.
+ */
+async function findPlatformAdminGrantHolder(
+  ql: any,
+  adminPsId: string,
+): Promise<{ holder: any | undefined; adminGrantRowsExamined: number; truncated: boolean }> {
+  const isUnscopedHumanHolder = (r: any) =>
+    !r.organization_id && r.user_id !== SystemUserId.SYSTEM;
+
+  // Counted by row IDENTITY, not by read: the two legs overlap by construction
+  // (leg A's rows are a subset of leg B's population), and a number that
+  // double-counted them would answer "how many reads did you make" while
+  // calling itself rows examined.
+  const examinedGrantRowIds = new Set<string>();
+  const countExamined = (rows: any[]) => {
+    for (const r of rows) {
+      examinedGrantRowIds.add(
+        r?.id === undefined || r?.id === null ? `?${examinedGrantRowIds.size}` : String(r.id),
+      );
+    }
+  };
+  let truncated = false;
+
+  // Leg A — the narrow question, asked of the driver.
+  const unscopedGrantRows = await tryFind(
+    ql,
+    'sys_user_permission_set',
+    { permission_set_id: adminPsId, organization_id: null },
+    PLATFORM_ADMIN_GRANT_PAGE_SIZE,
+    ADMIN_GRANT_SCAN_ORDER,
+  );
+  countExamined(unscopedGrantRows);
+  let holder: any | undefined = unscopedGrantRows.find(isUnscopedHumanHolder);
+
+  // Leg B — the ordered, bounded scan that still applies the exact predicate.
+  if (!holder) {
+    const pageSize = PLATFORM_ADMIN_GRANT_PAGE_SIZE;
+    const ceiling = PLATFORM_ADMIN_GRANT_SCAN_CEILING;
+    for (let offset = 0; offset < ceiling && !holder; offset += pageSize) {
+      const pageLimit = Math.min(pageSize, ceiling - offset);
+      const page = await tryFind(
+        ql,
+        'sys_user_permission_set',
+        { permission_set_id: adminPsId },
+        pageLimit,
+        ADMIN_GRANT_SCAN_ORDER,
+        offset,
+      );
+      if (page.length === 0) break;
+      countExamined(page);
+      holder = page.find(isUnscopedHumanHolder);
+      if (holder) break;
+      if (page.length < pageLimit) break;
+      if (offset + page.length >= ceiling) truncated = true;
+    }
+  }
+
+  return { holder, adminGrantRowsExamined: examinedGrantRowIds.size, truncated };
+}
+
+/**
+ * The platform admin a seed-ownership claim hands rows to when no bootstrap
+ * pass of THIS boot has answered yet — the existing holder, by the one rule.
+ *
+ * The seed-ownership claim runs whenever a seed settles (`app:seeded`), on every
+ * boot. An in-budget seed settles inside `AppPlugin.start()`, BEFORE
+ * `kernel:ready` runs {@link bootstrapPlatformAdmin}, so on a later boot that
+ * already has an admin the claim cannot wait for the bootstrap to name its
+ * target: nothing would ever re-run it. This answers the same question the
+ * bootstrap's `already_have_admin` guard answers, with the same function
+ * ({@link findPlatformAdminGrantHolder}) — ⛔ never a second selection rule.
+ *
+ * `undefined` exactly where the bootstrap names no target either:
+ *  - a walled posture — no grant row anchors platform-admin standing there, and
+ *    the bootstrap never promotes, so no claim ever ran under a wall;
+ *  - no {@link PLATFORM_ADMIN_PERMISSION_SET_NAME} among the sets this plugin
+ *    seeds (`admin_permission_set_missing`), or no stored row for it yet;
+ *  - nobody holds the unscoped grant yet — a first boot, where the promotion
+ *    that follows does its own claim.
+ *
+ * Read per call and never cached: the answer is final only once the grant
+ * table stops moving, and a sign-up can promote someone later in this boot.
+ */
+export async function findExistingPlatformAdmin(
+  ql: any,
+  bootstrapPermissionSets: readonly PermissionSet[],
+): Promise<string | undefined> {
+  if (!ql || typeof ql.find !== 'function') return undefined;
+  if (postureEnforcesWall(resolveTenancyPosture())) return undefined;
+  if (!bootstrapPermissionSets.some((ps) => ps.name === PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
+    return undefined;
+  }
+  // The read the bootstrap's own seed loop resolves this id with.
+  const sets = await tryFind(ql, 'sys_permission_set', { name: PLATFORM_ADMIN_PERMISSION_SET_NAME }, 1);
+  const adminPsId = sets[0]?.id;
+  if (!adminPsId) return undefined;
+  const { holder } = await findPlatformAdminGrantHolder(ql, adminPsId);
+  return holder?.user_id ? String(holder.user_id) : undefined;
 }
 
 /**
@@ -568,10 +738,11 @@ export async function bootstrapPlatformAdmin(
    * bundle that overruns `OS_INLINE_SEED_BUDGET_MS` keeps writing rows after the
    * promotion instant, and the re-run on `app:seeded` must re-own them to the
    * SAME admin. Before this, the short-circuited pass knew the answer and threw
-   * it away, so the only way to re-own the missed rows was to re-derive the
-   * holder — a second implementation of the two-leg scan above, which is how the
-   * guard and its copy drift apart (#16861 is what that scan costs to get
-   * right). One owner, read by both passes.
+   * it away. A seed that settles BEFORE this pass runs (an in-budget seed on a
+   * later boot) cannot wait for it, so the re-run then asks
+   * {@link findExistingPlatformAdmin} — the same two-leg scan this pass runs,
+   * one function, never a copy of it (commit 1c83ca226 is what that scan costs
+   * to get right).
    */
   adminUserId?: string;
   /** [#2705] Existing platform-owned rows reconciled to dist under `resync`. */
@@ -579,14 +750,14 @@ export async function bootstrapPlatformAdmin(
   /** [#2705] Existing rows left untouched by `resync` (admin/package-owned). */
   resyncSkipped?: number;
   /**
-   * [#16682] WHY this target was chosen, when one was. `declared-owner` means
+   * [commit 9b9581b11] WHY this target was chosen, when one was. `declared-owner` means
    * `OS_PLATFORM_OWNER_EMAIL` named them; `oldest-authenticable` means nobody
    * did and the age rule answered. The highest-privilege grant in the system
    * should not be auditable only by reading which code path ran.
    */
   basis?: 'declared-owner' | 'oldest-authenticable';
   /**
-   * [#16861] How many `admin_full_access` grant rows the `already_have_admin`
+   * [commit 1c83ca226] How many `admin_full_access` grant rows the `already_have_admin`
    * guard actually examined before answering. The old read looked at "up to 50,
    * whichever the driver produced first" and said nothing, so a guard that had
    * seen the whole population and a guard that had seen a truncated sample of
@@ -625,9 +796,9 @@ export async function bootstrapPlatformAdmin(
           }
         } else {
           resyncSkipped += 1;
-          // [#8692] Neutral by ruling: state the provenance and the action, and
+          // [commit 712e185db] Neutral by ruling: state the provenance and the action, and
           // claim NOTHING about intent. This used to say "(intentional
-          // override)", which is a lie for every row on a pre-#8692 install --
+          // override)", which is a lie for every row on a pre-ruling install --
           // there the only writer may have been this very seeder one call
           // earlier, inheriting `defaultValue: 'admin'` rather than any admin
           // deciding anything. The stored value cannot tell the two apart, so
@@ -646,10 +817,10 @@ export async function bootstrapPlatformAdmin(
       name: ps.name,
       ...platformOwnedFields(ps),
       active: true,
-      // [#8692] Stamp provenance EXPLICITLY rather than letting it fall to the
+      // [commit 712e185db] Stamp provenance EXPLICITLY rather than letting it fall to the
       // declaration's `defaultValue: 'admin'`. Without this the platform's own
       // default sets are stored indistinguishably from admin-authored ones, so
-      // `os meta resync` skips every single one of them (measured in #8804:
+      // `os meta resync` skips every single one of them (measured in commit db923a3a8:
       // resynced 0 / resyncSkipped 8) -- the exact inverse of what #2705 built
       // the flag for. Matches `bootstrap-builtin-positions.ts` and
       // `bootstrap-system-capabilities.ts`, which already stamp `'platform'`.
@@ -707,123 +878,29 @@ export async function bootstrapPlatformAdmin(
   // fail toward the stricter reading, same direction ADR-0093 D5 fails.
   const walled = postureEnforcesWall(resolveTenancyPosture());
 
-  const adminPsId = seeded['admin_full_access'];
+  const adminPsId = seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME];
   if (!adminPsId) {
     return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
   }
 
-  // ── Does this deployment ALREADY have a platform admin? (#16861) ──────────
+  // ── Does this deployment ALREADY have a platform admin? (commit 1c83ca226) ─
   //
-  // This read was `tryFind(ql, 'sys_user_permission_set', { permission_set_id:
-  // adminPsId }, 50)` — no `orderBy`, cap 50 — with the predicate that actually
-  // decides (`!organization_id`) applied CLIENT-SIDE to whatever 50 rows the
-  // driver produced first. `admin_full_access` is not only the platform-admin
-  // set: every ORGANIZATION-SCOPED grant of it writes a row carrying the same
-  // `permission_set_id`, so this population grows with the number of ORG
-  // admins, not with the number of platform admins. A tenant with fifty-odd of
-  // them filled the window with rows that all fail the filter, the short-circuit
-  // did not fire, a SECOND unscoped grant was minted, and `claimSeedOwnership`
-  // re-owned the seeded business records to the newly promoted user — silently,
-  // because the boot logs a successful promotion exactly as it does on a
-  // genuinely fresh install. What fails open there is #14348 case D:
-  // 「Moving an already-granted platform admin is reserved to the maintainer.」
-  //
-  // ## Why this is TWO reads and not `organization_id: null` in the `where`
-  //
-  // The card's suggested one-line narrowing was MEASURED before it was taken,
-  // and on its own it would have RELAXED this guard. Null matching itself is
-  // uniform across the families that can be measured — each answers "the column
-  // holds no value":
-  //
-  //     driver-sql (better-sqlite3)  via ObjectQL + these real objects  -> the unscoped row only
-  //     driver-sqlite-wasm           via ObjectQL + these real objects  -> the unscoped row only
-  //     driver-memory                driver face                       -> null-valued AND key-absent rows
-  //     driver-mongodb               translator (its own live suites    -> `{organization_id: null}`,
-  //                                  need a 123 MB binary download)        Mongo's null-or-missing reading
-  //
-  // What is NOT uniform is the narrowed read against THIS code's own predicate.
-  // `organization_id: ''` is storable on both SQL families and reads back as
-  // `''`: `!organization_id` counts that row UNSCOPED, and `where: {
-  // organization_id: null }` does NOT return it. A narrowing that REPLACED the
-  // client-side predicate would therefore stop seeing a legacy unscoped holder
-  // stored that way, fire less often, and mint the second grant this card is
-  // about. ⛔ This card only tightens, so the predicate is untouched and the
-  // READ is what changes:
-  //
-  //   Leg A — ask the driver the narrow question. Independent of how many
-  //           org-scoped grants exist, so no org-admin count can crowd the
-  //           answer out of a window.
-  //   Leg B — only when leg A found nobody: scan the grant population for this
-  //           set, ORDERED so each page is a deterministic slice rather than
-  //           "whatever the driver produced first", bounded, and WARNING at the
-  //           bound with the number of rows examined. This is the leg that
-  //           still sees a `''`-shaped legacy row.
-  //
-  // Both legs are strictly ADDITIVE to what the old read could see, so the
-  // guard can only fire MORE often than before, never less.
-  //
-  // The seed-data owner `usr_system` (provisioned by the SeedLoader, see
-  // runtime/app-plugin.ts `ensureSeedIdentity`) never counts — otherwise a DB
-  // where it was wrongly promoted would block every real admin forever.
-  // Ignoring it here makes the bootstrap self-healing on restart.
-  const isUnscopedHumanHolder = (r: any) =>
-    !r.organization_id && r.user_id !== SystemUserId.SYSTEM;
+  // The ONE rule — {@link findPlatformAdminGrantHolder} — that the seed-settle
+  // claim also asks when no pass of this boot has answered yet
+  // ({@link findExistingPlatformAdmin}). Why it is two legs and why each is
+  // bounded and ordered is on the function.
+  const {
+    holder: unscopedHolder,
+    adminGrantRowsExamined,
+    truncated: adminGrantScanTruncated,
+  } = await findPlatformAdminGrantHolder(ql, adminPsId);
 
-  // Counted by row IDENTITY, not by read: the two legs overlap by construction
-  // (leg A's rows are a subset of leg B's population), and a number that
-  // double-counted them would answer "how many reads did you make" while
-  // calling itself rows examined.
-  const examinedGrantRowIds = new Set<string>();
-  const countExamined = (rows: any[]) => {
-    for (const r of rows) {
-      examinedGrantRowIds.add(
-        r?.id === undefined || r?.id === null ? `?${examinedGrantRowIds.size}` : String(r.id),
-      );
-    }
-  };
-  let adminGrantScanTruncated = false;
-
-  // Leg A — the narrow question, asked of the driver.
-  const unscopedGrantRows = await tryFind(
-    ql,
-    'sys_user_permission_set',
-    { permission_set_id: adminPsId, organization_id: null },
-    PLATFORM_ADMIN_GRANT_PAGE_SIZE,
-    ADMIN_GRANT_SCAN_ORDER,
-  );
-  countExamined(unscopedGrantRows);
-  let unscopedHolder: any | undefined = unscopedGrantRows.find(isUnscopedHumanHolder);
-
-  // Leg B — the ordered, bounded scan that still applies the exact predicate.
-  if (!unscopedHolder) {
-    const pageSize = PLATFORM_ADMIN_GRANT_PAGE_SIZE;
-    const ceiling = PLATFORM_ADMIN_GRANT_SCAN_CEILING;
-    for (let offset = 0; offset < ceiling && !unscopedHolder; offset += pageSize) {
-      const pageLimit = Math.min(pageSize, ceiling - offset);
-      const page = await tryFind(
-        ql,
-        'sys_user_permission_set',
-        { permission_set_id: adminPsId },
-        pageLimit,
-        ADMIN_GRANT_SCAN_ORDER,
-        offset,
-      );
-      if (page.length === 0) break;
-      countExamined(page);
-      unscopedHolder = page.find(isUnscopedHumanHolder);
-      if (unscopedHolder) break;
-      if (page.length < pageLimit) break;
-      if (offset + page.length >= ceiling) adminGrantScanTruncated = true;
-    }
-  }
-
-  // ⛔ The truncation is never silent (#16861). Reaching the ceiling is the one
+  // ⛔ The truncation is never silent (commit 1c83ca226). Reaching the ceiling is the one
   // way this scan still answers "no platform admin yet" while one exists, and
   // that answer does not merely skip a log line — it MINTS A SECOND unscoped
   // grant and hands it the seeded business records. So it says the number it
   // examined rather than letting the promotion below read as a statement about
   // the whole table.
-  const adminGrantRowsExamined = examinedGrantRowIds.size;
   if (adminGrantScanTruncated && !unscopedHolder) {
     const truncation =
       '[security] the existing-platform-admin check stopped at its ceiling of '
@@ -851,9 +928,10 @@ export async function bootstrapPlatformAdmin(
       seeded: seededCount,
       adminPromoted: false,
       reason: 'already_have_admin',
-      // The promotion is a no-op forever; the CLAIM is not. This pass is the
-      // only thing on a later boot that knows who the seeded rows belong to,
-      // and the seed-settle re-run needs that name (see `adminUserId` above).
+      // The promotion is a no-op forever; the CLAIM is not. The seed-settle
+      // re-run hands rows to this name — or, when it fires before this pass
+      // has run at all, asks {@link findExistingPlatformAdmin}, which answers
+      // with this same holder (see `adminUserId` above).
       ...(unscopedHolder.user_id ? { adminUserId: String(unscopedHolder.user_id) } : {}),
       ...resyncCounts,
       ...grantScanCounts,
@@ -1039,7 +1117,7 @@ export async function bootstrapPlatformAdmin(
    * Mint the grant and RECORD it. One call site for both legs, so the write,
    * the log and the seed-ownership handoff cannot drift apart per basis.
    *
-   * [#16682] The old line was `first user promoted to platform admin: <email>`
+   * [commit 9b9581b11] The old line was `first user promoted to platform admin: <email>`
    * and nothing else. It is the only record of the highest-privilege grant
    * this system ever makes, and it did not say WHY that row won or HOW MANY
    * rows it was chosen from — so a promotion decided by a truncated,
@@ -1107,7 +1185,7 @@ export async function bootstrapPlatformAdmin(
     };
   };
 
-  // ── The candidate ORDER, stated to the DRIVER (#16682) ────────────────────
+  // ── The candidate ORDER, stated to the DRIVER (commit 9b9581b11) ──────────
   //
   // The age rule used to be applied by `[...users].sort(byCreatedAtAsc)` over
   // whatever `tryFind(ql, 'sys_user', {}, 50)` returned. That read carried no
@@ -1146,7 +1224,7 @@ export async function bootstrapPlatformAdmin(
   // itself into the derivation site (`resolve-authz-context.ts` §6b-config)
   // and, for the audit answer, `platform-admin-service.ts`.
   //
-  // ── Leg 1: the DECLARED owner, when the operator declared one (#16682) ────
+  // ── Leg 1: the DECLARED owner, when the operator declared one (commit 9b9581b11) ─
   //
   // `PLATFORM_OWNER_EMAIL_ENV` was imported into this file and read only on
   // the walled branch. So a deployment that had SAID who the owner is could
@@ -1267,7 +1345,7 @@ export async function bootstrapPlatformAdmin(
     return {
       seeded: seededCount,
       adminPromoted: false,
-      // [#16682, batch #100] The ruling allows either a distinct code or a
+      // [commit 9b9581b11, batch #100] The ruling allows either a distinct code or a
       // fold into `declared_owner_not_authenticable` with verification named
       // in the warning. A distinct code is used for the verification miss so
       // #14348's refusal keeps its own name and its own pins, and an operator
@@ -1319,7 +1397,7 @@ export async function bootstrapPlatformAdmin(
         '— platform admin NOT promoted. The first human that signs in will be promoted instead; a ' +
         'directory row nobody can sign in as would hold a grant it could never exercise.',
     );
-    // ⛔ The truncation is never silent again (#16682). Reaching the ceiling is
+    // ⛔ The truncation is never silent again (commit 9b9581b11). Reaching the ceiling is
     // the ONE way an ordered scan can still answer "nobody" while a promotable
     // human exists, so it says the number it examined instead of letting the
     // line above read as a statement about the whole table.

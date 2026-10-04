@@ -82,13 +82,14 @@ const WASM_RETIRED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 // ==========================================================================
-// 2a. Transport coherence — what `new TursoDriver` refuses or ignores
+// 2a. Transport coherence — what `new TursoDriver` refuses
 // ==========================================================================
 //
 // #19977. Each key below parsed on its own, so this mirror accepted
 // combinations the driver in this very package refuses at construction
-// (`VALIDATION_ERROR` / 400), or constructs and ignores. It now refuses them,
-// with the supported spelling in the message. The predicates and the messages
+// (`VALIDATION_ERROR` / 400), or, until #20200, constructed and ignored. It
+// now refuses them, with the supported spelling in the message. The
+// predicates and the messages
 // are the ones `@objectstack/spec`'s own turso contract
 // (`packages/spec/src/data/driver/turso.zod.ts`, `tursoTransportIssues`)
 // carries, byte for byte: the helper is internal to that package and not on
@@ -154,7 +155,7 @@ interface TursoTransportKeys {
 
 /** One refusal: the key it sits on and its message. */
 interface TursoTransportIssue {
-  path: 'url' | 'syncUrl' | 'timeoutMs';
+  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode';
   message: string;
 }
 
@@ -238,6 +239,42 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + `${drop} for a plain in-memory local database.`,
       }];
     }
+    if (mode === 'replica' && !hasSyncUrl) {
+      // #20437. Only a FORCED replica reaches here: with no `mode`, a replica is
+      // selected by `syncUrl` alone. The url is a `file:` url (every other one
+      // met a refusal above), so the url is fine and the MODE is what cannot be
+      // honoured — the issue sits on `mode`, as the `sync` refusal sits on `sync`.
+      // Unreachable through this mirror, which strips `mode` (see above); kept
+      // byte-identical to the spec contract's arm.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'replica'` makes this datasource an embedded replica, a local file kept in sync with "
+          + 'the remote named in `syncUrl`, but no `syncUrl` is set: nothing would ever sync, so it would '
+          + 'run as a plain local database that never replicates — the turso driver refuses this '
+          + 'configuration when it starts. For an embedded replica, name the remote in `syncUrl` beside '
+          + "the local file: `url: 'file:./data/replica.db'` with `syncUrl` set to the `libsql://` or "
+          + "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.",
+      }];
+    }
+    if (mode === 'local' && hasSyncUrl) {
+      // #20586. Only a FORCED local mode reaches here: with no `mode`, a
+      // `syncUrl` selects a replica. The url is a `file:` url or `:memory:`
+      // (every other one met a refusal above), so the url is fine; what the
+      // runtime would ignore is the MODE, because the driver syncs whenever
+      // `syncUrl` is set — so the issue sits on `mode`, as #20437's does.
+      // Unreachable through this mirror, which strips `mode` (see above); kept
+      // byte-identical to the spec contract's arm.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'local'` makes this datasource a plain local database, but `syncUrl` names a remote to "
+          + 'replicate from: the database would still be synced with that remote as an embedded replica, '
+          + 'so the declared local mode would be ignored — the turso driver refuses this configuration '
+          + 'when it starts. For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: '
+          + "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).",
+      }];
+    }
     return [];
   }
 
@@ -260,8 +297,8 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
       path: 'syncUrl',
       message:
         "`syncUrl` configures an embedded replica, but `mode: 'remote'` sends every read and write "
-        + 'straight to `url` and builds no replica: the turso driver never hands `syncUrl` to the '
-        + 'remote client and runs no sync, so the setting changes nothing. For a remote database, '
+        + 'straight to `url` and builds no replica: the turso driver refuses this configuration when '
+        + 'it starts. For a remote database, '
         + `drop ${syncUrlKeys}. For an embedded replica, drop \`mode\` and point \`url\` at a local `
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
@@ -390,8 +427,8 @@ export const TursoConfigSchema = lazySchema(() => z.object({
         + 'nothing.',
     });
   }
-  // What the driver refuses at construction, or constructs and ignores —
-  // see `tursoTransportIssues` above.
+  // What the driver refuses at construction — see `tursoTransportIssues`
+  // above.
   for (const issue of tursoTransportIssues(cfg)) {
     ctx.addIssue({ code: 'custom', path: [issue.path], message: issue.message });
   }

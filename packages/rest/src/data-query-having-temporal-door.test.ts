@@ -184,7 +184,7 @@ describe('[#20263] having — the 2026 control and the non-temporal columns answ
     ['a 2026 day $lt on max(date)', { last_placed: { $lt: '2026-02-01' } }, ['c1', 'c3']],
     ['a 2026 instant $gt on min(datetime)', { first_opened: { $gt: '2026-02-01T00:00:00.000Z' } }, ['c2', 'c3', 'c4']],
     ['a wall clock $lt on max(time)', { last_slot: { $lt: '12:00' } }, ['c1']],
-    ['a string on sum — not temporal, not judged', { total: { $gt: 'not-a-date' } }, []],
+    ['a number on sum — not temporal, not judged', { total: { $gt: 500 } }, ['c2']],
   ];
   for (const [name, having, kept] of KEPT) {
     it(`${name}: keeps ${kept.join(', ') || 'no group'}, engine and REST, both paths`, async () => {
@@ -197,4 +197,20 @@ describe('[#20263] having — the 2026 control and the non-temporal columns answ
       }
     });
   }
+
+  // [#20351] A string on sum is not this door's, and it no longer keeps no
+  // group with a 200: the number-comparand door refuses it, before any read.
+  it('a string on sum — not temporal: refused by the number-comparand door, engine and REST, both paths, no read', async () => {
+    const { engine, post, reads } = await boot();
+    const having = { total: { $gt: 'not-a-date' } };
+    for (const path of ['native', 'rows'] as const) {
+      const err = await refusalOf(engine.aggregate(OBJECT, grouped(path, having)));
+      expect({ code: err?.code, status: err?.status }, `engine, ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      const res = await post(grouped(path, having) as Record<string, unknown>);
+      expect(res._status, JSON.stringify(res._json)).toBe(400);
+      expect(res._json.code, `REST, ${path}`).toBe('INVALID_FILTER');
+      expect(res._json.error, `REST, ${path}`).toContain('at having.total.$gt');
+    }
+    expect(reads.n).toBe(0);
+  });
 });

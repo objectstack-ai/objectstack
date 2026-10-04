@@ -105,7 +105,7 @@ export { CHANNEL_UNAVAILABLE_REASONS } from './channel.js';
 export type {
     INotificationOutbox,
     NotificationDeliveryRecord,
-    // [#11859] What claim()/claimDigest() hand out and ack() takes back — the
+    // [commit d9cf78eaa] What claim()/claimDigest() hand out and ack() takes back — the
     // record carrying the claim credential the compare-and-set binds.
     ClaimedDeliveryRecord,
     DeliveryStatus,
@@ -116,7 +116,7 @@ export type {
     ReapOptions,
     AckResult,
 } from './outbox.js';
-// [#11453] `ack()`'s status precondition refuses with this, so a caller that
+// [commit 1a47a5368] `ack()`'s status precondition refuses with this, so a caller that
 // wants to distinguish "I lost the claim" from a transport fault can catch it.
 export { NotificationAckError } from './outbox.js';
 export { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
@@ -173,7 +173,10 @@ export {
     newDeliveryId as newHttpDeliveryId,
     DEFAULT_HTTP_TIMEOUT_MS,
     // The signing pair (#7722) — exported so a receiver-side verifier (or a
-    // test) recomputes the HMAC over exactly the bytes the sender signed.
+    // test) recomputes the HMAC over exactly the bytes the sender signed. The
+    // signer and the header are `@objectstack/core`'s own bindings
+    // (`signHttpBody` / `HTTP_SIGNATURE_HEADER`), re-exported under the same
+    // names: one scheme for the outbox and the flow `http` node's inline arm.
     deliveryBody as httpDeliveryBody,
     signBody as signHttpBody,
     SIGNATURE_HEADER as HTTP_SIGNATURE_HEADER,

@@ -269,7 +269,7 @@ export class HttpDispatcher {
      * [#17634] Record one attempt's outcome with the claim credential this
      * node's `claim()` stamped on the row, tolerating the ONE refusal a correct
      * dispatcher can legitimately provoke — `NotificationDispatcher.ackAttempt`'s
-     * shape (#11453, #11859).
+     * shape (commits 1a47a5368, d9cf78eaa).
      *
      * A send slower than `claimTtlMs` lets the visibility-timeout reap return the
      * row to `pending`, and another node — or this one, on a later tick —

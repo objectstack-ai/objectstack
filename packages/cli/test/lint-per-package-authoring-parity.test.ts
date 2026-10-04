@@ -55,6 +55,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run {
   code: number;
@@ -150,18 +151,25 @@ const ordersObjects = [{
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
   },
 }];
+// The containers bind by \`object\` and carry no \`name\` / \`label\` of their own:
+// both keys are \`dead\` in the view ledger, and since #16094 each draws a
+// union-run \`liveness-dead-property\` warning, which would break the "union
+// raises NOTHING" premise this fixture exists to hold. The list's own \`label\`
+// is live and stays.
 const ordersViews = [
   {
-    name: 'pp_account_list', label: 'Account List', object: 'pp_account',
+    object: 'pp_account',
     list: { label: 'Account List', columns: ['name', 'industry'] },
   },
   {
-    name: 'pp_order_list', label: 'Order List', object: 'pp_order',
+    object: 'pp_order',
     list: { label: 'Order List', columns: ['name', 'account'] },
   },
 ];
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: coreManifest,
   objects: [...ordersObjects, ...coreObjects],
   apps: [...coreApps],
@@ -170,7 +178,7 @@ export default {
     { manifest: { ...ordersManifest, objects: ordersObjects, views: ordersViews } },
     { manifest: { ...coreManifest, objects: coreObjects, apps: coreApps } },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -180,7 +188,9 @@ export default {
  * cards' worth of parity files.
  */
 const CONFIG_SINGLE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: {
     id: 'com.example.ppsingle', name: 'ppsingle', namespace: 'ps',
     version: '1.0.0', type: 'app', engines: { protocol: '^17' },
@@ -196,7 +206,7 @@ export default {
     name: 'ps_app', label: 'PS App',
     navigation: [{ id: 'nav_things', type: 'object', objectName: 'ps_thing', label: 'Things' }],
   }],
-};
+}, { strict: false });
 `;
 
 const dirs = { flip: '', single: '' };
@@ -205,6 +215,7 @@ function plant(config: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-lintpp-'));
   mkdirSync(join(dir, 'src'), { recursive: true });
   writeFileSync(join(dir, 'objectstack.config.ts'), config, 'utf8');
+  linkSpec(dir);
   writeFileSync(
     join(dir, 'package.json'),
     JSON.stringify({ name: 'lintpp-fixture', private: true, type: 'module' }, null, 2),

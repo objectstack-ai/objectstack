@@ -27,6 +27,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+// [#21321] An install, and a rehydrate of a ledger entry, now bind the package's
+// handlers through `@objectstack/runtime` (a lazy `import()` inside the plugin).
+// Its first load is paid here, at module top — never inside a clocked `it`
+// (the clocked-window rule, `scripts/check-test-source-alias.mjs`).
+import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { DEFAULT_INSTALLED_PACKAGES_DIR } from './local-manifest-source.js';

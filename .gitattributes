@@ -67,47 +67,72 @@
 # cleanly because they do not overlap, and the subtotal merges clean and WRONG
 # (seven cases in one day). Note it is the counts file, not the ledger — the
 # ledger's prose is hand-written and must never be resolved by regenerating.
+# #20361 sharded it into `….counts/`, one file per source directory, and stopped
+# committing its cross-directory totals — the same measured conflict as the
+# liveness counts below, in the same driver-less server-side merge.
 #
 # The liveness state table's counts joined at #7377 for the same reason, one file
 # over — 9 of its 30 rows had drifted from the gate before anyone re-ran the
-# documented snippet. Same split and the same caveat: `liveness/state-counts.md`
-# is the numbers and is driver-managed; `liveness/README.md` is the Notes prose —
+# documented snippet. Same split and the same caveat: `liveness/state-counts/` is
+# the numbers and is driver-managed; `liveness/README.md` is the Notes prose —
 # hand-written measurement of how each type got where it is — and is NOT.
 # Regenerating a Note would fabricate a verdict, which that README calls worse
 # than a missing row.
 #
-# The elevation census page joined at #13646 — a generated `file:line` anchor
-# table whose correct merged values are on NEITHER side of a conflict (measured on
-# #13625: five conflicted anchors resolved to 4408/5771/6019/6382/6575 against
-# branch 4407/5770/… and main 4284/5647/…), so no text merge and no hand merge can
-# reach them. ⚠️ It is routed as the FILE and NOT as `content/docs/permissions/**`:
-# unlike `content/docs/references/**` above, which is generated whole, that
-# directory is 22 hand-written prose pages around one generated one, and the glob
-# would defer the prose to OURS. See NOT_DRIVER_MANAGED for that entry.
+# #20361 then SHARDED those counts, one file per governed type, and stopped
+# committing a total: the single file's shared total row was rewritten by every
+# liveness PR, so in the driver-less server-side merge any two of them conflicted
+# and each landing left every other one `dirty`, with no CI run until a
+# merge-and-regenerate round. The cure is the one the header above records for
+# the three hottest artifacts; each gate sums its shards when it reads them.
+#
+# The elevation census page joined at #13646, when it was a generated `file:line`
+# anchor table whose correct merged values were on NEITHER side of a conflict
+# (measured on #13625: five conflicted anchors resolved to 4408/5771/6019/6382/6575
+# against branch 4407/5770/… and main 4284/5647/…), so no text merge and no hand
+# merge could reach them. ⚠️ It is routed as the FILE and NOT as
+# `content/docs/permissions/**`: unlike `content/docs/references/**` above, which
+# is generated whole, that directory is 22 hand-written prose pages around one
+# generated one, and the glob would defer the prose to OURS. See
+# NOT_DRIVER_MANAGED for that entry.
 #
 # This is also the row where the header's own warning is answered rather than
 # accepted: `scripts/check-system-context-census.mjs` still reddens on every PR from
-# the required `Lint & Repo Gates` job — it RE-DERIVES the census from the tree, so
-# it catches the stale anchors a merge leaves behind even when nothing conflicted,
-# which is the majority case (#13625: 18 anchors stale, 5 marked). The driver removes
-# hand-merge rounds; it is never the only signal.
+# the required `Lint & Repo Gates` job — it RE-DERIVES the census from the tree.
+# While the page carried line anchors, that is what caught the stale anchors a merge
+# left behind even when nothing conflicted, which was the majority case (#13625: 18
+# anchors stale, 5 marked). The driver removes hand-merge rounds; it is never the
+# only signal.
 #
 # ⚠️ #14064 CORRECTED the sentence that used to open that paragraph — "deferring is
-# safe here BECAUSE the census gate re-derives". The gate re-derives the census and
+# safe here BECAUSE the census gate re-derives". The gate re-derived the census and
 # the anchors. It re-derives no PROSE, because prose is derived from nothing, and
 # this page is the one routed path that carries both. So the argument was true and
 # its domain was half the risk surface: the driver drops a side WHOLE, and on this
-# page that side can carry hand-written paragraphs the gate is constitutionally
-# unable to miss. Measured, not reasoned — deleting a 3-line anchor-free paragraph
-# and running ten doc-family gates returned ten exit 0 over deleted documentation.
+# page that side can carry hand-written paragraphs whose loss the gate is
+# constitutionally unable to notice. Measured, not reasoned — deleting a 3-line
+# anchor-free paragraph and running ten doc-family gates returned ten exit 0 over
+# deleted documentation.
 #
-# Routing this file is still RIGHT (the correct anchors are on neither side; nothing
-# above changes). What #14064 added is the missing half: the row now declares
-# `mixed: 'line-anchors'` in scripts/regen-artifacts.mjs, and the driver refuses to
-# defer SILENTLY when the incoming side carries anything but anchor numbers — it
-# text-merges instead, and conflicts loudly if that cannot be done. The cheap case
-# stays cheap: of the last 25 main commits to this page, 24 changed nothing but
-# anchor numbers.
+# #14064 kept the routing (the correct anchors were on neither side) and added the
+# missing half: the row declares `mixed: 'line-anchors'` in
+# scripts/regen-artifacts.mjs, and the driver refuses to defer SILENTLY when the
+# incoming side carries anything but anchor numbers — it text-merges instead, and
+# conflicts loudly if that cannot be done. The cheap case stayed cheap: of the last
+# 25 main commits to this page when that was measured, 24 changed nothing but anchor
+# numbers.
+#
+# Today (since #15921) the page carries `path#symbol` anchors and no line numbers,
+# so the `line-anchors` comparator is the IDENTITY on it (measured on #16612:
+# `extractLineAnchors(page).length === 0`, `blankAnchorLineNumbers(page) === page`).
+# Every real edit therefore takes the text-merge branch, or conflicts loudly, by
+# design; the renumbering case is gone because there is nothing left to renumber.
+# What the census gate catches after a merge is now a symbol anchor that no longer
+# resolves, a population that no longer matches, or a declared count that no longer
+# equals the census. ⛔ The `mixed` field stays: it is what routes this row through
+# the lossless check at all, and deleting it sends the row to the unconditional
+# deferral, the silent deletion #14064 closed (reproduced on #16612). The row's
+# comment in scripts/regen-artifacts.mjs carries the measurements.
 
 #
 # #13731 enumerated this file's blind spot and closed it: `check:merge-driver` now
@@ -138,7 +163,7 @@
 # neither side.
 
 packages/spec/spec-changes.json                              merge=os-regen
-packages/spec/liveness/state-counts.md                       merge=os-regen
+packages/spec/liveness/state-counts/**                       merge=os-regen
 packages/spec/authorable-surface/**                          merge=os-regen
 packages/spec/authorable-surface.base.json                   merge=os-regen
 packages/spec/authorable-defaults/**                         merge=os-regen
@@ -149,7 +174,7 @@ packages/spec/export-origins/**                              merge=os-regen
 packages/spec/declaration-map/**                             merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen
 docs/protocol-upgrade-guide.md                               merge=os-regen
-docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen
+docs/audits/2026-07-unknown-key-strictness-ledger.counts/**  merge=os-regen
 content/docs/references/**                                   merge=os-regen
 content/docs/permissions/system-context.mdx                  merge=os-regen
 skills/*/references/_index.md                                merge=os-regen

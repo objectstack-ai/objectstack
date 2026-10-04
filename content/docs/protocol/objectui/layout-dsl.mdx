@@ -58,7 +58,7 @@ widgets are components in their own right — they are not children of a section
 ```
 Page
  ├─ Region: header
- │   └─ Component: page:header        (title, actions, breadcrumb)
+ │   └─ Component: page:header        (title, actions)
  ├─ Region: main
  │   ├─ Component: record:details
  │   │   └─ Section
@@ -563,10 +563,10 @@ is a **parse failure** — a loud rejection, not a silent no-op.
 </Callout>
 
 Looking for tabs that carry their own `name`, `icon`, `filter`, `order`,
-`pinned` and `isDefault`? That surface exists, but it belongs to **list** views,
-not forms: `ui/ViewTab` declares exactly nine keys (`filter`, `icon`,
-`isDefault`, `label`, `name`, `order`, `pinned`, `view`, `visible`), and each
-tab points at a named list view. See
+`pinned` and `isDefault`? That surface belongs to a **page list's** preset bar
+(`userFilters.tabs`), not to forms: `ui/ViewTab` declares exactly nine keys (`filter`,
+`icon`, `isDefault`, `label`, `name`, `order`, `pinned`, `view`, `visible`). A list
+view has no `tabs` key — an object's tab strip lists its named `listViews`. See
 [View Reference → ViewTab](/docs/references/ui/view#viewtab).
 
 ## Responsive Layout Modifiers
@@ -765,7 +765,10 @@ properties:
 
 A parent record edited alongside its child collections is the declared
 `object-master-detail-form` block. `details` entries derive the foreign key and
-columns from the child object's metadata when you omit them.
+columns from the child object's metadata when you omit them. An authored
+`columns` list takes the same name-keyed column a relationship field's
+`inlineColumns` takes: `{ name }` alone fills the label and cell type from the
+child field.
 
 {/* os:check-yaml PageComponentSchema */}
 ```yaml
@@ -779,7 +782,10 @@ properties:
     - title: Line Items
       childObject: invoice_line
       relationshipField: invoice_id
-      columns: [product, quantity, unit_price]
+      columns:
+        - name: product
+        - name: quantity
+        - name: unit_price
 ```
 
 For the *master/detail browsing* pattern — pick a record on the left, show it on

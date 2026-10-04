@@ -280,7 +280,7 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
 });
 
 /**
- * [#8839] The `sys_comment` moderation carve-out — again a TRIPWIRE, not the
+ * [commit c25b2d52a] The `sys_comment` moderation carve-out — again a TRIPWIRE, not the
  * proof. The proof is over HTTP, in
  * `packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts`, which
  * boots org-bound and arms itself: an assertion whose expectation and reality
@@ -332,7 +332,7 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
     expect(floor.using).toBe('created_by == current_user.id');
     expect(floor.positions).toEqual(['org_member']);
 
-    // The update limb is deliberately NOT widened: #8839 ruled on delete, which
+    // The update limb is deliberately NOT widened: commit c25b2d52a's ruling is on delete, which
     // is the limb it measured. A `sys_comment` update policy appearing here is a
     // second access-widening riding in on this one's ruling.
     expect(policiesFor('member_default', 'sys_comment').map((p) => p.operation)).toEqual(['delete']);
@@ -361,6 +361,12 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
  * exact pre-#11965 inline value (comments elided); if this pin fails, the spec
  * export changed the declared capability set — that is a capability change
  * riding on a refactor card, and it must not land silently.
+ *
+ * One capability change has landed on purpose since, on its own card, and is
+ * written into the literal below: `view_all_audit_log` (#21260, ruling B on
+ * #21175 — platform administrators hold the compliance ledger's audit
+ * capability by default). And one more, on #21237: the `fields` block keeping the
+ * identity object's `Admin` field group, which the `everyone` baseline withholds.
  */
 describe('admin_full_access imports the kernel capability declaration unchanged (#11965)', () => {
   it('parsed declaration deep-equals the pre-#11965 inline literal', () => {
@@ -386,9 +392,25 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         'setup.access',
         'setup.write',
         'studio.access',
+        // [#21260] added on purpose — see the docblock above.
+        'view_all_audit_log',
       ],
+      // [#21237] added on purpose — see the docblock above. The group is read off
+      // the identity object's declaration, never listed here.
+      fields: Object.fromEntries(
+        Object.entries(PlatformObjects.SysUser.fields as Record<string, { group?: string }>)
+          .filter(([, field]) => field.group === 'Admin')
+          .map(([name]) => [`sys_user.${name}`, { readable: true, editable: true }]),
+      ),
     });
     expect(setByName('admin_full_access')).toEqual(preMove);
+  });
+
+  it('[#21260] no other shipped set carries the ledger audit capability: every other position holds it only by explicit grant', () => {
+    const holders = (defaultPermissionSets as any[])
+      .filter((s) => (s.systemPermissions ?? []).includes('view_all_audit_log'))
+      .map((s) => s.name);
+    expect(holders).toEqual(['admin_full_access']);
   });
 
   it('the imported spec constant is the declaration content — no local fork', () => {

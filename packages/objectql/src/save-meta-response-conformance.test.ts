@@ -44,6 +44,9 @@ import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SaveMetaItemResponseSchema } from '@objectstack/spec/api';
 import { ObjectQL } from './engine.js';
+// [#21516] The rest of the stored-metadata family the repository writes through: the
+// engine refuses a name the registry does not resolve, so the harness registers it as a boot does.
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 
 const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
@@ -159,6 +162,7 @@ async function makeProtocol() {
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(sysMetadataObject, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any, 'test-package');
     return new ObjectStackProtocolImplementation(engine);
 }
 
@@ -292,6 +296,9 @@ describe('saveMetaItem carries the runtime authoring gate\'s advisories (#4717 â
     const cleanFlow = () => {
         const flow = advisoryFlow();
         (flow.nodes[1] as any).config.filter = [{ field: 'created_at', operator: 'lt', value: '2020-01-01' }];
+        // [#21470] Named for the row it is saved under (`bounded_purge`): a
+        // body `name` that is not its row's is refused by the write doors.
+        flow.name = 'bounded_purge';
         return flow;
     };
 

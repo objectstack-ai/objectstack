@@ -129,7 +129,9 @@ const OVERLAYLESS_PROBES: Record<string, Record<string, unknown>> = {
         sharingModel: 'private',
         fields: { name: { type: 'text', label: 'Name' } },
     },
-    hook: { name: 'rc5_acct', object: 'task', events: ['beforeUpdate'] },
+    // [#21689] With a `body`: the door refuses a hook without one before the
+    // receipt is built, as it refuses a body the schema rejects.
+    hook: { name: 'rc5_acct', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
     seed: { object: 'task', records: [] },
     action: { name: 'rc5_acct', label: 'Convert', type: 'script', objectName: 'task', target: 'convertHandler' },
     flow: {
@@ -171,10 +173,10 @@ describe('#5265 — a save receipt names what was actually written', () => {
         for (const type of Object.keys(OVERLAYLESS_PROBES)) {
             expect(OVERLAYLESS_RUNTIME_WRITABLE, `${type} left the overlay-less set`).toContain(type);
         }
-        // #6283 → #6483 — the override-artifact case at the bottom of this
+        // #6283 → commit ee58392e1 — the override-artifact case at the bottom of this
         // file needs a type that is BOTH overlay-less and per-org overridable.
         // `flow` played that part until #6283 rolled its `allowOrgOverride`
-        // back to `false` (ADR-0005:57); `action` inherited it until #6483
+        // back to `false` (ADR-0005:57); `action` inherited it until commit ee58392e1
         // rolled back the remaining nine unratified `true` flags — `action`'s
         // overlay-less-yet-overridable pairing was the #6190 phantom shape
         // exactly, the very thing being closed. The population is now EMPTY
@@ -312,7 +314,7 @@ describe('#5265 — a save receipt names what was actually written', () => {
         // not assumed — this case was written against `object` first.)
         //
         // The specimen was `flow` until #6283 rolled its `allowOrgOverride`
-        // back to `false` (ADR-0005:57), then bare `action` until #6483
+        // back to `false` (ADR-0005:57), then bare `action` until commit ee58392e1
         // rolled back the remaining nine unratified flags — no statically
         // registered type pairs overlay-less with overridable anymore (the
         // premise pin above holds the population empty). The pairing is

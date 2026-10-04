@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17124] THE one reading of `dateRange`'s ARRAY arm, for every face in this
+ * [commit 86c505286] THE one reading of `dateRange`'s ARRAY arm, for every face in this
  * package.
  *
  * ## What was wrong

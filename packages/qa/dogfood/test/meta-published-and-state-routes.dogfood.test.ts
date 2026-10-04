@@ -43,7 +43,7 @@ describe('dogfood: /meta/:type/:name/published and /meta/object/:name/state/:fie
     const artifactPath = join(tempDir, 'objectstack.json');
     // The real `objectstack build` lowering, not `JSON.stringify(stack)` —
     // that drops callables silently and the artifact parses green carrying
-    // none of what it advertises (#6293).
+    // none of what it advertises (commit c39a911ae).
     writeBuildShapedArtifact(showcaseStack as unknown as Record<string, unknown>, artifactPath);
 
     stack = await bootStack(showcaseStack, {

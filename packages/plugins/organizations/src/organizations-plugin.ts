@@ -316,23 +316,32 @@ export class OrganizationsPlugin implements Plugin {
         const fields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
         if (fields && fields.has('organization_id')) {
           const data = opCtx.data as Record<string, unknown>;
-          // [#2937] AUTHORITATIVE stamp for USER-context inserts. A user may not
-          // choose which tenant a row lands in: their insert ALWAYS carries the
-          // caller's active organization, so a supplied — possibly FORGED —
-          // `organization_id` pointing at another org is OVERWRITTEN, never
-          // trusted. (Previously this only FILLED a missing value, so a forged
-          // non-empty value slipped through and — absent the Layer 0 insert
-          // post-image check — landed in the victim tenant.) `isSystem`
-          // short-circuited above (line ~136), so legitimate on-behalf writes
-          // that deliberately set another org — the per-org seed replay
-          // / orphan-claim, imports, migrations — run under SYSTEM_CTX and are
-          // untouched. A non-`isSystem` context with a tenant but NO principal
-          // (a service acting with an org scope) keeps the prior fill-only
-          // semantics so it can still set an explicit value.
-          const isUserContext = !!opCtx.context.userId;
-          if (isUserContext) {
-            data.organization_id = opCtx.context.tenantId;
-          } else if (data.organization_id == null || data.organization_id === '') {
+          // FILL-ONLY, for every non-system context — a user's included
+          // (ADR-0105 D5: the engine "stamps `organization_id` from
+          // `ctx.tenantId` (active org) when absent, and validates any explicit
+          // value"). This middleware owns the first half and nothing more: an
+          // ABSENT or empty value becomes the caller's active organization.
+          //
+          // A SUPPLIED value is never touched here. It goes on to the Layer 0
+          // write wall in `@objectstack/plugin-security` (step 3.7, ADR-0095
+          // D1), the same wall an UPDATE that re-points `organization_id`
+          // meets, and gets the same answer: admitted where the caller's
+          // organization scope (or a platform administrator's posture
+          // exemption) admits it, otherwise refused `403 PERMISSION_DENIED`.
+          // A forged value from a member (#2937) is therefore REFUSED, loudly,
+          // rather than rewritten. Rewriting it — what this line did for user
+          // contexts until #21666 — answered one operation two ways: the
+          // create replied 201 with the row stored in an organization the
+          // caller never named, while the equivalent PATCH and the array
+          // insert (which this middleware never touched) were refused. ⛔ Do
+          // not reintroduce a rewrite on any posture: a silently replaced
+          // input is exactly what an AI author or a script cannot detect.
+          //
+          // `isSystem` short-circuited above, so the legitimate writers that
+          // deliberately name another organization — the per-org seed replay,
+          // the orphan claim, imports, migrations — run under SYSTEM_CTX and
+          // meet neither this stamp nor the wall.
+          if (data.organization_id == null || data.organization_id === '') {
             data.organization_id = opCtx.context.tenantId;
           }
         }

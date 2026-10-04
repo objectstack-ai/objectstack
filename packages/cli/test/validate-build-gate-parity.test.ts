@@ -47,9 +47,10 @@ const COMMANDS_DIR = join(__dirname, '..', 'src', 'commands');
  * the whole point of the file.
  *
  * ⭐ [#18491] This roster is now CLOSED rather than advisory: every bare
- * identifier either command calls must appear in exactly one of the three
- * ledgers in this file — here, in {@link BUILD_ONLY_GATES}, or in
- * {@link NOT_A_GATE} with the reason it is not a gate. A name nobody
+ * identifier either command calls must appear in exactly one of the
+ * ledgers in this file — here, in {@link BUILD_ONLY_GATES}, in
+ * {@link VALIDATE_ONLY_GATES} (#20331), or in {@link NOT_A_GATE} with the
+ * reason it is not a gate. A name nobody
  * classified fails, so a gate arrives here by being ADDED to the commands, not
  * by being spelled a particular way.
  */
@@ -120,8 +121,40 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // project `sdui.manifest.json` that exists but cannot be read, parsed or
   // carries no `components` map is refused (exit 1) when there is a
   // `kind:'html'` page to check. Not a registry rule: the manifest is a file
-  // in the working directory, not part of the stack a rule is handed.
+  // beside the config (#20166), not part of the stack a rule is handed.
   'resolveJsxGateManifest',
+  // [#20331, #20393] The boot registrar's divergent view-container `name`
+  // refusal (`viewContainerNameRefusal`, @objectstack/objectql), judged at
+  // author time by the same function boot throws the answer of. Not a registry
+  // rule: the WALK decides which `views:` entries boot registers and under
+  // which package id — the top level under the manifest's id, or each
+  // `packages[i].manifest` body under its own — which is the artifact's
+  // package reading, not the one stack a rule is handed.
+  //
+  // ⭐ This row is the #20331 VALIDATE_ONLY_GATES entry CLOSED. That entry read
+  // "`os build` still emits an artifact carrying such a container, which the
+  // runtime refuses when it loads it", and it was right. `compile.ts` now makes
+  // the same call (#20393), so the row moved here, where both doors are held to
+  // it — deleted there rather than reworded, for the reason the
+  // `runPerPackageAuthoringRules` row above gives.
+  'findViewContainerNameRefusals',
+  // A field `picklist` that names no picklist the stack declares is refused
+  // (an `info` notice when the declaring package depends on packages outside
+  // the stack, whose picklists no command can read). Not a registry rule: the
+  // verdict depends on WHICH package declares the field — that package's
+  // declared dependencies decide refusal against notice — and the union run a
+  // registry rule is handed is the flattened top level, which carries no
+  // package provenance. The WALK is the load path's package reading, the same
+  // class as the row above; both doors make the call, right after the parse.
+  'judgePicklistReferences',
+  // [#20367 ruling B] One authoring shape: a default export no stack producer
+  // built (`defineStack` / `composeStacks`) is refused right after load, before
+  // any other judgement — the `STACK_*` cross-field refusals run inside the
+  // producer only. Not a registry rule and it cannot become one: it judges the
+  // loaded MODULE's default export (the provenance mark `loadConfig` reads
+  // before its named-export merge), which no rule is ever handed. `os lint` is
+  // not an author-time door under the ruling and does not run it.
+  'refuseUnbuiltStack',
 ];
 
 /**
@@ -140,6 +173,32 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
   diffAccessMatrix: 'The comparison half of the same D6 snapshot gate.',
   buildRuntimeBundle: 'Emits the objectstack-runtime.{hash}.mjs sibling module. Artifact output by definition.',
 };
+
+/**
+ * Gates `os validate` runs that `os build` does not — the SUPERSET direction of
+ * this file's contract, which leaves `os validate` stricter than the build and
+ * never weaker than it.
+ *
+ * ⭐ [#20331] Why this ledger exists. Before it, the closed roster had no honest
+ * place for a gate wired into `validate.ts` alone: SHARED_NON_REGISTRY_GATES
+ * asserts both commands call it, BUILD_ONLY_GATES is the opposite direction,
+ * and a NOT_A_GATE row would be the false statement that ledger's header
+ * warns about. Each entry here is a written claim that the BUILD lacks a gate
+ * `os validate` has — a real gap in the build's direction, reported and not
+ * closed — with the reason it was not wired there.
+ *
+ * ⛔ Pruned both ways by `every VALIDATE_ONLY_GATES entry is still
+ * validate-only` below: a row whose gate `validate.ts` no longer calls is
+ * stale, and a row whose gate `compile.ts` now calls too belongs in
+ * SHARED_NON_REGISTRY_GATES instead.
+ *
+ * EMPTY is this ledger's steady state: every row is a gap the build carries.
+ * Its one row, `findViewContainerNameRefusals` (#20331), moved to
+ * SHARED_NON_REGISTRY_GATES when `compile.ts` gained the call (#20393). The
+ * ledger stays, empty, because it is the only honest place the closed roster
+ * has for the next validate-only gate.
+ */
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an
@@ -192,6 +251,15 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // `test/rls-policy-authoring-admission.test.ts`.
   'The engine judge handed to the authoring-rule registry as an input — the rule that reads it is the gate':
     ['stackFilterJudge'],
+  // [#20583] The catch-all's fold: it reads the ADR-0087 conversion record a
+  // stack PRODUCER stamped on the refusal it threw at load — the refusing half
+  // of step 1b's `loaded.stackConversions`, which is a property read and so
+  // never reached this scan. It raises no finding and refuses nothing: the
+  // refusal was already thrown, the conversions were already applied by the
+  // producer, and the exit is 1 whether it answers the record or `[]`. Both
+  // commands call it (and `lint.ts`), so no parity gap sits behind it either.
+  'Carries the conversion record a stack producer stamped on the refusal it threw — the producer judged; this reads, and refuses nothing':
+    ['stackConversionsOf'],
   // [#18431] Artifact ASSEMBLY, and deliberately not a `BUILD_ONLY_GATES` row.
   // That ledger's entries are gates that cannot run read-only (they rewrite a
   // committed snapshot, or emit a sibling module); filing this one there would
@@ -219,6 +287,10 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       // gate above) already produced; the same record rides `--json` whether
       // this runs or not.
       'printJsxGateNotices',
+      // Renders the `info` notices `judgePicklistReferences` (a gate above)
+      // already produced; the same records ride `--json` whether this runs or
+      // not.
+      'printPicklistReferenceNotices',
       // [#18780] `compile.ts`' local once-guard around the line above it. It
       // decides WHEN that printer is called — after the per-package pass has
       // appended its survivors, so the closing `N author-time warning(s) — see
@@ -253,7 +325,7 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     'cleanupOldRuntimeBundles',
     'warningsSoFar',
   ],
-  // [#17080] Reads a fact about the TOOLCHAIN, not about the input. The
+  // [commit 8b4890343] Reads a fact about the TOOLCHAIN, not about the input. The
   // ADR-0087 D4 `release` section is computed at publish time from the two
   // tarballs and shipped inside the installed `@objectstack/spec`; this reader
   // opens that file and counts its entries. It takes nothing from the stack, so
@@ -317,6 +389,7 @@ const PARITY_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts'];
 const CLASSIFIED: ReadonlySet<string> = new Set([
   ...SHARED_NON_REGISTRY_GATES,
   ...Object.keys(BUILD_ONLY_GATES),
+  ...Object.keys(VALIDATE_ONLY_GATES),
   ...NOT_A_GATE_NAMES,
 ]);
 
@@ -326,7 +399,7 @@ const UTILS_DIR = join(__dirname, '..', 'src', 'utils');
 
 /**
  * The three authoring commands, as one list. Named once so a rule below cannot
- * quietly cover a subset of the class it describes — the #12297 failure the
+ * quietly cover a subset of the class it describes — the failure commit 9fd45a952 closed, which the
  * sink guard at the bottom of this file records.
  */
 const AUTHORING_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts', 'lint.ts'];
@@ -808,9 +881,10 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
         `${unclassified.join(', ')}.\n` +
         `Every call site must land in exactly one ledger. If it is an artifact-level gate, wire it ` +
         `into BOTH commands and add it to SHARED_NON_REGISTRY_GATES; if it genuinely cannot run ` +
-        `read-only, add it to BUILD_ONLY_GATES with a reason; if it is not a gate at all, add it to ` +
-        `NOT_A_GATE under the reason that says so. Registering it in ` +
-        `packages/lint/src/authoring-rules.ts instead is better than all three — then all THREE ` +
+        `read-only, add it to BUILD_ONLY_GATES with a reason; if validate.ts runs it and compile.ts ` +
+        `deliberately does not, add it to VALIDATE_ONLY_GATES with the reason the build lacks it; if ` +
+        `it is not a gate at all, add it to NOT_A_GATE under the reason that says so. Registering it in ` +
+        `packages/lint/src/authoring-rules.ts instead is better than all four — then all THREE ` +
         `authoring commands get it and no roster row is needed.`,
     ).toEqual([]);
   });
@@ -928,6 +1002,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     const buckets: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
       ['SHARED_NON_REGISTRY_GATES', new Set(SHARED_NON_REGISTRY_GATES)],
       ['BUILD_ONLY_GATES', new Set(Object.keys(BUILD_ONLY_GATES))],
+      ['VALIDATE_ONLY_GATES', new Set(Object.keys(VALIDATE_ONLY_GATES))],
       ['NOT_A_GATE', NOT_A_GATE_NAMES],
     ];
     const doubled = [...CLASSIFIED].filter(
@@ -997,6 +1072,19 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     expect(stale, `BUILD_ONLY_GATES entries compile.ts no longer calls: ${stale.join(', ')}`).toEqual([]);
   });
 
+  it('every VALIDATE_ONLY_GATES entry is still validate-only', () => {
+    // [#20331] Pruned in BOTH directions, because the row makes two claims:
+    // validate runs the gate, and the build does not.
+    const stale = Object.keys(VALIDATE_ONLY_GATES).filter((g) => !calls('validate.ts', g));
+    expect(stale, `VALIDATE_ONLY_GATES entries validate.ts no longer calls: ${stale.join(', ')}`).toEqual([]);
+    const nowShared = Object.keys(VALIDATE_ONLY_GATES).filter((g) => calls('compile.ts', g));
+    expect(
+      nowShared,
+      `compile.ts now calls ${nowShared.join(', ')} too — the build gap is closed. Move the row to ` +
+        `SHARED_NON_REGISTRY_GATES, where both commands are held to it.`,
+    ).toEqual([]);
+  });
+
   /**
    * The same drift, one layer down and easier to miss: not "does this command
    * run the gate" but "does it LISTEN to what the gate says". The ADR-0087 D2
@@ -1007,7 +1095,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
    * before the conversion retires and their metadata stops loading, and five
    * conversions are live today.
    *
-   * ⭐ [#12297] `lint.ts` was MISSING FROM THIS LOOP, and that is why the gap
+   * ⭐ [commit 9fd45a952] `lint.ts` was MISSING FROM THIS LOOP, and that is why the gap
    * survived #11772: the loop named the two commands the card in hand was
    * about, so closing `os build` left `os lint` — the third command the #4409
    * registry holds to this same bar, and the one whose docblock above already

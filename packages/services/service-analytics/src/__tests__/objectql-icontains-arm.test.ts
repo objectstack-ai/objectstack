@@ -41,7 +41,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { collectFilterLeaves, normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { collectFilterLeaves, normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import type { DatasetScope } from '../strategies/types.js';
@@ -71,9 +71,9 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    [['id', 'string'], ['name', 'string'], ['amt', 'number']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
+    [['id', 'string'], ['name', 'string'], ['amt', 'number']].map(([n, t]) => [n, { label: n, type: t, sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } } as never;
 
@@ -113,6 +113,10 @@ describe('[#20098] `$icontains` on the ObjectQL strategy, over a real engine', (
       executeAggregate,
       getDatasetScope: () => datasetScope,
       declaredFieldType: (_object: string, field: string) => FIELDS[field]?.type,
+      // [#20446] …and the declared value shape, which `$empty` (in
+      // `FILTER_OPERATORS` since #20446) is answered by on the native face.
+      declaredValueShape: (_object: string, field: string) =>
+        (FIELDS[field] ? { type: FIELDS[field].type } : undefined),
       sqlDialect: () => 'sqlite',
     }) as unknown as StrategyContext;
   const service = (nativeSql: boolean) =>
@@ -258,6 +262,8 @@ describe('[#20098] `$icontains` on the ObjectQL strategy, over a real engine', (
     $icontains: { name: { $icontains: 'acme' } },
     $null: { name: { $null: true } },
     $exists: { name: { $exists: true } },
+    // [#20446] The text row: `name` holds null (a4) and `''` (a5).
+    $empty: { name: { $empty: true } },
   };
 
   it('the sample table covers every operator `FILTER_OPERATORS` declares', () => {
@@ -324,7 +330,7 @@ describe('[#20098] the catch-all is untouched', () => {
       { f: { $exists: true } }, { f: { $exists: false } }, { f: null } as unknown as FilterCondition, { f: 'x' },
     ];
     for (const where of samples) {
-      for (const leaf of collectFilterLeaves(normalizeAnalyticsFilterTree({ where } as never))) {
+      for (const leaf of collectFilterLeaves(normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS))) {
         emitted.add(leaf.operator);
         expect(() => convert(leaf.operator, leaf.values), `${JSON.stringify(where)} → ${leaf.operator}`).not.toThrow();
       }

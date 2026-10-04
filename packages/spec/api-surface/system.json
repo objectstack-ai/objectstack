@@ -497,6 +497,7 @@
     "PageComponentLike (interface)",
     "PageLike (interface)",
     "PageRegionLike (interface)",
+    "PicklistLike (interface)",
     "Plan (type)",
     "PlanParsed (type)",
     "PlanSchema (const)",
@@ -850,6 +851,7 @@
     "translateMetadataDocument (function)",
     "translateObject (function)",
     "translatePage (function)",
+    "translatePicklist (function)",
     "translateView (function)",
     "validationMessageTranslationKey (function)",
     "walkAddressedPageComponents (function)"

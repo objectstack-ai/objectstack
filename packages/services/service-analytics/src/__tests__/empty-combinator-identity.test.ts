@@ -51,10 +51,11 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import {
   normalizeAnalyticsFilterTree,
   collectFilterLeaves,
+  NO_DATETIME_COLUMNS,
 } from '../strategies/filter-normalizer.js';
 import { AnalyticsService } from '../analytics-service.js';
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where });
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
 
 const FALSE_NODE = { kind: 'const', value: false };
 const TRUE_NODE = { kind: 'const', value: true };

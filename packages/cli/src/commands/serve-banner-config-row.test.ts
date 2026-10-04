@@ -57,6 +57,23 @@ describe('resolveBannerConfigRow (#8978)', () => {
     })).toEqual({});
   });
 
+  it('names the compiled bundle — not the config — when a config boot served its app from one (#21501)', () => {
+    // A non-host config's standalone stack loaded dist/objectstack.json as the
+    // app bundle: the metadata served came from that file.
+    expect(resolveBannerConfigRow({
+      relativeConfig: 'objectstack.config.ts',
+      useArtifactFallback: false,
+      configBootBundle: 'dist/objectstack.json',
+    })).toEqual({ bundleSource: 'dist/objectstack.json' });
+    // A host config (or a config whose artifact was absent) loaded no bundle,
+    // so its row stays the config it booted.
+    expect(resolveBannerConfigRow({
+      relativeConfig: 'objectstack.config.ts',
+      useArtifactFallback: false,
+      configBootBundle: undefined,
+    })).toEqual({ configFile: 'objectstack.config.ts' });
+  });
+
   it('omits the row on an empty/quick-start boot (no config, no artifact)', () => {
     // `useArtifactFallback` is also set on the `OS_BOOT_EMPTY=1` quick-start
     // path — same defect, same fix: nothing was read, so nothing is named.

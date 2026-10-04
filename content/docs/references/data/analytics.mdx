@@ -1,5 +1,6 @@
 ---
-title: Analytics
+title: Analytics schema — Data Protocol reference
+navTitle: Analytics
 description: "Defines the \"Business Logic\" for data analysis. Inspired by Cube.dev, LookML, and dbt MetricFlow."
 ---
 
@@ -39,9 +40,6 @@ const result = AggregationMetricType.parse(data);
 * `min`
 * `max`
 * `count_distinct`
-* `number`
-* `string`
-* `boolean`
 
 
 ---
@@ -100,8 +98,8 @@ Type: `[string, string]`
 | **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is lowered by `parseFilterAST` on the client before the wire; this field admits only the lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`). |
 | **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **timezone** | `string` | optional |  |
 
 ### Nested Shape: `AnalyticsQuery.timeDimensions[number]`
@@ -125,11 +123,11 @@ Type: `[string, string]`
 | **title** | `string` | optional |  |
 | **description** | `string` | optional |  |
 | **sql** | `string` | ✅ | Base SQL statement or Table Name |
-| **measures** | `Record<string, { name: string; label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; … }>` | ✅ | Quantitative metrics |
-| **dimensions** | `Record<string, { name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }>` | ✅ | Qualitative attributes |
+| **measures** | `Record<string, { label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; sql: string; … }>` | ✅ | Quantitative metrics, keyed by metric name: the record key IS the metric's name, published and queried as `<cube>.<key>`. A metric declares no inner `name`. |
+| **dimensions** | `Record<string, { label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; sql: string; … }>` | ✅ | Qualitative attributes, keyed by dimension name: the record key IS the dimension's name, published and queried as `<cube>.<key>`. A dimension declares no inner `name`. |
 | **joins** | `Record<string, { name: string }>` | optional |  |
-| **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
-| **public** | `boolean` | optional (default: `false`) |  |
+| **refreshKey** | `never` | optional | [REMOVED] `analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing read it: no analytics result is cached, so neither `every` nor `sql` ever refreshed anything. Delete the key; every analytics query is computed when it is asked. A refresh cadence is declared again when a result cache exists. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **public** | `boolean` | optional (default: `true`) | Whether the analytics API exposes this cube. Default true (visible). false hides it from GET /analytics/meta and refuses POST /analytics/query and /analytics/sql for it (CUBE_NOT_FOUND). Visibility only: the underlying object's permissions and row-level security still govern its records on every door. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -142,36 +140,29 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique metric ID |
+| **name** | `never` | optional | [REMOVED] `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. Every consumer resolves a metric by its key in `measures` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
-| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or field reference |
-| **format** | `string` | optional |  |
+| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ |  |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("amount"), a relationship path ending in one ("account.amount"), or "*" for a count. Never a SQL expression: a derived value is declared on an ADR-0021 dataset (a measure-scoped filter, or derived: `{ op, of }`). |
+| **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta. |
 
 ### Nested Shape: `Cube.dimensions[string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique dimension ID |
+| **name** | `never` | optional | [REMOVED] `dimensions.<dimension>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the dimension's name. Every consumer resolves a dimension by its key in `dimensions` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a dimension, rename its key in `dimensions` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or column reference |
-| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("status") or a relationship path ending in one ("account.industry"). Never a SQL expression. |
+| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional | For a time dimension. A single interval is its default bucket: a query that groups by this dimension without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity the query states always wins, listed or not. |
 
 ### Nested Shape: `Cube.joins[string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. The KEY this join is declared under in the `joins` record is the FOREIGN-KEY FIELD on this cube's own object, not a second spelling of the object it reaches: the runtime emits `LEFT JOIN <name> <key> ON <base>.<key> = <key>.id` and resolves a member written `<key>.<field>` through that alias. A join keyed after the TARGET object joins on a column the base object does not have, so nothing resolves. |
-
-### Nested Shape: `Cube.refreshKey`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **every** | `string` | optional | Refresh interval (e.g. "1 hour") |
-| **sql** | `string` | optional | SQL to check for data changes |
 
 
 ---
@@ -193,12 +184,12 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique dimension ID |
+| **name** | `never` | optional | [REMOVED] `dimensions.<dimension>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the dimension's name. Every consumer resolves a dimension by its key in `dimensions` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a dimension, rename its key in `dimensions` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or column reference |
-| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("status") or a relationship path ending in one ("account.industry"). Never a SQL expression. |
+| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional | For a time dimension. A single interval is its default bucket: a query that groups by this dimension without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity the query states always wins, listed or not. |
 
 
 ---
@@ -222,12 +213,12 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique metric ID |
+| **name** | `never` | optional | [REMOVED] `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. Every consumer resolves a metric by its key in `measures` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
-| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or field reference |
-| **format** | `string` | optional |  |
+| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ |  |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("amount"), a relationship path ending in one ("account.amount"), or "*" for a count. Never a SQL expression: a derived value is declared on an ADR-0021 dataset (a measure-scoped filter, or derived: `{ op, of }`). |
+| **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta. |
 
 
 ---

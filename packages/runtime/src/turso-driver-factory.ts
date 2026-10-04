@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * libSQL/Turso driver loading — the SINGLE owner for both hosts (#6268).
+ * libSQL/Turso driver loading — the SINGLE owner for both hosts (commit 68f5eccb1).
  *
  * `@objectstack/driver-turso` drags `@libsql/client` (native bindings included),
  * so it is an OPTIONAL install rather than a dependency. Neither host can
@@ -25,14 +25,14 @@
  * engine), and it is the ruling both halves landed under (#5602 / PR #5819 for
  * the CLI, #5820 for the standalone stack).
  *
- * ## #6268 — why this module owns it, and what the hosts still own
+ * ## Commit 68f5eccb1 — why this module owns it, and what the hosts still own
  *
- * Until #6268 this shape existed TWICE: here, and in
+ * Until commit 68f5eccb1 this shape existed TWICE: here, and in
  * `packages/cli/src/utils/storage-driver.ts`. They were kept equal by hand
  * because the dependency direction forbids the reverse import (cli → runtime,
  * never runtime → cli) and each of the two rulings that created them had a
  * single-package file face. Hand alignment had already started to fail — the CLI
- * half moved onto `@objectstack/spec`'s shared driver vocabulary in #6345 while
+ * half moved onto `@objectstack/spec`'s shared driver vocabulary in commit e2798fab7 while
  * this half still carried a private `Set(['turso', 'libsql'])` — which is the
  * #3741 → #3758 shape: one decision, two implementations, one of them fixed.
  *
@@ -42,7 +42,7 @@
  *
  *  - **{@link LoadTursoDriverFactoryOptions.importDriverPackage} — the module
  *    resolution root.** `@objectstack/driver-turso` is an OPTIONAL PEER of
- *    `@objectstack/cli` and, since #12943, of `@objectstack/runtime` too. An
+ *    `@objectstack/cli` and, since commit 090f2302e, of `@objectstack/runtime` too. An
  *    optional peer NAMES the relationship and installs nothing, so the package
  *    still sits in whichever tree the operator installed it into — and a bare
  *    `import('@objectstack/driver-turso')` resolves from the node_modules tree
@@ -55,7 +55,7 @@
  *    own root, for the standalone stack.
  *    ⚠️ Inside THIS workspace pnpm links an optional peer, so the default thunk
  *    resolves here. Every test covering the missing-package arm therefore stages
- *    the absence rather than relying on the layout to supply it (#12943).
+ *    the absence rather than relying on the layout to supply it (commit 090f2302e).
  *  - **{@link LoadTursoDriverFactoryOptions.missingUrlError} — the error TYPE
  *    for a config with no url.** The CLI raises its own `UnsupportedDriverError`
  *    (a CLI-only semantic: `serve.ts` re-throws it as a fatal boot error), which
@@ -70,7 +70,7 @@
  *
  * ## #7314 — and the THIRD loader, one layer down
  *
- * #6268 converged the two HOST-injected loaders. It could not reach the
+ * Commit 68f5eccb1 converged the two HOST-injected loaders. It could not reach the
  * open-core one: `createDefaultDatasourceDriverFactory`'s `turso` arm in
  * `@objectstack/service-datasource`, which serves every door that is not a
  * host's `default` — a datasource created in Setup, `testConnection`, a declared
@@ -136,7 +136,7 @@ export { TURSO_DRIVER_PACKAGE, TURSO_DRIVER_INSTALL_COMMAND, MissingDriverPackag
  * Resolved through `@objectstack/spec`'s shared driver table rather than a local
  * `Set`, so "which spellings mean libSQL" has ONE answer across the CLI, the
  * standalone stack, the open-core factory and the metadata gate. The private
- * `Set(['turso', 'libsql'])` this replaced (#6268) happened to agree with the
+ * `Set(['turso', 'libsql'])` this replaced (commit 68f5eccb1) happened to agree with the
  * table on the day it was written — the table's `turso` row lists exactly those
  * two aliases — and would have silently stopped agreeing the moment a third
  * spelling was added on one side only.
@@ -155,7 +155,7 @@ export interface LoadTursoDriverFactoryOptions {
    *
    * NOT merely a test seam: the specifier resolves from the node_modules tree of
    * whichever module evaluates the `import()`, and the package is an optional
-   * peer of BOTH `@objectstack/cli` and `@objectstack/runtime` (#12943) — a
+   * peer of BOTH `@objectstack/cli` and `@objectstack/runtime` (commit 090f2302e) — a
    * declaration that installs nothing, so which tree actually holds the package
    * is still decided by where the operator installed it. The CLI passes its own
    * thunk so its operators keep resolving the package they installed next to the
@@ -173,7 +173,7 @@ export interface LoadTursoDriverFactoryOptions {
    *
    * Host-chosen because the TYPE is host semantics: the CLI raises its own
    * `UnsupportedDriverError`, which `serve.ts` re-throws as a fatal boot error
-   * and which by the #6268 ruling stays in the CLI. The MESSAGE is passed in
+   * and which by the ruling commit 68f5eccb1 landed stays in the CLI. The MESSAGE is passed in
    * from here, so the wording is still single-sourced.
    *
    * Defaults to the standalone stack's plain `Error` with its `[StandaloneStack]`
@@ -203,7 +203,7 @@ export async function loadTursoDriverFactory(
 ): Promise<IDatasourceDriverFactory> {
   // `as any` on the specifier: the package is an OPTIONAL PEER of
   // `@objectstack/runtime`, never a dependency (that is what "optional" means
-  // here — #12943 declared the relationship, and an optional peer installs
+  // here — commit 090f2302e declared the relationship, and an optional peer installs
   // nothing), so the literal must not be type-resolved: a consumer who did not
   // install it must still compile. Same shape the shared factory uses for the
   // other optional drivers (`default-datasource-driver-factory.ts`).
@@ -219,7 +219,7 @@ export async function loadTursoDriverFactory(
       driverType: 'turso',
       packageName: TURSO_DRIVER_PACKAGE,
       installCommand: TURSO_DRIVER_INSTALL_COMMAND,
-      // One wording for both hosts (#6268). It names BOTH consequences rather
+      // One wording for both hosts (commit 68f5eccb1). It names BOTH consequences rather
       // than picking one, because one message now answers a failed `os serve`
       // boot and a failed `os migrate` / embedded `createStandaloneStack` alike,
       // and an operator who is told only about the other host's symptom would

@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
-// Pins #10322: the printed "Next steps" (and the install-failure remedy) must
+// Pins commit 8d21f7a76: the printed "Next steps" (and the install-failure remedy) must
 // name the SAME package manager the run actually detected — never a
 // hardcoded `npm` regardless of what ran. Before this fix, a newcomer whose
 // install ran with `pnpm` was told to run `npm run dev` / `npm run validate`
-// afterwards — the third of the "three different answers" #10322 measured.
+// afterwards — the third of the "three different answers" commit 8d21f7a76 measured.
 // `packages/cli/src/commands/init.ts`'s own "Next steps" already threads its
 // detected `chosenPm` through; this file is the same contract for
 // `create-objectstack`.

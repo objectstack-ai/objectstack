@@ -701,7 +701,7 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         // [#6245] spec-valid bodies — `webhook` resolves a schema through
         // UNREGISTERED_KIND_SCHEMAS, and this control measures the #7894
         // PERMISSION verdict, so a malformed body would 422 and misread it.
-        // (`theme` was the specimen until #10485 retired that kind out of the
+        // (`theme` was the specimen until commit 35ad101bc retired that kind out of the
         // spelling contract.)
         const singular = responseOf(await dispatcher.handleMetadata(
             '/webhook/midnight_hook', ctx(), 'PUT',

@@ -66,6 +66,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import type { Cube } from '@objectstack/spec/data';
+import type { AnalyticsStrategy } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -87,9 +89,33 @@ const ACCOUNT_FIELDS = ['id', 'name', 'industry', 'region', 'owner', 'created_at
 const BASE_REGION = 'BASE-REGION';
 
 /**
+ * [#20381] The cube a request's strategies read for its name. An inferred cube
+ * lives only in the request that minted it — it is never registered, so
+ * `getMeta` never lists it — and this is the window onto it that remains: a
+ * probe ahead of every built-in strategy records `ctx.getCube(query.cube)` and
+ * declines, so the chain runs exactly as it would without it. A query a gate
+ * refuses inside `ensureCube` reaches no strategy, and the probe sees nothing.
+ */
+function requestCubeProbe() {
+  const seen: Cube[] = [];
+  const strategy: AnalyticsStrategy = {
+    name: 'RequestCubeProbe',
+    priority: 0,
+    canHandle: (query, ctx) => {
+      const cube = ctx.getCube(query.cube!);
+      if (cube) seen.push(cube);
+      return false;
+    },
+    execute: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+    generateSql: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+  };
+  return { strategy, seen };
+}
+
+/**
  * A service with NO registered cube for `crm_account`, so every query takes the
- * auto-inference path. One service per query: `ensureCube` registers what it
- * infers, so a second query on the same service would find the cube.
+ * auto-inference path — every query, since nothing a request infers is
+ * registered (#20381).
  *
  * `executeAggregate` is a two-object double. It serves the base aggregate AND
  * the FK→attribute read the ObjectQL cross-object plan issues against `owner`,
@@ -100,8 +126,10 @@ const BASE_REGION = 'BASE-REGION';
 function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
   const sqls: string[] = [];
   const calls: Array<{ object: string; groupBy?: unknown; filter?: unknown }> = [];
+  const probe = requestCubeProbe();
   const service = new AnalyticsService({
     logger: silentLogger,
+    strategies: [probe.strategy],
     queryCapabilities: () => ({
       nativeSql: !!opts.native,
       objectqlAggregate: !opts.native,
@@ -135,12 +163,12 @@ function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
     getObjectFieldNames: (n: string) =>
       n === 'crm_account' ? (opts.fields ?? ACCOUNT_FIELDS) : undefined,
   } as any);
-  return { service, sqls, calls };
+  return { service, sqls, calls, cubes: probe.seen };
 }
 
 /** Run one query and report everything it produced, however it settled. */
 async function run(query: unknown, opts: { native?: boolean; fields?: string[] } = {}) {
-  const { service, sqls, calls } = makeService(opts);
+  const { service, sqls, calls, cubes } = makeService(opts);
   let rows: unknown[] | undefined;
   let error: (Error & { code?: string; status?: number; field?: string }) | undefined;
   try {
@@ -148,16 +176,17 @@ async function run(query: unknown, opts: { native?: boolean; fields?: string[] }
   } catch (e) {
     error = e as Error & { code?: string };
   }
-  const [meta] = await service.getMeta((query as { cube: string }).cube);
-  const cubePrefix = `${(query as { cube: string }).cube}.`;
+  // The cube this request's strategies were handed — none when a gate refused
+  // the query before any strategy was asked.
+  const cube = cubes[cubes.length - 1];
   return {
     rows,
     error,
     sqls,
     calls,
-    // `getMeta` hands members out cube-prefixed; the KEY is what the mint produced.
-    dimensions: (meta?.dimensions ?? []).map((d) => d.name.replace(cubePrefix, '')).sort(),
-    measures: (meta?.measures ?? []).map((m) => m.name.replace(cubePrefix, '')).sort(),
+    // The KEY is what the mint produced.
+    dimensions: Object.keys(cube?.dimensions ?? {}).sort(),
+    measures: Object.keys(cube?.measures ?? {}).sort(),
   };
 }
 
@@ -323,10 +352,11 @@ describe('[#5739] the object and array `where` spellings converge on one travers
     );
 
     expect(dimensions).toEqual(['industry', 'owner.region']);
-    // The bare column stays BARE: `qualifyAndRegisterJoin` qualifies plain
-    // identifiers only when the cube declares `joins`, and an inferred cube never
-    // does — minting a dotted dimension does not change that (#5353's block 2).
-    expect(sqls[0]).toContain('WHERE (industry = $1 AND "owner"."region" = $2)');
+    // [#21249] The base column is qualified: the statement joins `owner`, so
+    // `industry` beside it is written against the base table, whether or not
+    // the cube declares `joins` — an inferred cube never does. Left bare, a
+    // joined target that also declares `industry` makes it ambiguous.
+    expect(sqls[0]).toContain('WHERE ("crm_account"."industry" = $1 AND "owner"."region" = $2)');
   });
 });
 
@@ -469,16 +499,27 @@ describe('[#5739] the source-field gates keep every rejection they already made'
     expect(sqls).toEqual([]);
   });
 
-  it('leaves a NESTED relation object reading exactly as it did', async () => {
+  it('leaves a NESTED relation object minting exactly as it did — and hands it to the engine as written', async () => {
     // `{owner: {region: 'NA'}}`'s top-level key is the bare `owner`, so the mint
-    // is unchanged by the ruling — and the LEAF `owner.region` reaches the
-    // strategies through `lookupMember`'s synthetic tier, as it always has.
-    const { sqls, dimensions } = await run(
+    // is unchanged by the ruling.
+    //
+    // [#20887] REPLACED second half. It used to assert that the LEAF
+    // `owner.region` reached the native strategy through `lookupMember`'s
+    // synthetic tier (a JOIN). The nested form is the ENGINE's now — the related
+    // object read as the caller, capped (#20802's ruling) — so the engine path
+    // receives it as written, and a host with no engine path is refused loudly,
+    // with no statement run.
+    const engine = await run({ cube: 'crm_account', measures: ['count'], where: { owner: { region: 'NA' } } });
+    expect(engine.dimensions).toEqual(['owner']);
+    expect(engine.calls).toHaveLength(1);
+    expect(JSON.stringify(engine.calls[0].filter)).toContain('{"owner":{"region":"NA"}}');
+    expect(JSON.stringify(engine.calls[0].filter)).not.toContain('owner.region');
+
+    const nativeOnly = await run(
       { cube: 'crm_account', measures: ['count'], where: { owner: { region: 'NA' } } },
       { native: true },
     );
-
-    expect(dimensions).toEqual(['owner']);
-    expect(sqls[0]).toContain('WHERE "owner"."region" = ');
+    expect(nativeOnly.error?.message).toMatch(/nested-relation condition on "owner"/);
+    expect(nativeOnly.sqls).toEqual([]);
   });
 });

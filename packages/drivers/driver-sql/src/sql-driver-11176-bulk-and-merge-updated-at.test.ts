@@ -4,9 +4,9 @@
  * [#11176] The two write doors that did not advance `updated_at`: `updateMany()`
  * on every dialect, and `upsert()`'s merge branch on Postgres and MySQL.
  *
- * ## Not #11067, and the difference is what this file is set up to show
+ * ## Not the defect commit 479fba50d fixed, and the difference is what this file is set up to show
  *
- * #11067 is about `tablesWithTimestamps` being filled only by DDL, so a
+ * Commit 479fba50d is about `tablesWithTimestamps` being filled only by DDL, so a
  * `skipSchemaSync` deployment never stamped. These two are missing on EVERY
  * deployment — so almost every table here is built by the driver's own
  * `initObjects`, with `tablesWithTimestamps` correctly populated. That is the
@@ -57,7 +57,7 @@
  * ## §6 The narrowing, stated as a measurement rather than a claim
  *
  * The upsert stamp reads `observedUpdatedAtColumn` — DDL-observed, or settled
- * `present` by a successful stamped UPDATE — and deliberately NOT #11067's
+ * `present` by a successful stamped UPDATE — and deliberately NOT commit 479fba50d's
  * `presumed` state. `presumed` exists so an UPDATE can speculate and then
  * RECOVER (`updateWithPresumedTimestamp`); the upsert door has no such recovery,
  * and a wrong presumption there would name a missing column in an INSERT column
@@ -66,7 +66,7 @@
  * would break first if the narrowing were ever widened without a recovery.
  *
  * `updateMany` has no such narrowing: it is an UPDATE door, so it reuses
- * #11067's machinery whole (§7).
+ * commit 479fba50d's machinery whole (§7).
  *
  * ## Reverse verification (direction predicted before running)
  *
@@ -87,7 +87,7 @@ const OPTS = { bypassTenantAudit: true } as any;
 /**
  * The instant a row is backdated to before the write under test.
  *
- * A sentinel far in the past rather than a sleep, for #11067's reason: a stamp
+ * A sentinel far in the past rather than a sleep, for commit 479fba50d's reason: a stamp
  * taken a moment after an insert default can legitimately land on the same
  * stored value. Backdating removes the race without weakening the assertion —
  * the stamp either moved to ~now or did not move at all, and those are six
@@ -338,7 +338,7 @@ function measure(cell: DialectCell): void {
     // ── §6 The declared narrowing, measured at the property that would break ──
 
     it('§6 still upserts a hand-migrated table that has NO `updated_at` column', async () => {
-      // The upsert stamp reads the OBSERVED answer, never #11067's presumption,
+      // The upsert stamp reads the OBSERVED answer, never commit 479fba50d's presumption,
       // because this door has no recovery to fall back on. If that narrowing is
       // ever widened without one, this is the call that stops working.
       const id = 'n1';
@@ -349,7 +349,7 @@ function measure(cell: DialectCell): void {
       expect(after.row.title).toBe('b');
     });
 
-    // ── §7 `updateMany` reuses #11067's machinery whole ──────────────────────
+    // ── §7 `updateMany` reuses commit 479fba50d's machinery whole ──────────────────────
 
     it('§7 stamps a `skipSchemaSync` table, and still updates one without the column', async () => {
       // The presumption and its recovery, exercised through the bulk door: it is
@@ -363,7 +363,7 @@ function measure(cell: DialectCell): void {
       expect(presumed.updatedAt).toBeGreaterThan(BACKDATED_MS);
       expect(presumed.row.title).toBe('b');
 
-      // The other half of #11067's pair: a table that genuinely lacks the column
+      // The other half of commit 479fba50d's pair: a table that genuinely lacks the column
       // must NOT gain a new rejection.
       await driver.create(NO_COL, { id: 'n2', title: 'a', status: 'bulk' }, OPTS);
       const touched = await driver.updateMany(NO_COL, { where: { status: 'bulk' } }, { title: 'b' }, OPTS);

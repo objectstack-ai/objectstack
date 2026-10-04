@@ -27,7 +27,7 @@
 //
 // `status` AND `code` (the ADR-0112 envelope), AND that the engine's
 // `setActionActive` was never entered — a gate that refused after the ledger
-// was written would still be #10243, with persistence.
+// was written would still be the leak commit 02b41232d measured, with persistence.
 
 import { describe, it, expect, vi } from 'vitest';
 
@@ -282,7 +282,7 @@ describe('ADR-0126 §5 — the action activation write is operator-gated in wall
 
                 // Sweeping a run surface into a metadata gate would lock every
                 // ordinary user out of the actions built for them — the one
-                // thing the #10243 ruling did not do.
+                // thing the ruling commit 266436a7f landed did not do.
                 expect(statusOf(res)).toBe(200);
                 expect(h.executeAction).toHaveBeenCalled();
             });

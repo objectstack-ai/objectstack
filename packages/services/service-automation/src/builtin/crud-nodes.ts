@@ -18,6 +18,17 @@ import type {
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
+import {
+    collectStoredMetadataFilterFields,
+    ephemeralStoredHashDigest,
+    redactStoredMetadataRows,
+    serveStoredMetadataHashColumnRows,
+    storedMetadataBodyPredicateRefusal,
+    storedMetadataBodyProjection,
+    storedMetadataHashEvaluateRefusal,
+    type StoredHashDigest,
+} from '@objectstack/metadata-protocol';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate, interpolateFilter, type VariableMap } from './template.js';
 import { refuseNode } from '../guard-refusal.js';
@@ -122,6 +133,8 @@ const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
     // until it is worded, which is how the flow author keeps getting a true
     // sentence instead of a fall-through label. Keep it exhaustive.
     primary_key: "the field is the object's primary key and the value sent is not an identifier — the row(s) are identified by the id argument or the filter, so writing it would have overwritten their primary key (pass a scalar id, or put an id set in the filter)",
+    // [#20805]
+    computed: 'the field is a computed formula — its value is computed each time the record is read, so there is nothing to write (leave it out of the fields map)',
 };
 
 function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
@@ -192,6 +205,175 @@ function resolveFieldValues(
             : interpolate(value, variables, context);
     }
     return out;
+}
+
+/**
+ * [#21519] The keyed digest a stored content hash is served under: the data
+ * engine's registered crypto provider's (`getKeyedDigest`, read at the moment
+ * of use, because a host registers the provider after the kernel starts), else
+ * `@objectstack/metadata-protocol`'s process-scoped ephemeral key. The same two
+ * sources, in the same order, the generic data door reads, so the hash this
+ * node serves is the hash the door serves for the same row: one key, never a
+ * second one.
+ */
+function storedHashDigestOf(data: IDataEngine): StoredHashDigest {
+    const accessor = (data as { getKeyedDigest?: () => StoredHashDigest | undefined }).getKeyedDigest;
+    const provider = typeof accessor === 'function' ? accessor.call(data) : undefined;
+    return provider ?? ephemeralStoredHashDigest;
+}
+
+/**
+ * [#21519] Run one `get_record` read and serve its answer the way the generic
+ * data door serves the same rows.
+ *
+ * The stored-metadata-body family (`sys_metadata` / `sys_metadata_history`,
+ * judged by the family's own predicate, `isStoredMetadataBodyObject`) holds a
+ * stored metadata body, credential material included, and a content hash over
+ * that whole body. Every door that serves either serves the body as its type's
+ * read projection and the hash in keyed form. A flow's read node is such a
+ * door: what it reads becomes the run's output, a flow caller is handed that
+ * back, and any record the flow writes from it is a copy. Both run identities
+ * are served the same way: `runAs: 'system'` reads elevated, so the engine
+ * cannot tell this read from the platform's own internal readers, which need
+ * the stored form. The rule is therefore applied here, at the node.
+ *
+ * Built only from the door's own functions (`@objectstack/metadata-protocol`),
+ * never a copy: the projection (`storedMetadataBodyProjection`, which adds the
+ * `type` column a body-only projection needs to choose its redactor; it is
+ * taken back off the served rows), the redactor (`redactStoredMetadataRows`)
+ * and the keyed serve (`serveStoredMetadataHashColumnRows`, under
+ * {@link storedHashDigestOf}). Any other object is read and returned as is.
+ */
+async function serveFamilyRead<A>(
+    data: IDataEngine,
+    objectName: string,
+    fields: string[] | undefined,
+    read: (fields: string[] | undefined) => Promise<A>,
+): Promise<A> {
+    if (!isStoredMetadataBodyObject(objectName)) return read(fields);
+    const projection = storedMetadataBodyProjection(objectName, fields);
+    const answer = await read(projection.fields as string[] | undefined);
+    const opts = { dropType: projection.addedType };
+    const digest = storedHashDigestOf(data);
+    if (Array.isArray(answer)) {
+        return (await serveStoredMetadataHashColumnRows(
+            objectName,
+            redactStoredMetadataRows(objectName, answer, opts),
+            digest,
+        )) as A;
+    }
+    if (answer !== null && typeof answer === 'object') {
+        const [served] = await serveStoredMetadataHashColumnRows(
+            objectName,
+            redactStoredMetadataRows(objectName, [answer], opts),
+            digest,
+        );
+        return served as A;
+    }
+    return answer;
+}
+
+/**
+ * [#21623] Refuse a node whose filter EVALUATES the stored-metadata family's
+ * body or content hash, the way the generic data door refuses the same filter.
+ *
+ * {@link serveFamilyRead} closes the node's serve and copy exits; this closes
+ * its evaluate exit. A filter over the stored body column, or over a stored
+ * content-hash column, is evaluated against the stored values row by row, so
+ * whether a row comes back answers the predicate even though the row itself
+ * is served projected: a guessed prefix of withheld credential material, or a
+ * guessed hash, returns the row exactly when it is right (the predicate oracle
+ * the family's refusals name). Under `runAs: 'system'` the engine reads
+ * elevated and cannot tell this read from the platform's own internal
+ * readers, so the rule is applied here, before the engine is asked.
+ *
+ * Built only from the door's own functions (`@objectstack/metadata-protocol`),
+ * in the door's own order, never a copy:
+ *  - the columns the filter reads come from the family's ONE filter-field
+ *    collector (`collectStoredMetadataFilterFields`): every key's head and
+ *    every cross-field `{ $field }` comparand, at any depth;
+ *  - the body refusal (`storedMetadataBodyPredicateRefusal`) is asked first,
+ *    then the content-hash refusal (`storedMetadataHashEvaluateRefusal`).
+ *
+ * `query` is the option bag the node hands the engine, so the collector reads
+ * exactly the filter the engine would run: the INTERPOLATED one, since a
+ * `{token}` can resolve to a whole condition (a `$and` list, a comparand) whose
+ * columns the authored template does not show. The node configs declare no
+ * sort and no grouping, so the refusals are fed filter fields only.
+ *
+ * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong,
+ * and re-running it unchanged never succeeds) carrying the door's own error
+ * code, read off the door's refusal rather than spelled again. `undefined`
+ * outside the family ({@link isStoredMetadataBodyObject}) and for a filter that
+ * reads neither column.
+ */
+function storedMetadataFilterRefusal(
+    nodeType: string,
+    objectName: string,
+    query: { where: Record<string, unknown> },
+): (ReturnType<typeof refuseNode> & { code: string }) | undefined {
+    if (!isStoredMetadataBodyObject(objectName)) return undefined;
+    const filterFields = collectStoredMetadataFilterFields(objectName, query);
+    const refuse = (refusal: Error) =>
+        ({ ...refuseNode(`${nodeType}: ${refusal.message}`), code: (refusal as Error & { code: string }).code });
+    const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(objectName, { filterFields });
+    if (bodyPredicateRefusal) return refuse(bodyPredicateRefusal);
+    const hashEvaluateRefusal = storedMetadataHashEvaluateRefusal(objectName, { filterFields });
+    if (hashEvaluateRefusal) return refuse(hashEvaluateRefusal);
+    return undefined;
+}
+
+/** [#21624] What each write node would have done, in its refusal's own words. */
+const STORED_METADATA_WRITE_VERB = {
+    create_record: 'create a record in',
+    update_record: 'update',
+    delete_record: 'delete from',
+} as const;
+
+/**
+ * [#21624] Refuse a WRITE node aimed at the stored-metadata family
+ * (`sys_metadata` / `sys_metadata_history`, judged by the family's own
+ * predicate, {@link isStoredMetadataBodyObject}).
+ *
+ * The family has one writer for app-authored work: the metadata protocol,
+ * where a change is validated and its provenance recorded (the ruling that
+ * refuses a hook body bound to these tables, or a body's direct write to them,
+ * applied to its own reason: a flow is app-authored automation too). Under
+ * `runAs: 'system'` the engine writes elevated and cannot tell this write from
+ * the platform's own internal writers, so the rule is applied here, at the
+ * node. ⛔ Not routed through the protocol from inside the node: that would be
+ * a second write path into the family.
+ *
+ * Judged on the object name the engine would be handed, before the node
+ * resolves its `filter` or its `fields`, so a refused node answers the same
+ * whatever it names: its filter is never evaluated against a family table
+ * (the write nodes' evaluate exit) and nothing it would write is computed.
+ *
+ * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong, and
+ * re-running it unchanged never succeeds) carrying the standard catalog's
+ * `PERMISSION_DENIED`: the code the data door's in-process write path answers
+ * a non-platform principal's write to these tables with in a secured
+ * composition, and the code the body-write boundary for the same ruling
+ * carries. No code is minted. `undefined` for any other object.
+ *
+ * Its message names the node, the verb and the table, then ends on the
+ * family's ONE prescription, `STORED_METADATA_BODY_PRESCRIPTION`, imported from
+ * `@objectstack/spec/kernel`: the sentence `FlowSchema`'s save-time refusal of
+ * the same node ends on, so the save and the run tell an author the same thing.
+ */
+function storedMetadataWriteRefusal(
+    nodeType: keyof typeof STORED_METADATA_WRITE_VERB,
+    objectName: string,
+): (ReturnType<typeof refuseNode> & { code: string }) | undefined {
+    if (!isStoredMetadataBodyObject(objectName)) return undefined;
+    return {
+        ...refuseNode(
+            `${nodeType}: refusing to ${STORED_METADATA_WRITE_VERB[nodeType]} '${objectName}': it holds stored `
+            + 'metadata, and a flow may not write it directly, so the write was not run. '
+            + STORED_METADATA_BODY_PRESCRIPTION,
+        ),
+        code: StandardErrorCode.enum.PERMISSION_DENIED,
+    };
 }
 
 /**
@@ -277,6 +459,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const limit = cfg.limit;
                 const outputVariable = cfg.outputVariable;
 
+                // [#21623] A filter that evaluates the stored-metadata family's
+                // body or content hash is refused before the engine is asked,
+                // with the data door's own code, under either run identity. It
+                // reads the interpolated filter, in the `where` slot both
+                // engine reads below hand it in.
+                const familyRefusal = storedMetadataFilterRefusal('get_record', objectName, { where: filter });
+                if (familyRefusal) return familyRefusal;
+
                 const data = getData();
                 if (!data) {
                     ctx.logger.warn(`[get_record] no data engine; skipping ${objectName}`);
@@ -286,9 +476,12 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #1888 — honor flow.runAs: read under the run's effective identity
                 // (system → RLS-bypassing; user → the triggering user).
                 const dataCtx = resolveRunDataContext(context);
+                // [#21519] A read of the stored-metadata family is served the
+                // data door's way under either identity: body projected, hash keyed.
                 try {
                     if (limit && limit > 1) {
-                        const records = await data.find(objectName, { where: filter, fields, limit, context: dataCtx });
+                        const records = await serveFamilyRead(data, objectName, fields, (projection) =>
+                            data.find(objectName, { where: filter, fields: projection, limit, context: dataCtx }));
                         if (outputVariable) variables.set(outputVariable, records);
                         // #4354 — the `selected` half of the broken-sweep signal:
                         // this is the count that made #4347 diagnosable at all
@@ -299,7 +492,8 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             metrics: { selected: Array.isArray(records) ? records.length : 0 },
                         };
                     }
-                    const record = await data.findOne(objectName, { where: filter, fields, context: dataCtx });
+                    const record = await serveFamilyRead(data, objectName, fields, (projection) =>
+                        data.findOne(objectName, { where: filter, fields: projection, context: dataCtx }));
                     if (outputVariable) variables.set(outputVariable, record);
                     return {
                         success: true,
@@ -337,6 +531,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const cfg = parsed.config;
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('create_record: objectName required');
+                // [#21624] A stored-metadata family target is refused before
+                // anything is resolved or written, under either run identity.
+                const familyRefusal = storedMetadataWriteRefusal('create_record', objectName);
+                if (familyRefusal) return familyRefusal;
 
                 // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
                 // evaluated; every other value interpolates exactly as before.
@@ -412,7 +610,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         metrics: { acted: 1 },
                     };
                 } catch (err) {
-                    // #14419 — `engine.insert` (#14095) raises `DuplicateRecordError`
+                    // Commit c5a7448d5 — `engine.insert` (#14095) raises `DuplicateRecordError`
                     // for a unique-constraint violation, carrying the ADR-0112
                     // `code: 'DUPLICATE_RECORD'` this executor used to throw away by
                     // folding every failure into one opaque string. Surfacing it here
@@ -436,9 +634,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     // dependency here via `@objectstack/spec`).
                     //
                     // Deliberately narrow to THIS verb: `update_record` / `delete_record`
-                    // collapse identically, but `engine.update` still leaks the raw
-                    // driver error (#14390, not yet fixed) — those node results have
-                    // nothing structured to surface yet, so they are untouched here.
+                    // collapse identically; `engine.update` gained the same `DUPLICATE_RECORD`
+                    // envelope for a unique violation (commit 9d7f7259f), but those node results
+                    // are untouched here — this repair was scoped to `create_record` alone.
                     const rawCode =
                         err && typeof err === 'object' && 'code' in err
                             ? (err as { code?: unknown }).code
@@ -486,6 +684,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const cfg = parsed.config;
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('update_record: objectName required');
+                // [#21624] Before the filter is resolved, so a family target's
+                // filter is never evaluated, under either run identity.
+                const familyRefusal = storedMetadataWriteRefusal('update_record', objectName);
+                if (familyRefusal) return familyRefusal;
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 const filterResult = resolveNodeFilter(
@@ -580,6 +782,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const cfg = parsed.config;
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('delete_record: objectName required');
+                // [#21624] Before the filter is resolved, so a family target's
+                // filter is never evaluated, under either run identity.
+                const familyRefusal = storedMetadataWriteRefusal('delete_record', objectName);
+                if (familyRefusal) return familyRefusal;
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 // The highest-stakes of the three: an erased condition here is the

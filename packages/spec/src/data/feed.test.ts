@@ -42,7 +42,7 @@ describe('SYS_ACTIVITY_BUILTIN_TYPES (#11807)', () => {
   });
 
   /**
-   * The vocabulary is OPEN (#11507): the published shape must not be able to
+   * The vocabulary is OPEN (commit 88b9d749a): the published shape must not be able to
    * reject anything. A plain readonly tuple has no parse/validate affordance;
    * a z.enum here would read as a value-domain validator and re-close the
    * vocabulary the day someone calls .parse() with it.

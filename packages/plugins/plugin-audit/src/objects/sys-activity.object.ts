@@ -56,8 +56,8 @@ export const SysActivity = ObjectSchema.create({
 
     /**
      * The activity kind — an OPEN, author-extensible vocabulary whose declared
-     * options are the platform's BUILT-IN set. Maintainer ruling 2026-08-24 on
-     * #11507 (direction 4 of the four that card framed), which the `description`
+     * options are the platform's BUILT-IN set. Maintainer ruling 2026-08-24,
+     * executed by commit 88b9d749a (direction 4 of the four weighed), which the `description`
      * below carries into the contract; this comment carries the reasoning.
      *
      * ## Why the declaration used to lie
@@ -89,7 +89,7 @@ export const SysActivity = ObjectSchema.create({
      *
      *  - Do not "fix" this by enforcing the enum on system-owned writes, and do
      *    not narrow `activityMilestones[].type`. Either is direction 3; re-open
-     *    #11507 first.
+     *    the ruling (commit 88b9d749a) first.
      *  - Keep the built-in set declared and censused — open is not undeclared.
      *    The writer census lives in `sys-activity-type-vocabulary.test.ts`, and
      *    it inventories BUILT-IN values only; an author's value belongs to the
@@ -117,8 +117,8 @@ export const SysActivity = ObjectSchema.create({
           + 'vocabulary, not a closed enum: metadata authors may contribute their own values '
           + '(sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an '
           + 'undeclared value is stored verbatim rather than rejected. Consumers must render '
-          + 'an unknown value instead of assuming this list is exhaustive (maintainer ruling '
-          + '2026-08-24, #11507).',
+          + 'an unknown value instead of assuming this list is exhaustive: the vocabulary is '
+          + 'open by decision, not a gap awaiting enforcement.',
         required: true,
         readonly: true,
         searchable: true,
@@ -170,7 +170,7 @@ export const SysActivity = ObjectSchema.create({
       group: 'Target',
     }),
 
-    // [#11374 route A] The value is a record id of the object `object_name`
+    // [commit f64668d3c, route A] The value is a record id of the object `object_name`
     // names — written by `audit-writers.ts` (`record_id: recordId`, the id of
     // the very row the mutation touched). The bound is derived by
     // referenced-column transitivity from the id itself, never guessed:

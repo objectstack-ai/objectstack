@@ -73,9 +73,9 @@
  * A 404 has at least four causes and the card refuses to let them merge, because
  * collapsing them reports `objectstack-ai/cloud` references as phantom numbers:
  *
- *   cross-repo-unjudged   the citation NAMES another repo (`owner/repo#N` or
- *                         `repo#N`). ⛔ Never resolved and never a finding: one
- *                         credential reads one board, exactly the call H19 makes.
+ *   cross-repo-unjudged   the citation NAMES another repo (`owner/repo#N`, or a
+ *                         `KNOWN_REPOSITORIES` name). ⛔ Never resolved, never a
+ *                         finding: one credential reads one board, as H19 does.
  *   never-issued          N is beyond this repo's allocation frontier, so the
  *                         number was never minted. Decided from the frontier.
  *   transferred           the number was minted and the WEB endpoint still
@@ -104,9 +104,9 @@
  *     #5`, `ADR §3.10 #2`) -- zero of them name an issue.
  *   - Six digits maximum, and zero such tokens exist in the declared surfaces,
  *     which is what keeps a six-digit hex colour out of the finding set.
- *   - `NON_CITATION_HEADS`: `Directive #14`, `batch #127`, `re-charter #26` and
- *     their siblings are ordinals in a numbering system that is not the board's.
- *     405 sites in package source, measured.
+ *   - `NON_CITATION_HEADS`: `Directive #14`, `batch #127`, `PKCS#11` and their
+ *     siblings are ordinals in a numbering system that is not the board's; a
+ *     row stays only while it protects a measured population (#20636 closeout).
  *
  * Source files are read through `scripts/symbol-anchors.mjs#commentProse`, so a
  * gate's own fixtures and any `#N` inside a string literal are blanked -- the
@@ -321,40 +321,229 @@ export const CITATION_MIN_DIGITS = 2;
 export const CITATION_MAX_DIGITS = 6;
 
 /**
+ * ⭐ THE QUALIFIER IS A CLOSED SET (#20330). A token joined to `#N` is a
+ * CANDIDATE, and it names a repository only when it is an `owner/repo` form or
+ * a name in this table; any other prefix is PROSE, and the `#N` after it is
+ * THIS repository's and is judged. Matched case-insensitively (GitHub's
+ * repository names are), so `Framework#N` and `OBJECTUI#N` read as their
+ * repositories.
+ *
+ * Why closed, measured on `288611e3e5` (2026-09-29) over the declared surfaces:
+ * the open grammar took every `word#N` as a repository, and 27 distinct
+ * candidates sat behind 1,655 sites. 306 of them were prose -- `pre-#N` 284,
+ * `post-#N` 12, and `Pre-`/`Post-`/`PRE-`/`POST-` 10 -- so a dead number spelled
+ * `pre-#12248` was classed cross-repo and never judged, the hole #20330 names.
+ * The rest were ordinals (`PD#12`, `OQ#10`, `Prime-Directive-#12`, `PKCS#11`),
+ * which `NON_CITATION_HEADS` now reads once the candidate is refused.
+ *
+ * ⛔ A name in this table is a measured citation population, never a guess.
+ * A repository the tree cites that is missing here reads as THIS repository:
+ * add its row, or write `owner/repo#N`, which is always a repository.
+ *
+ *   self     the name is THIS repository (the classifier judges it here).
+ *   joined   recognised only JOINED to its number (`ui#N`), never in the prose
+ *            form `REPO PR #N` below -- `UI #N` is ordinary English.
+ */
+export const KNOWN_REPOSITORIES = Object.freeze([
+  Object.freeze({
+    name: 'objectstack', slug: 'objectstack-ai/objectstack', self: true,
+    why: 'This repository. 111 `objectstack#N` sites, e.g. `packages/client/src/index.ts`.',
+  }),
+  Object.freeze({
+    name: 'framework', slug: 'objectstack-ai/objectstack', self: true,
+    why: "This repository's FORMER name: `git ls-remote https://github.com/objectstack-ai/framework` "
+      + 'answered this repository\'s refs (HEAD `288611e3e5` on both, 2026-09-29) while a nonexistent '
+      + 'control name exited 128 and `objectui` answered its own. 257 sites, `Framework#N` included.',
+  }),
+  Object.freeze({
+    name: 'objectui', slug: 'objectstack-ai/objectui',
+    why: 'The Studio/Console sibling. 684 sites across `objectui#N` and `objectstack-ai/objectui#N`.',
+  }),
+  Object.freeze({
+    name: 'ui', slug: 'objectstack-ai/objectui', joined: true,
+    why: 'A short alias for objectui, 11 sites: `ui#6837` / `ui#6206` / `ui#6207` measured as objectui\'s '
+      + 'records (`objectstack-ai/ui` does not exist). Joined only.',
+  }),
+  Object.freeze({
+    name: 'cloud', slug: 'objectstack-ai/cloud',
+    why: 'The commercial sibling (private: one credential cannot read it). 222 sites.',
+  }),
+  Object.freeze({
+    name: 'hotcrm', slug: 'objectstack-ai/hotcrm',
+    why: 'A public downstream application. 25 sites, `objectstack-ai/hotcrm#673` spelled in full once.',
+  }),
+  Object.freeze({
+    name: 'hotcrm-heimao', slug: null,
+    why: 'A downstream application repository; its owner is NOT MEASURED (not public under '
+      + 'objectstack-ai). 1 site, `packages/spec/src/data/field.zod.ts`.',
+  }),
+  Object.freeze({
+    name: 'os-tianshun-mtc', slug: null,
+    why: 'A downstream application repository; owner NOT MEASURED. 2 sites, '
+      + '`packages/lint/src/validate-security-posture.ts`.',
+  }),
+  Object.freeze({
+    name: 'os-project-titanwind-ehr', slug: null,
+    why: 'A downstream application repository; owner NOT MEASURED. 1 site, '
+      + '`packages/objectql/src/validation/rule-validator.ts`.',
+  }),
+]);
+
+const KNOWN_BY_NAME = new Map(KNOWN_REPOSITORIES.map((r) => [r.name, r]));
+const KNOWN_BY_SLUG = new Map(KNOWN_REPOSITORIES.filter((r) => r.slug)
+  .map((r) => [`${r.slug.split('/')[0]}/${r.name}`, r]));
+
+/**
+ * The repository a candidate qualifier NAMES, lower-cased -- its slug when
+ * known, a former name resolved to the current one -- or `null` when the
+ * candidate is prose. The ONE recogniser: extraction, the board's probe set and
+ * the classifier all ask it, so the three can never disagree about a token.
+ */
+export function repositoryOf(candidate) {
+  if (!candidate) return null;
+  const text = candidate.toLowerCase();
+  if (text.includes('/')) {
+    const known = KNOWN_BY_SLUG.get(text);
+    return known ? (known.slug ?? known.name) : text;
+  }
+  const known = KNOWN_BY_NAME.get(text);
+  return known ? (known.slug ?? known.name) : null;
+}
+
+/**
+ * Does this citation name the repository the board reads? A bare `#N` does, by
+ * convention; so does any qualifier that resolves to `ownerRepo` or its name.
+ */
+export function namesThisRepository(cite, ownerRepo) {
+  const repo = repositoryOf(cite.qualifier);
+  if (!repo) return true;
+  const own = ownerRepo.toLowerCase();
+  return repo === own || repo === own.split('/')[1];
+}
+
+/**
+ * The PROSE spelling of a qualifier, `objectui PR #10264` / `cloud #2937`,
+ * matched against the text that ENDS immediately before a bare `#`. Measured on
+ * `288611e3e5`: 27 sites, and on every one the named repository's record is the
+ * one the sentence describes (objectui's board read for each objectui number)
+ * while this repository's same number is unrelated -- 3 of them
+ * (`objectui PR #8758`) were census deaths here that are not deaths at all.
+ * ⛔ A qualifier does NOT carry across a pair: in `cloud#1013 and #10645` the
+ * second number is this repository's (measured over the 48 pair sites -- the
+ * `,` / `and` pairs name this repository's number, `/` ones mostly the
+ * qualifier's but not always), so each number of a pair is qualified on its own.
+ */
+const PROSE_QUALIFIER_RE = new RegExp(
+  `(?:^|[^\\w/-])(${KNOWN_REPOSITORIES.filter((r) => !r.joined).map((r) => r.name.replace(/[.-]/g, '\\$&')).join('|')})`
+  + '\\s+(?:(?:PR|issue)\\s+)?$',
+  'i',
+);
+
+/**
  * One citation. The leading group is CONTEXT (consumed so `a/b#12` and a bare
  * `#12` cannot both match the same characters), group 2 is the optional
- * repository qualifier and group 3 is the number.
+ * CANDIDATE qualifier -- `repositoryOf` decides whether it names a repository
+ * -- and group 3 is the number.
+ *
+ * ⭐ THE EXTRACTOR-SPELLING CLOSEOUT (#20636). Two exclusions here were wider
+ * than anything they protected, and each hid real citations from the diff gate
+ * and the census alike. Measured on `3693a1b50d` (2026-09-30) over the declared
+ * surfaces, every arm judged against one enumerated board (frontier #20959):
+ *
+ *   A hyphen after the number, `(?![\w-])`. It hid 58 `#N-word` sites
+ *     (`#13398-class`, `#5347-A`, `ui#6206-B`), 1 of them dead, and protected
+ *     NONE there: 0 numeric ranges, 0 slugs, 0 hex-like tokens. Repo-wide the
+ *     one non-citation shape it covered is a markdown in-page heading anchor,
+ *     `[13. Risks](#13-risks--mitigations)` (16 lines, all in `docs/design/**`
+ *     and `skills/**`), which keeps a narrower guard: the `](` row of
+ *     `NON_CITATION_HEADS`. Now `(?!\w)`, which still keeps `#12ab34` out.
+ *   A `/` before the `#`. It hid 528 sites, 10 of them dead: 523 slash-joined
+ *     second numbers (`#7737/#10629`) and 5 `TOKEN/#N` (`ADR-0049/#1888`), and
+ *     protected no path and no URL fragment there. What it does protect is a
+ *     CANDIDATE starting mid-path -- `https://host/docs/page#12` would read
+ *     `page` as prose and judge #12 -- so it stays on that arm only, and there
+ *     it yields to a `/` that joins onto a number (`#3076/objectui#2614`).
+ *
+ * A slash-joined continuation reads as its chain; see `extractCitations`.
  */
 export const CITATION_RE = new RegExp(
-  '(^|[^\\w#/-])(?:([A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?)#|#)'
-  + `(\\d{${CITATION_MIN_DIGITS},${CITATION_MAX_DIGITS}})(?![\\w-])`,
+  '(^|[^\\w#-])(?:(?<!(?:^|\\D)/)([A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?)#|#)'
+  + `(\\d{${CITATION_MIN_DIGITS},${CITATION_MAX_DIGITS}})(?!\\w)`,
   'g',
 );
 
 /**
+ * The URL spelling (#20636): `https://github.com/OWNER/REPO/issues/N` or
+ * `/pull/N` carries no `#`, so `CITATION_RE` never saw it. Measured on
+ * `3693a1b50d`: 57 sites in the declared surfaces (56 in package comments, 1 on
+ * a release page), 4 of them dead. Its qualifier is the URL's own `OWNER/REPO`,
+ * read by `repositoryOf` like any other, so an `objectstack-ai/framework` URL is
+ * this repository and every other repository's is cross-repo, never a finding.
+ *
+ * ⛔ Not `check:doc-authoring`'s: that gate asks whether a runtime STRING carries
+ * a tracker reference at all, and reads string literals; this one asks whether a
+ * citation RESOLVES, and reads comment prose. The projections are disjoint, so
+ * neither counts the other's sites -- the same tree held 2 URL sites in strings
+ * (`packages/runtime/src/route-ledger.ts`) against 56 in comments.
+ */
+export const CITATION_URL_RE = /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)\/(?:issues|pull)\/(\d+)/g;
+
+/**
  * Numbering systems that are NOT the board's, matched against the text that
  * ENDS immediately before the `#`. Every row is a measured population on this
- * tree, not a hypothetical.
+ * tree, not a hypothetical -- and a row that protects nothing is a blind spot,
+ * not a precaution: the grammar's two-digit floor already keeps a one-digit
+ * ordinal (`acceptance #5`, `clause #2`) out, so a head only earns a row for
+ * the two-digit-and-up ordinals it measurably covers.
+ *
+ * Retired by the #20636 closeout, each protecting 0 sites repo-wide and hiding
+ * board citations (measured on `3693a1b50d`; "hid" counts the declared surfaces
+ * and, where noted, the deferred test files):
+ *
+ *   `re-charter`  0 left; the 26 it hid (`re-charter #13135`, dead) were rewritten
+ *   `acceptance`  1 (`the silent acceptance #6132 closed`, live)
+ *   `clause`      0, and 4 in test files (`the clause #18510 removed`)
+ *   `option`      1 (`option #14088 gave`, live), and 1 under `scripts/**`
+ *   `§`           0, and 4 in test files (`§6 #11176's decisions`)
  */
 export const NON_CITATION_HEADS = Object.freeze([
   Object.freeze({ re: /(?:prime\s+)?directive\s*$/i, why: 'AGENTS.md Prime Directive ordinals' }),
   Object.freeze({ re: /(?:^|[^a-z])pd\s*$/i, why: 'the abbreviated Prime Directive spelling' }),
   Object.freeze({ re: /(?:decision\s+)?batch\s*$/i, why: 'maintainer decision-batch ordinals' }),
-  Object.freeze({ re: /re-charter\s*$/i, why: 're-charter round ordinals' }),
-  Object.freeze({ re: /acceptance\s*$/i, why: "an issue's own acceptance-criterion ordinals" }),
-  Object.freeze({ re: /clause\s*$/i, why: 'clause ordinals' }),
-  Object.freeze({ re: /option\s*$/i, why: 'option ordinals inside a ruling' }),
-  Object.freeze({ re: /§\s*[\d.]*\s*$/, why: 'a section ordinal' }),
+  /* The two rows below came due when the qualifier closed (`KNOWN_REPOSITORIES`):
+   * both were read as repositories before, so they were never judged at all. */
+  Object.freeze({ re: /(?:^|[^a-z])oq\s*$/i, why: "an ADR's open-question ordinals (`ADR-0076 OQ#10`), 10 sites" }),
+  Object.freeze({ re: /(?:^|[^a-z])pkcs\s*$/i, why: "a standard's own numbering (`PKCS#11`), 1 site" }),
+  /* The narrower guard the hyphen exclusion leaves behind (see `CITATION_RE`). */
+  Object.freeze({ re: /\]\($/, why: "a markdown link's in-page heading anchor (`[13. Risks](#13-risks--mitigations)`), 16 lines outside the declared surfaces" }),
 ]);
 
-/** Which of `NON_CITATION_HEADS` excuses this match, or `null`. */
+/**
+ * Which of `NON_CITATION_HEADS` excuses this match, or `null`. A hyphen that
+ * joins a head to its `#` is the same head -- `Prime-Directive-#12`, 2 sites.
+ */
 export function nonCitationHead(before) {
-  for (const row of NON_CITATION_HEADS) if (row.re.test(before)) return row;
+  const head = before.replace(/-+$/, '');
+  for (const row of NON_CITATION_HEADS) if (row.re.test(head)) return row;
   return null;
 }
 
 /**
- * Extract every citation from one file's text.
+ * Extract every citation from one file's text, in line and column order.
+ *
+ * ⭐ A SLASH-JOINED CONTINUATION reads as its chain (#20636). In `#A/#B` the
+ * second number is written with nothing of its own before the `#`, so it takes
+ * the first one's reading: bare after a bare or prose head (513 chains on
+ * `3693a1b50d`), the chain's repository after a qualified one, and an ordinal
+ * after an ordinal. The qualified case is measured, not assumed: of the 8
+ * chains headed by another repository there, the 5 on objectui's public board
+ * (`objectui#2715/#2717` and four more) each name objectui's record -- the
+ * issue, then the pull request that fixed it -- while this repository's same
+ * numbers are unrelated; the other 3 (`cloud`, `hotcrm-heimao`) are boards one
+ * credential cannot read, so they stay unjudged exactly as they were. ⛔ Only a
+ * `/` JOINED to the number continues a chain: `objectui#1 / #2` and
+ * `objectui#1 + #2` are two readings, and a second number that carries its own
+ * qualifier (`#3076/objectui#2614`) is read by that qualifier.
  *
  * @param {string} text  the file's bytes
  * @param {{ projection?: 'whole-file'|'comment-prose', onlyLines?: Set<number> }} [opts]
@@ -368,19 +557,42 @@ export function extractCitations(text, { projection = 'whole-file', onlyLines = 
   projectedLines.forEach((line, ix) => {
     const lineNo = ix + 1;
     if (onlyLines && !onlyLines.has(lineNo)) return;
+    const context = (sourceLines[ix] ?? '').trim().slice(0, 160);
+    const found = [];
     const re = new RegExp(CITATION_RE.source, 'g');
+    let chain = null;
     let m;
     while ((m = re.exec(line)) !== null) {
-      const before = line.slice(0, m.index + m[1].length);
-      if (!m[2] && nonCitationHead(before)) continue;
-      out.push({
-        number: Number(m[3]),
-        qualifier: m[2] ?? null,
-        line: lineNo,
-        raw: `${m[2] ?? ''}#${m[3]}`,
-        context: (sourceLines[ix] ?? '').trim().slice(0, 160),
-      });
+      /* Everything up to the `#`, a refused candidate included: `pre-` is prose,
+       * and `PD` in `PD#12` is the head `NON_CITATION_HEADS` reads. */
+      const hashAt = m.index + m[0].length - m[3].length - 1;
+      const before = line.slice(0, hashAt);
+      const continues = m[1] === '/' && !m[2] && chain !== null && chain.end === m.index;
+      let reading = continues ? chain.reading : null;
+      if (!reading) {
+        const joined = repositoryOf(m[2]) ? m[2] : null;
+        const prose = joined ? null : PROSE_QUALIFIER_RE.exec(before);
+        const qualifier = joined ?? prose?.[1] ?? null;
+        reading = {
+          qualifier,
+          excused: !qualifier && nonCitationHead(before) !== null,
+          spelled: joined ?? (prose ? before.slice(prose.index + prose[0].indexOf(prose[1])) : ''),
+        };
+      }
+      chain = { end: re.lastIndex, reading };
+      if (reading.excused) continue;
+      found.push({ at: hashAt, cite: { number: Number(m[3]), qualifier: reading.qualifier, line: lineNo, raw: `${reading.spelled}#${m[3]}`, context } });
     }
+    for (const u of line.matchAll(new RegExp(CITATION_URL_RE.source, 'g'))) {
+      const number = Number(u[3]);
+      /* `[#15325](https://github.com/…/issues/15325)` is ONE citation: the link's
+       * text already carries it, so the target is not counted a second time. */
+      const link = /\[[^\]]*\]\($/.exec(line.slice(0, u.index));
+      if (link && found.some((f) => f.cite.number === number && f.at > link.index && f.at < u.index)) continue;
+      found.push({ at: u.index, cite: { number, qualifier: `${u[1]}/${u[2]}`, line: lineNo, raw: u[0], context } });
+    }
+    found.sort((a, b) => a.at - b.at);
+    for (const f of found) out.push(f.cite);
   });
   return out;
 }
@@ -431,14 +643,13 @@ export function boardFromSets({ numbers, pulls = [], frontier, source }) {
  * @param {{ ownerRepo?: string, transferProbe?: (n:number) => ('transferred'|'absent'|null) }} [opts]
  */
 export function classifyCitation(cite, board, { ownerRepo = '', transferProbe = null } = {}) {
-  if (cite.qualifier) {
-    const [owner, name] = ownerRepo.split('/');
-    const namesThisRepo = cite.qualifier === ownerRepo || (name && cite.qualifier === name);
-    /* ⛔ A qualified citation is never resolved against this board. One
-     * credential reads one repository -- the call `check-half-states` makes for
-     * H19, and the reason the card refuses to let the cloud references be
-     * reported as phantom numbers. */
-    if (!namesThisRepo) return { cause: CAUSE.CROSS_REPO_UNJUDGED, detail: `names ${cite.qualifier}, a repository this credential does not read` };
+  /* ⛔ A citation naming ANOTHER repository is never resolved against this
+   * board. One credential reads one repository -- the call `check-half-states`
+   * makes for H19, and the reason the card refuses to let the cloud references
+   * be reported as phantom numbers. A qualifier that names no repository at all
+   * (`pre-`) is prose, and the number is this board's. */
+  if (!namesThisRepository(cite, ownerRepo)) {
+    return { cause: CAUSE.CROSS_REPO_UNJUDGED, detail: `names ${cite.qualifier}, a repository this credential does not read` };
   }
   if (board.has(cite.number)) {
     return board.isPull(cite.number)
@@ -725,16 +936,27 @@ const REMEDY = [
   '⛔ Do NOT guess a replacement number — 「guessing an upstream is exactly how a dangling',
   '   reference becomes a wrong one」. Either name a target that resolves, or keep the number',
   '   and say IN PROSE that it no longer resolves and what the live record is.',
-  '⛔ A number that names another repository is written `owner/repo#N`; a bare `#N` means',
-  '   THIS repository by convention and is judged as one.',
+  '⛔ A number that names another repository is written `owner/repo#N` (or `repo#N` for a name',
+  '   in KNOWN_REPOSITORIES), and each number of a pair carries its own: `objectui#1 + objectui#2`.',
+  '   A bare `#N` -- and one after any other prefix, `pre-#N` included -- means THIS repository.',
 ].join('\n');
 
 function renderFinding(f) {
   return `  [${f.cause}] ${f.path}:${f.line}  ${f.raw}\n      ${f.detail}\n      ${f.context}`;
 }
 
+/**
+ * The numbers the board must answer: every citation judged HERE, qualified or
+ * not. ⛔ Not "the unqualified ones" -- a probed board that never asked about
+ * `objectstack#20330` classes that live issue as unresolvable, a false red the
+ * diff-scoped verdict answered before this read `namesThisRepository`.
+ */
+export function boardWanted(rows, ownerRepo) {
+  return [...new Set(rows.filter((r) => namesThisRepository(r, ownerRepo)).map((r) => r.number))];
+}
+
 async function buildBoard({ rows, ownerRepo, token, strategy }) {
-  const wanted = [...new Set(rows.filter((r) => !r.qualifier).map((r) => r.number))];
+  const wanted = boardWanted(rows, ownerRepo);
   if (strategy === 'enumerate' || wanted.length > 400) return enumerateBoard({ ownerRepo, token });
   return probeBoard(wanted, { ownerRepo, token });
 }
@@ -832,7 +1054,7 @@ export async function run({ root = process.cwd(), scope = 'diff', base = null, j
   const classified = [];
   for (const cite of rows) {
     let probed = null;
-    if (transferProbe && !cite.qualifier && !board.has(cite.number) && cite.number <= board.frontier) {
+    if (transferProbe && namesThisRepository(cite, ownerRepo) && !board.has(cite.number) && cite.number <= board.frontier) {
       probed = await transferProbe(cite.number);
     }
     const verdict = classifyCitation(cite, board, { ownerRepo, transferProbe: () => probed });
@@ -898,12 +1120,94 @@ const SELF_TEST_BATTERIES = Object.freeze({
   transport: 7,
   'scope-contract': 12,
   'diff-scope': 13,
-  'live-corpus': 3,
+  'live-corpus': 7,
   'proxy-rearm': 10,
+  qualifier: 40,
+  spellings: 56,
 });
 
 /** Deleting a roster entry silences its floor, so the roster's size is pinned too. */
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+/**
+ * ⭐ THE ONE ENUMERATION OF CITATION SPELLINGS (#20636). Every spelling this
+ * gate has been measured against, each asserted either "extracted as" the
+ * readings in `reads` -- `#N` is THIS repository's number, `owner/repo#N`
+ * another repository's -- or, with `reads: []`, "not a citation, because" the
+ * reason given. A grammar change that moves any row turns the `spellings`
+ * battery red instead of becoming another card: `#N-word`, `#A/#B`, `option #N`,
+ * `clause #N`, `re-charter #N` and the URL form were each a card's worth of
+ * blind spot before this table (the family's first was #20330, `pre-#N`).
+ *
+ * Two completeness rules ride on it: every `NON_CITATION_HEADS` row must excuse
+ * at least one row here (a head with no measured spelling is the retired rows'
+ * failure over again), and every spelling in `REQUIRED_SPELLINGS` must appear.
+ */
+const SPELLING_TABLE = Object.freeze([
+  /* Extracted. */
+  { spelling: '#N', text: 'see #12248 for the ruling', reads: ['#12248'] },
+  { spelling: '(#N)', text: 'it landed (#12248), then', reads: ['#12248'] },
+  { spelling: '#N.', text: 'as ruled in #12248.', reads: ['#12248'] },
+  { spelling: 'PR #N', text: 'the PR #8546 landed', reads: ['#8546'] },
+  { spelling: 'owner/repo#N', text: 'see objectstack-ai/cloud#861', reads: ['objectstack-ai/cloud#861'] },
+  { spelling: 'owner/repo#N naming this repository', text: 'objectstack-ai/objectstack#12248 says', reads: ['#12248'] },
+  { spelling: 'repo#N', text: 'see objectui#4356 there', reads: ['objectstack-ai/objectui#4356'] },
+  { spelling: 'former-name#N', text: 'Framework#4443 said', reads: ['#4443'] },
+  { spelling: 'repo PR #N', text: '(objectui PR #10264, merged)', reads: ['objectstack-ai/objectui#10264'] },
+  { spelling: 'pre-#N', text: 'the pre-#12248 shape', reads: ['#12248'] },
+  { spelling: 'post-#N', text: 'the post-#12248 shape', reads: ['#12248'] },
+  { spelling: 'word#N', text: 'see foo#12248', reads: ['#12248'] },
+  { spelling: '#N-word', text: 'a #13398-class blind spot', reads: ['#13398'] },
+  { spelling: '#N-letter', text: 'the disposition #5347-A', reads: ['#5347'] },
+  { spelling: 'repo#N-letter', text: 'the ui#6206-B family', reads: ['objectstack-ai/objectui#6206'] },
+  { spelling: 'prefix-#N-word', text: 'Post-#11663-L4 the invariant', reads: ['#11663'] },
+  { spelling: '#A-B', text: 'issues #712-714 point there', reads: ['#712'],
+    because: 'the second number of a range carries no `#`, and a `#`-less number is no citation spelling' },
+  { spelling: '#A/#B', text: 'the same ruling #7737/#10629 made', reads: ['#7737', '#10629'] },
+  { spelling: '#A/#B/#C', text: 'the #5611/#5775/#6276 rule', reads: ['#5611', '#5775', '#6276'] },
+  { spelling: 'repo#A/#B', text: 'lists paginate (objectui#2711/#2722)', reads: ['objectstack-ai/objectui#2711', 'objectstack-ai/objectui#2722'],
+    because: 'a slash JOINED to the number continues the chain, which carries its repository' },
+  { spelling: 'prefix-#A/#B', text: 'pre-#3912/#3994 databases', reads: ['#3912', '#3994'] },
+  { spelling: '#A/repo#B', text: 'the #3076/objectui#2614 pair', reads: ['#3076', 'objectstack-ai/objectui#2614'] },
+  { spelling: 'repo#A / #B', text: 'objectui#2715 / #12248', reads: ['objectstack-ai/objectui#2715', '#12248'],
+    because: 'a spaced slash stands alone, so the second number is read as written' },
+  { spelling: 'repo#A + #B', text: 'objectui#6110 + #12248', reads: ['objectstack-ai/objectui#6110', '#12248'] },
+  { spelling: 'TOKEN/#N', text: 'unscoped (ADR-0049/#1888)', reads: ['#1888'] },
+  { spelling: 'option #N', text: 'the option #14088 gave', reads: ['#14088'] },
+  { spelling: 'clause #N', text: 'the clause #18510 removed', reads: ['#18510'] },
+  { spelling: 're-charter #N', text: 're-charter #13135 said', reads: ['#13135'] },
+  { spelling: 'acceptance #N', text: 'the silent acceptance #6132 closed', reads: ['#6132'] },
+  { spelling: '§ #N', text: "§6 #11176's decisions", reads: ['#11176'] },
+  { spelling: 'URL', text: 'see https://github.com/objectstack-ai/objectstack/issues/17590 for it', reads: ['#17590'] },
+  { spelling: 'URL /pull/', text: 'https://github.com/objectstack-ai/objectstack/pull/20554', reads: ['#20554'] },
+  { spelling: 'URL, former name', text: 'https://github.com/objectstack-ai/framework/issues/4443', reads: ['#4443'] },
+  { spelling: 'URL, another repository', text: 'https://github.com/objectstack-ai/objectui/issues/9048', reads: ['objectstack-ai/objectui#9048'] },
+  { spelling: '[#N](URL)', text: '([#15325](https://github.com/objectstack-ai/objectstack/issues/15325))', reads: ['#15325'],
+    because: "the link's target is the citation its text already carries, counted once" },
+  /* Not a citation. */
+  { spelling: '#N, one digit', text: 'acceptance #5 and #7', reads: [],
+    because: 'below the two-digit floor: all 133 one-digit tokens measured were ordinals' },
+  { spelling: '#N, seven digits', text: 'colour #1234567 here', reads: [], because: 'beyond six digits, where a hex colour lives' },
+  { spelling: '#N followed by a letter', text: 'the colour #12ab34', reads: [], because: 'digits running into a letter are a hex colour' },
+  { spelling: '##N', text: 'a ##12 heading', reads: [], because: 'a `#` before the `#` is a markdown heading marker' },
+  { spelling: 'Prime Directive #N', text: 'Prime Directive #14 binds', reads: [], because: 'an AGENTS.md Prime Directive ordinal' },
+  { spelling: 'Prefix-Directive-#N', text: 'a Prime-Directive-#12 shape', reads: [], because: 'a hyphen joining a head to its `#` is the same head' },
+  { spelling: 'PD#N', text: 'which PD#12 rejects', reads: [], because: 'the abbreviated Prime Directive spelling' },
+  { spelling: 'batch #N', text: 'decision batch #127 ruled', reads: [], because: 'a maintainer decision-batch ordinal (276 sites, none above #227)' },
+  { spelling: 'OQ#N', text: 'ADR-0076 OQ#10 says', reads: [], because: "an ADR's open-question ordinal" },
+  { spelling: 'PKCS#N', text: 'PKCS#11 HSMs', reads: [], because: "a standard's own numbering" },
+  { spelling: '](#N-slug)', text: 'see [13. Risks](#13-risks--mitigations)', reads: [],
+    because: "a markdown link's in-page heading anchor -- the one non-citation the hyphen exclusion covered" },
+  { spelling: 'path/page#N', text: 'https://example.com/docs/page#12', reads: [],
+    because: 'a qualifier candidate never starts mid-path, so a URL fragment is no citation' },
+  { spelling: 'ordinal #A/#B', text: 'Prime Directive #12/#14', reads: [], because: 'a slash-joined continuation reads as its chain, here an ordinal' },
+]);
+
+/** The spellings the closeout card and its folded positions named; each must stay in the table. */
+const REQUIRED_SPELLINGS = Object.freeze([
+  '#N', 'owner/repo#N', 'pre-#N', 'post-#N', '#N-word', '#A/#B', '(#N)', '#N.',
+  'option #N', 'clause #N', 're-charter #N', 'URL',
+]);
 
 /** Where an assertion lands when no battery is open — never a declared name. */
 const UNATTRIBUTED_BATTERY = '(no battery open)';
@@ -953,8 +1257,8 @@ export async function selfTest() {
     check(cites('colour #1234567 here').length === 0, 'a seven-digit token is outside the grammar');
     check(cites('Prime Directive #14 binds').length === 0, 'Prime Directive ordinals are not citations');
     check(cites('decision batch #127 ruled').length === 0, 'decision-batch ordinals are not citations');
-    check(cites('re-charter #26 said').length === 0, 're-charter ordinals are not citations');
-    check(cites('ADR §3.10 #12 says').length === 0, 'section ordinals are not citations');
+    check(cites('re-charter #13135 said').join() === '#13135', 'a retired head reads no ordinal: `re-charter` measured only tracker numbers, and hid 26 dead ones');
+    check(cites('see [13. Risks](#13-risks--mitigations)').length === 0, "a markdown link's in-page heading anchor is not a citation, hyphen or not");
     check(cites('PR #8546 landed').join() === '#8546', 'a `PR #N` head is a citation, not an ordinal');
     check(cites('the path a/b#12 is not a citation').join() === 'a/b#12', 'a slash-qualified token keeps its qualifier rather than reading as bare');
     const prose = extractCitations('const s = "#11111";\n// a note about #22222\n', { projection: 'comment-prose' });
@@ -1117,6 +1421,19 @@ export async function selfTest() {
     check(live.files.length > 100, `the declared surfaces must reach the tree, got ${live.files.length} file(s)`);
     check(live.rows.length > 1000, `the live corpus must yield its citations, got ${live.rows.length}`);
     check(live.rows.some((r) => r.qualifier), 'the live corpus must contain at least one cross-repo citation — the arm that must never be reported as a phantom');
+    check(live.rows.every((r) => !r.qualifier || repositoryOf(r.qualifier) !== null),
+      'every qualifier the live corpus keeps must name a repository — an unrecognised one kept is the open grammar back');
+    /* The three arms the #20636 closeout opened each reach the tree -- the
+     * floor that tells "no such spelling left" from "the arm went blind". A
+     * row counts only when its number is spelled ONCE on its line, so the same
+     * number cited elsewhere on that line cannot stand in for the arm. */
+    const once = (r) => (r.context.match(new RegExp(`#${r.number}(?!\\d)`, 'g')) ?? []).length === 1;
+    check(live.rows.some((r) => once(r) && new RegExp(`#${r.number}-[A-Za-z]`).test(r.context)),
+      'the live corpus must yield a `#N-word` citation — the hyphen arm reaching the tree');
+    check(live.rows.some((r) => once(r) && new RegExp(`\\d/#${r.number}(?!\\d)`).test(r.context)),
+      'the live corpus must yield a slash-joined `#A/#B` second number — the continuation reaching the tree');
+    check(live.rows.some((r) => /^https?:\/\//.test(r.raw)),
+      'the live corpus must yield a URL-spelled citation — the URL arm reaching the tree');
   }
 
   /* 7. THE LOCAL ROUTE. Offline, over the imported plan: the arms that decide
@@ -1148,6 +1465,96 @@ export async function selfTest() {
       'structural: the re-exec is taken by the LIVE modes only — never --self-test (offline, and pinned offline), never --list (no network at all)');
   }
 
+  /* 8. THE QUALIFIER (#20330). A candidate names a repository only when it is
+   *    `owner/repo` or a `KNOWN_REPOSITORIES` name; any other prefix is prose
+   *    and its number is judged HERE. Every spelling is pinned both ways: read
+   *    right on a live number, and a FINDING on a dead one. */
+  battery('qualifier');
+  {
+    const OWN = 'objectstack-ai/objectstack';
+    const board = boardFromSets({ numbers: [100, 20330], pulls: [], frontier: 30000, source: 'stub' });
+    const one = (t) => extractCitations(t);
+    const judge = (t) => one(t).map((c) => classifyCitation(c, board, { ownerRepo: OWN }).cause);
+    const lit = (t) => judge(t).join() === CAUSE.RESOLVES;
+    const red = (t) => { const causes = judge(t); return causes.length === 1 && FINDING_CAUSES.includes(causes[0]); };
+
+    for (const p of ['pre-', 'post-', 'Pre-', 'Post-', 'PRE-', 'POST-']) {
+      check(one(`the ${p}#12248 shape`).map((c) => `${c.qualifier}|${c.raw}`).join() === 'null|#12248',
+        `\`${p}\` is prose, not a repository: its number is extracted bare`);
+      check(lit(`the ${p}#100 shape`) && red(`the ${p}#12248 shape`),
+        `\`${p}#N\` is judged HERE: a live number resolves and a dead one is a FINDING`);
+    }
+
+    check(one('Framework#4443 / cloud#983').map((c) => repositoryOf(c.qualifier)).join() === `${OWN},objectstack-ai/cloud`,
+      '`Framework` is THIS repository (its former name, any case); `cloud` is not');
+    for (const q of ['framework', 'Framework', 'objectstack-ai/framework', 'objectstack']) {
+      check(lit(`${q}#100`) && red(`${q}#12248`), `\`${q}#N\` names THIS repository: judged, lit when live and red when dead`);
+    }
+    for (const q of ['objectui', 'OBJECTUI', 'ui', 'cloud', 'hotcrm', 'objectstack-ai/objectui', 'better-auth/better-auth']) {
+      check(judge(`${q}#12248`).join() === CAUSE.CROSS_REPO_UNJUDGED,
+        `\`${q}#N\` names another repository: never judged, so a number dead HERE is no finding`);
+    }
+    check(one('see foo#12248')[0]?.qualifier === null && red('see foo#12248'),
+      'an UNKNOWN word prefix is prose too — the set of repositories is closed, not a list of exceptions');
+    for (const t of ['which PD#12 rejects', 'ADR-0076 OQ#10 says', 'PKCS#11 HSMs', 'a Prime-Directive-#12 shape']) {
+      check(one(t).length === 0, `\`${t}\` is an ordinal once its candidate is refused, not a citation`);
+    }
+
+    check(one('(objectui PR #10264, merged)').map((c) => `${c.qualifier}|${c.raw}`).join() === 'objectui|objectui PR #10264',
+      'the prose spelling `objectui PR #N` names objectui');
+    check([judge('(objectui PR #12248)'), judge('cloud #12248 contract'), judge('objectui issue #12248')]
+      .every((c) => c.join() === CAUSE.CROSS_REPO_UNJUDGED), 'the prose form defers to its repository, dead here or not');
+    check(lit('framework #100') && red('framework #12248'), 'the prose form of THIS repository is judged here');
+    check(red('the PR #12248 landed') && red('Studio UI #12248'),
+      '⛔ a bare `PR #N`, and the joined-only alias in `UI #N`, are NOT the prose form: judged here, red when dead');
+
+    check(judge('objectui#6110 + #12248').join() === `${CAUSE.CROSS_REPO_UNJUDGED},${CAUSE.ALLOCATED_BUT_ABSENT}`,
+      "⛔ a qualifier does NOT carry across a pair: the second number is this repository's, and red when dead");
+    check(judge('objectui#6110 + objectui#12248').join() === `${CAUSE.CROSS_REPO_UNJUDGED},${CAUSE.CROSS_REPO_UNJUDGED}`,
+      'a pair qualified number by number defers both');
+
+    const rows = [{ number: 20330, qualifier: 'framework' }, { number: 11, qualifier: 'objectui' }, { number: 12, qualifier: null }];
+    check(boardWanted(rows, OWN).sort((a, b) => a - b).join() === '12,20330',
+      "the board's probe set is every citation judged HERE — a qualified this-repository number in, another repository's out");
+    const probed = await probeBoard(boardWanted([{ number: 20330, qualifier: 'objectstack' }], OWN), {
+      ownerRepo: OWN, token: '',
+      fetchImpl: stubFetch([[/per_page=1/, { body: [{ number: 30000 }] }], [/issues\/20330$/, { body: { number: 20330 } }]]),
+    });
+    check(classifyCitation({ number: 20330, qualifier: 'objectstack' }, probed, { ownerRepo: OWN }).cause === CAUSE.RESOLVES,
+      '⛔ a live `objectstack#N` RESOLVES on a probed board — probing only the unqualified numbers answered it allocated-but-absent, a false red');
+    check(/const wanted = boardWanted\(rows, ownerRepo\);/.test(readFileSync(SELF_PATH, 'utf8')),
+      'structural: the live board is built from `boardWanted`');
+
+    check(KNOWN_REPOSITORIES.every((r) => r.name === r.name.toLowerCase() && typeof r.why === 'string' && r.why.length > 40),
+      'every known repository is a lower-case name carrying the reading that put it in');
+    check(KNOWN_REPOSITORIES.filter((r) => r.self).every((r) => r.slug === OWN) && KNOWN_REPOSITORIES.some((r) => r.self),
+      'every name for THIS repository resolves to its slug');
+  }
+
+  /* 9. THE SPELLINGS (#20636). The one enumeration table, read row by row,
+   *    then held complete against the heads and the required spellings. */
+  battery('spellings');
+  {
+    const OWN = 'objectstack-ai/objectstack';
+    const reads = (t) => extractCitations(t).map((c) => `${namesThisRepository(c, OWN) ? '' : repositoryOf(c.qualifier)}#${c.number}`);
+    const excusedBy = (t) => [...t.matchAll(new RegExp(CITATION_RE.source, 'g'))]
+      .map((m) => nonCitationHead(t.slice(0, m.index + m[0].length - m[3].length - 1))).filter(Boolean);
+    for (const row of SPELLING_TABLE) {
+      const got = reads(row.text);
+      check(got.join() === row.reads.join(),
+        `spelling \`${row.spelling}\` in ${JSON.stringify(row.text)} must read ${row.reads.length ? row.reads.join(', ') : 'as NOT a citation'}${row.because ? ` (${row.because})` : ''}; got ${got.length ? got.join(', ') : 'nothing'}`);
+    }
+    for (const head of NON_CITATION_HEADS) {
+      check(SPELLING_TABLE.some((row) => row.reads.length === 0 && excusedBy(row.text).includes(head)),
+        `the head row for ${head.why} must excuse at least one spelling in the table — a head with no measured spelling is a blind spot`);
+    }
+    const labels = new Set(SPELLING_TABLE.map((row) => row.spelling));
+    check(REQUIRED_SPELLINGS.every((s) => labels.has(s)) && labels.size === SPELLING_TABLE.length,
+      `the table must carry every required spelling once (missing: ${REQUIRED_SPELLINGS.filter((s) => !labels.has(s)).join(', ') || 'none'})`);
+    check(SPELLING_TABLE.every((row) => row.reads.length > 0 || (typeof row.because === 'string' && row.because.length > 20)),
+      'every "not a citation" row must say why');
+  }
+
   /* ── The floor: every declared battery RAN, and ran its cases ───────────── */
   const floorMessages = [];
   const floorFailure = (m) => { floorMessages.push(m); };
@@ -1176,7 +1583,7 @@ export async function selfTest() {
   assert(!breached, floorMessages.join('\n     '));
 
   const total = [...batterySeen.values()].reduce((a, b) => a + b, 0);
-  console.log(`✅ check-issue-citations --self-test: grammar narrowed, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
+  console.log(`✅ check-issue-citations --self-test: grammar narrowed, every spelling enumerated, qualifier a closed set of repositories, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
   return SELF_TEST_VERDICT;
 }
 

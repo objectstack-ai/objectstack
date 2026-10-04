@@ -52,12 +52,12 @@
  * empty string. That is the risk #7987 was parked on, and the reason the
  * mechanism is a readback rather than a bare flag.
  *
- * **`sys_account.password`** (#8676) — the credential hash. better-auth's
+ * **`sys_account.password`** (commit d6e80b28b) — the credential hash. better-auth's
  * sign-in verifier reads it off an adapter result row
  * (`internalAdapter.findCredentialAccount(userId)`), so it belongs to this
  * seam for the same reason the OAuth columns do.
  *
- * ## TWO seams, not one — this module owns both (#8676)
+ * ## TWO seams, not one — this module owns both (commit d6e80b28b)
  *
  * The table above serves better-auth's storage adapter, which is the only
  * importer of {@link reattachInternalFieldsOnRead}. plugin-auth also has
@@ -162,12 +162,12 @@ interface ReadbackColumn {
  */
 const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   [SystemObjectName.SESSION]: [{ field: 'token', absenceProvesStrip: true }],
-  // [#7987] All three OAuth credential columns, plus [#8676] `password`.
+  // [#7987] All three OAuth credential columns, plus [commit d6e80b28b] `password`.
   //
   // `password` is here because better-auth's sign-in verifier reads it OFF an
   // adapter result row: `internalAdapter.findCredentialAccount(userId)` returns
   // the row whose `password` is then compared against the submitted one. Under
-  // the #8676 flag that row comes back without the column, so without this row
+  // the commit d6e80b28b flag that row comes back without the column, so without this row
   // password sign-in would fail for every user. `absenceProvesStrip: false`
   // because `sys_account.password` is `required: false` and genuinely empty on
   // OAuth-only accounts — see the field's own doc above for why that
@@ -189,6 +189,47 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
     { field: 'id_token', absenceProvesStrip: false },
     { field: 'password', absenceProvesStrip: false },
   ],
+  // [#21197] The credential-class census, closed under the same flag (ruling
+  // record 5942811916, C2): each column below is declared `internal: true` so
+  // that no generic exit — the data path, and the compliance ledger's CRUD
+  // mirror that honours the same flag — carries it, and each is here because a
+  // better-auth route reads it back OFF a row its storage adapter returned
+  // (traced in the installed better-auth / @better-auth/* dist, 1.7.3):
+  //
+  //  - `sys_jwks.private_key` — the jwt plugin's key read (`findMany`, no
+  //    projection) feeds signing. MEASURED before this row existed: the flag
+  //    alone signs only on the request that minted the key, and degrades
+  //    signing on every later read and on a fresh manager. `required: true` ⇒
+  //    absence can only be the strip.
+  //  - `sys_verification.value` — reset-password, email/phone OTP, magic link
+  //    and OIDC code redemption read it off the found or CONSUMED row (the
+  //    adapter's `consumeOne` re-attaches through this table too).
+  //    `required: true`. `identifier` is deliberately absent: no flow reads it
+  //    back off a row — it is only ever the lookup key.
+  //  - `sys_two_factor.secret` (`required: true`) and `.backup_codes` (empty
+  //    until generated) — TOTP and backup-code verification read both off the
+  //    enrolment row.
+  //  - `sys_sso_provider.oidc_config` / `.saml_config` — the sso plugin reads
+  //    the provider's protocol blob on every federated sign-in; both are
+  //    optional (a provider carries one or the other).
+  //  - `sys_oauth_application.client_secret` — the provider reads the stored
+  //    digest off the client row to verify a presented secret; empty on a
+  //    public client.
+  [SystemObjectName.JWKS]: [{ field: 'private_key', absenceProvesStrip: true }],
+  [SystemObjectName.VERIFICATION]: [{ field: 'value', absenceProvesStrip: true }],
+  [SystemObjectName.TWO_FACTOR]: [
+    { field: 'secret', absenceProvesStrip: true },
+    { field: 'backup_codes', absenceProvesStrip: false },
+  ],
+  // Spelled, not imported from `sso-client-secret.ts` (`SSO_PROVIDER_OBJECT`):
+  // that module imports this one for its own legacy-secret migration, and a
+  // module-top constant read across an import cycle is a TDZ error. The spec
+  // declares no `SystemObjectName` member for this object.
+  sys_sso_provider: [
+    { field: 'oidc_config', absenceProvesStrip: false },
+    { field: 'saml_config', absenceProvesStrip: false },
+  ],
+  [SystemObjectName.OAUTH_APPLICATION]: [{ field: 'client_secret', absenceProvesStrip: false }],
 };
 
 /** What breaks if a stripped row is handed to better-auth un-repaired. */
@@ -200,6 +241,14 @@ const FAIL_CLOSED_CONSEQUENCE: Readonly<Record<string, string>> = {
     'better-auth OAuth token routes (/get-access-token, /account-info, /refresh-token) would '
     + 'fail to exchange the refresh token — answering REFRESH_TOKEN_NOT_FOUND, or handing back '
     + 'an empty access token — on such rows',
+  [SystemObjectName.JWKS]:
+    'better-auth JWT signing would find no private key on such rows and stop signing tokens '
+    + '(no set-auth-jwt header, no OIDC id_token)',
+  [SystemObjectName.VERIFICATION]:
+    'better-auth one-time verification flows (password reset, OTP, magic link, OIDC code redemption) '
+    + 'would find no stored value on such rows and refuse every outstanding code',
+  [SystemObjectName.TWO_FACTOR]:
+    'better-auth two-factor verification would find no TOTP secret on such rows and refuse every code',
 };
 
 /**
@@ -228,7 +277,7 @@ export async function reattachInternalFieldsOnRead(
 }
 
 /**
- * [#8676] Recover flagged columns for one of plugin-auth's OWN raw-engine
+ * [commit d6e80b28b] Recover flagged columns for one of plugin-auth's OWN raw-engine
  * reads — the second seam, and the reason a bare flag was not enough.
  *
  * ## Why this exists beside {@link reattachInternalFieldsOnRead}
@@ -333,7 +382,8 @@ async function recoverColumns(
         `${objectName} rows were read back without '${field}' (the engine's \`internal: true\` `
           + 'strip ran) but this engine offers no `resolveInternalField` accessor to recover it. '
           + `${FAIL_CLOSED_CONSEQUENCE[objectName] ?? 'better-auth would observe an incomplete row'}. `
-          + 'Wire the ObjectQL engine (which provides the accessor, #8118), or remove the '
+          + 'Wire the ObjectQL engine, which provides the accessor (an `internal` column is withheld from '
+          + 'every ordinary read and recovered only through it), or remove the '
           + `\`internal\` flag from ${objectName}.${field}.`,
       );
     }

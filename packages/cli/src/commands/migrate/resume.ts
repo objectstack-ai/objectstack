@@ -13,6 +13,7 @@ import {
 } from '@objectstack/core';
 import { describeInterruptedRun } from '@objectstack/runtime';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import { MIGRATION_JOURNAL_OBJECT } from '@objectstack/spec/system';
 import {
   printHeader,
   printSuccess,
@@ -23,6 +24,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -105,10 +107,15 @@ export default class MigrateResume extends Command {
 
     let stack;
     try {
+      // [#21391] The list mode boots READ-ONLY, the boot `os migrate plan`
+      // takes: `deferSchemaDdl` holds schema DDL back on every SQL datasource,
+      // and `readOnlyProbe` keeps a missing sqlite file from being created.
+      // `--run` keeps the plain boot: the tables must exist before it writes.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins(),
+        ...(flags.run ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -134,7 +141,12 @@ export default class MigrateResume extends Command {
         // which is the truthful answer for this process.
       }
 
-      const interrupted = await findInterruptedRuns(engine);
+      // [#21529] Not asked: the list mode's read-only boot measured whether the
+      // journal table exists, and a table that does not exist holds no runs.
+      // Reading it anyway answered a fresh project's empty list with a query
+      // fault and exit 1. `--run` booted plain, so its table exists by now.
+      const journalAbsent = !flags.run && stack.tableAbsent(MIGRATION_JOURNAL_OBJECT);
+      const interrupted = journalAbsent ? [] : await findInterruptedRuns(engine);
 
       // ── list mode (no --run): read-only ──────────────────────────────
       if (!flags.run) {
@@ -147,7 +159,12 @@ export default class MigrateResume extends Command {
           return;
         }
         if (interrupted.length === 0) {
-          printSuccess('No interrupted migration runs — every run in the journal concluded.');
+          printSuccess(
+            journalAbsent
+              ? `No interrupted migration runs — this database has no ${MIGRATION_JOURNAL_OBJECT} table yet, ` +
+                  'so no run was ever journalled here.'
+              : 'No interrupted migration runs — every run in the journal concluded.',
+          );
           return;
         }
         printWarning(`${interrupted.length} interrupted migration run(s):`);
@@ -233,6 +250,11 @@ export default class MigrateResume extends Command {
         this.exit(1);
       }
     } catch (error: any) {
+      // [#21434] The `this.exit(…)` calls above throw oclif's exit signal from
+      // inside this `try`. Re-reporting it printed a second `--json` document
+      // and turned every exit 0 above (a resumed run, an already-concluded
+      // run) into exit 1.
+      if (isExitSignal(error)) throw error;
       const msg = error instanceof MigrationJournalRefusal
         // A refusal is the runner working, not breaking — say what it refused.
         ? `Refused (${error.code}): ${error.message}`

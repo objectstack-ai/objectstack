@@ -318,7 +318,7 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
 }
 
 /**
- * [#8726] The protocol layer's overlay-aware merged read, as this package can
+ * [commit e783e163d] The protocol layer's overlay-aware merged read, as this package can
  * name it.
  *
  * ⚠️ **Deliberately `Pick`ed from the DECLARED contract rather than restated.**
@@ -344,7 +344,7 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
 export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
 
 /**
- * [#8726] Read this environment's `skill` rows through the merged listing.
+ * [commit e783e163d] Read this environment's `skill` rows through the merged listing.
  *
  * ── The defect this closes ────────────────────────────────────────────────
  *
@@ -361,7 +361,7 @@ export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
  *
  * ── Absent vs. degraded vs. failed — three outcomes, deliberately ─────────
  *
- * 1. **No merged read on this host** → the pre-#8726 registry listing,
+ * 1. **No merged read on this host** → the registry listing before commit e783e163d,
  *    unchanged, including its `?? []` for a host with no metadata service at
  *    all. Structural absence is not degradation: a host that assembles this
  *    runtime without the metadata protocol has no merged read to offer, so
@@ -412,7 +412,7 @@ async function readMergedSkillRows(
 }
 
 /**
- * [#8726] Report #6504's completeness verdict for the skill prompt surface.
+ * [commit e783e163d] Report #6504's completeness verdict for the skill prompt surface.
  *
  * This read never had a diagnosed wrapper at all — unlike the stdio bridge,
  * where #6504 had already landed one — so a known-partial skill surface
@@ -644,7 +644,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // ExecutionContext filtering, exactly like `describeObject` (the MCP
         // route itself is authenticated).
         //
-        // [#8726] Through the protocol layer's MERGED listing — the second half
+        // [commit e783e163d] Through the protocol layer's MERGED listing — the second half
         // of #8328, whose own reproduction runs through THIS endpoint. See
         // {@link readMergedSkillRows}.
         listSkills: async () => {
@@ -693,10 +693,27 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             // flow action while promising "its input parameters".
             const automation: any = await actionExec.resolveAutomationService(deps, context, envId);
             const hasAutomation = Boolean(automation);
+            // [#21321] ONE source for advertising and running. `run_action`
+            // dispatches a script action through the engine's handler registry
+            // (`executeRegisteredAction`), so the listing asks that registry —
+            // the same engine, the same key rotation — instead of trusting the
+            // declaration's `target || body`. A declared action nothing bound
+            // (measured: an `os package install`ed package) was listed here and
+            // refused there with "No handler registered".
+            const hasHandler = actionExec.registeredActionHandlerProbe(
+                deps,
+                await deps.getObjectQL(context, envId).catch(() => undefined),
+            );
             const out: any[] = [];
             for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(deps, meta)) {
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
                 if (!actionExec.isHeadlessInvokableAction(deps, action, hasAutomation)) continue;
+                // The script arm — every action `invokeBusinessAction` sends to
+                // the handler registry, i.e. neither the declarative update nor
+                // a flow (its branch order, read the same way). The other two
+                // arms have their own dispatchers and keep their own predicates.
+                if (!actionExec.isDeclarativeUpdateAction(action) && action?.type !== 'flow'
+                    && !hasHandler(objectName, actionExec.resolveActionHandlerKeys(action))) continue;
                 // [#2849 / ADR-0011] MCP is an AI surface: only actions the
                 // author explicitly opted in via `ai.exposed` are listed.
                 // Fail-closed — bodies run as trusted code (see

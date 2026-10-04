@@ -75,7 +75,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.4.0
+  ghcr.io/objectstack-ai/objectstack:17.6.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -93,7 +93,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.4.0
+  ghcr.io/objectstack-ai/objectstack:17.6.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -144,7 +144,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:17.4.0
+FROM ghcr.io/objectstack-ai/objectstack:17.6.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -162,7 +162,7 @@ image)? The official image is nothing more than:
 
 ```dockerfile title="Dockerfile (self-built runtime, equivalent)"
 FROM node:22-slim
-RUN npm install -g @objectstack/cli@17.4.0
+RUN npm install -g @objectstack/cli@17.6.0
 
 WORKDIR /srv/app
 RUN chown node:node /srv/app
@@ -540,6 +540,17 @@ first thing to look for — and note that it asks only whether *an* account row
 exists, so a row you wrote yourself silences it whether or not anyone can
 actually authenticate with it.
 
+The same shape is logged at **debug** instead, under the same token and naming
+the reason, when the deployment has a sign-in path that needs no `sys_account`
+row of its own: SSO-only mode (`OS_AUTH_SSO_ONLY` or `ssoOnlyMode`), a
+configured social or OIDC provider, enterprise SSO with at least one registered
+identity provider, or a host that constructs `AuthPlugin` with
+`hostSignInHandoff: true` because it signs people in through a handoff route of
+its own. A deployment with none of these still reports at **error**.
+`hostSignInHandoff` is a statement by the code that serves such a route, not a
+way to quiet the report: set on a deployment without one, it hides exactly the
+dead end this section describes.
+
 **The recovery is out of band, and it is one row.** Write a pending invitation
 directly against the store the deployment reads, then have that person register
 through the ordinary sign-up endpoint — the invitation carve-out admits that
@@ -577,8 +588,11 @@ this step.
   answer the `invite_only` default already gives for an address the directory
   holds, so the widened posture buys that person no login and their sign-in
   stays `401`. A fresh address does get an account, but every posture other
-  than `invite_only` forces email verification on, so its first sign-in is
-  refused `403 EMAIL_NOT_VERIFIED` until a mail transport delivers the link.
+  than `invite_only` forces email verification on (unless an `open` deployment
+  has itself declared it off — see
+  [Email verification under each posture](#email-verification-under-each-posture)),
+  so its first sign-in is refused `403 EMAIL_NOT_VERIFIED` until a mail
+  transport delivers the link.
 - **A hand-written credential row authenticates nothing.** The `sys_account`
   row shape is public; the format of the secret stored in its `password`
   column is the platform's own. A row carrying a plaintext password is refused
@@ -632,6 +646,30 @@ refusal above for a silent success, which is the shape that behaviour exists to
 remove. If you run a real internet-facing `open` deployment and want that
 trade, open an issue saying so: it is a per-deployment decision, waiting on a
 deployment that needs it.
+
+### Email verification under each posture
+
+- **`invite_only`** follows `auth.require_email_verification`
+  (`OS_AUTH_REQUIRE_EMAIL_VERIFICATION`), off by default.
+- **`email_domain`** forces verification on, and an explicit `false` is
+  refused: the domain allowlist is the only gate there, so an unverified
+  sign-up could claim a colleague's address.
+- **`open`** forces verification on too, **unless the deployment turns it
+  off**: set `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`, or
+  `emailAndPassword.requireEmailVerification: false` in the stack config. A
+  sign-up is then signed in at once and no verification mail is sent.
+
+The `open` opt-out is for a deployment with no mail transport that trusts
+whoever can reach it, such as a pre-production environment. It is loud and it
+has a cost:
+
+- The boot logs one warning naming the posture and the consequence, and
+  `/api/v1/auth/config` reports `requireEmailVerification: false` — the value
+  actually wired.
+- Anyone can register an address they do not control. An organization
+  invitation sent to that address can then be accepted by that account.
+- It is the deployment's to declare. A `false` stored only through the
+  settings console is refused under `open`, and verification stays on.
 
 ## Go-live
 

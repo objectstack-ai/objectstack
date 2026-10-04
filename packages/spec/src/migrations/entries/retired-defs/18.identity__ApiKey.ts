@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #8715 — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
+// Commit 2c86fe3ea — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
 // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
 // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this
 // platform does not load: `start`, `lastRefetchAt`, `enabled` (the real

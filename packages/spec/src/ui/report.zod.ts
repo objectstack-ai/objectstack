@@ -182,6 +182,31 @@ const JOINED_CONTAINER_CHART_REFUSED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
+ * The refusal a `joined` report's block with no `dataset` earns, at
+ * `blocks[i].dataset` (#21702; ADR-0021 single-form, ADR-0049 enforce-or-remove,
+ * the enforce arm). A block is an independent dataset query, and nothing else
+ * feeds it: the container selects nothing (its `dataset` is refused below).
+ * Measured at this repo's `.objectui-sha` pin
+ * `ab187972159583b595facdcae3c73b50f6f312e9`: `DatasetReportRenderer`'s joined
+ * branch hands each block's `dataset` to its table as
+ * `String(block.dataset ?? '')`, and the table's query hook goes idle on an
+ * empty name, so an unbound block draws an empty table and queries nothing; a
+ * report whose blocks ALL lack one fails `isDatasetReport` and falls through to
+ * the pre-9.0 presentation bridge, which queries nothing either.
+ *
+ * The key stays `.optional()` on `JoinedReportBlockSchema` itself: `blocks` is
+ * read only on a `joined` report, so the requirement lives on the arm of
+ * `ReportSchema`'s refinement that reads it. `block` is how the refusal names
+ * the block — by its `name`, or by its `blocks[i]` position when the name is
+ * empty (an empty name is its own issue, and does not stop this one).
+ */
+function joinedBlockDatasetRequired(block: string): string {
+  return `a \`joined\` report draws each block from that block's own \`dataset\`, and ${block} binds none, `
+    + 'so nothing queries it and it draws no rows. Bind the block to a dataset: set its `dataset` to the '
+    + 'dataset whose measures (`values`) and dimensions (`rows`) it shows.';
+}
+
+/**
  * Joined Report Block Schema
  *
  * Represents a single sub-report inside a `type: 'joined'` report. Each block
@@ -203,8 +228,15 @@ const JOINED_CONTAINER_CHART_REFUSED =
  * - A block is drawn as a table and has no `chart` key: #20161 removed it,
  *   because nothing ever drew it. Writing it is refused with the upgrade
  *   prescription (the `guidance` entry below).
+ *
+ * [#19920] Carries its inferred type, not a `z.ZodTypeAny` annotation. That
+ * annotation erased the block's shape, so {@link JoinedReportBlock} and every
+ * `blocks[]` element of {@link Report} / {@link ReportParsed} were `unknown`
+ * and any value type-checked against them. It dodged no TS7056 (measured: none
+ * without it); what it bought was declaration size, the block's shape being
+ * emitted once here and once inside `ReportSchema`'s `blocks`.
  */
-export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObject({
+export const JoinedReportBlockSchema = lazySchema(() => strictObject({
   surface: 'this joined report block',
   history:
     'Until this shape was closed these were dropped silently — the block still rendered, '
@@ -272,8 +304,13 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
    * ADR-0021 — the dataset this block binds to (single-form). The block selects
    * the dataset's measures by name; the legacy inline `objectName` + `columns` +
    * `groupings` query was removed in the cutover.
+   *
+   * Every block of a `joined` report binds one: `ReportSchema`'s refinement
+   * refuses a block without it at `blocks[i].dataset` (#21702), because nothing
+   * else would feed the block's query. It stays optional on this shape only
+   * because `blocks` is read on a `joined` report alone.
    */
-  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)').meta({ title: 'Dataset' }),
+  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021); a joined report refuses a block without one').meta({ title: 'Dataset' }),
   /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
   rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)').meta({ title: 'Rows' }),
   /** Dimension names across — matrix blocks pivot rows × columns (ADR-0021 D2). */
@@ -455,11 +492,11 @@ export const ReportSchema = lazySchema(() => strictObject({
 
   /**
    * Visualization — an embedded chart plotted from the bound dataset
-   * (`xAxis` names a dimension, `yAxis` a measure) above the report's table.
+   * (`xAxis` names a dimension, `yAxis` a measure) above the report's table,
+   * or below it for a `matrix` report with `columns`.
    *
-   * Refused on a `joined` report (#20161): a joined report draws each block
-   * as a table and never reads `chart`, and a block has no `chart` key — so a
-   * chart there parsed and plotted nothing.
+   * Refused on a `joined` report (#20161), which draws each block as a table
+   * and never reads `chart`; a block has no `chart` key.
    */
   chart: ReportChartSchema.optional().describe('Embedded chart configuration (refused on a joined report, which draws tables only)'),
 
@@ -499,6 +536,15 @@ export const ReportSchema = lazySchema(() => strictObject({
     if (!r.blocks || r.blocks.length === 0) {
       ctx.addIssue({ code: 'custom', message: 'a `joined` report needs `blocks`.', path: ['blocks'] });
     }
+    // #21702 — "each block dataset-bound" is enforced here, not only stated: a
+    // block with no `dataset` is refused at its own `dataset` path, by name
+    // (see `joinedBlockDatasetRequired`). Until this arm it parsed, passed
+    // `objectstack validate` and every save door, and drew nothing.
+    r.blocks?.forEach((block, i) => {
+      if (!block || typeof block !== 'object' || block.dataset !== undefined) return;
+      const name = typeof block.name === 'string' && block.name.length > 0 ? `block \`${block.name}\`` : `\`blocks[${i}]\``;
+      ctx.addIssue({ code: 'custom', message: joinedBlockDatasetRequired(name), path: ['blocks', i, 'dataset'] });
+    });
   } else if (!r.dataset || !r.values || r.values.length === 0) {
     ctx.addIssue({
       code: 'custom',
@@ -543,7 +589,19 @@ export const ReportSchema = lazySchema(() => strictObject({
   }
 }));
 
+/**
+ * One sub-report of a `type: 'joined'` report (input shape): the input type of
+ * {@link JoinedReportBlockSchema}.
+ *
+ * [#19920] Was `unknown` while that schema was annotated `z.ZodTypeAny`.
+ * `joined-report-block-type.test.ts` pins that `unknown`, an undeclared key and
+ * the retired `chart` are refused here. A static type, not the schema's
+ * verdict: the `order` check against the selected dimensions and measures is a
+ * refinement, not a type, so `JoinedReportBlockSchema` remains the only judge.
+ */
 export type JoinedReportBlock = z.input<typeof JoinedReportBlockSchema>;
+/** Post-parse shape of {@link JoinedReportBlock} — defaults applied, transforms run (ADR-0122). */
+export type JoinedReportBlockParsed = z.infer<typeof JoinedReportBlockSchema>;
 
 /**
  * Report Types

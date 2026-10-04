@@ -10,6 +10,11 @@
  * table that keeps growing can never be retired.
  *
  * `graftNormalizedOperators` copies the normalization back on and nothing else.
+ * [#20051] A `view` save no longer runs it: a view stores the parsed value of
+ * every key its body carried (`projectStorableViewBody`), which normalises the
+ * operator the same way. The graft serves every other type, and these helper
+ * pins keep using view bodies because `ViewMetadataSchema` is the schema whose
+ * operator normalisation the graft was written for.
  * The tests below pin both halves of that claim: operators DO change, and
  * everything else — auxiliary fields, unknown keys, `$`-token conditions, array
  * order, absent optionals — does NOT.
@@ -97,23 +102,35 @@ describe('graftNormalizedOperators — through the real view metadata schema', (
     expect(graftThroughSchema(authored)).toBe(authored);
   });
 
+  // [#20301] The nested carrier is the page-list preset bar, `userFilters.tabs[]`:
+  // the list view's own `tabs` is a retired key the parse now refuses, and
+  // `ViewTabSchema` — whose `filter` this leg exercises — survives only there.
   it('normalizes a tab filter, not just the view filter', () => {
     const authored = view(
       [{ field: 'status', operator: 'eq', value: 'open' }],
-      { tabs: [{ name: 'mine', label: 'Mine', filter: [{ field: 'owner', operator: 'isNotNull' }] }] },
+      {
+        userFilters: {
+          element: 'tabs',
+          tabs: [{ name: 'mine', label: 'Mine', filter: [{ field: 'owner', operator: 'isNotNull' }] }],
+        },
+      },
     );
     const out = graftThroughSchema(authored) as {
       filter: Array<{ operator: string }>;
-      tabs: Array<{ filter: Array<{ operator: string }> }>;
+      userFilters: { element: string; tabs: Array<{ name: string; filter: Array<{ operator: string }> }> };
     };
     expect(out.filter[0].operator).toBe('equals');
-    expect(out.tabs[0].filter[0].operator).toBe('is_not_null');
+    expect(out.userFilters.tabs[0].filter[0].operator).toBe('is_not_null');
+    // Only the operator moved: the preset bar's own keys ride through as authored.
+    expect(out.userFilters.element).toBe('tabs');
+    expect(out.userFilters.tabs[0].name).toBe('mine');
   });
 });
 
 describe('graftNormalizedOperators — what it must never touch', () => {
   it('keeps Studio-only auxiliary fields a `parsed.data` swap would strip', () => {
-    // The exact reason saveMeta persists verbatim (ADR-0005 §Validation).
+    // Why the graft, not a `parsed.data` swap, is the helper's contract (ADR-0005
+    // appendix (c) for every type but `view`).
     const authored = view(
       [{ field: 'status', operator: 'gt', value: 1 }],
       { isPinned: true, isDefault: false, sortOrder: 3 },

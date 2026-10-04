@@ -172,14 +172,14 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
 
   const config = record.config;
 
-  // The passthrough spelling (#9040): a stored `options.auth.password` (or a
+  // The passthrough spelling (commit 24206416a): a stored `options.auth.password` (or a
   // legacy row's equivalent) is a LIVE login credential — measured, the client
   // resolves the block into `MongoCredentials` — that this action cannot
   // re-home mechanically: dropping the nested leaf would leave an `auth` block
   // with only a username, which the client refuses at construction
   // (`credentials must be an object with 'username' and 'password'
   // properties`, measured on mongodb@7.5.0), and the DSN branch injects a
-  // bound secret only through a URL that already names a user (#8696). Refused
+  // bound secret only through a URL that already names a user (commit 90a12fb18). Refused
   // with the per-row remedy, exactly like the URL spellings below.
   const passthroughKeys = refusedPassthroughSecretPaths(record.driver)
     .filter((path) => {
@@ -266,8 +266,10 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
         action: 'refuse',
         reason:
           `Datasource '${record.name}' holds ${named}, which the ${String(record.driver)} driver does not `
-          + 'read as its credential — a pre-#8078 alias spelling, or a key that is credential-shaped but '
-          + 'deliberately still writable (turso\'s `encryptionKey`, #8081 item 4). Binding one into the '
+          + 'read as its credential — an alias spelling from before inline credentials were refused at '
+          + 'publish, which no connection builder reads, or a key that is credential-shaped but '
+          + 'deliberately still writable (turso\'s `encryptionKey`, which has no secret slot of its own: '
+          + 'the one slot carries the `authToken`). Binding one into the '
           + 'single secret slot would hand the driver a credential it does not use, or add authentication '
           + 'to a connection that works without it today.',
         remedy:

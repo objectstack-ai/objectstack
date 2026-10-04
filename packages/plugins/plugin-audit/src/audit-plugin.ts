@@ -17,6 +17,12 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
+import { installActivityReadVisibility } from './activity-read-visibility.js';
+import { installActivityFieldRedaction } from './activity-field-redaction.js';
+import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
+import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
+import type { FieldVisibilitySource } from './served-fields.js';
+import { installParentFieldQueryGuards } from './parent-field-query-guard.js';
 
 /**
  * [#8992] Read/view audit configuration — the per-object opt-in, closed.
@@ -95,8 +101,22 @@ export class AuditPlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysAuditLog, SysActivity, SysComment],
-      // ADR-0029 D7 — contribute the Audit Logs entry into the Setup app's
-      // `group_diagnostics` slot. The plugin owns sys_audit_log (K2).
+      // ADR-0029 D7 — contribute the Audit Logs entries into the Setup app's
+      // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so both
+      // doors onto it live and die with this plugin and need no item gate.
+      //
+      // #20142 — the two entries are two different surfaces, and neither is a
+      // superset of the other:
+      //  - `nav_audit_logs` is the object view: `sys_audit_log`'s named list
+      //    views (`record_views` lists the `read` rows, an action the page's
+      //    filter did not offer at the console pin this entry was measured
+      //    against), searchable, with the actor and tenant rendered as
+      //    resolved lookups.
+      //  - `nav_audit_log_browser` is the console's Audit Log page (the
+      //    `audit:log` registry key, `registerSystemComponents.tsx`): one
+      //    filterable table whose detail drawer pretty-prints a change's
+      //    before and after JSON, where the record page shows `old_value` /
+      //    `new_value` as raw textarea text.
       navigationContributions: [
         {
           app: 'setup',
@@ -104,6 +124,7 @@ export class AuditPlugin implements Plugin {
           priority: 100,
           items: [
             { id: 'nav_audit_logs', type: 'object', label: 'Audit Logs', objectName: 'sys_audit_log', icon: 'scroll-text' },
+            { id: 'nav_audit_log_browser', type: 'component', label: 'Audit Log Browser', componentRef: 'audit:log', icon: 'file-diff' },
           ],
         },
       ],
@@ -261,6 +282,74 @@ export class AuditPlugin implements Plugin {
           );
         }
         ctx.logger.info('AuditPlugin: sys_comment record-level access gates installed');
+      }
+
+      // sys_activity READ visibility — an activity row is readable when the
+      // record it is about (`object_name`, `record_id`) is readable, decided by
+      // the same caller-scoped parent read the sys_comment gate above asks.
+      // The object is append-only with `apiMethods: ['get', 'list']`, so the
+      // read side is the whole gate. Without the middleware seam it cannot be
+      // installed, and that is said rather than left silent.
+      if (typeof (engine as any).registerMiddleware === 'function') {
+        // [#21154] A query that filters, sorts, searches, groups or aggregates
+        // by a value-bearing column of the activity stream or the ledger is
+        // judged before the read gate below runs its pre-scan — a read-time
+        // redaction narrows only what is served, so such a predicate would
+        // select on a value the reader is not served. The security service is
+        // resolved on every read, as for the redaction.
+        installParentFieldQueryGuards(
+          engine as any,
+          () => {
+            try {
+              const sec = ctx.getService<FieldVisibilitySource>('security');
+              return sec && typeof sec.getReadableFields === 'function' ? sec : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+          ctx.logger,
+        );
+        installActivityReadVisibility(engine as any, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_activity parent-record read visibility installed');
+        // [#21081] …and of each row it keeps, the value-bearing columns serve a
+        // parent field only to a reader the security service serves that field
+        // unmasked. The service is resolved on EVERY read, for the reason the
+        // approval snapshot gives: the security plugin may register after this
+        // one, and a resolver captured now would pin "no service" — i.e. never
+        // redact — for the life of the process. `getService` throws on an empty
+        // slot, so a deployment without the security plugin (no field-level
+        // security anywhere) serves rows exactly as before.
+        const getSecurity = (): FieldVisibilitySource | undefined => {
+          try {
+            const sec = ctx.getService<FieldVisibilitySource>('security');
+            return sec && typeof sec.getReadableFields === 'function' ? sec : undefined;
+          } catch {
+            return undefined;
+          }
+        };
+        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
+        // [#21155] The compliance ledger's before/after snapshots take the same
+        // narrowing, through the same answer and the same resolver: a ledger
+        // reader is not field-unrestricted by default. An auditor who must see
+        // every field is granted it by a set that unmasks those fields.
+        installAuditLogFieldRedaction(engine as any, getSecurity, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_audit_log field redaction installed');
+        // [#21175] …and the ledger's rows take the activity stream's parent-record
+        // gate: a row about a record is served only to a caller who can read it.
+        // Middleware runs in registration order, so on the ledger the #21154
+        // query guard above judges a query first (a refused query never pays
+        // this gate's pre-scan), and the field redaction narrows only the rows
+        // this gate keeps.
+        installAuditLogReadVisibility(engine as any, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_audit_log parent-record read visibility installed');
+      } else {
+        ctx.logger.warn(
+          'AuditPlugin: engine has no middleware seam — sys_activity READ visibility and field redaction, and ' +
+            'sys_audit_log READ visibility and field redaction, NOT installed (activity and ledger rows about ' +
+            'records the caller cannot read would be listable, and an activity row or a ledger snapshot would ' +
+            'serve every parent field value it carries)',
+        );
       }
     });
   }

@@ -24,8 +24,11 @@
  * The card named `$null`, `$between` and `$notContains`. Probing every declared
  * operator one at a time and intersecting the key sets moved that list twice:
  *
- * - **`$lte` on a bare calendar day is a fourth member** — #4042's whole-day
- *   rewrite compiles it half-open, onto `$lt`.
+ * - **`$lte` on a bare calendar day was a fourth member** while this
+ *   translator applied #4042's whole-day rewrite itself, onto `$lt`. Since
+ *   #20822 that rule is applied once at the seams (ADR-0053 D-D1 item 5): here
+ *   `$lte` writes its own key, and the seam-fed pair reaches the translator
+ *   already split by the lowering's one-operator-per-conjunct rule.
  * - **The whole `$regex` family is a fifth, and it is THIS DRIVER'S ALONE.**
  *   `$contains` / `$startsWith` / `$endsWith` / `$icontains` all write
  *   `$regex`; `driver-memory` has promoted its string family to `$and`
@@ -43,12 +46,18 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { FILTER_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, lowerFilterCondition } from '@objectstack/spec/data';
 
 import { translateFilter } from './mongodb-filter.js';
 
+/**
+ * [#20446] Every probed field is declared `text`, so `$empty` — in
+ * `FILTER_OPERATORS` since #20446 — translates its text row rather than being
+ * refused for want of a declaration. No other operator reads the resolver.
+ */
+const TEXT_SHAPE = { type: 'text' } as const;
 const doc = (where: unknown): Record<string, unknown> =>
-  translateFilter(where as never) as Record<string, unknown>;
+  translateFilter(where as never, undefined, () => TEXT_SHAPE) as Record<string, unknown>;
 
 /** Both key orders of one two-operator field constraint. */
 function bothOrders(
@@ -90,9 +99,9 @@ const setOf = (where: unknown): string[] => [...constraintsOf(doc(where))].sort(
 
 describe('[#13524] the ENUMERATION — which lowered key each declared operator writes', () => {
   /**
-   * Measured, one operator at a time. An operator with a comparand-dependent
-   * lowering is probed with BOTH comparands, because that dependence is where
-   * two of the five contested keys come from.
+   * Measured, one operator at a time. `$lte` and `$between` are probed with a
+   * bare calendar day too: their lowering depended on it until #20822, and the
+   * rows pin that it no longer does.
    */
   const LOWERED_KEYS: ReadonlyArray<readonly [string, unknown, readonly string[]]> = [
     ['$eq', 'x', ['$eq']],
@@ -101,11 +110,11 @@ describe('[#13524] the ENUMERATION — which lowered key each declared operator 
     ['$gte', 1, ['$gte']],
     ['$lt', 1, ['$lt']],
     ['$lte', 1, ['$lte']],
-    ['$lte', '2026-07-28', ['$lt']],                  // BARE CALENDAR DAY (#4042)
+    ['$lte', '2026-07-28', ['$lte']],                 // BARE CALENDAR DAY: as written (#20822)
     ['$in', ['x'], ['$in']],
     ['$nin', ['x'], ['$nin']],
     ['$between', [1, 2], ['$gte', '$lte']],
-    ['$between', ['2026-01-01', '2026-07-28'], ['$gte', '$lt']],
+    ['$between', ['2026-01-01', '2026-07-28'], ['$gte', '$lte']],
     ['$contains', 'x', ['$regex']],
     ['$notContains', 'x', ['$not']],
     ['$startsWith', 'x', ['$regex']],
@@ -115,6 +124,8 @@ describe('[#13524] the ENUMERATION — which lowered key each declared operator 
     ['$null', false, ['$ne']],
     ['$exists', true, ['$ne']],
     ['$exists', false, ['$eq']],
+    ['$empty', true, ['$in']],                        // the text row: null or ''
+    ['$empty', false, ['$nin']],
   ];
 
   it('the probe table covers the declared vocabulary exactly', () => {
@@ -128,7 +139,7 @@ describe('[#13524] the ENUMERATION — which lowered key each declared operator 
     expect(Object.keys(emitted.f as Record<string, unknown>).sort()).toEqual([...keys].sort());
   });
 
-  it('the contested keys are exactly these five', () => {
+  it('the contested keys are exactly these', () => {
     const byKey = new Map<string, Set<string>>();
     for (const [op, , keys] of LOWERED_KEYS) {
       for (const key of keys) {
@@ -146,9 +157,15 @@ describe('[#13524] the ENUMERATION — which lowered key each declared operator 
       $eq: ['$eq', '$exists', '$null'],
       $ne: ['$exists', '$ne', '$null'],
       $gte: ['$between', '$gte'],
-      $lt: ['$between', '$lt', '$lte'],
       $lte: ['$between', '$lte'],
       $regex: ['$contains', '$endsWith', '$icontains', '$startsWith'],
+      // [#20446] `$empty` (in `FILTER_OPERATORS` since #20446) writes `$in` /
+      // `$nin` on its text row, so it contests those two keys BY KEY — but the
+      // translator never puts it in the shared slot: it is always a document of
+      // its own, AND-ed beside the field's other operators, so no pairing can
+      // clobber it (the sweep below holds every pair to that).
+      $in: ['$empty', '$in'],
+      $nin: ['$empty', '$nin'],
     });
     // `$not` is written by `$notContains` and by nothing else — the card's
     // third named member, measured NOT reachable.
@@ -177,14 +194,18 @@ describe('[#13524] the emitted document carries BOTH constraints, in either key 
     expect(doc(ba)).toEqual(expected);
   });
 
-  it('THE FOURTH MEMBER — `$lte` on a bare calendar day contests `$lt`', () => {
+  it('THE FOURTH MEMBER, retired — `$lte` on a bare calendar day no longer contests `$lt` (#20822)', () => {
     const [ab, ba] = bothOrders('d', ['$lte', '2026-07-28'], ['$lt', '2026-07-02']);
-    // Was {d:{$lt:'2026-07-02'}} and {d:{$lt:'2026-07-29'}} — a whole-day
-    // upper bound silently replacing the author's own strict bound, or the
-    // reverse, depending on which was typed second.
-    const expected = { $and: [{ d: { $lt: '2026-07-02' } }, { d: { $lt: '2026-07-29' } }] };
-    expect(doc(ab)).toEqual(expected);
-    expect(doc(ba)).toEqual(expected);
+    // Was {d:{$lt:'2026-07-02'}} and {d:{$lt:'2026-07-29'}} before #13524 — a
+    // whole-day upper bound silently replacing the author's own strict bound.
+    // A direct call: `$lte` writes its own key, so the pair is uncontested.
+    expect(doc(ab)).toEqual({ d: { $lte: '2026-07-28', $lt: '2026-07-02' } });
+    expect(doc(ba)).toEqual({ d: { $lt: '2026-07-02', $lte: '2026-07-28' } });
+    // A seam-fed call: the lowering's `$lt` cannot join the author's map, so it
+    // arrives as its own conjunct and both bounds survive, in either order.
+    const seamed = (where: Record<string, unknown>) => doc(lowerFilterCondition(where));
+    expect(constraintsOf(seamed(ab))).toEqual(new Set(['d|$lt|"2026-07-02"', 'd|$lt|"2026-07-29"']));
+    expect(constraintsOf(seamed(ba))).toEqual(new Set(['d|$lt|"2026-07-02"', 'd|$lt|"2026-07-29"']));
   });
 
   it('THE FIFTH MEMBER, THIS DRIVER`S ALONE — two string operators both write `$regex`', () => {
@@ -237,6 +258,7 @@ describe('[#13524] the sweep — every declared pair, both orders, nothing dropp
     $icontains: '07-15',
     $null: false,
     $exists: true,
+    $empty: false,
   });
 
   it('the comparand table covers the declared vocabulary exactly', () => {

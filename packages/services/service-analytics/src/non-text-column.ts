@@ -39,7 +39,8 @@
  *
  * A row with no value already satisfies `$notContains` (#5298) and fails every
  * positive operator, so `1 = 1` / `1 = 0` agree with the null polarity on every
- * row. Under `$not`, the leaf is totalised first (`nullSafeNegationOperand`):
+ * row. Under `$not`, the leaf is totalised first (by the shared lowering, the
+ * NULL rule's one source since #5930 step 4):
  * `NOT (col IS NOT NULL AND 1 = 0)` is TRUE for every row — what the JS faces
  * answer for `!contains` on a number — and `NOT (col IS NULL OR 1 = 1)` is
  * FALSE for every row, what they answer for `!notContains`.

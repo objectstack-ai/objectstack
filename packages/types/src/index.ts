@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 export * from './degraded-boot.js';
-// [#11343/#12751] The one verified-email predicate the walled owner-elevation
+// [commit c0714eb5d / #12751] The one verified-email predicate the walled owner-elevation
 // gate (plugin-security) and the owner-verification boot diagnostic
 // (plugin-auth) both read — see the module doc for why it must be one.
 export * from './email-verified.js';
@@ -48,7 +48,7 @@ export * from './relation-sub-object.js';
 // Four hand-written vocabularies used to answer it and disagreed about MySQL,
 // which is why every MySQL conflict came back 500 instead of 409.
 export * from './unique-violation.js';
-// [#4728/#4825, moved here by #13279] The one "which driver failures may be
+// [#4728/#4825, moved here by commit 6a180e42d] The one "which driver failures may be
 // silenced?" vocabulary — `isMissingTableError` (a READ failed because the
 // table was never provisioned) and `isSchemaAlreadyExistsError` (a DDL failure
 // that was just the table already being there). It was `@objectstack/metadata`'s
@@ -58,6 +58,21 @@ export * from './unique-violation.js';
 // so adopting the predicate adds no edge. `@objectstack/metadata/errors` still
 // re-exports `isMissingTableError` for its published consumers.
 export * from './driver-error-classification.js';
+// [#21385, maintainer ruling 2026-10-02 letter A] THE driver-fault redaction:
+// the one cut that keeps a statement's bound values and inlined literals out of
+// every log face and out of the error that leaves the engine. Moved here from
+// `@objectstack/objectql` because its callers are the engine and `driver-sql`'s
+// own log lines, and the family's next face, `operatorFacingErrorText` (#21418),
+// lives in this package: this is the one home all of them reach, so adopting it
+// adds no edge. Named rather
+// than `export *`: the module's template table and its load-time guard stay
+// package-internal (their cases live beside them).
+export {
+  redactBoundStatement,
+  redactStatementFromMessage,
+  redactPropagatedDriverFault,
+  type DriverFaultOrigin,
+} from './driver-fault-redaction.js';
 // [#8567] The OPPOSITE question, kept deliberately separate: "is this the
 // database refusing an ON CONFLICT target that no unique index backs?" One
 // measured limb per dialect that can raise it (SQLite, Postgres); MySQL cannot,
@@ -68,6 +83,12 @@ export * from './unbacked-conflict-target.js';
 // the pure enumerator both the hard stop (install seam) and the advisories
 // (`os doctor` / `os migrate plan`) read, so the three cannot drift apart.
 export * from './unique-scope-install-gate.js';
+// [#20919] The REST door's error CLASSIFICATION half (`mapDataError` through
+// `classifyDataError`), moved here from `@objectstack/rest` beside the
+// primitives it composes, so the bulk-import runner in `@objectstack/core`
+// judges a failed row with the same table the HTTP door answers with. `rest`
+// keeps the emission half and re-exports the public names.
+export * from './data-error-classification.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

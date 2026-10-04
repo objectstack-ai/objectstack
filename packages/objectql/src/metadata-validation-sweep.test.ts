@@ -18,7 +18,7 @@
  * Types without a Zod schema in the central registry (today only
  * `rag_pipeline` among the URL-map kinds — `theme`/`webhook` and their
  * siblings all resolve schemas via `UNREGISTERED_KIND_SCHEMAS` since
- * #6245/#10194) are still expected to pass through unvalidated — that is
+ * #6245 / commit 2306a765c) are still expected to pass through unvalidated — that is
  * the documented fall-through, not a regression. We pin it explicitly so any
  * future coverage gap is visible in the report.
  *
@@ -143,12 +143,17 @@ const FIXTURES: Record<string, Fixture> = {
         invalidatedField: 'type',
     },
     hook: {
+        // [#21689] Both carry a `body`: the save door refuses a hook with no
+        // `body` (it could never run), so a body-less `valid` would measure
+        // that refusal, and `invalid` stays `valid` minus the one field the
+        // schema must name.
         valid: {
             name: 'sweep_hook',
             object: 'sweep_account',
             events: ['beforeInsert'],
+            body: { language: 'js', source: 'return;' },
         },
-        invalid: { name: 'sweep_hook', object: 'sweep_account' },
+        invalid: { name: 'sweep_hook', object: 'sweep_account', body: { language: 'js', source: 'return;' } },
         invalidatedField: 'events',
     },
     validation: {
@@ -195,7 +200,7 @@ const FIXTURES: Record<string, Fixture> = {
     app: {
         valid: { name: 'sweep_app', label: 'Sweep' },
         // The invalid probe breaks `label`, not `name`: an ungrammatical item
-        // name is refused by the #12194 grammar door (INVALID_REQUEST 400)
+        // name is refused by the grammar door (commit 311433f6b, INVALID_REQUEST 400)
         // BEFORE the central Zod registry runs, so a bad name can no longer
         // prove the schema gate this sweep exists to prove. The name-grammar
         // refusal has its own pins in metadata-protocol.

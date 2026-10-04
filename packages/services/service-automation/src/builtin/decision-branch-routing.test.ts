@@ -207,7 +207,7 @@ describe('decision branch routing (#4414)', () => {
         // branch and every out-edge label.
         expect(warnings.some((w) =>
             w.msg.includes('no out-edge carries that label')
-            && w.msg.includes('#4414')
+            && w.msg.includes('The branch selection is IGNORED')
             && w.meta?.branchLabel === 'Yes — already converted'
             && (w.meta?.outEdges as Array<{ label: string | null }>)
                 .map((e) => e.label).includes('Yes')

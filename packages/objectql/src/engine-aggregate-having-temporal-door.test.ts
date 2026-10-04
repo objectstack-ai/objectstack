@@ -191,10 +191,26 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
       ['"+010000-01-01T00:00:00.000Z"', 'not a date value']],
     ['the number for 10000-01-01 on max(date), in the year class\'s own words',
       () => ({ last_placed: { $gt: Y10000 } }), { placed_on: { $gt: Y10000 } },
-      ['253402300800000', 'outside the years 0000 to 9999', 'keep the wrong groups']],
+      ['253402300800000', 'outside the years 0001 to 9999', 'keep the wrong groups']],
     ['the Date for 10000-01-01 on max(date)',
       () => ({ last_placed: { $lt: new Date(Y10000) } }), { placed_on: { $lt: new Date(Y10000) } },
-      ['Date +010000-01-01T00:00:00.000Z', 'outside the years 0000 to 9999']],
+      ['Date +010000-01-01T00:00:00.000Z', 'outside the years 0001 to 9999']],
+    // [#20264] A datetime year outside 0001..9999 is the year class too, on
+    // `having` with no edit here: the predicate asks core's one range. At the
+    // base this `$lt` kept no group — the extended text sorts below every year.
+    ['an extended-year ISO string on min(datetime), in the year class\'s words',
+      () => ({ first_opened: { $lt: '+010000-01-01T00:00:00.000Z' } }), { opened_at: { $lt: '+010000-01-01T00:00:00.000Z' } },
+      ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'outside the years 1000 to 9999', 'keep the wrong groups']],
+    // [#20280] A datetime before year 1000, MySQL's documented `DATETIME`
+    // floor, is the year class now too, in its own words: it sorts as the
+    // instant it names, so the message claims no misorder. Kept every group at
+    // the base (the read control below said "inside the range").
+    ['[#20280] the first instant of year 1 on min(datetime), before the datetime floor',
+      () => ({ first_opened: { $gt: '0001-01-01T00:00:00.000Z' } }), { opened_at: { $gt: '0001-01-01T00:00:00.000Z' } },
+      ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'outside the years 1000 to 9999', 'Before year 1000']],
+    ['the number for year 0 on max(date) — [#20264] year 0 joins the refused years',
+      () => ({ last_placed: { $gt: Date.parse('0000-06-15T00:00:00.000Z') } }), { placed_on: { $gt: Date.parse('0000-06-15T00:00:00.000Z') } },
+      ['outside the years 0001 to 9999']],
     ['"not-a-date" on min(datetime)',
       () => ({ first_opened: { $lt: 'not-a-date' } }), { opened_at: { $lt: 'not-a-date' } },
       ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'not a datetime value']],
@@ -204,6 +220,16 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     ['"noon" on max(time)',
       () => ({ last_slot: { $gt: 'noon' } }), { slot: { $gt: 'noon' } },
       ["`having` on 'last_slot' (max(slot), a time column)", 'not a time value']],
+    // [#20480] A time column keeps the UTC time of day of an instant only when
+    // its UTC year has a four-digit spelling. This number kept NO group at the
+    // base (it was compared with `HH:MM:SS` text as written), and was listed
+    // among the comparands left alone; it is refused now, with its string twin.
+    ['[#20480] the number for 10000-01-01 on max(time), which kept no group',
+      () => ({ last_slot: { $gt: Y10000 } }), { slot: { $gt: Y10000 } },
+      ["`having` on 'last_slot' (max(slot), a time column)", '253402300800000', 'at having.last_slot.$gt']],
+    ['[#20480] the card\'s extended-year instant on max(time)',
+      () => ({ last_slot: { $gt: '+010000-01-01T10:00:00Z' } }), { slot: { $gt: '+010000-01-01T10:00:00Z' } },
+      ["`having` on 'last_slot' (max(slot), a time column)", '"+010000-01-01T10:00:00Z"', 'at having.last_slot.$gt']],
     ['an $in member', () => ({ last_placed: { $in: ['2026-02-01', 'not-a-date'] } }), { placed_on: { $in: ['2026-02-01', 'not-a-date'] } },
       ['at having.last_placed.$in[1]']],
     ['a $nin member', () => ({ last_placed: { $nin: ['not-a-date'] } }), { placed_on: { $nin: ['not-a-date'] } },
@@ -247,9 +273,32 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     await expectHavingRefusal(() => ({ d: { $gt: Y10000 } }), [{ field: 'opened_at', dateGranularity: 'day', alias: 'd' }]);
   });
 
-  it('the remedy names no placeholder: having resolves none, so it would send the author to a literal', async () => {
-    for (const having of [{ last_placed: { $lt: 'x' } }, { first_opened: { $lt: 'x' } }]) {
-      expect(await expectHavingRefusal(() => having)).not.toContain('{30_days_ago}');
+  // [#20334] `having` resolves placeholders through `where`'s resolver, so its
+  // remedy is `where`'s: it names the relative-date placeholder that a caller
+  // holding a preset name (`last_30_days`) needs, on the two kinds that take one.
+  it('the remedy names the placeholder the resolver knows, in the where twin\'s words', async () => {
+    const CASES: ReadonlyArray<readonly [Record<string, unknown>, Record<string, unknown>, string]> = [
+      [{ last_placed: { $lt: 'last_30_days' } }, { placed_on: { $lt: 'last_30_days' } },
+        "`having` on 'last_placed' (max(placed_on), a date column) compares against \"last_30_days\" at "
+        + 'having.last_placed.$lt, which is not a date value this platform can interpret.'],
+      [{ first_opened: { $lt: 'last_30_days' } }, { opened_at: { $lt: 'last_30_days' } },
+        "`having` on 'first_opened' (min(opened_at), a datetime column) compares against \"last_30_days\" at "
+        + 'having.first_opened.$lt, which is not a datetime value this platform can interpret.'],
+    ];
+    const after = (message: string, marker: string): string => {
+      expect(message).toContain(marker);
+      return message.slice(message.indexOf(marker) + marker.length);
+    };
+    for (const [having, where, firstSentence] of CASES) {
+      // INVALID_FILTER / 400 on both paths, empty or populated, no read.
+      const message = await expectHavingRefusal(() => having);
+      expect(message.startsWith(`aggregate('${OBJECT}'): ${firstSentence} `)).toBe(true);
+      const remedy = after(message, 'The `having` was NOT applied. ');
+      expect(remedy).toContain('"{30_days_ago}"');
+      const twin = await whereTwinOf(where);
+      expect(twin.err?.code).toBe('INVALID_FILTER');
+      expect(twin.err?.status).toBe(400);
+      expect(remedy).toBe(after(twin.err!.message, 'The filter was NOT applied. '));
     }
   });
 });
@@ -263,6 +312,8 @@ describe('[#20263] having — one predicate: refused exactly when @objectstack/c
   const VALUES: readonly unknown[] = [
     'not-a-date', '2026-02-01', '2026-02-01T10:00:00.000Z', '2026-02-01 10:00', '+010000-01-01T00:00:00.000Z',
     '10:00', '10:00:00', '25:00', 'last_30_days', '1769940000000', '{today}', '{not_a_token}', '', '   ',
+    // [#20280] Read on a date and a time column, refused on a datetime one.
+    '0500-07-15T10:00:00.000Z', Date.parse('0500-07-15T10:00:00.000Z'),
     1769940000000, Y10000, -62198755200000, new Date(1769940000000), new Date(Y10000), null, true,
   ];
   for (const [kind, column, field] of COLUMNS) {
@@ -294,19 +345,15 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     ['an in-range Date on max(date)', { last_placed: { $gt: new Date(1769940000000) } }, ['c2']],
     ['a 2026 instant on min(datetime)', { first_opened: { $gt: '2026-02-01T00:00:00.000Z' } }, ['c2', 'c3', 'c4']],
     ['a bare day as the upper bound of min(datetime)', { first_opened: { $lte: '2026-02-01' } }, ['c1', 'c2']],
-    // The `datetime` rule reads an extended-year instant, so the predicate calls
-    // it interpretable and its `where` twin is not refused by the door either.
-    // Its text orders below every four-digit year, so `$lt` keeps no group, on
-    // `having` as before; which years a comparand may name is #20264's to
-    // decide, in the predicate, and `having` follows it with no second edit.
-    ['an extended-year ISO on min(datetime) — read by the datetime rule', { first_opened: { $lt: '+010000-01-01T00:00:00.000Z' } }, []],
+    // [#20264] An extended-year instant on min(datetime) is refused now (see
+    // the REFUSED table); [#20280] so is the first instant of year 1, and the
+    // floor's edge, year 1000, is read — as is year 1 on a date column.
+    ['[#20280] the first instant of year 1000 on min(datetime) — the floor\'s edge', { first_opened: { $gt: '1000-01-01T00:00:00.000Z' } }, ['c1', 'c2', 'c3', 'c4']],
+    ['[#20280] year 1 on max(date) — a date keeps 0001..9999', { last_placed: { $gt: '0001-01-01' } }, ['c1', 'c2', 'c3', 'c4']],
     ['a wall clock on max(time)', { last_slot: { $gte: '12:00' } }, ['c2', 'c3', 'c4']],
-    ['the number for 10000-01-01 on max(time) — not judged on time', { last_slot: { $gt: Y10000 } }, []],
-    ['a string on sum — not temporal', { total: { $gt: 'not-a-date' } }, []],
-    ['a string on count — not temporal', { n: { $gt: 'not-a-date' } }, []],
-    ['a string on avg — not temporal', { mean: { $gt: 'not-a-date' } }, []],
+    ['[#20480] the same wall clock as a 2026 instant on max(time) — the control', { last_slot: { $gte: '2026-01-01T12:00:00Z' } }, ['c2', 'c3', 'c4']],
+    ['[#20480] the same wall clock as a 2026 epoch-ms number on max(time)', { last_slot: { $gte: Date.parse('2026-01-01T12:00:00Z') } }, ['c2', 'c3', 'c4']],
     ['a {placeholder} is stepped around, as on where', { last_placed: { $lte: '{today}' } }, ['c1', 'c2', 'c3', 'c4']],
-    ['an unknown {placeholder} too', { last_placed: { $gte: '{not_a_token}' } }, []],
     ['the empty string (its own card)', { last_placed: { $gt: '' } }, ['c1', 'c2', 'c3', 'c4']],
     ['null in the equality slot', { last_placed: null }, []],
     ['$exists', { last_placed: { $exists: true } }, ['c1', 'c2', 'c3', 'c4']],
@@ -324,6 +371,39 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
       expect(await keptGroups(having)).toEqual(kept);
     });
   }
+
+  // [#20351] A string on a NUMERIC column is not this door's either, and it is
+  // no longer compared as written: the number-comparand door, which runs after
+  // this one, refuses it in its own words, before any read. (It kept no group,
+  // with a 200, before that door existed.)
+  it('a string on sum, count or avg is not this door\'s: the number-comparand door refuses it, before any read', async () => {
+    for (const column of ['total', 'n', 'mean']) {
+      for (const path of ['native', 'rows'] as const) {
+        const { engine, reads } = await makeEngine(path, ROWS);
+        const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { [column]: { $gt: 'not-a-date' } })));
+        expect({ code: err?.code, status: err?.status }, `${column} ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        // [#20510] `total` / `n` / `mean` are aggregation aliases — a numeric
+        // aggregated column, not a declared field — and `having` never binds
+        // to a driver, so the refusal carries no PostgreSQL clause.
+        expect(err?.message, `${column} ${path}`).toContain(`compares a numeric aggregated column against "not-a-date" at having.${column}.$gt`);
+        expect(err?.message, `${column} ${path}`).not.toContain('PostgreSQL');
+        expect(reads, `${column} ${path}`).toEqual({ aggregate: 0, find: 0 });
+      }
+    }
+  });
+
+  // [#20334] An unknown one is stepped around by this door too, and is then
+  // refused one layer down by the token resolver, in its own code, as on
+  // `where` (it kept no group with a 200 before `having` resolved tokens).
+  it('an unknown {placeholder} is not this door\'s verdict: FILTER_TOKEN_UNKNOWN from the resolver, before any read', async () => {
+    for (const path of ['native', 'rows'] as const) {
+      const { engine, reads } = await makeEngine(path, ROWS);
+      const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { last_placed: { $gte: '{not_a_token}' } })));
+      expect(err?.code, path).toBe('FILTER_TOKEN_UNKNOWN');
+      expect(err?.status, path).toBe(400);
+      expect(reads, path).toEqual({ aggregate: 0, find: 0 });
+    }
+  });
 
   it('a coarser bucket is a text label, and is not judged', async () => {
     const kept = await keptGroups(

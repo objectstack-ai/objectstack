@@ -30,7 +30,7 @@ export type {
     FlowDispatchOutcome,
     // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
     // the durable off-switch that REPLACES the retired process-local
-    // `flowEnabled` map (#10243). Exported so a host can supply its own
+    // `flowEnabled` map (the leak commit 02b41232d measured). Exported so a host can supply its own
     // backing store, and so the shape a consumer reads is the platform's.
     FlowActivationStore,
     FlowActivationRow,
@@ -70,6 +70,15 @@ export type {
     // consumer needs the name to annotate a result or switch exhaustively over
     // `reason` — the three negatives exist precisely to be branched on.
     ConsumedSuspensionInspection,
+    // [#20761] The reader `AutomationEngine.setPackagedFlowSource` takes — the
+    // method is barrel-reachable, so a host building a custom composition
+    // needs the name to hand it the loader's set.
+    PackagedFlowSource,
+    // [#20790] The write-only flow credential channel's engine port, and what
+    // `AutomationEngine.flowCredentialHoldings` answers — both
+    // barrel-reachable through `setFlowCredentialSource` and that method.
+    FlowCredentialSource,
+    FlowCredentialHolding,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot
@@ -126,6 +135,25 @@ export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-
 export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 
+// [#20790] The write-only flow credential channel: where a flow's inbound hook
+// secret and http signing secrets live once they are out of its definition —
+// the object, the channel the plugin registers on the metadata save door, and
+// the one-time move of credentials stored before it.
+export { SysFlowCredential } from './sys-flow-credential.object.js';
+export {
+    FlowCredentialChannel,
+    FlowCredentialChannelRefusal,
+    FlowCredentialUnresolvableError,
+    FLOW_CREDENTIAL_OBJECT,
+    FLOW_CREDENTIAL_VALUE_FIELD,
+} from './flow-credential-channel.js';
+export type { FlowCredentialEngine, FlowCredentialState } from './flow-credential-channel.js';
+export {
+    migrateFlowCredentialsIntoChannel,
+    FLOW_CREDENTIAL_MIGRATION_ID,
+} from './flow-credential-migration.js';
+export type { FlowCredentialMigrationResult } from './flow-credential-migration.js';
+
 // [ADR-0126 §4/§7.2] Packaged-flow enable/disable. The durable ledger behind
 // `AutomationEngine.toggleFlow` — the in-memory store is for tests and hosts
 // with no ObjectQL; the ObjectQL-backed store writes `sys_metadata_activation`
@@ -137,6 +165,21 @@ export type { FlowActivationStoreEngine } from './flow-activation-store.js';
 // a fully-functional automation capability.
 export { AutomationServicePlugin, createPackageFileLoader } from './plugin.js';
 export type { AutomationServicePluginOptions } from './plugin.js';
+
+// [#20919] The connector sync executor — pull a `mapping`'s `connectorSource`
+// and write the records through the import runner. A `job` whose `pull` names
+// the mapping drives it, through the `automation` service's contract method
+// (`IAutomationService.pullConnectorSource`, which the engine serves from
+// `AutomationServicePlugin.pullConnectorSource`).
+export { pullConnectorSource, ConnectorPullError, CONNECTOR_PULL_PROVIDERS } from './connector-pull.js';
+export type {
+    ConnectorPullDeps,
+    ConnectorPullOptions,
+    ConnectorPullProtocol,
+    ConnectorPullRefusalReason,
+    ConnectorPullRegistry,
+    ConnectorPullResult,
+} from './connector-pull.js';
 
 // Run identity (ADR-0049 / #1888). Maps a flow run's effective `runAs` to the
 // ObjectQL `context` its data nodes pass — `system` → elevated/RLS-bypassing,

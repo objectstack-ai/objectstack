@@ -42,7 +42,7 @@ import { ObjectQL } from './engine.js';
  * (#5285). So a test that hands the engine one has to say so, and
  * `as unknown as EngineQueryOptions` is how: it names the contract being
  * bypassed, keeps the rest of the call type-checked, and greps as an
- * intentional act — none of which a bare `as any` does. (#6300 flipped the
+ * intentional act — none of which a bare `as any` does. (Commit 74155c735 flipped the
  * find/findOne parameter from `EngineQueryOptionsParsed` to the author-state
  * `EngineQueryOptions`; the cast target follows the contract it names.)
  *
@@ -90,7 +90,7 @@ interface SeenRead { ast: DriverQuery }
  * signature moves.
  *
  * `aggregate` included: the engine reaches it by duck-typing
- * (`typeof drv.aggregate === 'function'`, `engine.ts`), and until #14345 the
+ * (`typeof drv.aggregate === 'function'`, `engine.ts`), and until commit e89fa9233 the
  * interface did not declare it, so this file carried a local extension for
  * the one verb. `IDataDriver.aggregate?` now spells the signature the engine
  * calls, so the double's `aggregate` is checked by the same annotation as
@@ -673,8 +673,11 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     await engine.find('deal', asFilterArrayQuery([['stage', 'in', ['won', 'lost']]]));
     expect(lastWhere()).toEqual({ stage: { $in: ['won', 'lost'] } });
 
+    // [ADR-0053 D-D1, amended — #5930] `$nin` reaches the driver with the
+    // shared lowering's NULL escape around it, the #5298 reading every face
+    // already gives it; the list itself is untouched.
     await engine.find('deal', asFilterArrayQuery([['stage', 'not_in', ['lost']]]));
-    expect(lastWhere()).toEqual({ stage: { $nin: ['lost'] } });
+    expect(lastWhere()).toEqual({ $and: [{ $or: [{ stage: { $null: true } }, { stage: { $nin: ['lost'] } }] }] });
 
     await engine.find('deal', asFilterArrayQuery([['amount', 'between', [5, 25]]]));
     expect(lastWhere()).toEqual({ amount: { $between: [5, 25] } });
@@ -686,7 +689,8 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     await engine.find('deal', { where: { stage: { $in: [] } } });
     expect(lastWhere()).toEqual({ stage: { $in: [] } });
     await engine.find('deal', { where: { stage: { $nin: [] } } });
-    expect(lastWhere()).toEqual({ stage: { $nin: [] } });
+    // [ADR-0053 D-D1, amended — #5930] …inside the shared lowering's NULL escape.
+    expect(lastWhere()).toEqual({ $and: [{ $or: [{ stage: { $null: true } }, { stage: { $nin: [] } }] }] });
   });
 
   it('the gate does not re-judge list MEMBERS — that is #5234, on another face', async () => {
@@ -728,8 +732,10 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   });
 
   it('a scalar on a NON-collection operator is untouched', async () => {
+    // [ADR-0053 D-D1, amended — #5930] `$ne` reaches the driver inside the
+    // shared lowering's NULL escape; the scalar comparand is untouched.
     await engine.find('deal', asFilterArrayQuery([['stage', '!=', 'won']]));
-    expect(lastWhere()).toEqual({ stage: { $ne: 'won' } });
+    expect(lastWhere()).toEqual({ $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'won' } }] }] });
     // String bounds on a range comparison stay legal, and since #5685 the
     // declaration agrees: `FieldOperatorsSchema` now declares `$gt` as
     // number|Date|string|FieldReference, matching the ISO strings the showcase

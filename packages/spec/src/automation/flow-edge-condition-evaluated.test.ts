@@ -44,7 +44,7 @@ function issuesOf(value: unknown) {
     : result.error.issues.map((i) => ({ code: i.code, path: i.path.map(String).join('.'), message: i.message }));
 }
 
-describe('FlowEdgeSchema.condition — an evaluated slot requires a non-blank `source` (#15807)', () => {
+describe('FlowEdgeSchema.condition — an evaluated slot requires a non-blank `source`', () => {
   it('REFUSES an `ast`-only envelope: one issue at `condition`, the published sentence', () => {
     // Both union arms abort on this shape (the envelope arm's missing `source`
     // is an aborting `invalid_type`), so it surfaces as the union's own issue
@@ -181,7 +181,7 @@ describe('FlowEdgeSchema.condition — an evaluated slot requires a non-blank `s
   });
 });
 
-describe('EvaluatedExpressionInputSchema — the sibling of ExpressionInputSchema for an evaluated slot (#15807)', () => {
+describe('EvaluatedExpressionInputSchema — the sibling of ExpressionInputSchema for an evaluated slot', () => {
   const direct = (value: unknown) => {
     const r = EvaluatedExpressionInputSchema.safeParse(value);
     return r.success

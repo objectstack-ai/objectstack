@@ -55,11 +55,12 @@
  * driver's SOURCE — so its verdict was about the checkout. A bare
  * `@objectstack/driver-turso` specifier would instead resolve through the
  * package's `exports` map to the BUILT `dist`, turning a source pin into a
- * verdict about the last `pnpm build`. Two declarations keep it a source pin,
- * and each is enforced by its own gate: an anchored `resolve.alias` entry in
- * this package's `vitest.config.ts` (`check:test-source-alias`) and a `paths`
- * rule in its `tsconfig.json` (`check:type-source-resolution`). Both carry the
- * reasoning at the site.
+ * verdict about the last `pnpm build`. Two declarations keep it a source pin:
+ * an anchored `resolve.alias` entry in this package's `vitest.config.ts`,
+ * enforced by `check:test-source-alias`, and a `paths` rule in its
+ * `tsconfig.json`, which `check:type-source-resolution` enforced until it was
+ * retired on 2026-09-18 (#18373) — no gate enforces that one now. Both carry
+ * the reasoning at the site.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -148,19 +149,27 @@ describe('TursoDriver date-bucket parity (framework#3773)', () => {
 
     it('the checker WOULD catch a driver that advertises a granularity it cannot run', async () => {
       // The tripwire the vacuous pass above is worth having. Rather than mock a
-      // remote transport into life, this drives a real local driver and makes it
-      // advertise `week` — which SqlDriver deliberately does NOT implement on
-      // SQLite (`%V` needs 3.46+), so `aggregate()` throws exactly as
-      // RemoteTransport would on a structured groupBy.
+      // remote transport into life, this drives a real local driver whose
+      // capability row advertises a granularity its bucket expression cannot
+      // render, so `aggregate()` throws exactly as RemoteTransport would on a
+      // structured groupBy.
       //
       // So: if someone deletes remote's `queryDateGranularity: {}` override
       // believing SqlDriver handles it, this is the shape of failure they get —
       // named, not silent.
+      //
+      // [#21595] It used to make the driver advertise `week`, which SqlDriver
+      // did not implement on SQLite. SQLite buckets `week` now, so the driver
+      // keeps its real row (which advertises `week`) and its `week` arm answers
+      // `null`, as it did before #21595: the incoherent pair a revert of the
+      // arm alone would ship.
       const driver = new TursoDriver({ url: ':memory:' });
-      Object.defineProperty(driver, 'supports', {
-        get: () => ({ queryDateGranularity: { week: true } }),
+      const inherited = (driver as any).buildDateBucketExpr.bind(driver);
+      Object.defineProperty(driver, 'buildDateBucketExpr', {
+        value: (field: string, g: string, table?: string) => (g === 'week' ? null : inherited(field, g, table)),
         configurable: true,
       });
+      expect(driver.supports.queryDateGranularity?.week).toBe(true);
 
       const problems = await checkDateBucketParity(driver, {
         createOptions: { bypassTenantAudit: true },

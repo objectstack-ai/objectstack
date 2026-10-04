@@ -9,14 +9,15 @@
       "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 4,
       "priority": "P0",
       "surface": "cli",
       "personas": ["operator (local shell)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a free non-default port (lsof -nP -iTCP:<port> -sTCP:LISTEN empty first — dogfood skill §0) and a scratch DB path under /tmp/<run>/"
+          "a free non-default port (lsof -nP -iTCP:<port> -sTCP:LISTEN empty first — dogfood skill §0) and a scratch DB path under /tmp/<run>/",
+          "⚠️ an app directory NO other runner boots, for steps[4], steps[6] and steps[7]: each writes into the directory it runs in. steps[4] bumps a tracked source file's mtime, so every other runner booting that tree reads its artifact as stale — and an `os dev` already running there is watching `objectstack.config.ts, src` and rebuilds and restarts on the change; steps[6] creates the unified default DB under .objectstack/data/ in it; steps[7] plants a legacy dev.db. Use your own worktree, or a worktree copy of examples/app-showcase (the same prescription cli.build-own-contract carries), and discard it after"
         ]
       },
       "steps": [
@@ -28,7 +29,7 @@
         "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line",
         "run once with NONE of --database/--fresh/env-db set and no config-declared default datasource, and record the printed Database line (must be the project-anchored UNIFIED default file:<cwd>/.objectstack/data/objectstack.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line (its DB is the SAME unified filename under the ephemeral home) and its deletion on exit",
         "legacy compat-read: in a scratch project whose .objectstack/data holds a legacy dev.db and NO objectstack.db, boot with nothing chosen and capture both the Database line (must resolve to the legacy file — never a fresh empty objectstack.db beside it) and the one loud notice line naming that file and how to converge on the unified name",
-        "capture `echo $?` after every terminated invocation"
+        "capture `echo $?` after every terminated invocation, against the expected codes: Ctrl-C/SIGINT ends a plain `os dev` with its serve child's exit code — 0 on a clean shutdown (the parent follows `code ?? 0`, packages/cli/src/utils/dev-restart.ts#ServeRestartCoordinator); a `--fresh` run's own SIGINT handler deletes the tempdir and exits 130 (SIGTERM 143); the no-config case of steps[3] exits 1"
       ],
       "acceptance": [
         {
@@ -40,13 +41,13 @@
         {
           "clause": "--seed-admin provisions the FIXED well-known dev admin (admin@objectos.ai / admin123) loginable via the real auth endpoint, and the seed is idempotent — a later boot with a different --admin-password does NOT overwrite the existing account",
           "oracle": "api",
-          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account')",
+          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account'). ⚠️ The `🔑 Dev admin: …` banner row is NOT seeding evidence: plugin-auth re-arms it on every later dev boot while the account still holds the default password (auth-plugin.ts maybeReportExistingSeedAdmin), so it reprints on boots that seeded nothing — judge the seed by the auth responses only",
           "evidence": "the two auth responses"
         },
         {
           "clause": "DB selection honors the ONE shared resolution matrix (#6469 resolveProjectDatabaseUrl, which dev maps its flags onto via resolveDevDatabase and start/migrate resolve through too): with nothing chosen, dev defaults to the PERSISTENT project-anchored sqlite file — the unified <state dir>/data/objectstack.db, i.e. .objectstack/data/objectstack.db under the project — never the historical serve default of :memory: that wipes work on restart",
           "oracle": "log",
-          "verify": "the printed Database key-value per variant matches the matrix, tier for tier (explicit -d url; env url; memory driver imposes no file default; config-declared default datasource; legacy dev.db/standalone.db compat-read WITH its notice line; otherwise the unified objectstack.db default) — and dev carries no fallback filename of its own",
+          "verify": "the printed Database key-value per variant matches the matrix, tier for tier (explicit -d url, including `-d :memory:` — SQLite's own in-memory database; env url; config-declared default datasource; legacy dev.db/standalone.db compat-read WITH its notice line; otherwise the unified objectstack.db default) — and dev carries no fallback filename of its own",
           "evidence": "the per-variant Database boot lines"
         },
         {
@@ -76,6 +77,7 @@
       ],
       "negative": [
         "a dev boot that wipes an existing dev DB when the user chose nothing (a regression to the historical :memory: serve default) is the FAIL the persistent default exists for",
+        "a dev boot that ACCEPTS the retired in-memory (mingo) engine — `--database-driver memory`, `OS_DATABASE_DRIVER=memory|mingo|in-memory`, or `-d memory://` / `mingo://` — is a FAIL: it is not a boot store (it refuses every tenant-scoped read, so a data read answers 503). The flag value is refused while the flags parse (oclif's allowlist message, exit 2); the env spelling is refused BEFORE any Database line prints, exit 1; the URL is refused by the serve child after the parent's Database line, exit 1 — each naming `--fresh` and `:memory:` except oclif's own allowlist line",
         "a boot that silently opens a fresh empty objectstack.db beside an existing legacy dev.db — or reads the legacy file WITHOUT printing the notice — is a FAIL: the compat-read exists so an established dev environment never looks like data loss",
         "an auto-shifted port that is not reported (URL printed for the requested port while the server bound elsewhere) is a FAIL"
       ],
@@ -84,20 +86,33 @@
         "--database <url> (explicit; no default imposed)",
         "--fresh (ephemeral tempdir OS_HOME; same unified filename under it; implies --seed-admin)",
         "OS_DATABASE_URL / DATABASE_URL / TURSO_DATABASE_URL env (env wins over the default)",
-        "--database-driver memory / OS_DATABASE_DRIVER=memory (explicit in-memory; no file default)",
+        "-d :memory: (SQLite's own in-memory database — the replacement for the retired in-memory engine; nothing persists across restarts)",
+        "--database-driver memory / OS_DATABASE_DRIVER=memory|mingo|in-memory / -d memory:// or mingo:// → REFUSED (the retired in-memory engine; see the negative for where each is refused and what it names)",
         "config-declared default datasource (the project config's default home wins over the unified default)",
         "legacy compat-read: an existing dev.db / standalone.db when no objectstack.db exists (resolved WITH one loud notice line; probe order objectstack.db → dev.db → standalone.db)"
       ],
       "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],
       "source": [
         "packages/cli/src/commands/dev.ts#resolveDevDatabase (resolveDevDatabase — dev's ONE resolution seam onto the shared matrix, carrying no fallback filename of its own; the persistent-default rationale; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
-        "packages/runtime/src/resolve-project-database.ts#resolveProjectDatabaseUrl (#6469 resolveProjectDatabaseUrl — the shared priority matrix explicit → env → memory driver → config-declared default datasource → unified <state dir>/data/objectstack.db, the state-dir order homeDir/OS_HOME/<projectRoot>/.objectstack/~/.objectstack, and the legacy dev.db/standalone.db compat-read with its loud notice)",
+        "packages/runtime/src/resolve-project-database.ts#resolveProjectDatabaseUrl (#6469 resolveProjectDatabaseUrl — the shared priority matrix explicit → env → config-declared default datasource → unified <state dir>/data/objectstack.db, with a retired in-memory driver selection refused ahead of every rung (retiredMemoryEngineMessage), the state-dir order homeDir/OS_HOME/<projectRoot>/.objectstack/~/.objectstack, and the legacy dev.db/standalone.db compat-read with its loud notice)",
         "packages/cli/src/commands/unified-db-resolution.pin.test.ts#start (pins dev/start/migrate all resolving through that one seam)",
         ".claude/skills/dogfood-verification/SKILL.md §0–§1 (port isolation, health probe, fixed admin creds, /_console layout)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "text refresh only, no property change: the DB-selection clause, step, variants and sources named the retired resolveDefaultDevDbUrl helper and the .objectstack/data/dev.db default, both superseded by #6469's unified <state dir>/data/objectstack.db resolved through the shared resolveProjectDatabaseUrl (dev's seam is now resolveDevDatabase). Re-derived from dev.ts + resolve-project-database.ts: added the config-datasource and legacy compat-read tiers as variants, a step and negative for the legacy dev.db notice, and the pin test to sources. The load-bearing assertion is UNCHANGED in substance — nothing-chosen still defaults to a PERSISTENT project-anchored sqlite file, never :memory:", "ref": "#7650" }
+        { "revision": 2, "date": "2026-08-11", "change": "text refresh only, no property change: the DB-selection clause, step, variants and sources named the retired resolveDefaultDevDbUrl helper and the .objectstack/data/dev.db default, both superseded by #6469's unified <state dir>/data/objectstack.db resolved through the shared resolveProjectDatabaseUrl (dev's seam is now resolveDevDatabase). Re-derived from dev.ts + resolve-project-database.ts: added the config-datasource and legacy compat-read tiers as variants, a step and negative for the legacy dev.db notice, and the pin test to sources. The load-bearing assertion is UNCHANGED in substance — nothing-chosen still defaults to a PERSISTENT project-anchored sqlite file, never :memory:", "ref": "#7650" },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056: steps[4], [6] and [7] write into the app directory they run in and are unsafe on a tree parallel runners share — requires now prescribes an unshared app directory; steps[8] names the expected exit codes (SIGINT 0 for plain dev, 130 for --fresh); acceptance[1] says the Dev admin banner row reprints on later boots and is not seeding evidence",
+          "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-03",
+          "change": "the in-memory (mingo) engine was retired as a boot store, so the DB-selection matrix loses its 'memory driver imposes no file default' tier: the variant now reads REFUSED, a negative names where each spelling is refused (flag at parse, env before the Database line, URL in the serve child) and what the refusal names, `-d :memory:` is added as the replacement variant, and the resolveProjectDatabaseUrl source note drops the memory rung. Measured on the change's own build: `--database-driver memory` exit 2 (oclif allowlist), `OS_DATABASE_DRIVER=memory os dev --fresh` exit 1 with no Database line, `os dev -d :memory:` serves crm_lead 200",
+          "ref": "#21492"
+        }
       ]
     },
     {
@@ -105,7 +120,7 @@
       "title": "os build's own contract: no computed value in the exit slot, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "build",
       "personas": ["operator (local shell)"],
@@ -122,7 +137,7 @@
         "break an author-time rule: author a flow whose Approval node approver expression does not parse (the #4409 worked example that once built green while os lint rejected it) and run `os build; echo $?`",
         "re-run both failing builds with --json and capture the failure payloads",
         "restore the config, add one UNDECLARED authoring key (the #3786 advisory class) and run `os build; echo $?` — the warning prints, the build passes",
-        "the exit-slot pair: make the config throw at LOAD time and run BOTH `os build; echo $?` (human path — expect oclif's ExitError 2 out of compile.ts's this.error() catch) and `os build --json; echo $?` (expect 1 via emitJson) — the pair that separates the framework's error exit from the #4873 leak",
+        "the exit-slot pair: make the config throw at LOAD time and run BOTH `os build; echo $?` (human path — expect exit 2 out of compile.ts's human-path catch: its own ✗ line, then this.exit(2)) and `os build --json; echo $?` (expect 1 via emitJson) — the pair that separates the framework's error exit from the #4873 leak",
         "repeat one successful run and one failing run verbatim and compare the two exit codes each time — a code that MOVES between identical runs is the #4873 signature, and only a repeat can see it",
         "confirm `os build` and `os compile` produce identical behavior on the same input (build is the documented alias)"
       ],
@@ -136,7 +151,7 @@
         {
           "clause": "a schema violation fails the build with a LOCATED error naming the failing path — never a bare 'validation failed' — and the exit code is 1 under --json or 2 on the human path",
           "oracle": "build",
-          "verify": "the formatted Zod error names the object/field path of the deliberate break; echo $? is 1 for `--json` (compile.ts emits the failure payload then calls this.exit(1)) and 2 for a plain human-format run (the same catch ends at oclif's this.error(), whose default exit is 2). Both are legitimate — clause 5 of this item blesses exactly that oclif 2 — so record WHICH invocation was measured rather than failing the clause on a 2",
+          "verify": "the formatted Zod error names the object/field path of the deliberate break; echo $? is 1 for `--json` (compile.ts emits the failure payload then calls this.exit(1)) and 2 for a plain human-format run (the same catch prints its own ✗ line and ends at this.exit(2) — the status the this.error() that stood there raised). Both are legitimate — clause 5 of this item blesses exactly that oclif 2 — so record WHICH invocation was measured rather than failing the clause on a 2",
           "evidence": "the error output + exit code"
         },
         {
@@ -152,9 +167,9 @@
           "evidence": "the paired --json payloads"
         },
         {
-          "clause": "#4873 exit-code honesty: the exit code is a STATUS, never a computed value — no duration, count or finding total ever reaches the exit-code slot. The legitimate exits are 0 and 1 through the CliExitCode union (every emitJson/emitText caller, i.e. both --json paths here), plus oclif's ExitError 2 when the human path (the run without --json) ends in this.error(): a config-load-time throw exiting 2 is the framework's error exit and is NOT a violation of this clause — cli.flag-command-error-ux pins that same 2 as the correct oclif error code, and the two items must not disagree",
+          "clause": "#4873 exit-code honesty: the exit code is a STATUS, never a computed value — no duration, count or finding total ever reaches the exit-code slot. The legitimate exits are 0 and 1 through the CliExitCode union (every emitJson/emitText caller, i.e. both --json paths here), plus oclif's ExitError 2 when the human path (the run without --json) ends in its catch's this.exit(2): a config-load-time throw exiting 2 is the framework's error exit and is NOT a violation of this clause — cli.flag-command-error-ux pins that same 2 as the correct oclif error code, and the two items must not disagree",
           "oracle": "build",
-          "verify": "every observed exit is 0, 1, or an oclif 2 from a this.error() path, AND none of them varies with the run: the #4873 shape is a value that TRACKS something (timer.elapsed() in emitJson's positional exit slot made a fully successful run exit 531 & 0xFF = 19, a different nonzero every time). Repeat one success and one failure to show the codes are stable; a nonzero that is neither 1 nor an oclif error exit, or any code that changes between two identical runs, FAILS",
+          "verify": "every observed exit is 0, 1, or an oclif 2 from the human path's this.exit(2), AND none of them varies with the run: the #4873 shape is a value that TRACKS something (timer.elapsed() in emitJson's positional exit slot made a fully successful run exit 531 & 0xFF = 19, a different nonzero every time). Repeat one success and one failure to show the codes are stable; a nonzero that is neither 1 nor an oclif error exit, or any code that changes between two identical runs, FAILS",
           "evidence": "the collected exit codes with the --json and human paths labelled separately, plus the repeat runs showing each code is stable"
         },
         {
@@ -166,12 +181,12 @@
       ],
       "negative": [
         "exit 0 with no artifact written, or nonzero on the clean config, is a FAIL",
-        "an exit code that tracks a computed value — a duration, a count, a finding total — is the #4873 leak this item's exit clause exists for: a SUCCESSFUL run exiting nonzero, or any code that differs between two identical runs, FAILS. Oclif's fixed ExitError 2 on a this.error() path is NOT that leak and must not be filed as one (that reading is what collided with cli.flag-command-error-ux, reconciled in #7648)",
+        "an exit code that tracks a computed value — a duration, a count, a finding total — is the #4873 leak this item's exit clause exists for: a SUCCESSFUL run exiting nonzero, or any code that differs between two identical runs, FAILS. Oclif's fixed ExitError 2 on the human path (its catch's this.exit(2)) is NOT that leak and must not be filed as one (that reading is what collided with cli.flag-command-error-ux, reconciled in #7648)",
         "the DEEP gate content (date-arithmetic formula errors, retired-key tombstones) is api-backend.formula-gates / api-backend.enforce-or-remove-authoring-gates — cite pinned passes there; this item owns only the build's OWN exit/error/output contract"
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/cli/src/commands/compile.ts#Compile (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1) — re-pointed #18104: emitJson is IMPORTED here from format.ts and only ever called; the pipeline this item means is what the Compile command class this file declares runs) + build.ts (alias)",
+        "packages/cli/src/commands/compile.ts#Compile (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches printing their own ✗ line and ending in this.exit(2) — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1) — re-pointed #18104: emitJson is IMPORTED here from format.ts and only ever called; the pipeline this item means is what the Compile command class this file declares runs) + build.ts (alias)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode = 0 | 1 — the narrowed emitJson/emitText exit slot, NOT a bound on oclif's own error exit)",
         "packages/cli/src/utils/format.exit-code.test.ts#asExitCode (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all — re-pointed #18104: emitJson is IMPORTED into this test and only called; asExitCode is the binding that carries the rejection, a duration typed into that positional slot under a @ts-expect-error)",
         "cli.flag-command-error-ux (the sibling item that owns oclif's exit 2 — cross-referenced so the two never re-collide)",
@@ -180,7 +195,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "narrowed the exit-code clause to the #4873 duration-leak it exists to pin. As phrased ('exactly 0 or 1') it also forbade oclif's standard ExitError 2, which compile.ts's human-path this.error() catches legitimately produce on a config-load-time throw — so it contradicted cli.flag-command-error-ux, which asserts that same 2 is correct, and a run reported the collision as a product violation (#7648). The clause now pins what #4873 was: a computed value (duration/count) reaching the exit slot, detectable as a nonzero on success or a code that moves between identical runs; 0/1 via CliExitCode and oclif's fixed 2 on the human path are named as legitimate. Still load-bearing — a duration in the exit slot FAILS it — with a repeat-run step and a negative added to keep it falsifiable, and the CliExitCode source note corrected to say it narrows the emitJson/emitText slot, not oclif's error exit", "ref": "#7648" },
-        { "revision": 3, "date": "2026-08-18", "change": "reconciled clause 2 with clause 5, which contradicted each other. Clause 2 demanded exit 1 on a schema violation while clause 5 explicitly blesses 'an oclif 2 from a this.error() path'. Measured in compile.ts (build is an alias of it): the --json failure path emits the payload and calls this.exit(1); the human path falls through the same catch to this.error(), which exits 2. The clause now names both and asks which was run (#9417)", "ref": "#9386" }
+        { "revision": 3, "date": "2026-08-18", "change": "reconciled clause 2 with clause 5, which contradicted each other. Clause 2 demanded exit 1 on a schema violation while clause 5 explicitly blesses 'an oclif 2 from a this.error() path'. Measured in compile.ts (build is an alias of it): the --json failure path emits the payload and calls this.exit(1); the human path falls through the same catch to this.error(), which exits 2. The clause now names both and asks which was run (#9417)", "ref": "#9386" },
+        { "revision": 4, "date": "2026-10-03", "change": "text refresh only, no status change: six live texts named compile.ts's this.error() as the mechanism of the human path's exit 2. Since bf36edd0a1 that catch prints its own ✗ line and ends in this.exit(2), which raises the same status without oclif's second Error: rendering; every oracle (exit 2 on the human path, 1 under --json) still holds. Revisions 2 and 3 above keep their wording: they record what was true when written", "ref": "#21492" }
       ]
     },
     {
@@ -438,7 +454,7 @@
       "title": "os test: a Quality Protocol suite is validated at LOAD, executed against a booted app, and its verdict is the exit code — capture/interpolation thread state, an unevaluable assertion FAILS",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)", "suite author (writes qa/*.test.json)"],
@@ -453,7 +469,7 @@
         "knownGaps": [
           "`run_script` has no adapter branch and fails by name (`Unsupported action type in HttpAdapter: run_script`) — the variant sweep records ONE refusal and that is the honest verdict, not a fixture gap to work around. The other seven members execute since #7848; the five record-shaped ones did not until then (see `negative`), so a sweep transcript predating that fix shows five 404s and is not comparable",
           "the record action types resolve the Data Protocol mount from the server's own `/discovery` (`routes.data`) since #7983, so a deployment that sets `crud.dataPrefix` IS reached; what remains out of reach is `api.apiPath`, which moves the discovery document itself out from under the probe (measured: `{apiBase}/discovery` 404s, and `/.well-known/objectstack` reports the DISPATCHER's `/api/v1/data`, not the REST mount). Against such a host the adapter falls back to the convention and says so — it names the mount it addressed, the probe that failed and the remedy, on the warning AND on every 404 — and those steps must still be written as `api_call`. The fixture boot is stock, so neither case bites here",
-          "scenario SELECTION is by tag only, and preconditions are NOT honoured: `os test --tags a,b` runs the scenarios carrying at least one listed tag (any-of, exact, case-sensitive — commands/test.ts `selectScenariosByTags`), counts the rest as deselected — not run, never counted as passed — and without the flag the whole glob runs; `scenario.requires` (`params`/`plugins`) is declared but NOT CHECKED — its describe() says so and its row in packages/spec/liveness/qa.json stays `dead` pending the maintainer's decision on #20289 — so a suite still cannot declare a precondition it will be skipped for, and a scenario naming a plugin the target lacks still runs, the unmet requirement surfacing only as whatever failure it causes, if any"
+          "scenario SELECTION is by tag only: `os test --tags a,b` runs the scenarios carrying at least one listed tag (any-of, exact, case-sensitive — commands/test.ts `selectScenariosByTags`), counts the rest as deselected — not run, never counted as passed — and without the flag the whole glob runs. Preconditions SKIP rather than select: a scenario whose `requires.params` variable is unset or empty in the `os test` process, or whose `requires.services` entry the target's discovery does not declare enabled and available, is skipped with its reason (core runner.ts `judgeRequirements`), counted apart and never passed. The fixture suite declares no `requires`, so the green path exercises no skip; a skip probe must be STAGED — a scenario requiring a service the stock showcase boot does not declare available (`search` is one: nothing in the open framework registers that slot) — and an all-skipped run exits 0, or 1 under --fail-on-empty"
         ]
       },
       "steps": [
@@ -548,7 +564,7 @@
         "packages/core/src/qa/runner.ts#scenario (scenario sequencing, `capture` + `{{var}}` interpolation, the assertion operators, setup/teardown semantics, the #7256 unevaluable-`contains` fix)",
         "packages/core/src/qa/http-adapter.ts#mount (the action-type switch — its case labels ARE the enum values; the record routes take their prefix from the one memoised `/discovery` probe per run, falling back to the RestApiConfigSchema + CrudEndpointsConfigSchema convention with a diagnostic that names the mount, #7848 / #7983)",
         "packages/spec/src/qa/testing.zod.ts#TestSuiteSchema (TestSuiteSchema — the shape enforced at load; TestActionTypeSchema pinned above)",
-        "packages/spec/liveness/qa.json#tags (the ADR-0049 ledger whose existence this item is coverage.json's mapping for — its `tags` row is live on `os test --tags`, and its `requires` row stays dead: the precondition is declared and not checked)",
+        "packages/spec/liveness/qa.json#tags (the ADR-0049 ledger whose existence this item is coverage.json's mapping for — its `tags` row is live on `os test --tags`, and its `requires` row is live on the runner's precondition judgement: an unmet `params` or `services` entry skips the scenario)",
         "packages/cli/test/qa-suite-schema-load.test.ts, packages/cli/test/resolve-glob-lazy-walk.test.ts, packages/core/src/qa/runner.test.ts (the three unit pins — cited so a run knows what is already covered, NOT a substitute for driving a booted app)",
         "content/docs/deployment/cli.mdx §os test (the documented command contract)",
         "examples/app-showcase/qa/platform-smoke.test.json (the fixture suite this item drives)"
@@ -558,7 +574,8 @@
         {"revision": 2, "date": "2026-08-12", "change": "the adapter was repaired, which this item's own `negative` clause declared to be a revision rather than a silent green (#7848). Item 1: the five record-shaped action types now round-trip against a stock server — the `${baseUrl}/api/data/:object` literal became a prefix DERIVED from the two schemas RestServer itself resolves from (RestApiConfigSchema `apiPath ?? {basePath}/{version}` + CrudEndpointsConfigSchema.dataPrefix), and `update_record` PATCHes where it used to PUT a route that has no PUT sibling. Re-measured on a booted showcase, one scenario per member with NO shared setup so no member's verdict is inferred from a sibling: 7 of 8 execute and assert, `run_script` still refuses by name. The `negative` clause is inverted accordingly — a 404 from a record action type is the regression now — and the knownGap it rested on is replaced by the narrower one that survives: the record types address the DEFAULT mount only, so a host that moves it with `api.apiPath`/`crud.dataPrefix` still needs `api_call`. Item 2: a zero-match glob still exits 0, deliberately (a repo that legitimately ships no suites must not start failing CI), but the posture is now DECLARED — stated in `--help`, opt out with the new `--fail-on-empty`, and `Found N test suites.` is emitted on EVERY run including `Found 0 test suites.`, which is the line this item's first acceptance clause already asks a run record to quote", "ref": "#7848"},
         {"revision": 3, "date": "2026-08-17", "change": "the record action types stopped ASSUMING the mount (#7983). They now resolve it from the server: one memoised `GET {apiBase}/discovery` per run, addressing whatever `routes.data` advertises, with the RestApiConfigSchema + CrudEndpointsConfigSchema convention as the fallback — the `@objectstack/client` `getRoute` pattern, copied rather than re-invented. Measured on a booted stack (REST generator + dispatcher bridge) before and after, three configs: stock stays green; `crud.dataPrefix: '/objects'` went from `HTTP Error 404` to a created record, so that row of the gap is CLOSED; `api.apiPath: '/api/2026-01'` still 404s and is NOT closed — `apiPath` moves the discovery document itself, and the one fixed-path document (`/.well-known/objectstack`) advertises the dispatcher's `/api/v1/data` under all three configs, so trusting it would attach a false provenance to the same 404. That row is narrowed instead: the fallback is announced (a warning naming the mount, the failed probe and the remedy) and every 404 from a record action now carries the mount it addressed and where that mount came from, so the failure can no longer read as the suite author's own URL mistake. `api_call` is unchanged and probes nothing — it remains the escape hatch for a host the probe cannot reach", "ref": "#7983"},
         { "revision": 4, "date": "2026-08-18", "change": "corrected the flag count from two to three. packages/cli/src/commands/test.ts declares url, token AND fail-on-empty; the same revision's own acceptance already describes --fail-on-empty, so the knownGap contradicted its own item. The gap's point is unchanged and now stated directly: none of the three flags selects scenarios (#9417)", "ref": "#9386" },
-        { "revision": 5, "date": "2026-09-28", "change": "the knownGap and the qa.json source note were falsified by #20289 (PR #20341) and are corrected: `os test` gained `--tags` (any-of, exact, case-sensitive; deselected scenarios are counted and never passed; a selection that matches no scenario exits 0, or 1 under --fail-on-empty), and the report now heads each suite with its `name` and prints each scenario's `name` beside its id. What stays true is narrower: `scenario.requires` is declared but NOT CHECKED, pending the maintainer's decision on #20289. Steps and acceptance are unchanged — the green-path clause's scenarioId is still on every scenario line, now in brackets after the name, or bare when the name equals the id", "ref": "#20289" }
+        { "revision": 5, "date": "2026-09-28", "change": "the knownGap and the qa.json source note were falsified by #20289 (PR #20341) and are corrected: `os test` gained `--tags` (any-of, exact, case-sensitive; deselected scenarios are counted and never passed; a selection that matches no scenario exits 0, or 1 under --fail-on-empty), and the report now heads each suite with its `name` and prints each scenario's `name` beside its id. What stays true is narrower: `scenario.requires` is declared but NOT CHECKED, pending the maintainer's decision on #20289. Steps and acceptance are unchanged — the green-path clause's scenarioId is still on every scenario line, now in brackets after the name, or bare when the name equals the id", "ref": "#20289" },
+        { "revision": 6, "date": "2026-09-28", "change": "the knownGap and the qa.json source note were falsified again by #20289's `requires` round (ruling B) and are corrected: `scenario.requires` is now CHECKED before the first step — `params` against the `os test` process environment, `services` against the target's discovery `services` (enabled and `available`) — and an unmet entry SKIPS the scenario with its reason, counted apart and never passed; an all-skipped run exits 0, or 1 under --fail-on-empty. `requires.plugins` is retired (refused at load, prescription names `requires.services`). Steps and acceptance are unchanged: the fixture suite declares no `requires`, so the green path runs every scenario exactly as before", "ref": "#20289" }
       ]
     },
     {
@@ -566,7 +583,7 @@
       "title": "Wrong flags and unknown commands error with usage and a nonzero exit — never silently ignored, never executed anyway",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -647,11 +664,12 @@
       ],
       "source": [
         "packages/cli/src/commands/ (the 20 top-level commands + 10 topics enumerated as variants — oclif pattern discovery per package.json oclif.commands)",
-        "packages/cli/package.json (oclif.plugins = help + plugins only — no not-found plugin, so unknown commands hard-error)",
+        "packages/cli/package.json (no oclif.plugins at all — no plugin manager, no help command and no not-found plugin, so unknown commands hard-error)",
         "@oclif/core parse contract (Nonexistent flag / enum FailedFlagValidation / command-not-found, exit 2)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-02", "change": "source: package.json no longer declares oclif.plugins — the two listed plugins sat in devDependencies and never loaded, so the array was dropped; the registered surface and the unknown-command hard-error are unchanged (os --help and the full command table read byte-identical before and after)", "ref": "claude/issue-21285-drop-dead-oclif-plugins" }
       ]
     },
     {
@@ -1058,7 +1076,7 @@
       "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell, pre-repair audit)"],
@@ -1070,7 +1088,7 @@
         ],
         "knownGaps": [
           "ORDERING IS LOAD-BEARING: do NOT boot the dev server again between seeding and scanning — a #8686-repairing boot backfills organization_id = NULL, which is exactly the evidence this report inventories (the command's own header calls the evidence perishable). The duplicates command itself boots read-only (deferSchemaDdl + readOnlyProbe) and is safe to run any number of times",
-          "the memory driver does NOT lack a raw-SQL seam — `InMemoryDriver.execute()` logs `Raw execution not supported in InMemory driver` and returns null, which is exactly the SHAPE the seam resolver tests for, so the no_sql_seam refusal was dead code for it (a clean `duplicates:[]` exit 0 instead, #10677). The refusal now keys on whether a seam returns a RESULT SET rather than on whether `execute` exists, so the memory driver does take the no_sql_seam branch. The negative probe still needs a second scratch config on the memory driver — stage it per run. The mongodb branch is NOT covered by that fix's evidence — the driver was not loaded — so treat it as unverified rather than assuming it behaves like memory"
+          "the memory driver does NOT lack a raw-SQL seam — `InMemoryDriver.execute()` logs `Raw execution not supported in InMemory driver` and returns null, which is exactly the SHAPE the seam resolver tests for, so the no_sql_seam refusal was dead code for it (a clean `duplicates:[]` exit 0 instead, #10677). The refusal now keys on whether a seam returns a RESULT SET rather than on whether `execute` exists. ⛔ That branch can no longer be driven from a CLI boot: the in-memory engine was retired as a boot store, so a memory-driver scratch config (`--database-url memory://…`) now answers `{error: 'boot_failed'}` exit 1 with the retirement message before any seam exists. The no_sql_seam clause is satisfied by the seam-double pin instead — `packages/cli/src/commands/migrate/duplicates.null-seam.test.ts` runs the real command over a driver whose `execute` answers no result set — and its pass is the evidence. The mongodb branch is NOT covered by that evidence — the driver was not loaded — so treat it as unverified rather than assuming it behaves like the double"
         ]
       },
       "steps": [
@@ -1081,7 +1099,7 @@
         "seed the kernel:ready blocker too (#8725): two ACTIVE sys_view_definition rows with the SAME name and organization_id/owner both NULL — then jq .runtimeIndexPreflight and .summary.runtimeIndexesBlocked",
         "run `os migrate duplicates --object <the-object>` and `--object <an-object-with-no-findings>` — capture .filter in both payloads",
         "run `os migrate duplicates --database-url file:/tmp/<run>/dup.db` and confirm it reaches the same DB (the flag also honors OS_DATABASE_URL)",
-        "negative: from the memory-driver scratch config run `os migrate duplicates; echo $?` and capture the refusal payload",
+        "negative (no_sql_seam): run `pnpm --filter @objectstack/cli exec vitest run src/commands/migrate/duplicates.null-seam.test.ts` and cite its pass — the seam double that answers no result set, driving the real command; then run `os migrate duplicates --database-url memory://qa; echo $?` and capture the boot_failed payload (the retired engine is refused at boot, naming the replacement)",
         "stderr/stdout split: confirm report.json parses as ONE JSON document — the boot's own log lines must have gone to stderr (#6217)"
       ],
       "acceptance": [
@@ -1130,7 +1148,7 @@
         {
           "clause": "a driver with no raw-SQL seam refuses LOUDLY: {error: 'no_sql_seam', …} with exit 1 — an empty clean report from a driver the probe cannot run against would be indistinguishable from 'never looked'",
           "oracle": "log",
-          "verify": "the memory-driver run emits the no_sql_seam payload and echo $? is 1 (duplicates.ts); a boot failure likewise answers {error: 'boot_failed'} exit 1, never a zero-duplicate success",
+          "verify": "the seam-double pin (duplicates.null-seam.test.ts) passes: the real command over a driver whose execute answers no result set emits the no_sql_seam payload with exit 1, and a control seam that answers an empty result set is read, not refused (duplicates.ts); a boot failure — including `--database-url memory://qa`, the retired in-memory engine — answers {error: 'boot_failed'} exit 1, never a zero-duplicate success",
           "evidence": "the refusal payload + exit code"
         }
       ],
@@ -1150,7 +1168,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os migrate duplicates` landed 2026-08-16 (#8928) after the sibling migrate item's enumeration was authored, so the subcommand had no functional coverage. Authored from the contract header's five ruling points, with the perishability ordering (seed → scan → only then any repair-bearing boot) carried as a load-bearing knownGap and the no-JSON-flag posture spelled out so the #4873 sweep does not misread an oclif 2", "ref": "claude/new-session-0pv25p" },
         { "revision": 2, "date": "2026-08-21", "change": "clause-7 knownGap was factually wrong about the memory driver, and the run that trusted it produced a false all-clear: the driver exposes a NO-OP `execute` seam (warn + return null), not no seam, so the no_sql_seam refusal never fired and the scan answered exit 0 with `duplicates:[]` — indistinguishable from `never looked`. Corrected the knownGap, and re-derived the drifted duplicates.ts line citations against the fix that makes the refusal live (#10677). The mongodb half is left explicitly UNVERIFIED rather than restated: that driver was not loaded for the fix", "ref": "#10677" },
-        { "revision": 3, "date": "2026-08-22", "change": "the #11031 revision bump landed the kernel:ready pre-flight (#8725) without this entry: the report contract moved reportVersion 1 → 2, gaining `runtimeIndexPreflight[]` plus `summary.runtimeIndexesBlocked` and `summary.runtimeIndexBlockingRows`; the jq walk step now includes `.runtimeIndexPreflight`; a seeding step was added for the `kernel:ready` blocker (two ACTIVE `sys_view_definition` rows sharing a name with `organization_id` and `owner` both NULL); and a new acceptance clause covers the kernel:ready pre-flight — one entry per index the three `kernel:ready` migrations tighten (four, the overlay migration owns two), each `blocked`/`clear`/`table-absent`/`unreadable`, with the matched control written into its verify step (the same database run through `os migrate plan` names neither the index nor the view). This entry repairs that ledger gap; no further change to the item's fields", "ref": "#11031" }
+        { "revision": 3, "date": "2026-08-22", "change": "the #11031 revision bump landed the kernel:ready pre-flight (#8725) without this entry: the report contract moved reportVersion 1 → 2, gaining `runtimeIndexPreflight[]` plus `summary.runtimeIndexesBlocked` and `summary.runtimeIndexBlockingRows`; the jq walk step now includes `.runtimeIndexPreflight`; a seeding step was added for the `kernel:ready` blocker (two ACTIVE `sys_view_definition` rows sharing a name with `organization_id` and `owner` both NULL); and a new acceptance clause covers the kernel:ready pre-flight — one entry per index the three `kernel:ready` migrations tighten (four, the overlay migration owns two), each `blocked`/`clear`/`table-absent`/`unreadable`, with the matched control written into its verify step (the same database run through `os migrate plan` names neither the index nor the view). This entry repairs that ledger gap; no further change to the item's fields", "ref": "#11031" },
+        { "revision": 4, "date": "2026-10-03", "change": "the no_sql_seam negative could no longer be staged on a memory-driver scratch config: the in-memory engine was retired as a boot store, and `os migrate duplicates --database-url memory://qa` now answers {error: 'boot_failed'} exit 1 with the retirement message (measured on the change's own build). The negative step and clause 8's verify now cite the seam-double pin, duplicates.null-seam.test.ts — the real command over a driver whose execute answers no result set, plus a control seam that answers an empty result set — and keep the memory:// run as a boot_failed probe; the knownGap says why. The mongodb branch stays explicitly unverified", "ref": "#21492" }
       ]
     },
     {

@@ -25,6 +25,14 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * and `client.automation.list` are retired (ADR-0087 semantic entry
  * `automation-flow-list-route-retired`).
  *
+ * The toggle door switches PACKAGED flows only: a flow a code package ships.
+ * It records the installation's choice in the packaged-metadata activation
+ * ledger (ADR-0126 §7.2). A flow authored in the deployment is not switched
+ * there. Its switch is its own `status`: `'obsolete'` disarms it and
+ * `'active'` arms it, published with the complete definition through
+ * `PUT /api/v1/automation/:name`. The toggle door refuses such a flow with
+ * 409 `RESOURCE_CONFLICT`, names that switch, and changes nothing.
+ *
  * @example Endpoints
  * ```
  * GET    /api/v1/automation/:name                — Get flow
@@ -32,7 +40,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * PUT    /api/v1/automation/:name                — Update flow
  * DELETE /api/v1/automation/:name                — Delete flow
  * POST   /api/v1/automation/:name/trigger        — Trigger flow execution
- * POST   /api/v1/automation/:name/toggle         — Enable/disable flow
+ * POST   /api/v1/automation/:name/toggle         — Enable/disable a packaged flow
  * GET    /api/v1/automation/:name/runs           — List execution runs
  * GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
  * ```
@@ -353,6 +361,13 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     ),
     errorMessage: z.string().optional().describe(
       'Friendly terminal message copied from the flow definition on failure',
+    ),
+    flowLabel: z.string().optional().describe(
+      'The flow definition\'s authored `label`, copied verbatim so a runner can name the flow '
+      + '(header, completion toast) and translate it against `flows.<flow>.label`. Set on every '
+      + 'result of an evaluation of a registered flow (paused and terminal alike); absent on a '
+      + 'refusal carrying `code`. For a subflow chain it is the addressed (parent) run\'s flow. '
+      + 'Never defaulted to the API name',
     ),
     refusalMessage: z.string().optional().describe(
       'Rendered refusal, set when `status` is `refused` - the `end` node\'s `message` '

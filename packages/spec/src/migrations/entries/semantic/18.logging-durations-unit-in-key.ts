@@ -10,15 +10,17 @@ export const entry: SemanticMigration = {
     + '`timeoutMs` (default 30000) on HttpDestinationConfig, and `buffer.flushIntervalMs` '
     + '(default 1000) on LoggingConfig — rename the keys; every value (milliseconds) is unchanged',
   reason:
-    'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
-    + 'batch #115), executing the #14478 rule per file. All four keys named milliseconds in a '
+    'Maintainer ruling A, 2026-09-11: the gate that reads a duration key\'s JSDoc lands last, '
+    + 'after its offenders are fixed file by file — so this entry executes, per file, the rule '
+    + 'that a duration number key carries its unit in its name. All four keys named '
+    + 'milliseconds in a '
     + 'source JSDoc — "Flush interval in milliseconds", "Initial retry delay in milliseconds", '
     + '"Timeout in milliseconds" — and the JSDoc above a key is not what '
     + '`content/docs/references/**` renders; `.describe()` is, and none of the four carried one at '
     + 'all. Measured by the `check:duration-unit-keys` census on this tree before the change, all '
     + 'four read `[name: -] [prose: -]`: no unit in the key and no published prose to supply it, '
     + 'so `content/docs/references/system/logging.mdx` printed a bare 5000 / 1000 / 30000 / 1000 '
-    + 'and nothing on the page decided milliseconds from seconds. Under the #14478 gate, moving '
+    + 'and nothing on the page decided milliseconds from seconds. Under that rule\'s gate, moving '
     + 'the unit into the describe alone is itself a violation (unit in prose, none in the name), '
     + 'so each key is renamed and given the describe it never had in the same stroke. '
     + '⚠️ `flushInterval` was declared TWICE on this file, in two different defs and with two '
@@ -45,10 +47,12 @@ export const entry: SemanticMigration = {
     + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
     + 'and its test the only occurrences are the generated rows in '
     + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-    + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells '
+    + 'objectui checkout — `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — spells '
     + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-    + 'across its 8512 tracked files, against lit controls `useState` 2391 and `timeout` 1096 on '
-    + 'the same corpus (all four 0 across 8303, against 2389 and 1086, at 62597c588).',
+    + 'across its 7579 tracked files, against lit controls `useState` 2477 and `timeout` 1351 on '
+    + 'the same corpus (all four 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+    + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
+    + '8303, against 2389 and 1086, at 62597c588).',
   acceptanceCriteria:
     'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
     + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '

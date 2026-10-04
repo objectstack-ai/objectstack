@@ -1,5 +1,6 @@
 ---
-title: Export
+title: Export schema — API Protocol reference
+navTitle: Export
 description: "Defines the export file formats, import validation, template-based field mapping, and the asynchronous import-job contracts."
 ---
 
@@ -48,7 +49,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **rows** | `Record<string, any>[]` | optional | Row objects (when format = json) |
 | **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
 | **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
-| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
+| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
 | **mappingName** | `string` | optional | Name of a registered `mapping` metadata artifact to apply; the server resolves it (org-scoped rows first, then env-wide) and projects columns through it. Mutually exclusive with an inline `mapping` — supplying both is refused (400 CONFLICTING_MAPPING). |
 | **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
@@ -127,7 +128,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **object** | `string` | ✅ | Target object name |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | ✅ | Template direction |
 | **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional | Default file format for this template |
-| **mappings** | `{ sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | ✅ | Field mapping entries |
+| **mappings** | `{ sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | ✅ | Field mapping entries |
 | **createdAt** | `string` | optional | Template creation timestamp |
 | **updatedAt** | `string` | optional | Last update timestamp |
 | **createdBy** | `string` | optional | User who created the template |
@@ -214,7 +215,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
-| **results** | `{ row: integer; ok: boolean; action: Enum<'created' \| 'updated' \| 'skipped' \| 'failed'>; id?: string; … }[]` | ✅ | Capped sample of per-row outcomes (failures first) |
+| **results** | `{ row: integer; ok: boolean; action: Enum<'created' \| 'updated' \| 'skipped' \| 'failed'>; id?: string; … }[]` | ✅ | Capped sample of per-row outcomes, failures first. An ok row, and any `droppedFields` or `warnings` it carries, reaches this reader only if it falls inside the sample; `resultsTruncated` says whether the sample is partial, and the job counters count every row. |
 | **resultsTruncated** | `boolean` | ✅ | Whether `results` is a capped sample of a larger set |
 
 ### Nested Shape: `ImportJobResults.results[number]`
@@ -228,6 +229,8 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **field** | `string` | optional | Field that caused a coercion/validation error |
 | **code** | `string` | optional | Error code (failed rows) |
 | **error** | `string` | optional | Human-readable error message (failed rows) |
+| **warnings** | `{ field: string; code: string; message: string }[]` | optional | Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the verdict accepted: the row is `ok` because the write would store it and log the same complaint. A committed row never carries it, since the write path has no channel to report admitted findings on. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per reason, in the engine's own `droppedFields` shape and reason vocabulary. A committed row reports the strips its write made. A dry-run row reports the strips its preview runs, which for a row the import would update excludes `readonlyWhen` and primary-key strips, so that row can name fewer fields than its commit. The row still succeeds: `ok` and `action` are unchanged. Present only when at least one field was dropped. A server or write path that does not produce this report omits the key too, so an absent key alone does not prove nothing was dropped. In an async job's `results`, an ok row's drops reach the reader only if the row falls inside that capped, failures-first sample. |
 
 
 ---
@@ -282,7 +285,7 @@ Type: `Record<string, string>`
 
 #### Option 2
 
-Type: `{ sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' | 'uppercase' | 'lowercase' | 'trim' | 'date_format' | 'lookup'>; … }[]`
+Type: `{ sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' | 'uppercase' | 'lowercase' | 'trim' | 'date_format' | 'lookup'>; … }[]`
 
 ---
 
@@ -300,7 +303,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **rows** | `Record<string, any>[]` | optional | Row objects (when format = json) |
 | **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
 | **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
-| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
+| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
 | **mappingName** | `string` | optional | Name of a registered `mapping` metadata artifact to apply; the server resolves it (org-scoped rows first, then env-wide) and projects columns through it. Mutually exclusive with an inline `mapping` — supplying both is refused (400 CONFLICTING_MAPPING). |
 | **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
@@ -354,6 +357,8 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **field** | `string` | optional | Field that caused a coercion/validation error |
 | **code** | `string` | optional | Error code (failed rows) |
 | **error** | `string` | optional | Human-readable error message (failed rows) |
+| **warnings** | `{ field: string; code: string; message: string }[]` | optional | Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the verdict accepted: the row is `ok` because the write would store it and log the same complaint. A committed row never carries it, since the write path has no channel to report admitted findings on. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per reason, in the engine's own `droppedFields` shape and reason vocabulary. A committed row reports the strips its write made. A dry-run row reports the strips its preview runs, which for a row the import would update excludes `readonlyWhen` and primary-key strips, so that row can name fewer fields than its commit. The row still succeeds: `ok` and `action` are unchanged. Present only when at least one field was dropped. A server or write path that does not produce this report omits the key too, so an absent key alone does not prove nothing was dropped. In an async job's `results`, an ok row's drops reach the reader only if the row falls inside that capped, failures-first sample. |
 
 
 ---
@@ -371,6 +376,26 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **field** | `string` | optional | Field that caused a coercion/validation error |
 | **code** | `string` | optional | Error code (failed rows) |
 | **error** | `string` | optional | Human-readable error message (failed rows) |
+| **warnings** | `{ field: string; code: string; message: string }[]` | optional | Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the verdict accepted: the row is `ok` because the write would store it and log the same complaint. A committed row never carries it, since the write path has no channel to report admitted findings on. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per reason, in the engine's own `droppedFields` shape and reason vocabulary. A committed row reports the strips its write made. A dry-run row reports the strips its preview runs, which for a row the import would update excludes `readonlyWhen` and primary-key strips, so that row can name fewer fields than its commit. The row still succeeds: `ok` and `action` are unchanged. Present only when at least one field was dropped. A server or write path that does not produce this report omits the key too, so an absent key alone does not prove nothing was dropped. In an async job's `results`, an ok row's drops reach the reader only if the row falls inside that capped, failures-first sample. |
+
+### Nested Shape: `ImportRowResult.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field the finding is about (`_record` for an object-level rule). |
+| **code** | `string` | ✅ | Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`. |
+| **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
+
+### Nested Shape: `ImportRowResult.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
 
 
 ---
@@ -382,7 +407,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'strict' \| 'lenient' \| 'dry_run'>` | optional (default: `"strict"`) | Validation mode for the import |
-| **deduplication** | `{ strategy: Enum<'skip' \| 'update' \| 'create_new' \| 'fail'>; matchFields: string[] }` | optional | Deduplication configuration |
+| **deduplication** | `{ strategy?: Enum<'skip' \| 'update' \| 'create_new' \| 'fail'>; matchFields: string[] }` | optional | Deduplication configuration |
 | **maxErrors** | `integer` | optional (default: `100`) | Maximum validation errors before aborting |
 | **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string fields |
 | **dateFormat** | `string` | optional | Expected date format in import data (e.g., "YYYY-MM-DD") |

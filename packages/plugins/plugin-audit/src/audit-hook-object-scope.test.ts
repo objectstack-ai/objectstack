@@ -16,13 +16,13 @@
  * gates bought a `driver.findOne` / matched-row read for a handler that was
  * going to return on its first line.
  *
- * ## Why an allow list could not fix it (#5928, PR #6575)
+ * ## Why an allow list could not fix it (#5928, commit 69787f07b)
  *
  * `SKIP_OBJECTS` is a DENY list over an OPEN universe: `/meta` PUT registers new
  * objects into a running engine with no event a plugin could subscribe to, so a
  * registrant that enumerated the complement would freeze its list at boot and
  * silently stop auditing everything created afterwards — a compliance
- * regression, and a quiet one. The `excludeObjects` face #6575 added is the
+ * regression, and a quiet one. The `excludeObjects` face commit 69787f07b added is the
  * expression this plugin was missing; `test 3` below is the pin that the deny
  * direction is preserved.
  *
@@ -462,7 +462,7 @@ describe('[#5860] the skip list is declared on the registration face', () => {
     // invariant, and it is what this now asserts. An object-SCOPED gate costs
     // the demand gate nothing beyond its own object — and on these two
     // objects nothing at all: `comment-access-hooks.ts` (#4630) and
-    // service-storage's `attachment-access-hooks.ts` (#10091) already declare
+    // service-storage's `attachment-access-hooks.ts` (commit da891e0ef) already declare
     // `beforeUpdate` scoped to `sys_comment` / `sys_attachment`, so
     // `hasHooksFor` is already true for both wherever the access kits install.
     const globalPreImage = registrations
@@ -524,7 +524,7 @@ describe('[#5860] the skip list is declared on the registration face', () => {
       expect(excluded).toContain('sys_comment');
       expect(excluded).toContain('sys_job_queue');
       expect(excluded).not.toContain('biz_task');
-      // #6575 refuses both of these at registration; a spread of the real skip
+      // Commit 69787f07b refuses both of these at registration; a spread of the real skip
       // list can never produce them, and this says so out loud.
       expect(excluded).not.toContain('*');
       expect(excluded.every((n) => typeof n === 'string' && n.trim().length > 0)).toBe(true);

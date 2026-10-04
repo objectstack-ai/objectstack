@@ -253,26 +253,31 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       actor_id: {
-        label: "Actor"
+        label: "Actor",
+        help: "El usuario que realizó esta acción. Vacío cuando no hay ninguna persona registrada: una acción iniciada por el sistema, o una decisión registrada antes de que se capturara al usuario que decidió, que sigue mostrando el turno en calidad del cual se tomó."
+      },
+      acted_as: {
+        label: "Actuó como",
+        help: "El turno de aprobación pendiente en calidad del cual se realizó esta acción, con la grafía almacenada del turno: un ID de usuario, un correo electrónico o una dirección de puesto. Vacío cuando ningún turno admitió la acción, como las acciones propias del solicitante, las acciones del sistema y las anulaciones de administrador."
       },
       comment: {
         label: "Comentario"
       },
       via_override: {
         label: "Mediante anulación de administrador",
-        help: "Verdadero cuando el actor fue admitido en esta acción únicamente por la vía de anulación privilegiada (#3424): no ocupaba ningún puesto en la lista de aprobadores pendientes de la solicitud."
+        help: "Verdadero cuando el actor no ocupaba ningún puesto en la lista de aprobadores pendientes de la solicitud y fue admitido en esta acción únicamente por la anulación privilegiada, que permite a un administrador de la plataforma o de la organización actuar sobre cualquier solicitud pendiente para que una que nadie de su lista puede decidir nunca quede bloqueada."
       },
       reassign_from: {
         label: "Reasignado de",
-        help: "Usuario cuyo turno de aprobación pendiente fue traspasado (solo acciones de reasignación)"
+        help: "El turno de aprobación pendiente que se traspasó, con la grafía almacenada del turno: un ID de usuario, un correo electrónico o una dirección de puesto (solo acciones de reasignación)."
       },
       reassign_to: {
         label: "Reasignado a",
-        help: "Usuario que recibió el turno de aprobación pendiente (solo acciones de reasignación)"
+        help: "La dirección de aprobación pendiente a la que se traspasó el turno, con su grafía almacenada: un ID de usuario, un correo electrónico o una dirección de puesto (solo acciones de reasignación)."
       },
       attachments: {
         label: "Adjuntos",
-        help: "Archivos que respaldan esta acción, p. ej. un contrato firmado o pruebas (#3266)."
+        help: "Archivos que respaldan esta acción, p. ej. un contrato firmado o pruebas."
       },
       created_at: {
         label: "Creado el"
@@ -297,7 +302,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
     fields: {
       id: {
         label: "Delegation ID"

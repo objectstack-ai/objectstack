@@ -23,7 +23,7 @@ import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+import { I18nLabelSchema } from './i18n.zod';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
@@ -32,6 +32,8 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
+import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 
 /**
  * Semantic near-misses — a different **word** for the same intent, usually
@@ -63,7 +65,7 @@ const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
   default: 'defaultValue',
   // The words an author borrows from `FieldSchema` (`readonly`) or widget
   // vocabulary (`disabled`) for "the user must not edit this". On a param the
-  // declared contract is `carryOver` (#11753): non-editable AND still
+  // declared contract is `carryOver` (commit 0e4e51b0a): non-editable AND still
   // submitted verbatim — which is the half `readonly`'s field semantics
   // (write-path strip) would get exactly wrong here.
   readonly: 'carryOver',
@@ -387,7 +389,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    */
   defaultFromRow: z.boolean().optional().meta({ title: 'Default From Row' }),
   /**
-   * Carry-over declaration (#11753 ruling, 2026-08-25): the param's value is
+   * Carry-over declaration (maintainer ruling 2026-08-25, commit 0e4e51b0a): the param's value is
    * carried through the dialog rather than collected from the user — seeded
    * from the current row (`defaultFromRow` is required alongside), rendered as
    * a NON-EDITABLE summary, and submitted VERBATIM in the request body.
@@ -395,9 +397,9 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * The knob exists because neither neighbour expresses this contract:
    *
    * - `visible: false` omits the param from the dialog AND from the submission
-   *   — measured on #11753; a clone action that hid its facet params this way
-   *   would silently stop copying them, which is exactly the #11703 defect
-   *   shape.
+   *   — the measurement commit 0e4e51b0a records; a clone action that hid its facet params this way
+   *   would silently stop copying them, which is exactly the defect shape
+   *   commit 5cb62d88b fixed in `clone_permission_set`.
    * - Leaving the param editable invites the failure the ruling names: the
    *   clone dialog offered `member_default`'s `row_level_security` — a JSON
    *   array of 17+ policy objects — as a prefilled textarea on the platform's
@@ -406,7 +408,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    *   (`PermissionSetSchema` validates shape, not intent).
    *
    * "Not editable" is expressed by contract and enforced by the renderer
-   * (maintainer ruling on #11753, recommendation A): objectui's
+   * (maintainer ruling 2026-08-25, recommendation A, commit 0e4e51b0a): objectui's
    * `ActionParamDialog` renders a declared carry-over as a read-only summary
    * while keeping the seeded value in its submit state, so what is declared is
    * what is sent. Requiring `defaultFromRow: true` is the declared = enforced
@@ -457,7 +459,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   // A carry-over param must have its row seed declared. The pair is checked at
   // parse time because the failure it prevents is silent at runtime: a
   // `carryOver: true` param with no `defaultFromRow` would render an empty
-  // read-only control and submit `undefined` — the #11703 silent-drop shape,
+  // read-only control and submit `undefined` — the silent-drop shape commit 5cb62d88b fixed,
   // reintroduced through the very key added to close it.
   (p) => !p.carryOver || p.defaultFromRow === true,
   {
@@ -634,7 +636,10 @@ const GLOBAL_NAV_RETIRED =
  * - `list_item`       — per-row action on a list/grid row (Salesforce row-level menu).
  * - `record_header`   — primary actions in the record-detail title bar.
  * - `record_more`     — overflow menu under the "More" / ⋯ button on a record.
- * - `record_related`  — actions on a related list section inside a record.
+ * - `record_related`  — per-row action on each row of a related list shown inside
+ *                       a parent record, in that parent's context only. Unlike
+ *                       `list_item` (every row wherever the object is listed), it
+ *                       never surfaces on the object's own list views.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
  *
@@ -788,8 +793,18 @@ export const ActionAiSchema = strictObject({
    * downstream tool chaining (one action's output feeds another's input) and
    * is summarised into the tool description so the model knows what it gets
    * back. Optional — when omitted the return value is treated as freeform.
+   *
+   * The cloud AI runtime compiles this schema before the action runs, and its
+   * schema reader refuses an untyped subschema that carries a type-scoped
+   * keyword (`properties`, `items`, `pattern`, `minimum`, …). The slot refuses
+   * the same schemas here, at the subschema's path, through the one factory
+   * `agent.structuredOutput.schema` shares (`shared/ai-json-schema-slot.ts`).
    */
-  outputSchema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema for the action return value.'),
+  outputSchema: aiJsonSchemaSlot('ai.outputSchema').optional().describe(
+    'JSON Schema for the action return value. An untyped subschema that carries a type-scoped '
+    + 'keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI '
+    + 'runtime\'s schema reader does not check it; declare its "type".',
+  ),
 
   /**
    * Override confirmation for AI calls. When unset, the bridge defaults to
@@ -816,7 +831,7 @@ export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
  * | `string` | `disabled: "record.status == 'closed'"` | CEL shorthand, normalized to the envelope at parse time |
  * | `{ dialect, source }` | `{ dialect: 'cel', source: '…', meta: { rationale } }` | the full envelope, for authorship metadata or a non-default dialect |
  *
- * The two keys were asymmetric until #5970 — `visible` had no `boolean` arm, so
+ * The two keys were asymmetric until commit 97e7e3caa — `visible` had no `boolean` arm, so
  * the very common `visible: true` was a parse error on the spec side while
  * objectui's `ActionDef` accepted it and stored metadata was already written
  * that way. An asymmetry between two keys that mean the same *kind* of thing is
@@ -854,7 +869,10 @@ const actionObject = () => strictObject({
     title: 'label', displayName: 'label', text: 'label',
     object: 'objectName', entity: 'objectName',
     actionType: 'type',
-    url: 'target', endpoint: 'target', path: 'target', href: 'target',
+    // The executor-target family lives in ONE table the `action:button` /
+    // `action:icon` rows read too (`action-target-aliases.ts`), so the action
+    // and the blocks that run it print the same rename (#21005).
+    ...ACTION_TARGET_ALIASES,
     parameters: 'params', args: 'params', inputs: 'params', fields: 'params',
     confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
@@ -1299,7 +1317,65 @@ const actionObject = () => strictObject({
   // `ActionSchema`'s refine chain alone — hence "a registered action" rather
   // than an unqualified claim that would be false on the inline surface.
   confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.'),
-  successMessage: I18nLabelSchema.optional().describe('Success message to show after execution'),
+  // `${result.*}` is the scope `onSuccess.navigate` declares (see that key's
+  // docblock for its members) — the copy reuses it rather than growing a
+  // second interpolation dialect (#21095). The sentence is phrased "on a
+  // registered action" for the same reason `confirmText`'s is: this describe()
+  // also renders into the InlineAction table, which does not pick
+  // `outcomeMessages`.
+  successMessage: I18nLabelSchema.optional().describe("Success message shown after the action succeeds. On a `type: 'api'` or `type: 'script'` action it may interpolate ${result.*} — the server response payload, the same scope `onSuccess.navigate` declares (e.g. ${result.id}). On a registered action that declares `outcomeMessages`, the entry named by the response's `outcome` is shown instead, and this message is the fallback."),
+
+  /**
+   * Outcome-specific success copy — ruling A on objectstack-ai/cloud#2315,
+   * the mechanism half of ruling B there: the server returns FACTS, the
+   * console composes the message in the user's locale. Landing order: this
+   * key (spec and client, #21095), then the console reader
+   * (objectstack-ai/objectui#11344), then cloud's producers.
+   *
+   * One server-executing action can succeed in more than one way — an
+   * environment delete archives, finds it already archived, defers a purge or
+   * destroys; an update check finds updates, finds none, or finds nothing
+   * installed — and one static `successMessage` cannot say which happened.
+   * So the handler answers with a closed `outcome` fact and this map carries
+   * the copy for each: keys are the snake_case outcome names the handler
+   * returns, values the message shown for that outcome.
+   *
+   * **Selection** (the console's, after an `api` or `script` action
+   * succeeds): the success payload's top-level `outcome` — the payload
+   * `${result.*}` reads, i.e. `${result.outcome}` — names the entry; failing
+   * a match, `successMessage`; failing that, the runner's default text.
+   *
+   * **Interpolation**: each message, like `successMessage`, may interpolate
+   * `${result.X}` — the scope `onSuccess.navigate` declares
+   * (for `type: 'api'` the `target` call's response body, for
+   * `type: 'script'` the handler's return value). No second dialect.
+   *
+   * **Where it is refused** (`refuseInertOutcomeMessages`, and the
+   * declarative-update table): on a type with no server response to report
+   * an outcome (`url` / `modal` / `flow` / `form`), beside `resultDialog`
+   * (which suppresses the success toast this copy is shown in), and beside
+   * `operation: 'update'` (no handler, so no outcome). Each would parse clean
+   * and never be read — the ADR-0078 shape this file refuses at authoring time.
+   *
+   * **Translation** rides beside `successMessage`, at the action's one
+   * address (`translateAction`): a bound action reads
+   * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, and an
+   * object-less action reads `globalActions.<action>.outcomeMessages.<outcome>`.
+   *
+   * Liveness: the ledger row was `planned` until the console reader landed,
+   * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `2e818d0b5`, re-read 2026-10-04: `core/src/actions/ActionRunner.ts` is
+   * byte-identical to `ab1879721`, where it was read 2026-10-03, so the anchor
+   * below held unmoved). The reader is objectui#11344 (objectui
+   * `c476be0e0`): `ActionRunner.composeSuccessMessage`
+   * (`core/src/actions/ActionRunner.ts:1497`) picks `outcomeMessages[outcome]`
+   * off the handler's return value, falls back to `successMessage` and then to
+   * the runner's default text, and fills `${result.*}` in whichever it shows.
+   * The four action renderers forward the key to the runner (`action:bar`
+   * spreads a registered action onto `action:button` whole). At `89cad75d5570`
+   * no objectui source outside its types named the key.
+   */
+  outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
   errorMessage: I18nLabelSchema.optional().describe('Error message to show when the action fails (overrides the raw error).'),
@@ -1655,8 +1731,45 @@ const actionObject = () => strictObject({
     }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
   }).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+  // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
+  // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
+  // `2bf6ef18d`). The ledger graded this key `live` on an uncited "PARTIAL —
+  // honored by a few objectui renderers" note, and no reader stood behind it.
+  // Measured at this checkout's `.objectui-sha` pin `f8a9d0fb05`: none of the
+  // surfaces that render an action — `action:button`, `action:icon`,
+  // `action:menu`, `action:group`, `action:bar`, the grid's row and bulk
+  // action menus, `record:quick_actions`, the declared-actions bar — reads an
+  // action's `aria`. The only `schema.aria` readers there are the PLACING
+  // nodes' own blocks (the `record:*` page components, the list view,
+  // `element:button`'s props), which never look inside an action.
+  //
+  // Remove rather than enforce: every one of those surfaces already derives the
+  // accessible name from the action's REQUIRED `label` — as the visible button
+  // or menu-item text, or as `aria-label` on the icon-only `action:icon` and
+  // the overflow-menu trigger — and the region that places the actions carries
+  // the node-level `ariaLabel` / `ariaDescribedBy` / `role`. A per-action ARIA
+  // block would be a second spelling of both, needing a precedence rule nobody
+  // has written. One node, one accessibility vocabulary.
+  //
+  // `retiredKey()` rather than a bare deletion although this is a
+  // `strictObject`: a bare delete is loud only as a generic unrecognized-key
+  // report, which cannot carry the prescription (`aria-carrier-tombstones.test.ts`
+  // pins the family). `AriaPropsSchema` is untouched — a key retirement, not a
+  // def retirement. Sources are stripped by the D2 conversion
+  // `action-aria-removed`.
+  aria: retiredKey(
+    '`action.aria` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no action ' +
+    'surface ever applied it: the button, icon, menu, group and bar renderers, the row and bulk ' +
+    'action menus and the record quick-actions toolbar all take the accessible name from the ' +
+    "action's `label` and never read this block, so ARIA attributes declared here parsed and then " +
+    'silently did not reach the DOM. Delete the key. The accessible name that IS applied is the ' +
+    "action's required `label` — the visible button or menu-item text, and the `aria-label` of an " +
+    'icon-only action — so write the name you meant there. To name the region that PLACES the ' +
+    'actions, author `ariaLabel` / `ariaDescribedBy` / `role` in the `aria` block of the placing ' +
+    'node: `page.components[].aria` (the component that renders the actions) or the list view ' +
+    '`aria`. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `action` is a registered metadata type, so `MetadataPlugin`'s loader stamps
@@ -1700,6 +1813,10 @@ const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why:
     "`onSuccess` is not defined for an `operation: 'update'` action yet — its `${result.*}` scope is a "
     + "handler's return value, and a declarative update has no handler. Drop it; post-success navigation "
     + 'for the declarative write is a spec proposal, not a silent key.'],
+  ['outcomeMessages',
+    "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
+    + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '
+    + 'ever be chosen. Drop it; a fixed confirmation for the write is `successMessage`.'],
   ['opensInNewTab',
     "`opensInNewTab` pre-opens a tab for a handler-returned `{ redirectUrl }` — an `operation: 'update'` "
     + 'action has no handler and returns no redirect. Drop it.'],
@@ -1796,6 +1913,56 @@ function refuseDeclarativeUpdateContradictions(
           + 'runs on. Use a record location (`list_item`, `record_header`, `record_more`, `record_section`) or, '
           + "for the selection bar, a `bulkActionDefs` entry on the list view (`{ operation: 'update', patch }`).",
       });
+    });
+  }
+}
+
+/**
+ * The two places `outcomeMessages` (#21095) would parse clean and never be
+ * read — refused at the key's own path, each with the rewrite. The third,
+ * `operation: 'update'`, lives in {@link DECLARATIVE_UPDATE_REFUSED_KEYS}
+ * beside `onSuccess`, the sibling key it is refused for the same reason as.
+ *
+ *  1. A type with no server response. Only `type: 'api'` (the `target` call's
+ *     response body) and `type: 'script'` (the handler's return value) hand
+ *     the console a success payload that can carry an `outcome` — the same
+ *     two-type scope as `onSuccess`, whose `${result.*}` the copy interpolates.
+ *  2. Beside `resultDialog`. A result dialog SUPPRESSES the success toast
+ *     (the one-shot reveal opens an acknowledge-only dialog instead), and the
+ *     toast is the only place outcome copy is shown.
+ *
+ * `type` has already been defaulted to `'script'` when this runs (the
+ * #13897 asymmetry), so an action that never wrote `type` is in scope.
+ */
+function refuseInertOutcomeMessages(
+  data: { type?: string; outcomeMessages?: unknown; resultDialog?: unknown },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.outcomeMessages === undefined) return;
+
+  if (data.type !== 'api' && data.type !== 'script') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['outcomeMessages'],
+      message:
+        '`outcomeMessages` holds the success copy for each `outcome` a server handler reports, and only '
+        + "`type: 'api'` and `type: 'script'` actions have a server response that can report one — on a "
+        + `\`type: '${data.type}'\` action the map would parse clean and never be read. For one fixed `
+        + 'confirmation use `successMessage`; to report distinct outcomes, run the work in a '
+        + "`type: 'script'` handler (or a `type: 'api'` endpoint) whose success payload carries "
+        + "`{ outcome: '<key>' }`.",
+    });
+  }
+
+  if (data.resultDialog !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['outcomeMessages'],
+      message:
+        '`outcomeMessages` is success-TOAST copy, and `resultDialog` suppresses that toast: the one-shot '
+        + 'reveal opens an acknowledge-only dialog instead, so no outcome message would ever be shown. '
+        + 'Drop `outcomeMessages`, or drop `resultDialog` if the response holds nothing the user must '
+        + 'copy now.',
     });
   }
 }
@@ -2045,6 +2212,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + "`type: 'api'` action calling an endpoint of your own — otherwise drop `undoable`.",
   path: ['undoable'],
 }).superRefine(refuseDeclarativeUpdateContradictions)
+  .superRefine(refuseInertOutcomeMessages)
   .transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.input<typeof ActionSchema>;

@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -94,7 +94,7 @@
         "open the record's History tab (screenshot first, then read entries)",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
-        "delete via the row/detail action; confirm the dialog; re-read via the filtered GET",
+        "delete via the row/detail action; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
         "reload the list view and confirm final state"
       ],
       "acceptance": [
@@ -135,7 +135,7 @@
           "evidence": "re-read JSON + search response"
         },
         {
-          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns (e.g. approval_status) RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner",
+          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Record that half blocked(fixture), or first give a contact a lead_score system-side (an objectql write in {isSystem: true} context sets a readonly field, as access-security.write-path-guards negative[1] does) and clone that contact",
           "oracle": "api",
           "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData)",
           "evidence": "clone response + source-vs-clone field diff + owner_id read"
@@ -203,6 +203,12 @@
           "date": "2026-08-24",
           "change": "clause 7's cross-area recipe pointer became a real reference. The persona it needs — qa-contributor-bound-member — is owned by areas/search.json, and until now no spelling existed that the validator accepted, so the pointer lived in knownGaps prose and clause 7's verify text: readable by a runner, invisible to check:platform-checklist, and free to rot if the recipe were ever renamed or moved. The maintainer ruled option A on 2026-08-22 (#10593 gap 2, area-qualified references), so this item now carries fixtures.provisioning.use = `search:qa-contributor-bound-member` and the gate resolves it. What a RUN does is unchanged in every particular: the same recipe, replayed from the same file, unblocking the same single clause on the same object and row — clause 7 was already instructed to drive showcase_invoice with this persona, and no step, clause, oracle, persona or acceptance text changed. The revision is bumped because the item's fixtures did, and because a run record pinning revision 6 was scored against an item whose recipe reference the tooling could not check",
           "ref": "#10593"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056: acceptance[6]'s readonly-column half is unobservable on the stock seed (no readonly column on showcase_account, no approval_status anywhere, lead_score null on every seeded contact) — recorded with the system-side way to make it observable; steps[8] warns that an own-row invoice pointing at the run's account turns the delete into 409 DELETE_RESTRICTED",
+          "ref": "#21060"
         }
       ]
     },
@@ -1387,7 +1393,7 @@
       "source": [
         "#3358 §4 ('leaving it unticked on the strength of a label')",
         "ADR-0059",
-        "examples/app-showcase/src/ui/actions/index.ts#maxSize (maxSize declarations)"
+        "examples/app-showcase/src/ui/actions/index.ts#ActionParamGalleryAction (maxSize declarations on its image and file params — re-pointed #18101: maxSize is a key written INLINE in each param literal, which the shared resolver does not read as a declaration, and ActionParamGalleryAction is the action constant that declares those params)"
       ],
       "history": [
         {
@@ -1499,7 +1505,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1520,7 +1526,7 @@
         "list_item — showcase_quick_view / showcase_mark_done in the row menu",
         "record_header — showcase_mark_done / showcase_log_time in the detail title bar",
         "record_more — showcase_open_docs / showcase_recalc_selection under the ⋯ overflow",
-        "record_related — showcase_log_time on the related-list section",
+        "record_related — showcase_log_time on each row of the related-list section inside a record (the Tasks related list on a showcase_project record), and on no row of the showcase_task list view",
         "record_section — showcase_mark_done / showcase_log_time in the Task Detail quick-actions bar (record:quick_actions resolves through the location filter)",
         "empty-locations semantics probe — an action with NO locations key renders on NO surface, and `locations: []` likewise (objectui#3142 collapsed the renderers onto one membership predicate, `actionRendersAt`; placement is a declaration, which is why recalc_selection has to name record_more)"
       ],
@@ -1528,7 +1534,7 @@
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
         "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
-        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.edit), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
+        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
         "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
         "empty-locations probe, both halves: (a) in a scratch/writable package author a copy of an api action with NO locations key; reload and sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY — then delete the probe; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
@@ -1568,7 +1574,7 @@
       "negative": [
         "any action rendering at a location it did not declare is a FAIL — placement is a contract, not a hint, and since objectui#3142 there is no everywhere-default left to inherit",
         "showcase_recalc_selection appearing on the list toolbar is the objectui#3142 regression shape — FAIL even though clicking it would merely error",
-        "a dispatch that opens the wrong target (e.g. log_time opening a list view instead of the showcase_task.edit form — the #2554 build-gate class) is a FAIL of the dispatch clause, not a cosmetic note"
+        "a dispatch that opens the wrong target (e.g. log_time opening a list view instead of the showcase_task.form form — the #2554 build-gate class) is a FAIL of the dispatch clause, not a cosmetic note"
       ],
       "traps": [
         "hydration-race",
@@ -1616,6 +1622,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 6,
+          "date": "2026-09-30",
+          "change": "re-worded the record_related variant to the location's placement as the spec's ACTION_LOCATIONS docblock now states it (#20937): a per-row action on each row of a related list inside a parent record, in that parent's context only — so showcase_log_time is expected on the rows of the Tasks related list on a showcase_project record, and on no row of the showcase_task list view. It used to read 'on the related-list section', which a runner could score against the section's toolbar. The console at this repo's objectui pin places no record_related action on related-list rows yet (its related list puts list_item actions on rows and list_toolbar actions in the header; the renderer half is objectui#11270), so a run against that pin records this variant as a missing placement — the correct verdict, not a checklist defect",
+          "ref": "#20937"
         }
       ],
       "enumSource": {
@@ -2829,7 +2841,7 @@
       },
       "source": [
         "objectui: packages/fields/src/widgets/LookupField.tsx (allowCreate default-on, SYSTEM_REFERENCE_RX / USER_DIRECTORY_REFS, isUserFacingReference, handleCreateNew), packages/fields/src/widgets/RecordPickerDialog.tsx (scoped find)",
-        "examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate + category.object.ts (parent allowCreate:true)",
+        "examples/app-showcase/src/data/objects/business-unit.object.ts#BusinessUnit.parent + category.object.ts (parent allowCreate:true — re-pointed #18101: allowCreate is a key written INLINE in the lookup options, which the shared resolver does not read as a declaration, and the parent field of the BusinessUnit object is the declaration that carries it)",
         "PENDING-GAPS §B lookup-picker-create-new"
       ],
       "history": [
@@ -3031,7 +3043,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3040,7 +3052,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the four seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })): showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
+          "the five seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives; showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
           "showcase_task (title required text + done boolean, defaultValue false), showcase_inquiry (status select whose 'new' option is default:true + source plain text with NO default), showcase_project (budget/spent currency + the spent_within_budget script rule that REJECTS spent > budget*1.2)",
           "seeded rows: not-done task 'Build homepage' (done:false) for the transition PATCH; already-done tasks 'Audit current IA' and 'App wireframes' (done:true) for the non-transition proof; projects 'Data Platform' (budget 600000 / spent 420000) and 'Website Relaunch' (budget 150000 / spent 60000)",
           "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe",
@@ -3049,8 +3061,8 @@
         "knownGaps": [
           "afterInsert and afterDelete have NO fixture hook — the four seeded hooks cover beforeInsert, beforeUpdate and afterUpdate only. Exercise these two events with a scratch log hook or record the variant knownGap; do not fake coverage.",
           "beforeDelete has NO seeded showcase hook — the abort-blocks-delete contract is pinned only by the dogfood hef_ref_guard fixture (packages/qa/dogfood/test/hook-error-format.dogfood.test.ts), a test-only stack, not the showcase app; drive beforeDelete via a scratch hook or cite that pin.",
-          "priority ordering (lowest-first on the SAME object+event) is not fixture-covered: no two showcase hooks share an object+event (normalize is showcase_task/before*, audit is showcase_task/afterUpdate — different events), so ordering needs a scratch pair of hooks on one object+event with distinct priorities.",
-          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four fixtures never throw (their trim/stamp/log bodies always succeed). The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
+          "priority ordering (lowest-first on the SAME object+event) is not fixture-covered: showcase_normalize_task_title (priority 50) and showcase_guard_task_reopen (priority 60) do share showcase_task/beforeUpdate, but neither logs and the guard fires only on a reopening write it then refuses, so their order is not observable from outside; ordering needs a scratch pair of logging hooks on one object+event with distinct priorities.",
+          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four hooks this item drives never throw (their trim/stamp/log bodies always succeed). The one seeded hook that throws, showcase_guard_task_reopen, is a beforeUpdate abort and does not stand in for this item's beforeInsert abort-rollback clause. The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
           "the async audit/warn lines land AFTER the HTTP write resolves (fire-and-forget runs once the engine has moved on) — a log read taken before the async body executes shows no line; settle before judging any no-fire."
         ]
       },
@@ -3073,7 +3085,7 @@
         "condition fails CLOSED (#4775) — SCRATCH: an unevaluable/uncompilable condition ABORTS the operation and is NOT softened by onError:'log' nor fire-and-forgotten (the gate runs OUTSIDE both); add a scratch hook with a broken condition (unit-pinned in hook-wrappers.ts)"
       ],
       "steps": [
-        "boot showcase isolated; sign in as seeded admin; confirm the four hooks actually registered before asserting any no-fire — GET /api/v1/meta/types/hook (or the boot log) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
+        "boot showcase isolated; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/types/hook (or the boot log) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
         "stamp defaults (beforeInsert): POST /api/v1/data/showcase_inquiry {name:'os-qa-<runid>'} OMITTING status AND source; re-read via GET and confirm source == 'web' — the hook is the SOLE producer of that value (the source field carries no default), so a correct read proves the hook fired; status == 'new' corroborates but is NOT hook-attributable alone (the 'new' status option is default:true)",
         "title trim (beforeInsert + beforeUpdate): POST /api/v1/data/showcase_task with title '  os-qa-<runid>  ' (leading/trailing spaces) and valid required fields; re-read → title == 'os-qa-<runid>' (insert trim); then PATCH the same row's title to another padded value and re-read → trimmed again (update trim); ONE multi-event hook covered both",
         "completion audit — FIRES (transition): PATCH /api/v1/data/showcase_task/<Build homepage id> {done:true} (previous done:false); after the HTTP response resolves, settle briefly (the audit is async fire-and-forget, it runs after the write returns), then read the server log for 'task completed: Build homepage'",
@@ -3164,7 +3176,7 @@
         "ref": "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (pins the beforeInsert stamp: status='new'/source='web' on an anonymous inquiry submit); packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (pins the beforeDelete onError:'abort' throw → REST error body). Declarative-wrapper semantics (two-root condition, async, retry, onError, fail-closed) are unit-pinned in packages/objectql/src/hook-wrappers.ts + hook-binder.ts tests. The transition audit / over-budget warn / priority-ordering LOG oracles and the abort/log/priority SCRATCH variants are NOT yet dogfood-pinned — drive them by hand."
       },
       "source": [
-        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
+        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
         "packages/spec/src/data/hook.zod.ts#HookSchema (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
         "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
         "packages/objectql/src/hook-binder.ts#bindHooksToEngine (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
@@ -3186,6 +3198,12 @@
           "date": "2026-09-09",
           "change": "citation only, no clause moved — the hook liveness citation asserted `timeout` 'live'; #14478 renamed it to `timeoutMs` and left `timeout` as a 'dead' tombstone row, so the ref sent a runner to a contradiction. Now names the live key and the tombstone.",
           "ref": "#15839"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-03",
+          "change": "fixture roster only, no clause moved — the showcase gained a fifth hook, showcase_guard_task_reopen (beforeUpdate on showcase_task, throws a user-facing refusal), the fixture records-forms.script-action-hook-refusal-toast drives. Two knownGaps stated facts it made false ('no two showcase hooks share an object+event', 'the fixtures never throw'); both now name it and say why it does not close this item's ordering or beforeInsert abort-rollback clause.",
+          "ref": "#21596"
         }
       ]
     },
@@ -4013,7 +4031,7 @@
       "title": "Import mapping TransformType matrix: each of the 7 declared transforms does exactly its documented conversion, javascript is refused loudly at the door (no sandbox), format mismatch is a named 400",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4042,18 +4060,18 @@
       "steps": [
         "POST /api/v1/data/showcase_inquiry/import with mappingName 'showcase_inquiry_feed' and a CSV whose Channel column carries one mapped code ('Webform') and one unmapped string; read back the created rows",
         "author scratch mappings (one per remaining transform) over PUT /api/v1/meta/mapping/<name>; import a vector file through each and read back the rows",
-        "author a scratch mapping declaring transform 'javascript' on one column; POST an import through it and capture the refusal",
+        "author a scratch mapping declaring transform 'javascript' on one column (bare — the javascript transform takes no params, and an `expression` key is refused 422 at authoring); POST an import through it and capture the refusal",
         "POST a JSON payload through a sourceFormat:'csv' mapping and capture the refusal; POST an xlsx payload through the same and confirm it is ACCEPTED (tabular-compatible)"
       ],
       "acceptance": [
         {
           "clause": "PER-VARIANT: each supported transform lands exactly its documented output on the created rows — none copies; constant writes params.value ignoring the source; map translates valueMap hits AND passes an unmapped raw value through unchanged; split distributes trimmed parts across its target list; join concatenates with the separator dropping empty members",
           "oracle": "api",
-          "verify": "per-variant row re-reads against the switch arms in packages/rest/src/import-mapping.ts — one observed conversion per variant, none inferred from a sibling",
+          "verify": "per-variant row re-reads against the switch arms in packages/core/src/utils/import-mapping.ts — one observed conversion per variant, none inferred from a sibling",
           "evidence": "the vector files + per-variant row reads"
         },
         {
-          "clause": "javascript is declared-but-refused, LOUDLY and BEFORE any row lands: a mapping carrying transform 'javascript' answers 400 code UNSUPPORTED_TRANSFORM whose message names the missing server-side sandbox and framework#2611 — and zero rows are created",
+          "clause": "javascript is declared-but-refused, LOUDLY and BEFORE any row lands: a mapping carrying transform 'javascript' answers 400 code UNSUPPORTED_TRANSFORM whose message names the missing server-side sandbox in words (since f115b1f, #21188, refusals carry no tracker number) — and zero rows are created",
           "oracle": "api",
           "verify": "the refusal (import-mapping.ts — checked per-entry before applyMappingToRows runs) + an unchanged target count; the spec deliberately still admits the value (TransformType), so the DOOR is the contract",
           "evidence": "the 400 body + before/after counts"
@@ -4088,7 +4106,7 @@
       },
       "source": [
         "packages/spec/src/data/mapping.zod.ts#TransformType (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
-        "packages/rest/src/import-mapping.ts#transform (format guard + the javascript refusal naming #2611), (the per-transform switch + around-the-seam unknown-transform refusal)",
+        "packages/rest/src/import-mapping.ts#resolveNamedMapping (format guard + the javascript refusal naming #2611), packages/core/src/utils/import-mapping.ts#transform (the per-transform switch + around-the-seam unknown-transform refusal)",
         "examples/app-showcase/src/data/mappings/index.ts#showcase_inquiry_feed (showcase_inquiry_feed — the stock none+map carrier)",
         "cross-ref: records-forms.named-import-mapping (header mapping, idempotence, unknown-name refusal — kept there; this item is the transform axis)"
       ],
@@ -4098,7 +4116,8 @@
           "date": "2026-08-30",
           "change": "initial — sweep gap (spec-enums angle): TransformType's 7 members had no per-variant coverage; named-import-mapping drives only the default copy + upsert path. Authored as a sibling item rather than widening that one (different axis, different fixtures), with the enumSource pin so an 8th transform trips VARIANTS STALE",
           "ref": "#sweep-2026-08-30"
-        }
+        },
+        { "revision": 2, "date": "2026-10-02", "change": "clause 2 no longer requires the refusal to name framework#2611: f115b1f (#21188) made REST refusals state each decision in words instead of a tracker number, and on 17.6.0 the UNSUPPORTED_TRANSFORM message names the missing sandbox without it (measured by the release-verification run, 0 rows landed). Step 3 notes the javascript transform is authored bare", "ref": "#21330" }
       ]
     },
     {
@@ -4175,6 +4194,196 @@
           "date": "2026-09-22",
           "change": "initial — acceptance for predicate relationship traversal under ADR-0137 D2 (a field-rule predicate that faults refuses the submit and names the field and the rule). The related record is read under SYSTEM authority bounded by the fields the predicate names, so the ruled outcomes are: the write passes when the parent field does not trip the rule, is refused with the AUTHORED message when it does, and is refused naming the related object when the rule cannot be evaluated at all",
           "ref": "claude/issue-18682-predicate-relationship-traversal"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.picklist-shared-across-objects",
+      "title": "One shared picklist on two objects: both are served the same resolved options, a package extension adds to both, a value outside the set is refused, and a locale switch relabels",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a picklist declared once (`*.picklist.ts`) and referenced by `Field.select({ picklist })` on two showcase objects, a `picklistExtensions` entry that adds one value to it, and `picklists.NAME` labels for a second locale. Stock showcase has none of these, and nothing serves a picklist until the runtime layer (#19519) lands, so the fixture arrives with it"
+        ]
+      },
+      "acceptance": [
+        {
+          "clause": "both objects' fields are served with the SAME resolved `options` (the picklist's own values plus the extension's) beside the `picklist` name, and each object's form offers exactly that set",
+          "oracle": "api",
+          "verify": "read both objects' field metadata: each field parses as packages/spec/src/data/picklist.zod.ts#PicklistServedFieldSchema and the two option lists are equal; then enumerate the options each object's form offers",
+          "evidence": "both served field bodies + both form option enumerations"
+        },
+        {
+          "clause": "the write door judges both objects against the resolved set: the extension's value persists on object A, and a value outside the set is refused on object B, the refusal naming the picklist",
+          "oracle": "api",
+          "verify": "POST the extension's value to object A and re-read the row; POST an out-of-set value to object B and capture the refusal envelope",
+          "evidence": "the re-read + the refusal envelope"
+        },
+        {
+          "clause": "switching the locale relabels the options on both objects from the picklist's `picklists.NAME.options.VALUE` translations, and the stored values do not change",
+          "oracle": "api",
+          "verify": "read both objects' field metadata under each locale; a picklist-bound field takes its option labels through packages/spec/src/system/i18n-resolver.ts#translateObject, and the values are identical across locales",
+          "evidence": "both served bodies under each locale"
+        }
+      ],
+      "negative": [
+        "a picklist-bound field served WITHOUT `options` is a FAIL: renderers, the record validator and filter pickers read `options`, so they would have nothing to offer or judge",
+        "a value outside the set accepted with 200 on either object is a FAIL: hiding it in the form is a client courtesy, and the write door is the boundary",
+        "a field naming a picklist that does not exist, served as an empty option list, is a FAIL: it must be refused loudly at load, naming the field and the package",
+        "an extension that duplicates, replaces or removes a base value is a FAIL: extensions are additive only, and a duplicate is refused loudly rather than last-wins"
+      ],
+      "source": [
+        "#18164 design of record (comment 5715762696), items 1 to 6: the kind, the field reference, server resolution, the additive package extension, the translation face, and the verification sentence that this item and records-forms.picklist-org-append split between them",
+        "#19518, the spec layer (landed as addbbf02ab): packages/spec/src/data/picklist.zod.ts#PicklistSchema",
+        "#19518, the extension shape: packages/spec/src/data/picklist.zod.ts#PicklistExtensionSchema",
+        "#19519, the runtime layer this item waits on (load before `object`, additive merge, resolve at serve time, write validation against the resolved set); its acceptance sentence is this item's three clauses"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-30",
+          "change": "initial — planned. The spec layer landed (#19518), but no runtime reads a picklist yet (packages/spec/liveness/picklist.json grades every key `planned`), so there is nothing to drive. The acceptance clauses are drafted from the design of record and #19519's acceptance; steps arrive with #19519, in the edit that promotes this item after a run in which it passes. The locale relabel sits on this item rather than on the organization item because it is phase-1 behaviour, and a promotion needs the whole item to pass",
+          "ref": "#19518"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.picklist-org-append",
+      "title": "An organization appends a value to a shared picklist without changing the app source: that organization can write it, and another organization is refused",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "an admin of organization A (appends the value, then writes it)",
+        "a member of organization B (the same app and picklist, without A's value)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two organizations on one environment, each with its own signed-in persona, sharing one app whose object has a picklist-bound field"
+        ],
+        "knownGaps": [
+          "NOT DECLARED: the per-organization overlay is phase 2 of the picklist design. The picklist row of packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY carries `allowOrgOverride: false`, the one opt-in ADR-0005 allows for an organization overlay, and ruling 5904864936 on #18164 defers the overlay to its own sub-issue, filed when a customer requirement measures it. Nothing here can run until that sub-issue lands the overlay. Package-level extension (phase 1) is records-forms.picklist-shared-across-objects"
+        ]
+      },
+      "negative": [
+        "organization B writing the value that only organization A appended, accepted with 200, is a FAIL: the appended value belongs to A's overlay alone",
+        "an organization overlay that removes or renames a value the owning package declared is a FAIL: the overlay adds values only, and removal or rename stays with the owning package",
+        "an append that needed an edit to the app source or to the owning package does not demonstrate this item: the capability is appending without touching either"
+      ],
+      "source": [
+        "#18164 design of record (comment 5715762696), item 4 (a per-organization overlay of the picklist shape, additive only, whose allowance was left to the maintainer as an open point) and item 6 (the verification sentence: org A adds a value, A writes it, B is refused)",
+        "#18164 ruling 5904864936 (the overlay stays deferred to its own sub-issue on a measured customer requirement) and #19518 Scope 5 (not declared in the spec layer)",
+        "docs/adr/0005-metadata-customization-overlay.md (`allowOrgOverride` on the type registry is the only org-overlay opt-in)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-30",
+          "change": "initial — planned. The docs/NORTH-STAR.md feature-map line names per-organization append as half of the shared-picklist feature, and the design of record's verification sentence names this behaviour, so the ledger holds it as a planned requirement rather than leaving it off. It carries no acceptance clauses: neither the overlay's schema nor its write door is designed yet, and a clause would be written against a design nobody has settled",
+          "ref": "#19518"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.script-action-hook-refusal-toast",
+      "title": "A script action whose server-side hook refuses the write with a user-facing sentence answers a 4xx, the console shows exactly one error toast carrying that sentence, and the record is left unchanged",
+      "since": "v17.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the script action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — body writes { id, done: false } through ctx.api, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item only — the Task Detail page is kind:'full' and renders no record_header bar)",
+          "the refusal sentence, verbatim: 'A finished task cannot be reopened. Create a follow-up task instead.' (TASK_REOPEN_REFUSAL in the hooks file — re-read it there before the run, never from this line)",
+          "a seeded FINISHED task (done: true) — 'Audit current IA' or 'App wireframes' (examples/app-showcase/src/data/seed/index.ts) — which is the only kind of record the action is offered on",
+          "a console built at this repo's .objectui-sha (pnpm objectui:build), served by the same boot the run drives",
+          "a browser driver that can read the network log and the DOM of one page (Playwright with launchOptions.executablePath=/opt/pw-browsers/chromium on these containers — RUNNER environment facts)"
+        ],
+        "knownGaps": [
+          "the console half is pinned in the objectui repo, not here — objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts characterizes the console failure chain (a 500 or a 400 carrying the sentence yields exactly one error toast with that sentence) with fetch and the toast sink as doubles. It is not runnable from this checkout and it stubs the transport, so it is not this item's evidence; this item exists to observe the whole chain live, on a stock app.",
+          "the toaster auto-dismisses every toast after 4s (objectui ConsoleToaster toastOptions.duration 4000) and closes it with an exit animation that marks the node data-removed=\"true\" first — count inside that window, and exclude removed nodes, or a correct single toast reads as zero."
+        ]
+      },
+      "steps": [
+        "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin) with the console built at .objectui-sha; sign in through the form as the seeded admin",
+        "pick a finished task: GET /api/v1/data/showcase_task?where=... (or the list) and record its id, done, progress and modified timestamp — this is the before-image",
+        "open the showcase_task list in the console (/_console/apps/showcase_app/showcase_task); screenshot after render settles; open the finished task's row menu ('Open menu' on its row) and confirm 'Reopen' is offered there",
+        "start capturing the network log and, before clicking, count toast nodes: document.querySelectorAll('[data-sonner-toast]:not([data-removed=\"true\"])').length — the baseline (expected 0)",
+        "click 'Reopen' with a ref-targeted click (RUNNER automation self-check); wait for the response of POST /api/v1/actions/showcase_task/showcase_reopen_task (the request URL may carry the record id as a further path segment) — record its status and its JSON body",
+        "within 2s of that response landing (the 4s auto-dismiss window), screenshot, then read every live toast node: count, data-type attribute, textContent — and compute count minus baseline",
+        "tie the toast to the request: the request was the ONLY non-GET request between the baseline read and the toast read in the network log, and the toast text contains the same sentence as that response's error.message",
+        "re-read the task over the API: GET /api/v1/data/showcase_task/ID — compare done, progress and the modified timestamp against the before-image",
+        "repeat once on a fresh page load (RUNNER rule 2 — any fail is reproduced twice before it is recorded)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the refusal answers a 4xx on the action route — a guard that said no is a successful evaluation, never a 5xx server fault — and the response body carries the hook's sentence",
+          "oracle": "network",
+          "verify": "the captured response of POST /api/v1/actions/showcase_task/showcase_reopen_task has 400 <= status < 500 and its body's error.message contains TASK_REOPEN_REFUSAL verbatim",
+          "evidence": "the request line, the response status and the error envelope (code, message) as text"
+        },
+        {
+          "clause": "the console shows EXACTLY ONE new toast for that refusal, of type error, whose text contains the sentence — not zero (the objectui#9151 symptom), not two (a duplicated sink), and not a success toast",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms the page rendered, the live-toast count read within the auto-dismiss window minus the pre-click baseline is exactly 1; that node's data-type is 'error' and its textContent contains TASK_REOPEN_REFUSAL",
+          "evidence": "baseline count, post-response count, the node data-type and textContent, as text; a one-line description of the screenshot"
+        },
+        {
+          "clause": "the toast belongs to THIS request: it is the console reporting the refused action, not some other failure that happened to toast at the same moment",
+          "oracle": "network",
+          "verify": "the network log between the baseline read and the toast read holds exactly one non-GET request — the action POST — and the toast's sentence equals the one in that response's error.message",
+          "evidence": "the ordered list of non-GET requests in that window, with status"
+        },
+        {
+          "clause": "the record is left unchanged: the refused write did not land, neither partly nor through a second path",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_task/ID after the click returns done true, the same progress and the same modified timestamp as the before-image",
+          "evidence": "the before-image and the after re-read, side by side"
+        }
+      ],
+      "negative": [
+        "a 5xx on the action route is a FAIL of the status clause even when the body carries the sentence — the class #17265 fixed (PR #17679) must not regress",
+        "zero live toasts after a 4xx carrying the sentence is a FAIL of the toast clause — the objectui#9151 symptom; rule out a count taken after the 4s auto-dismiss before recording it",
+        "a toast that shows only the generic fallback ('… failed (HTTP nnn)') when the response body carried the sentence is a FAIL — the sentence is what the user must be told",
+        "two or more new toasts for one click is a FAIL — one refusal, one message"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "automation-input"
+      ],
+      "source": [
+        "examples/app-showcase/src/data/hooks/index.ts#GuardTaskReopenHook (the refusing beforeUpdate hook; the sentence is TASK_REOPEN_REFUSAL in the same file)",
+        "examples/app-showcase/src/ui/actions/index.ts#ReopenTaskAction (the script action whose ctx.api write the hook refuses)",
+        "examples/app-showcase/test/task-reopen-hook-refusal.test.ts (pins the fixture: the hook refuses with the sentence and leaves the row unchanged on the real engine, and the action writes the refused shape)",
+        "packages/runtime/src/sandbox/quickjs-runner.ts#sandboxRefusalMessage (a nested sandboxed hook refusal keeps its business message across the action VM hop, so the action route answers 4xx — #17265 / PR #17679)",
+        "packages/runtime/src/sandbox/nested-hook-refusal-is-a-rejection.test.ts (the wire half: 400 VALIDATION_ERROR with the sentence, unit-level)",
+        "objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts (objectui#9252 — the console failure chain characterized end to end with the transport stubbed)",
+        "objectui packages/app-shell/src/chrome/ConsoleToaster.tsx (sonner Toaster: richColors, duration 4000, toast nodes carry data-sonner-toast and data-type)",
+        "objectui#9151 (the zero-toast symptom this item re-observes on a current build); #21596 (this item)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-03",
+          "change": "initial — gives objectui#9151's re-observation a home: the status half was fixed (#17265 / PR #17679) and the console chain pinned correct with the transport stubbed (objectui#9252), but the symptom was never re-observed live on a current build. The showcase had no hook that refuses a write, so the fixture pair (showcase_guard_task_reopen + showcase_reopen_task) lands with it.",
+          "ref": "#21596"
         }
       ]
     }

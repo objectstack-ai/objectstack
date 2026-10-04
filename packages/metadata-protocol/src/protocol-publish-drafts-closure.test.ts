@@ -35,7 +35,7 @@
  * The `objects` and `permissions` gaps are the same defect at advisory
  * severity: they do not refuse, they manufacture findings that describe
  * nothing. Both are pinned below, because a closure that is uniform is the
- * property #9612/#10058 declared and a per-collection patch is what produced
+ * property #9612/commit 6f5a44976 declared and a per-collection patch is what produced
  * this card.
  *
  * ## The discriminating tests are the ones that expect SILENCE
@@ -216,10 +216,13 @@ function makeStubEngine(options?: { liveObjects?: unknown[]; livePermissions?: u
                 if (type === 'permission') return options?.livePermissions ?? [liveReadonlySet];
                 return [];
             },
-            // No declared package namespace → the ADR-0028 prefix pre-flight is
-            // skipped (legacy-grandfathered path), and `resolveWritePackageScope`
-            // narrows nothing.
-            getPackage: () => undefined,
+            // The base the drafts are bound to is INSTALLED — a flow may be
+            // saved only into a package the registry holds (#20863) — and its
+            // manifest declares no namespace → the ADR-0028 prefix pre-flight is
+            // skipped (legacy-grandfathered path); it declares no dependencies
+            // and no live object carries a package stamp, so
+            // `resolveWritePackageScope`'s closure removes nothing.
+            getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
         },
     };
     return { engine, rows, historyRows };

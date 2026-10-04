@@ -1,5 +1,6 @@
 ---
-title: Analytics
+title: Analytics schema — API Protocol reference
+navTitle: Analytics
 description: "Defines the HTTP interface for the Semantic Layer. Provides endpoints for executing analytical queries and discovering metadata."
 ---
 
@@ -46,7 +47,7 @@ const result = AnalyticsEndpoint.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ name: string; title?: string; measures: object[]; dimensions: object[] }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
+| **data** | `{ name: string; title?: string; description?: string; measures: object[]; … }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title and description, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
 
 ### Nested Shape: `AnalyticsMetadataResponse.error`
 
@@ -77,8 +78,9 @@ const result = AnalyticsEndpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Cube name |
 | **title** | `string` | optional | Human-readable cube title |
-| **measures** | `{ name: string; type: string; title?: string }[]` | ✅ | Measures this cube accepts in `/analytics/query` |
-| **dimensions** | `{ name: string; type: string; title?: string }[]` | ✅ | Dimensions this cube accepts in `/analytics/query` |
+| **description** | `string` | optional | Cube description, projected from the cube definition's `description` |
+| **measures** | `{ name: string; type: string; title?: string; description?: string; … }[]` | ✅ | Measures this cube accepts in `/analytics/query` |
+| **dimensions** | `{ name: string; type: string; title?: string; description?: string }[]` | ✅ | Dimensions this cube accepts in `/analytics/query` |
 
 
 ---
@@ -95,8 +97,8 @@ const result = AnalyticsEndpoint.parse(data);
 | **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is lowered by `parseFilterAST` on the client before the wire; this field admits only the lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`). |
 | **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **timezone** | `string` | optional |  |
 | **query** | `never` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. The `{ cube, query: {...} }` envelope was the dialect of the retired degraded analytics shim — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
 | **format** | `never` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
@@ -121,7 +123,7 @@ const result = AnalyticsEndpoint.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string; totals?: object[] }` | ✅ |  |
+| **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string; totals?: object[]; … }` | ✅ |  |
 
 ### Nested Shape: `AnalyticsResultResponse.error`
 
@@ -154,6 +156,11 @@ const result = AnalyticsEndpoint.parse(data);
 | **fields** | `{ name: string; type: string; label?: string; format?: string; … }[]` | ✅ | Column metadata |
 | **sql** | `string` | optional | Executed SQL (if debug enabled) |
 | **totals** | `{ dimensions: string[]; rows: Record<string, any>[] }[]` | optional | Marginal aggregates - one entry per requested totals grouping, in request order, each computed with the measure's true aggregate over the underlying data (never re-derived from bucketed values). The grand-total grouping yields a single dimensionless row. |
+| **object** | `string` | optional | The base object of the dataset the answer was computed from: the dataset's `object`, by machine name. Every dataset answer (`POST /analytics/dataset/query`) must carry it, whatever dimensions are selected and whether or not rows came back, so a consumer can refresh on that object's record changes and drill into its records. Absent on a cube query answer, which has no dataset behind it. |
+| **dimensionFields** | `Record<string, string>` | optional | Drill-through sidecar: each equality-drillable dimension the answer is grouped by, dimension name to that dataset dimension's own `field` (a base-object field or a `relationship.field` path). Set only on a dataset answer (`POST /analytics/dataset/query`) that has rows and groups by at least one dimension with a `field` that is not `type: 'date'`; a date dimension is never listed (see `drillRanges`). Absent on a cube query answer. |
+| **drillRawRows** | `Record<string, any>[]` | optional | Drill-through sidecar, aligned to `rows` by index: each `dimensionFields` dimension name to the stored value that row was grouped by (a select option's value, a lookup's record id), captured before label resolution rewrites the row to its display label. An exact-match drill filter is built from these, not from the labels in `rows`. Set exactly when `dimensionFields` is. |
+| **drillRawTotals** | `Record<string, any>[][]` | optional | Drill-through sidecar for `totals`: entry `[i][j]` aligns to `totals[i].rows[j]` and holds the stored value of the `dimensionFields` dimensions that grouping groups by, so the grand-total grouping yields an empty map per row. Set only when `dimensionFields` is and the answer carries at least one `totals` grouping. |
+| **drillRanges** | `Record<string, { field: string; gte: string; lt: string }>[]` | optional | Drill-through sidecar for time buckets, aligned to `rows` by index: date dimension name to the half-open range `[gte, lt)` that row's bucket covers. Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants at midnight in the reference timezone when the source field is `datetime`; a row whose bucket value is null gets no entry for that dimension. Set only on a dataset answer that has rows and groups by at least one `type: 'date'` dimension with a `field` and a granularity; independent of `dimensionFields`. Absent on a cube query answer. |
 
 
 ---
@@ -219,8 +226,8 @@ const result = AnalyticsEndpoint.parse(data);
 | **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Presentation-scope date bucketing applied to every selected `date` dimension; an explicit `timeDimensions` entry wins over it, and the dataset dimension's own default is used when neither is set |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`); attaches `<measure>__compare` columns |
 | **totals** | `{ groupings: string[][] }` | optional | Server-side marginal aggregates; each grouping is a dimension subset to additionally aggregate by, `[]` being the grand total |
 | **timezone** | `string` | optional |  |

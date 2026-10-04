@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11014 — the Phase 3a-destructive gate's REACHABLE TYPE SET is `object`
+ * Commit 2d8b92ff1 — the Phase 3a-destructive gate's REACHABLE TYPE SET is `object`
  * alone, and this file is the measurement that says so.
  *
  * ## Why a type set needs a pin at all
@@ -10,7 +10,7 @@
  * open on `(singularType === 'object' || singularType === 'field')`. The
  * `field` limb could not produce a finding, so the condition made the gate's
  * coverage READ wider than it is — and that is not a cosmetic problem:
- * #10886's face inventory had to establish, per face, exactly which types can
+ * Commit 809e61221's face inventory had to establish, per face, exactly which types can
  * reach this gate, and the `field` spelling is the one thing that made the
  * answer look bigger. An inventory that trusted the condition chased a face
  * population that does not exist.
@@ -87,7 +87,7 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 // ---------------------------------------------------------------------------
-// Harness — a `sys_metadata`-backed kernel, the shape the #10886 face
+// Harness — a `sys_metadata`-backed kernel, the shape commit 809e61221's face
 // inventory uses. `update` is present because §2's hatch-open cases really do
 // PERSIST (that is what "the write got past reason 2" means), and it routes
 // through the producer's predicate for the reason above. `delete` is
@@ -132,6 +132,19 @@ const fieldRow = (type: string): Row => row({
     name: DOTTED,
     metadata: JSON.stringify({ name: FIELD, label: 'Probe', type }),
 });
+
+/**
+ * [#21470] The body a hatch-path save SENDS: a field definition with no
+ * `name`. A `field` row is named `<object>.<field>`, which a `FieldSchema`
+ * `name` (dot-free) can never spell, so every runtime write door now refuses a
+ * `field` body whose `name` is set (`VALIDATION_ERROR` / 400, before this
+ * file's gates) — the write would register the row under the column name.
+ * `FieldSchema` does not require `name`, so the nameless body is the one the
+ * hatch can carry, and what these cases measure is unchanged: the destructive
+ * gate's reach, not the body's name. The STORED rows above keep theirs, as a
+ * row written before that refusal sits at rest.
+ */
+const HATCH_BODY = (type: 'text' | 'number') => ({ label: 'Probe', type });
 
 /** An `object` row carrying a real `fields` map — the only diffable shape. */
 const objectRow = (name: string, fields: readonly string[]): Row => row({
@@ -364,7 +377,7 @@ describe('[#11014 §2 reason 1] a `field` body has no `fields` map to diff', () 
         const r = await save(protocol, {
             type: 'field',
             name: DOTTED,
-            item: { name: FIELD, label: 'Probe', type: 'number' },
+            item: HATCH_BODY('number'),
         });
 
         // It persisted — so the request reached, and passed, the gate.
@@ -379,7 +392,7 @@ describe('[#11014 §2 reason 1] a `field` body has no `fields` map to diff', () 
         const r = await save(protocol, {
             type: 'field',
             name: DOTTED,
-            item: { name: FIELD, label: 'Probe', type: 'number' },
+            item: HATCH_BODY('number'),
         });
 
         expect(r.outcome).toBe('resolved');
@@ -469,7 +482,7 @@ describe('[#11014 §3] the double fault the trimmed limb used to catch', () => {
         const r = await save(protocol, {
             type: 'field',
             name: DOTTED,
-            item: { name: FIELD, label: 'Probe', type: 'text' },
+            item: HATCH_BODY('text'),
         });
 
         expect(r.outcome).toBe('resolved');

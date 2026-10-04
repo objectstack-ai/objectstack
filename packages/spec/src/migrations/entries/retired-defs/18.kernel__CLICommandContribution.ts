@@ -5,7 +5,7 @@
 // (ADR-0049 enforce-or-remove; triage graded 2026-08-25, the exported
 // orphan-value-schema class — #3950). The pair described a "CLI Command
 // Contribution declaration in the manifest" and claimed retention "for
-// describing command metadata in plugin manifests" — but after #10724
+// describing command metadata in plugin manifests" — but after commit be21955ba
 // tombstoned `manifest.contributes.commands`, no manifest surface could
 // legally carry these entries: the exported schema advertised a shape whose
 // only declared carrier rejects it. The manifest never referenced this schema

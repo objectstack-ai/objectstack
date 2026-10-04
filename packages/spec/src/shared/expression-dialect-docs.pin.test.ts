@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6085] The `## Dialects` table in `expression.zod.ts`'s module TSDoc lists
+ * [commit 026101660] The `## Dialects` table in `expression.zod.ts`'s module TSDoc lists
  * exactly the members of `ExpressionDialect` — no more, no fewer.
  *
  * That table is not a comment. `build-docs.ts` publishes the module doc block

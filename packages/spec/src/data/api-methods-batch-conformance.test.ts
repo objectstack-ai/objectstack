@@ -61,16 +61,79 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `f8a9d0fb0`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-24 — previously measured at `62597c588`, `87af769e9`,
-  // `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before that at
-  // `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
-  // `6314e87f2`. On the hop off `62597c588`, `ObjectGrid.tsx` changed again
-  // (18 insertions, 5 deletions: objectui#10083's `rowActionsDeclared` row-menu
-  // signal and objectui#9909's currency display locale), none of it inside the
-  // selection block, which only MOVED: `ObjectGrid.tsx:4032-4059` here, still
-  // hashing to `c88443302d40c2db739ddb235470bafa29056e2e`, re-READ with the
-  // same reading below. `ObjectGrid.tsx` changed across the move off
+  // (`.objectui-sha` = `2e818d0b5`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-10-04: `ObjectGrid.tsx` and `hooks/useBulkExecutor.ts` are
+  // byte-identical across the hop off `ab1879721` (`git diff --quiet`), so
+  // every anchor held unmoved. Re-measured at `ab1879721`, 2026-10-03. On the
+  // hop off `89cad75d5`, `ObjectGrid.tsx` changed
+  // again (74 insertions, 11 deletions: objectui#11544's group-header labels
+  // read from the object field's `options` only, objectui#11475's percent
+  // storage `max` copied onto the cell's field meta on three paths and one
+  // import edited in place, above the selection block; objectui#11068's
+  // `keyboardNavigation`, objectui#11475's mobile-card percent face and
+  // objectui#11227's resolved empty-state labels, below it), none of it inside
+  // the selection block, which only MOVED by +19: `ObjectGrid.tsx:4810-4837`
+  // here (`4791-4818` at `89cad75d5`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `89cad75d5` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `89cad75d5`, 2026-10-02:
+  // on the hop off `31971ff1e`, `ObjectGrid.tsx` changed
+  // again (42 insertions, 17 deletions: objectui#11322's built-in bulk-delete
+  // gate asking `partitionRowsByPredicate` directly and objectui#11254's
+  // mobile-card percent width, plus their two import lines, each edited in
+  // place), every hunk either a same-length import edit or below the
+  // selection block, which did NOT move: `ObjectGrid.tsx:4791-4818` there as at
+  // `31971ff1e`, still hashing to `c88443302d40c2db739ddb235470bafa29056e2e`
+  // (hash-object of the block), re-READ with the same reading below;
+  // `hooks/useBulkExecutor.ts` is byte-identical to `31971ff1e` and its
+  // `:298-303` still hashes to `01083348330f10a201cdf1078b4c21c236402b6a`.
+  // At `31971ff1e`, 2026-10-01: on the hop off `e420df310`, `ObjectGrid.tsx` changed
+  // again (41 insertions, 1 deletion: objectui#10689's re-read on a harvested
+  // query input), every hunk above the selection block, which only MOVED by
+  // +40: `ObjectGrid.tsx:4791-4818` there (`4751-4778` at `e420df310`), still
+  // hashing to `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the
+  // block), re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `e420df310` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `e420df310`, 2026-09-30:
+  // on the hop off `db11afd49`, `ObjectGrid.tsx` changed
+  // again (164 insertions, 48 deletions: objectui#9853's display page size,
+  // objectui#11021's searched grouped grid, objectui#9547's `onNavigate` prop,
+  // objectui#7297's `{record_id}` filter values and objectui#11070's
+  // `reference` spelling among them), none of it inside the selection block,
+  // which only MOVED by +114: `ObjectGrid.tsx:4751-4778` there (`4637-4664` at
+  // `db11afd49`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `db11afd49` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `db11afd49`, 2026-09-29:
+  // on the hop off `dd3f7e1be`, `ObjectGrid.tsx` changed
+  // again (105 insertions, 16 deletions: objectui#11068's grid keys,
+  // objectui#11105's server-grouped column-name fix, objectui#10993's title
+  // locale map among them), none of it inside the selection block, which only
+  // MOVED by +32: `ObjectGrid.tsx:4637-4664` here (`4605-4632` at
+  // `dd3f7e1be`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `dd3f7e1be` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. Previously measured at
+  // `89cad75d5`, `31971ff1e`, `e420df310`, `db11afd49`, `dd3f7e1be`, `f8a9d0fb0`, `62597c588`,
+  // `87af769e9`, `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before
+  // that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
+  // `6314e87f2`. On the hop off `f8a9d0fb0`, `ObjectGrid.tsx` changed hard
+  // (745 insertions, 161 deletions: objectui#7189's server-side grid grouping
+  // and objectui#10881's grouped-grid refusal among them), none of it inside
+  // the selection block, which only MOVED: `ObjectGrid.tsx:4605-4632` then
+  // (`4032-4059` at `f8a9d0fb0`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e`, re-READ with the same reading
+  // below — the one edit in the surrounding selection-mode region (from its
+  // `Determine selection mode` comment to `singleSelection`) is a comment tag
+  // (`[#3720]` -> `[objectstack#3720]`). On the hop off
+  // `62597c588`, `ObjectGrid.tsx` changed too (18 insertions, 5 deletions:
+  // objectui#10083's `rowActionsDeclared` row-menu signal and objectui#9909's
+  // currency display locale), none of it inside the selection block, which
+  // only MOVED then as well (`4024-4051` to `4032-4059`), re-READ with the
+  // same reading. `ObjectGrid.tsx` changed across the move off
   // `87af769e9` too (119 insertions, 9 deletions), and THAT time the selection block's CONTENT
   // moved, not only its position: objectui#10218 (`62597c588` itself)
   // rewrote the `selection` arm to "presence enables; an explicit off wins",
@@ -87,16 +150,17 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `00d3f09c5` is the one that caught the previous record's OWN grid anchor as
   // wrong rather than merely shifted: `3790-3805` there is
   // `runBulkActionAggregate` and says nothing about selection. That is the
-  // #10274 class, and the reason a citation refresh re-READS instead of moving
+  // class commit d1ba685ec gates, and the reason a citation refresh re-READS instead of moving
   // numbers — arithmetic on a wrong anchor produces a fresh-looking span still
   // describing the wrong function. The second claim,
   // `hooks/useBulkExecutor.ts:298-303`, sits in a file that is byte-identical
-  // to `62597c588` and to `87af769e9` on the last two hops (it last changed on the hop off `53ded82bf`, 36
+  // to `f8a9d0fb0`, to `62597c588` and to `87af769e9` on the last three hops
+  // (`git diff --quiet`; it last changed on the hop off `53ded82bf`, 36
   // insertions, 22 deletions, when it was re-READ rather than carried on file
   // identity): the six lines hash to
   // `01083348330f10a201cdf1078b4c21c236402b6a` at every one of those pins and
   // still end on
-  // `label = 'bulk delete'`, the line the `284-288` span cited six
+  // `label = 'bulk delete'`, the line the `284-288` span cited nine
   // pins ago stopped short of, truncating the second of the two branches it
   // names (byte-identity is never taken as proof an anchor is right):
   //

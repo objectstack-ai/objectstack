@@ -1,5 +1,2600 @@
 # @objectstack/core
 
+## 17.6.0
+
+### Minor Changes
+
+- 05a7547: fix(core,objectql)!: a `datetime` value names a year from 1000 to 9999 at both engine doors, so one before year 1000 is refused as a written value and as a filter comparand; a `date` keeps 0001 to 9999
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE at the two engine doors: a datetime whose UTC year falls in 0001..0999, refused VALIDATION_FAILED (field code invalid_date) as a written value and INVALID_FILTER / 400 as a comparand. No authorable key, spelling, export or stored metadata shape moves: FieldSchema's datetime type, every object definition and every query shape parse as before, and @objectstack/core and @objectstack/objectql export nothing new and nothing less (isOutsideTemporalYearRange keeps its signature). A datetime already stored before year 1000 is record data, not metadata: nothing converts it, no conversion is registered, and it is never shifted; the body says how an operator finds such rows and that a write carrying one is refused, which is guidance about data, not a rewrite of any consumer's code or metadata. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a value range and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the engine accepts as a `datetime`. The one range function both doors ask, `isOutsideTemporalYearRange` in `@objectstack/core`, now takes a lower bound per kind: a `datetime` starts at year 1000 (its UTC year), a `date` stays at 0001, and both still end at 9999. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A `datetime` whose UTC year falls in 0001..0999, which both doors accepted before:
+  
+  - **The write door** (the record validator), in every spelling it took: an ISO instant string, a bare `YYYY-MM-DD` (midnight UTC), a zone-naive `YYYY-MM-DD HH:MM`, and a `Date`. It answers `VALIDATION_FAILED` with the field's `invalid_date` code, on `engine.insert`, `engine.update` (one row or many) and the dry-run `engine.validate`, so on `POST /api/v1/data/:object`, `PATCH /api/v1/data/:object/:id` and each row of `POST /api/v1/data/:object/import` too. A number was already refused there, because a `datetime` is stored as text.
+  - **The comparand door** (the temporal-comparand door), in every spelling: an ISO string, a `Date` and epoch milliseconds as a number. It answers `INVALID_FILTER` / 400 at `where`, at a per-aggregation `filter` and at `having`, on the engine and on `POST /api/v1/data/:object/query`. The analytics native-SQL strategy asks the same predicate, so it declines such a comparand and the query reaches this door.
+  - The year is the instant's UTC year: `1000-01-01T00:00:00+08:00` is year 999 in UTC and is refused, and `0999-12-31T23:00:00-02:00` is year 1000 in UTC and is read.
+  
+  **What an author sees.** The comparand refusal names the field, the value, its position and the range: "an instant whose UTC year falls outside the years 1000 to 9999, the years a datetime value may name". It then says why the floor sits at 1000, instead of the misorder words that a year past 9999 still gets: MySQL documents its `DATETIME` from year 1000 only, and reads one stored in the years 0001 to 0099 back a century late. A comparand in those years that was already refused for its spelling or its day (a non-ISO spelling, a day that does not exist) is now named by its year first, as one past 9999 already was. The write refusal is the existing `invalid_date` sentence for a `datetime` field.
+  
+  **Why.** MySQL documents `DATETIME` from year 1000, and it reads a stored `DATETIME` in 0001..0099 back a century late through its client's instant parser (`0009-03-04 10:00` comes back as `2004-09-03T10:00Z`), which ADR-0053 D-F2 keeps. The range is the contract on every backend, so SQLite, PostgreSQL and the in-memory driver, which held these years, refuse them too. No writer or query of a `datetime` before year 1000 was found.
+  
+  **A `datetime` already stored before year 1000.** Nothing rewrites it, and nothing shifts it into the range. It reads back as before, and on MySQL a year in 0001..0099 still presents a century late. To find such rows, filter the field with `$lt` on `1000-01-01T00:00:00.000Z`, the floor's first instant, which both doors admit; the comparison runs on the stored value, so it finds them on MySQL as well. An update that leaves the field out is accepted. A write that carries a year below 1000 is refused, so the field can be written again with an instant from year 1000 on, or with `null`, and the author decides which.
+  
+  **Unchanged.** A `date` keeps 0001..9999, padded to four digits as before. A `time` column still reads the time of day of an instant in 0001..0999, and a `time` comparand refused for another reason keeps that reason's words. Every year from 1000 to 9999 on a `datetime`, and every refusal outside 0001..9999 on either kind, answers as before, apart from the range the words name.
+- b785c3b: fix: `sum` / `avg` answer the same double on every face the platform owns, added with one compensated fold that `@objectstack/core` now exports as `compensatedSum` (#20544)
+  
+  Clause-②: yes
+  
+  **New export.** `@objectstack/core` exports `compensatedSum(nums)`: the sum of
+  `nums`, added in order with Kahan-Babuska-Neumaier compensation, which is the
+  summation SQLite (3.43 and later) uses for its own `sum` and `avg`. It moved
+  here from `@objectstack/objectql`'s rows path (`in-memory-aggregation.ts`),
+  which now imports it instead of keeping a private copy.
+  
+  **What changed.** Three folds still added a group's values naively, and now call
+  the same function:
+  
+  - `@objectstack/driver-memory`'s `aggregate()` and `find()` with aggregations,
+    the path `engine.aggregate` takes on an in-memory datasource;
+  - `@objectstack/driver-memory`'s analytics face (`MemoryAnalyticsService`),
+    whose `sum` / `avg` measures are now a `$group` `$accumulator` in place of
+    mingo's `$sum` / `$avg`;
+  - `@objectstack/service-analytics`' draft preview.
+  
+  Over a `number` column holding `0.1`, `0.2` and `0.3`, each of them answered
+  `0.6000000000000001` / `0.20000000000000004`. They now answer `0.6` /
+  `0.19999999999999998`, as SQLite and the engine's rows path do. Over
+  `1e16, 1, -1e16` they answered `0` and now answer `1`. On driver-memory,
+  `engine.aggregate` gave two answers depending on its path: `having { s: { $eq:
+  0.6 } }` kept the group on the rows path and dropped it on the native path. It
+  now keeps it on both.
+  
+  **What did not move.** Two addends, integers whose running total stays within
+  2^53, and a non-finite total give the same answer as before. Which values count
+  as addends did not change either: booleans as 1 / 0, and nulls and non-numeric
+  strings left out, as each face already had it. `count`, `min` and `max` are
+  untouched. The analytics face's pipeline dump (`result.sql`) now renders the
+  accumulator's functions by name, so a `sum` measure and an `avg` measure still
+  dump differently.
+  
+  **Residual.** PostgreSQL and MySQL add their doubles natively without
+  compensation, and the platform does not wrap that arithmetic. So over three or
+  more fractions their native path can still differ from these faces in the last
+  place. An exact `$eq` on a fractional sum compares doubles; compare with a range.
+- 2473e26: fix(core,objectql)!: a temporal filter comparand is refused with `INVALID_FILTER` / 400 exactly when the same value is refused as a written value — a day that does not exist (`"2026-02-30"`) is no longer rolled over or compared as text, and a non-ISO `datetime` spelling (`"07/15/2026 10:00"`) is no longer read in the server's zone (#20549); and a `time` comparand whose instant has no four-digit UTC year (`"+010000-01-01T10:00:00Z"`) is refused rather than compared as text (#20480)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a filter comparand VALUE at the engine's temporal-comparand door (where, a per-aggregation filter, having) and, through the same predicate, the analytics raw-SQL decline: no authorable key, spelling or stored shape of metadata moves, `packages/spec` is untouched, and no stored row is read or rewritten. What is refused is a temporal string naming a day that does not exist, a datetime string outside the ISO spellings, and a bare integer string; which instant such a string meant (a host zone, a locale's day order, a year or epoch milliseconds) is not something a ledger entry can decide. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a comparand value check (not `registered` / `already-registered`); and the change is runtime behaviour, not a TypeScript declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a `date`, a `datetime` and a `time` field accept as a filter comparand. It ships as `minor` under the launch-window convention for accept-set narrowings (`check-changeset-no-major` refuses `major` until GA; the breaking-ness is carried by this banner and the ADR-0087 disposition above).
+  
+  The record validator already refused the `date` / `datetime` classes as written values (`VALIDATION_FAILED` / `invalid_date`). The comparand door was wider, so a filter admitted what a write refused and answered the wrong rows. The two predicates moved into `@objectstack/core`'s `isUninterpretableTemporalComparand`, and both doors now ask that one rule. A comparand is refused with `INVALID_FILTER` / 400, naming the field, before any driver read, at `where`, a per-aggregation `filter` and `having`:
+  
+  - **A day that does not exist**, on a `date` or as the day part of a `datetime`: `"2026-02-30"`, `"2026-02-29"` (2026 is not a leap year), `"2026-04-31"`, `"2026-02-30T10:00:00Z"`. `"2028-02-29"` is a real day and is read.
+  - **A `datetime` string in any spelling but the ISO 8601 ones the platform writes**, after trimming: `YYYY-MM-DD` (midnight UTC); `YYYY-MM-DDTHH:MM[:SS[.fraction]]` followed by `Z`, a `±HH:MM` or `±HHMM` offset, or nothing (a zone-naive wall clock is UTC, ADR-0074); and `YYYY-MM-DD HH:MM[:SS[.fraction]]` with no zone. Refused now, for example: `"07/15/2026 10:00"`, `"2026/07/15 10:00"`, `"15 July 2026 10:00"`, `"07/08/2026"`, `"Wed, 15 Jul 2026 10:00:00 GMT"`, `"2026-07-15 10:00:00+08:00"` (write it with a `T`), and a bare integer string such as `"2026"` or `"1784109600000"`.
+  - **An instant on a `time` column in either class above.** A `time` column reads a comparand that is not a bare wall clock as an instant, by the `datetime` rule, and keeps its UTC time of day — so `"07/15/2026 10:00"` was the host zone's time of day, and `"1784109600000"` a string of epoch milliseconds. A wall clock (`"10:00"`, `"10:00:00.5"`), an ISO instant, a `Date` and an epoch-millisecond number are read as before, in a four-digit year (next).
+  - **An instant on a `time` column whose UTC year has no four-digit spelling**, in every spelling (#20480): `"+010000-01-01T10:00:00Z"`, `"-000001-01-01T10:00:00Z"`, `"9999-12-31T23:00:00-02:00"` (year 10000 in UTC), and the epoch-millisecond number or `Date` of any of them. A `time` column keeps the UTC time of day of an instant only when that instant spells a four-digit year; any other one reached the driver as written and was compared with the stored `HH:MM:SS` text. No time of day is read from an extended year. Year 0 (`"0000-06-15T10:00:00Z"`) spells four digits, and its time of day is read as before.
+  
+  Epoch milliseconds stay a `datetime` comparand as a JSON number: `{ "$gt": 1784109600000 }` is read exactly as before. As a string, a bare integer was read as epoch milliseconds, so `"2026"` meant two seconds after 1970 and matched every later row; send the number, or an ISO instant.
+  
+  What a caller sees through `POST /api/v1/data/:object/query`, the process in America/New_York, PostgreSQL 16 at `Asia/Shanghai`:
+  
+  | `where` | memory | SQLite | PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|:--|
+  | `datetime` `$eq "2026-02-30T10:00:00Z"` | 200, the row stored at `2026-03-02T10:00:00.000Z` | the same | the same | 400 `INVALID_FILTER` |
+  | `datetime` `$eq "07/15/2026 10:00"`, `"2026/07/15 10:00"` | 200, the row at `2026-07-15T14:00:00.000Z`, the server process's zone | the same | the same | 400 `INVALID_FILTER` |
+  | `date` `$eq "2026-02-30"` | 200 `[]`, compared as text | the same | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  | `datetime` `$gt "2026"` | 200, every row (read as 2026 epoch milliseconds) | the same | the same | 400 `INVALID_FILTER` |
+  | `time` `$gt "+010000-01-01T10:00:00Z"`, rows `09:00` / `10:30` / `12:00` | 200, 3 of 3 (compared as text) | the same | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  | `time` `$gt` the number of that instant | 200 `[]` | 200, 3 of 3 | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  
+  The refusal names the field and the value, says the filter was not applied, and names the spellings that are read. The rows a non-ISO comparand matched were a property of the deployment host: the same request answered differently on two servers.
+  
+  **Who is affected.** A caller that filters a `date` or `datetime` field with a string: a REST or SDK client, a saved report or view filter, a dashboard's analytics query (the raw-SQL strategy declines such a comparand, and the engine refuses it), an MCP `query_records` call written by a model. A `{placeholder}` such as `{30_days_ago}`, the empty string, a JS `Date` and an epoch-millisecond number are unchanged.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL:
+  
+  - a real leap day: `date` `"2028-02-29"`, `datetime` `"2028-02-29T10:00:00Z"`;
+  - each ISO spelling above, compared as the same instant whatever the host's zone: `"2026-07-15T14:00:00Z"`, `"2026-07-15T22:00:00+08:00"`, `"2026-07-15 14:00"` (UTC, not the host zone);
+  - a `date` comparand with a leading real `YYYY-MM-DD`, still compared as that day (`"2026-07-15T10:00:00Z"` on a `date` is July 15);
+  - the same wall clock as a 2026 instant on a `time` column: `$gt "2026-07-15T10:00:00Z"` answers the `10:30` and `12:00` rows, as does its epoch-millisecond number or `Date`;
+  - the year range 0001..9999, and every written value (the record validator now asks the same rule it copied, and answers exactly as before).
+- 889139c: fix(plugin-security): `security/explain` resolves the user it explains in the organization enforcement resolves them in, so a member whose membership in the caller's organization has ended is no longer explained holding that organization's grants (#20580)
+  
+  When an administrator explains another user, the explanation is computed in the administrator's own organization. Enforcement does one more thing for that same user first: under a walled tenancy posture (`isolated` or `group`), it drops an organization claim that no current membership backs, and the user resolves with no active organization, so only their global grants apply. The explainer skipped that check. For a user whose membership in the administrator's organization had ended, the explanation listed that organization's grants, and the verdicts they decide, while enforcement applied none of them.
+  
+  The explainer now asks the same check before it resolves the user, and resolves them where it says. `@objectstack/core` exports that check as `vetOrganizationClaim(claimedOrganizationId, accessibleOrgIds, tenancyPosture)`. It returns the claimed organization while a current membership backs it or while no wall is enforced, and `undefined` once the claim is dropped. `resolveAuthzContext` asks the same function for a session's claim, so the two cannot disagree. This is a new export with no behaviour change to `resolveAuthzContext`.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A current member's explanation.
+  - The `single` posture, where no claim is dropped on either side.
+  - Explaining yourself, and a caller with no active organization.
+- a6866da: fix(core): a date or time in the years 0001..0099 is read as written, not as 1900..1999, wherever a UTC instant is built from year / month / day / time parts
+  
+  `Date.UTC(year, …)` and `new Date(year, …)` read a year from 0 to 99 as 1900 + year. Core built its instants from parts that way, so every day of the years 0001..0099 (inside the supported range 0001..9999) landed in the 1900s at the sites below, with no error.
+  
+  - `@objectstack/core`: **new export** `wallClockToUtcMs(parts)`, the epoch milliseconds of a `WallClockParts` read as UTC. It is `Date.UTC` without the two-digit-year remap: `month` is 1-12, omitted time components are 0, and every component rolls over past its end as `Date.UTC` rolls it (`month: 13` is next January, `day: 0` the previous month's last day, `hour: 24` the next midnight). A `NaN` component gives `NaN`. Every site below now builds through it:
+    - `zonedWallClockToUtcMs` and `zonedDateStartToUtcMs`, the wall clock and the zone-offset read. The offset read also takes the zone's era, so a wall clock early on 0001-01-01 in a zone west of UTC, whose offset probe lands in year 0, reads right.
+    - `bucketKeyToCalendarRange` (`0050` spans 0050-01-01..0051-01-01, not 1950..1951; `0050-01-01` as a `day` key is no longer `null`) and `bucketDateKey`'s ISO week (0050-01-01 is in week 52 of 0049, not of 1949).
+    - The date macros: `{1976_years_ago}` resolves to `0050-09-30`, not `1950-09-30`. A macro that lands in 0001..0999 is now spelled with a four-digit year, as the `date` storage form spells it (`0055-06-15`, not `55-06-15`, which names no day).
+  - `@objectstack/service-analytics`: the preview evaluator's `week` key and the `compareTo` bucket alignment build their days through `wallClockToUtcMs`.
+  - `@objectstack/trigger-schedule`: a time-relative window's day bounds build through `wallClockToUtcMs`.
+  
+  What an author sees: `POST /api/v1/data/:object/import` stores the `datetime` cell `0050-01-01 10:00` as `0050-01-01T10:00:00.000Z`, and in `Asia/Shanghai` as `0050-01-01T01:54:17.000Z` (the zone's local mean time for that year). Before, it stored `1950-01-01T10:00:00.000Z` and `1950-01-01T02:00:00.000Z` and reported the row `ok`. Measured through the import route and read back through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16; the `2026-07-15 10:00` control is stored the same before and after. Every year from 0100 on builds exactly as before.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- 89801cd: **A flow `http` node's `signingSecret` now signs the request on every arm, with one scheme, and a secret that does not resolve refuses the node instead of letting the request leave unsigned.**
+  
+  `signingSecret` is declared as "HMAC-SHA256 secret → X-Objectstack-Signature", with no arm named. Only the durable arm honoured it, because only the messaging outbox signed. The default inline request, and a `durable: true` node on a host with no messaging HTTP outbox (which degrades to that inline request), were sent without the header while the run reported success.
+  
+  - `@objectstack/core`: **new exports** `signHttpBody(body, secret)` and `HTTP_SIGNATURE_HEADER`, the outbound HTTP signature scheme: `X-Objectstack-Signature: sha256=<lowercase hex HMAC-SHA256 of the exact body bytes>`, where a request with no body is signed over the empty string. They were `@objectstack/service-messaging`'s own, and they moved here so a sender with no outbox can sign with the same code.
+  - `@objectstack/service-messaging`: `signHttpBody` and `HTTP_SIGNATURE_HEADER` are still exported under the same names. They are now re-exports of the `@objectstack/core` bindings, not a second implementation. Delivery rows and the headers the outbox sends are unchanged.
+  - `@objectstack/service-automation`: the `http` node's inline request carries `X-Objectstack-Signature` whenever `signingSecret` is set. It is computed over the exact body the node sends (its JSON serialization of `config.body`, or the empty string when there is none), so a receiver that verifies with `signHttpBody` over the bytes it received accepts it on every arm.
+    - A non-empty `signingSecret` that renders to nothing at run time now fails the node with a guard refusal naming `config.signingSecret`, and nothing is sent. This covers a `{token}` with no value in the run, or one that renders the empty string. The refusal is on every arm, including the outbox arm, which used to enqueue such a delivery unsigned. A fault edge does not route it. The fix is to give the run the value the template reads.
+    - An authored `signingSecret: ''` still sends unsigned on purpose, on every arm.
+  
+  Clause-②: yes (widening) — two new exports on `@objectstack/core`'s root. Nothing is removed or renamed on any package. The one newly refused case is a node whose authored secret did not resolve, which the published contract already said signs.
+- bbcd20c: An import row now says which of its fields the write dropped, on the dry run and on the commit. A column mapped to a `formula` field, a static `readonly` field or a runtime-owned field is legally stripped by the engine: the row still succeeds, and the create door already reported the strip as `droppedFields`. The import row answered a bare `ok` / `created` on both halves, so a file whose formula column was ignored read exactly like a file that wrote it. `runImport` now copies the engine's own per-row report onto each `ok` row as `ImportRowResult.droppedFields`: from the `validateData` verdict on the dry run, from the row's `insertManyData` outcome, and from the `createData` / `updateData` response of a single-row write. The synchronous route, the async job's results and the job's dry run all carry it; no REST change was needed.
+  
+  Clause-②: yes (widening)
+  
+  - **Verbatim, in the engine's vocabulary.** The events are the engine's `DroppedFieldsEvent`s, one per reason (`computed`, `readonly`, `readonly_when`, `primary_key`). The import reads no reason and keeps no list of non-writable types, so a reason the engine adds later reaches the row unchanged. A reader that branches on `reason` must stay exhaustive.
+  - **Where the key is absent although something may have been dropped.** A create batched through `createManyData` (a protocol without `insertManyData`) is reported only as a batch-level union that names no row, so those rows carry no key. And a row the import would UPDATE is previewed in `update` mode, which runs no `readonlyWhen` or primary-key strip, so its dry run can name fewer fields than its commit. The `ImportRowResultSchema.droppedFields` describe now says both.
+  - **Unchanged:** `ok`, `action`, the counters, the failed rows and the async job's results cap. A clean row, a failed row and a skipped row carry no `droppedFields`.
+  
+  `ImportProtocolLike.insertManyData`'s declared outcome now names the optional `droppedFields` it already answered with.
+- dcd3309: fix(core,objectql)!: a relative-date placeholder that resolves outside its field's years is refused `INVALID_FILTER` / 400, naming the placeholder and the year it resolved to, instead of reaching the driver and answering the wrong rows
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE at the engine's filter-resolution stage: a relative-date placeholder (a date macro such as {8000_years_from_now}) whose resolved day or instant falls outside its column's years, refused INVALID_FILTER / 400 on where, a per-aggregation filter and having. No authorable key, spelling, export or stored metadata shape moves: every filter, view, dataset and query shape parses as before, the date-macro vocabulary is unchanged, and @objectstack/core and @objectstack/objectql export nothing new and nothing less (resolveFilterToken and resolveFilterTokens keep their signatures). The resolver's spelling of a day outside 0001..9999 changes, and that day was never a value any reader read as the day it names. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a value range or a resolved value and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the engine answers for a filter carrying a relative-date placeholder. A date macro is resolved after the temporal-comparand door, which steps around a placeholder, so the year range that door asks of a literal never saw the value one resolved to. It does now, through the same function, core's `isOutsideTemporalYearRange`, by the column's kind: a `date` takes the years 0001 to 9999 and a `datetime` 1000 to 9999. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A date macro whose resolved value falls outside its column's years, on a declared `date` or `datetime` field (or, on a `time` field, one that resolves to an instant whose UTC year has no four-digit spelling), at `where` (on `find`, `findOne`, `count`, `aggregate`, a multi-row `update` and `delete`), at a per-aggregation `filter`, at `having` (by the aggregated column's kind), and through `judgeFilter`. On REST that is `POST /api/v1/data/:object/query` and every other door that reads through the engine. Measured before this on InMemoryDriver and SqlDriver on SQLite, over a `datetime` field with a row in 2026 and a row in 1500:
+  
+  - `$gt {8000_years_from_now}` answered both rows, and the right answer was none;
+  - `$lt {2027_years_ago}` answered the 1500 row, because the resolver spelled year -1 as `-1-10-01` and that text was read as a day in 2001, and the right answer was none;
+  - `$lt {1977_years_ago}` resolved to year 49, below the `datetime` floor of 1000, which now applies to a resolved placeholder as it does to a literal;
+  - on a `time` field, `$gt {8000_years_from_now}` answered every row: the `time` rule keeps no time of day from an instant whose UTC year has no four-digit spelling, so it compared as text. Such a placeholder is refused now in the words a literal of that instant gets.
+  
+  **What an author sees.** The refusal names the field, the placeholder as written, its position, the value it resolved to and that value's year, in the temporal-comparand door's words for the year class: `filter on 'opened_at' compares a declared datetime field against "{8000_years_from_now}" at where.opened_at.$gt, a relative-date placeholder that resolved to "+010026-10-01" (the year 10026), an instant whose UTC year falls outside the years 1000 to 9999 …`. It ends by asking for a placeholder whose offset lands inside those years.
+  
+  **The resolver's spelling** (`@objectstack/core`). A date macro that lands on a day outside 0001..9999 now resolves to that day in the expanded-year form of ECMAScript's date time string format, `+010026-10-01` or `-000001-10-01` (year 0 is `0000-10-01`). It used to take the storage rule's unpadded spelling, `10026-10-01` or `-1-10-01`, which `Date.parse` reads through the host's legacy parser in the host's zone, so a day in year -1 read as one in 2001 and could not be judged. Every consumer of `resolveFilterToken` and `resolveFilterTokens` sees the new spelling for such a day only. A day inside 0001..9999 and a sub-day placeholder's instant are spelled as before.
+  
+  **Unchanged.** A placeholder that resolves inside its column's years answers as before; a `date` keeps the years 0001 to 0999, which a `datetime` refuses, and a `time` field reads the time of day of any instant with a four-digit year, year 0 included. A placeholder on a column with no temporal kind (text, number) and a context placeholder such as `{current_user_id}` are not judged by this range. Every literal comparand answers as before.
+- f6ccca4: fix(objectql,rest): a `date` or `datetime` value refused for its year says so — "must be a date in the years 0001 to 9999" / "must be a datetime whose UTC year falls in the years 1000 to 9999" — instead of "must be a valid date (ISO-8601)", which was false for a value such as `0500-07-15T10:00:00Z` (#20846)
+  
+  Clause-②: yes (widening) — one new export on `@objectstack/core`'s root, `SUPPORTED_TEMPORAL_YEARS`. No value's verdict moves and no wire key moves: the field code stays `invalid_date` and its `constraint` stays `{ type }`.
+  
+  `POST` / `PATCH /api/v1/data/:object` and each row of `POST /api/v1/data/:object/import`
+  refuse a `date` outside the years 0001 to 9999 and a `datetime` whose UTC year falls
+  outside 1000 to 9999. When the value itself is readable — an ISO 8601 string such as
+  `0500-07-15T10:00:00Z` or `+010000-01-01`, or a `Date` — the refusal's message now
+  names the kind's years. An author who read "not valid ISO" rewrote the spelling, and no
+  spelling of that year is admitted.
+  
+  - `@objectstack/spec`: the validation message catalog gains `invalid_date_range` and
+    `invalid_datetime_range` in `en`, `zh-CN`, `ja-JP` and `es-ES`. They are two more
+    sentences of the `invalid_date` code, never a wire value. The years are the template
+    parameters `{{firstYear}}` / `{{lastYear}}`. A deployment that overrides a message
+    under `validation.field.invalid_date` or `validation.field.invalid_datetime` does not
+    cover these values. To override their text, define
+    `validation.field.invalid_date_range` / `validation.field.invalid_datetime_range`.
+  - `@objectstack/core`: `SUPPORTED_TEMPORAL_YEARS` (`{ date: { first: 1, last: 9999 },
+    datetime: { first: 1000, last: 9999 } }`, frozen) is the range
+    `isOutsideTemporalYearRange` judges by. It is exported so a refusal names the range
+    from the source the doors use, never a copy of its numbers.
+  - `@objectstack/objectql` and `@objectstack/rest`: the record validator and the import's
+    cell reader choose the range sentence for such a value. An import cell with more than
+    four year digits (`+010000-01-01`) is refused by the import's reader. It used to read
+    "is not a valid date" and now gets the same range sentence as the write door.
+  
+  **What is not affected.** Which values are refused is unchanged, and so is the refusal's
+  code (`invalid_date`) and `constraint`. A value that is not readable keeps its sentence:
+  "must be a valid date (ISO-8601)" at the write door, `"…" is not a valid date` at the import.
+  So does a number, which is never a written `date` or `datetime`.
+- d1633f3: fix: the analytics native-SQL path answers a measure its response declares `number` as a number on every dialect, presented by the one rule `driver-sql`'s `aggregate()` applies, which `@objectstack/core` now exports as `AGGREGATE_ANSWER_KIND` and `presentAsNumber` (#20889)
+  
+  Clause-②: yes (widening)
+  
+  **New exports.** `@objectstack/core` exports two names, moved here unchanged
+  from `@objectstack/driver-sql`, which now imports them instead of keeping them
+  private:
+  
+  - `AGGREGATE_ANSWER_KIND`: what each declared aggregate function answers.
+    `count`, `count_distinct`, `sum` and `avg` answer `'number'`; `min` and `max`
+    answer `'column'`, a value of the aggregated column.
+  - `presentAsNumber(value)`: the `'number'` presentation. A string `Number()`
+    reads as a number becomes that number. Any other value is returned as given:
+    a number, `null`, a boolean, empty or blank text, or text that reads as NaN.
+  
+  **What changed.** On PostgreSQL, `POST /api/v1/analytics/query` and
+  `POST /api/v1/analytics/dataset/query` answered through `NativeSQLStrategy`
+  returned count, count_distinct, sum, avg, and min / max over a numeric column
+  as strings, such as `count: "2"` and
+  `sum: "500.000000000000000000000000000000"`, while `fields[]` declared
+  `number`. A dataset's `row_count` did the same, and a measure-scoped count
+  mixed `"1"` with the number `0` in one column. SQLite answered numbers. The
+  strategy now presents each measure column by its declared aggregate function,
+  through the same table and presenter as `SqlDriver.aggregate()`. `min` / `max`
+  are presented only when their column is declared numeric, so `max` over a text
+  column, every dimension, and expression measures keep the value the database
+  returned.
+  
+  **Precision.** The answer is one JS number, the policy `driver-sql`'s
+  `aggregate()` already applies. A total that needs more digits than a double
+  holds, such as `9007199254740993`, answers the nearest double
+  (`9007199254740992`), which is also what SQLite and the engine path answer.
+  
+  **What did not move.** `@objectstack/driver-sql`'s behaviour is unchanged: its
+  `aggregate()` reads the same table, and its read presenter calls the same
+  function. The answers on SQLite are byte-identical. The arithmetic of the
+  analytics native statement did not change either. On PostgreSQL its `sum` and
+  `avg` still add exact decimals, so `0.1 + 0.2` answers `0.3` where the engine
+  path answers `0.30000000000000004`.
+- 8368f1c: feat(core): the bulk-import runner, its row coercion, the mapping apply and the field-meta map now live in `@objectstack/core`, beside `bulkWrite` (#20919)
+  
+  `runImport` (with `sanitizeRowError` and its option/result types), the cell
+  coercion (`coerceRow`, `coerceFieldValue`, `parseDateCell`, `parseNumberCell`,
+  `parseBooleanCell`, `matchOption`, `splitMulti`, `isBlank`), the `mapping`
+  artifact pipeline (`applyMappingToRows`, `refuseUnknownMappingTargets`,
+  `MappingArtifactLike`, `MappingFailure`, `ApplyMappingOptions`) and the field
+  metadata map (`buildFieldMetaMap`, `ExportFieldMeta`) are exported from
+  `@objectstack/core`. They moved here unchanged from `@objectstack/rest` so the
+  connector sync executor in `@objectstack/service-automation` writes through the
+  same runner as the HTTP import door without depending on the HTTP layer. Nothing
+  to change for consumers: `@objectstack/rest` re-exports every name it exported
+  before.
+- 58a77db: fix(service-analytics)!: the analytics read scope and the native `where` answer `$contains` / `$notContains` on a multi-valued or JSON-stored field by membership, with the one construct `driver-sql` emits, now exported from `@objectstack/core` (#20987)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a correction of which rows two analytics SQL faces answer for one operator on one declared field class: the read scope `compileScopedFilterToSql` compiles from a row policy, and the native strategy's rendering of a query's `where`. No authorable key, spelling, export or stored shape of metadata moves; `packages/spec` is untouched, and the contract sentence the faces now meet (`FILTER_OPERATORS.$contains`) is the one already declared. A policy or filter that was written stays written as it was, and what it now selects is what the data door already selected for it, so there is nothing a ledger entry could rewrite. The new refusal on a datasource whose SQL dialect the host cannot name is a refusal of a query, not of stored metadata. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter operator's reading (not `registered` / `already-registered`); and the change is runtime behaviour plus one additive export, not a declaration change (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the analytics doors answer for one class of read. A row policy (the read scope the analytics plugin compiles from the security service, or a host's own `getReadScope`) whose `$contains` or `$notContains` names a field declared multi-valued (`multiple: true` on a multi-capable type, or a multi-option type) or JSON-stored now selects the rows holding the comparand as an ELEMENT of the stored list. It used to select every row whose stored JSON text contained the comparand as a substring, so on SQLite a policy could admit rows outside it, and on PostgreSQL every query under such a policy answered `500` (MySQL was not measured). An analytics count under such a policy now equals what the same caller reads through the data door. On a datasource whose SQL dialect the analytics host cannot name, such a policy now refuses the query (`READ_SCOPE_COMPILE_FAILED` / `500`) instead of falling back to the substring reading. It ships as `minor` under the launch-window convention.
+  
+  **The `where`.** `POST /api/v1/analytics/query`, the dataset door and `/analytics/sql` on the native strategy render the same membership test for a `$contains` / `$notContains` in a query's `where` (or a dataset's `runtimeFilter`) on such a field: on PostgreSQL the query answers rows where it answered `500`, and on SQLite the count stops over-counting (`$contains`) and under-counting (`$notContains`). On a datasource whose dialect the host cannot name, the operator on such a field is refused `INVALID_FILTER` / `400`. The ObjectQL strategy already answered membership and is unchanged.
+  
+  **Unchanged.** On a scalar text field `$contains` stays the substring test, on every face. `$notContains` keeps its NULL rule: a row with no value satisfies it. A host that wires no field metadata keeps the substring reading, because it cannot tell a JSON column from a text one; the analytics plugin wires it from the data engine.
+  
+  **New export.** `@objectstack/core` exports `jsonMembershipPredicate(dialect, emitters, value)` and `jsonMembershipCandidates(value)`, with the `JsonMembershipDialect` and `JsonMembershipEmitters` types: the per-dialect membership construct (#17590) moved from `@objectstack/driver-sql`, where it was module-private, and made placeholder-agnostic. `@objectstack/driver-sql` imports it and emits byte-identical statements and bindings.
+  
+  **What to do after upgrading.** Nothing, unless a policy or a dashboard filter relied on the substring reading of a multi-valued or JSON-stored field: such a filter now selects members only, as the data door always did. A host whose analytics `sqlDialect` hook answers nothing for a SQL datasource should answer `'sqlite'`, `'postgres'` or `'mysql'`, or the operator on such a field is refused.
+- a11faee: fix(objectql)!: a per-aggregation `filter` refuses `$in` / `$nin` / `$eq` / `$ne` / an ordering / `$between` / implicit equality on a declared JSON-stored field with `INVALID_FILTER` / 400, in the words `where` refuses them in, instead of counting rows the stored arrays cannot support
+  
+  Clause-②: yes (widening)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at the engine's per-aggregation filter position: the operator x declared-type pairs refused are exactly the pairs driver-sql's where has refused on a JSON-stored column since its column-type gate landed, and the per-aggregation position now answers them the same way. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema, AggregationNodeSchema and every object and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query the engine answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour plus ADDITIONS only (three new @objectstack/core exports and one new optional trailing parameter on applyInMemoryAggregation), with no published interface or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts in one position, `aggregations[i].filter`, on every driver and for every caller that reaches the engine: the REST query door (`POST /api/v1/data/:object/query`), a flow or hook, and the analytics strategy that lowers a dataset measure's filter onto `engine.aggregate`. The published `applyInMemoryAggregation(rows, ast, timezone, fields)` narrows the same way when it is handed a field map. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field the object declares JSON-stored (a structured-JSON type such as `json` or `address`, an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`), a per-aggregation `filter` that compares the field with `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin` or implicit equality (`{ "owners": "u1" }`) is refused with `INVALID_FILTER` / 400, whatever the comparand (`null` and an empty list included), at any depth under `$and` / `$or` / `$not`, and before any driver is asked for a row, so an empty table refuses it too. That is the set `driver-sql`'s `where` refuses on such a column, for the same reason.
+  
+  **What an author sees now.** The same 400 body the same filter gets as a `where`: the filter WAS NOT APPLIED, the comparison can never equal one member of a stored list, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership, or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message, as they are for `where`, and the full diagnostic, naming both and the aggregation position, goes to the server log.
+  
+  **Why a refusal.** The engine evaluates a per-aggregation filter itself, and it compared the whole stored array against a scalar. Measured through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16 over six rows of a `multiple: true` lookup, two of them holding `u1`: `{ owners: { $in: ['u1', 'u9'] } }` counted 0, `{ owners: { $nin: ['u1', 'u9'] } }` counted all 6, the two rows it was asked to exclude among them, `$gt` / `$lte` / `$between` counted 4 / 1 / 5, and `{ tags: { $eq: 'red' } }` counted the row holding `['red']` by JS loose equality. The same filters in `where` were 400 on both dialects.
+  
+  **Who is affected.** A dashboard, report, dataset measure or caller whose per-aggregation filter compares a JSON-stored field with one of those operators and read the count as a real answer. Also a host calling `applyInMemoryAggregation` directly with a `fields` map: it now judges each `aggregations[i].filter` against that map before any row (an empty `rows` array included) and throws the same `INVALID_FILTER` / 400. It takes an optional fifth argument, `reportWithheld(diagnostic)`, which receives the withheld field, operator and position; without it the diagnostic is dropped. A call without `fields` judges nothing, as before. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not JSON-stored; `having`; `where`; and a host whose engine has no declaration for the object, where nothing is judged.
+  
+  **`@objectstack/core`** (three new root exports): `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, `jsonColumnOperatorRefusalText(field, op, bare)` and its return type `JsonColumnOperatorRefusalText` (`{ message, diagnostic }`). They are the operator set and the two texts (the withheld message and the full diagnostic) of the JSON-column refusal, so `driver-sql`'s `where` and the engine's per-aggregation filter refuse with one set and one sentence.
+  
+  **`@objectstack/driver-sql`**: no behaviour change. Its JSON-column gate reads the set and the text from `@objectstack/core`; every refusal it prints is byte for byte what it printed before.
+- 2c1cef3: fix(core)!: a filter that aims `$startsWith`, `$endsWith`, `$icontains`, `$like` or `$ilike` at a field stored as a JSON column is refused with `INVALID_FILTER` / 400, as `$eq` / `$in` / `$nin` already are, instead of matching the field's serialized text or failing at query time
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape on a JSON-stored column: the five text operators join the operator set driver-sql's where and the engine's per-aggregation filter already refuse there, through the one shared set in @objectstack/core. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema, ViewFilterRuleSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query a driver answers, not what any metadata says, and the refusal itself names the spelling to use. The other categories are closed on facts: @objectstack/core publishes (not unpublished); no ADR-0087 id covers a text operator on a multi-valued field, and filter-text-operator-declared-type-refused covers declared non-text types only, so this diff neither registers nor reuses one (not registered / already-registered); and the change is runtime behaviour only, with no published interface or type narrowed or removed: the exported set keeps its ReadonlySet of string type, and objectql's search expander changes only which operator it emits for a multi-valued field (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows which filters are answered on a field stored as a JSON column, on every face that reads `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`: `driver-sql`'s `where` (and `driver-sqlite-wasm` and `driver-turso`'s local transport, which inherit it) on every read and write face that lowers a filter, and the engine's per-aggregation `filter`. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field declared multi-valued (an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`) or structured-JSON (`json`, `address`, …), a filter using `$startsWith`, `$endsWith`, `$icontains`, or the staged pattern pair `$like` / `$ilike`, is refused with `INVALID_FILTER` / 400, at any depth under `$and` / `$or` / `$not`. The per-aggregation `filter` refuses the three declared ones; it already refused `$like` / `$ilike` as operators it does not evaluate. Through the engine, a structured-JSON field was already refused all seven text operators by the text-operator declared-type door, which still answers first there, in its own words; what moves for it is a direct driver call.
+  
+  **What an author sees.** The body the equality family already gets there, byte for byte: the filter WAS NOT APPLIED, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message and named in the server-log diagnostic; a filter positively marked as the caller's own reads them named.
+  
+  **Why a refusal.** Such a column stores the serialization `["u1","u2"]`, and none of these five operators has a membership reading. Measured through `POST /api/v1/data/:object/query` on a multi-value lookup and a `tags` field: on SQLite `$startsWith: "["` and `$endsWith: "]"` matched every row with a value, `$startsWith: "u1"` matched none of the rows holding `u1`, and `$icontains: "U1"` also matched the row holding only `u10`; on PostgreSQL 16 every one failed at query time with a `500` `DATABASE_ERROR`, a `json` column having no `LIKE` operator; the per-aggregation `filter` counted 0 for each. No membership reading is invented for a prefix, suffix or case-folded test.
+  
+  **Who is affected.** A saved filter, list view, dashboard widget, report or caller that aims one of these operators at a multi-valued or JSON-stored field. On SQLite it read rows that matched the stored brackets and quotes; it now gets the 400. On PostgreSQL it already failed, with a 500. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **`@objectstack/objectql`: `$search` over a multi-valued field answers by membership.** The search expander (`$search` on `find`, `findOne` and `aggregate`, the REST `search` / `$search` parameter included) used to emit `$in` for a term matching a `select` option label and `$icontains` for any other term, against every field in the resolved search set. On a multi-valued field both are refused by the gate above, so one such field in the set failed the whole search: a label term answered 400 on every dialect, and any other term answered 500 on PostgreSQL and, with this change, 400 on SQLite. The auto-default set includes a `select` declared `multiple: true`, as in `examples/app-todo`'s `todo_task.tags`, and `searchableFields` may name a `tags` field or a multi-valued lookup. Such a field is now matched by membership: a term matching option labels becomes one `$contains` per matched option value, and any other term, or any term on a field with no options, becomes `$contains` of the term. No search answers 400 or 500 for it any more. **The visible cost:** to hit a multi-valued field, a term must now equal one of its members or match one of its option labels; SQLite used to match substrings of the stored array's serialized text as well, so a term like `wood` found a row tagged `redwood`, and it no longer does. Scalar fields are searched exactly as before.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not JSON-stored, the scalar text column included; `driver-memory`; and `driver-turso`'s remote transport, which compiles its own filters.
+- 097ef80: fix: the analytics native-SQL path aggregates with the engine's own aggregate policies, so one query answers one number whichever strategy serves it: `sum` / `avg` accumulate in double, a PostgreSQL boolean aggregand is cast, and an all-NULL `sum` answers `0`. The operand policies move from `@objectstack/driver-sql` to `@objectstack/core` (#21042)
+  
+  Clause-②: yes (widening)
+  
+  **New exports.** `@objectstack/core` exports the aggregate operand policies, moved here from `@objectstack/driver-sql`, where they were module-private. The driver now imports them and emits byte-identical statements.
+  
+  - `AGGREGATE_ACCUMULATION`: what each declared aggregate function accumulates in on PostgreSQL and MySQL. `avg` accumulates in double; `sum` accumulates in double over a fractional column; the counts, `min` and `max` take the column as stored.
+  - `aggregandColumnClass(shape)`: the one column-class predicate those policies read, over a column's declared `{ type, multiple }`. It answers `'fractional'`, `'integral'`, `'boolean'`, or `undefined` for every other column, a multi-valued one included. The type `AggregandColumnClass` names the three classes.
+  - `POSTGRES_BOOLEAN_AGGREGAND_CAST`: the functions whose boolean aggregand is cast to `int` on PostgreSQL. These are `sum`, `avg`, `min` and `max`; the two counts are never cast.
+  - `doubleAccumulationOperand(operand, dialect)`: the column's text, parsed as a double, spelled for `'postgres'` or `'mysql'`.
+  - `aggregandOperandSql(func, columnClass, dialect, operand)`: the operand an aggregate wraps, with the cast inside the double operand. The type `AggregandSqlDialect` names its dialects (`'sqlite'`, `'postgres'`, `'mysql'`, `'unknown'`).
+  
+  **What changed.** `POST /api/v1/analytics/query` and `POST /api/v1/analytics/dataset/query` served by `NativeSQLStrategy` (the default on a SQL driver) skipped three policies `SqlDriver.aggregate()` applies. So the ObjectQL strategy and `engine.aggregate` answered differently for the same query. Measured on SQLite and PostgreSQL 16.13:
+  
+  - On PostgreSQL, `sum` / `avg` over an exact-decimal column, and `avg` over an integer one, added exact decimals. For example, `0.1 + 0.2` answered `0.3` and `11 / 9` answered `1.222222222222222`, where the engine answers `0.30000000000000004` and `1.2222222222222223`. The native statement now accumulates in double, as the driver does.
+  - On PostgreSQL, `sum` / `avg` / `min` / `max` over a boolean field answered `500` (`function sum(boolean) does not exist`). The native statement now casts the boolean aggregand to `int`, as the driver does, and answers the numbers the engine answers.
+  - On every dialect, a group whose aggregand is NULL in every row, and a measure-scoped `sum` that admits no row, answered `sum` `null` at the cube door. The strategy now folds a `null` answer to `emptyGroupValueFor` (`@objectstack/spec`) for every measure, so that `sum` answers `0`. `avg`, `min` and `max` over nothing stay `null`. The dataset door already answered `0`.
+  
+  This is no narrowing: each answer moves to the value the platform already declared for the same query.
+  
+  **What did not move.** `@objectstack/driver-sql`'s statements and answers are unchanged: a move-proof test compiles each aggregate function over each column class on SQLite, PostgreSQL and MySQL, and the statements equal the ones captured before the move. SQLite's native statement is unchanged, because neither operand policy applies there. A host that relays no field declarations to the analytics service, or names no SQL dialect, gets today's native arithmetic.
+- 1bd14c9: fix(core)!: a date macro whose offset lands past every instant a JavaScript `Date` can hold is refused `INVALID_FILTER` / 400, naming the placeholder, instead of resolving to the text `Invalid Date` or throwing an uncoded `RangeError`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE in @objectstack/core's filter-placeholder resolver: a date macro (such as {300000_years_ago} or {99999999999999999999_minutes_ago}) whose offset lands past every instant a JavaScript Date can hold, refused INVALID_FILTER / 400 by resolveFilterToken and resolveFilterTokens. No authorable key, spelling, export or stored metadata shape moves: every filter, view, dataset and query shape parses as before, the date-macro vocabulary is unchanged, and @objectstack/core exports nothing new and nothing less (resolveFilterToken and resolveFilterTokens keep their signatures; the error class is module-private). The categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a value range or a resolved value and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what `resolveFilterToken` and `resolveFilterTokens` answer for one class of inputs, and so what every door that resolves filter placeholders answers. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A relative-date placeholder whose offset lands past the instants a JavaScript `Date` can hold names no day and no time. The resolver used to answer a day-or-coarser one (`{300000_years_ago}`) with the text `Invalid Date`, which compares as text, and to throw an uncoded `RangeError: Invalid time value` for a sub-day one (`{99999999999999999999_minutes_ago}`). Measured before this through `engine.find` on InMemoryDriver and `POST /api/v1/data/:object/query` on SqlDriver over SQLite, over a `datetime` field with a row in 2026 and a row in 1500:
+  
+  - `$lt {300000_years_ago}` answered both rows, and `judgeFilter` answered `{ ok: true }`;
+  - `$lt {99999999999999999999_minutes_ago}` threw the uncoded `RangeError` from `engine.find` and `judgeFilter`, and the REST door answered `500 INTERNAL_ERROR`.
+  
+  Both are refused now with `INVALID_FILTER` / 400 at every position the engine resolves (`where` on `find`, `findOne`, `count`, `aggregate`, a multi-row `update` and `delete`, a per-aggregation `filter`, `having`) and through `judgeFilter`, before any driver read. Every other caller of `resolveFilterToken` / `resolveFilterTokens` receives the same coded error in place of the text or the `RangeError`. The refusal is the same on every column, because the resolver does not know the column: such a placeholder names no value at all.
+  
+  **What an author sees.** `Relative-date placeholder "{300000_years_ago}" names no instant: its offset lands past every instant a JavaScript Date can hold, so it resolves to no day and no time, and it is refused rather than compared. A date value names a year from 0001 to 9999, and a datetime value a year from 1000 to 9999: use a relative-date placeholder whose offset lands inside those years.` The thrown error carries `code: 'INVALID_FILTER'`, `status: 400` and `token` (the placeholder's name), the code the engine already answers for a placeholder that resolves outside its column's years.
+  
+  **Unchanged.** A placeholder that names an instant resolves as before, including one past the years 0001..9999 that a `Date` still holds (`{273847_years_ago}` resolves to `-271821-09-30`); the engine's per-column year range judges that one, as before. Context placeholders and an unknown placeholder answer as before.
+- d2bc644: fix(plugin-security): a row-level `check` judges a lone scalar written to a declared multi-valued field as the one-member list it is stored as, so the write and the read the same policy scopes give one answer for one row (#21238)
+  
+  Clause-②: yes (widening)
+  
+  The write door stores a lone scalar sent to a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `lookup` / `user` / `file` / `image` flagged `multiple: true`) as a one-member list: `tags: 'x'` is stored as `["x"]`. The row-level write `check` judged the value as sent on the insert and on a by-id update, because both images are formed before the write door runs. Measured through `ObjectQL.insert` with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set, with the same predicate as `using` and `check`:
+  
+  | `check` | written | write, before | stored | read |
+  |---|---|---|---|---|
+  | `record.tags.contains('x')` | `'x'` | 403 | `["x"]` | shown |
+  | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
+  | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
+  
+  Now the image's value on every field the object declares multi-valued goes through the same rule the write door stores it by, before the check is judged. The first and third rows are admitted. The second is refused: a policy that forbids a member from tagging a row `x` can no longer be passed by sending `'x'` instead of `['x']`. A lone scalar now gets exactly the verdict its stored list gets, on the insert, a by-id update and a predicate update. That includes a policy that compares such a field with a scalar comparison (`==`, `!=`, `in`, an ordering), which the read refuses with `INVALID_FILTER` / 400: there `'x'` used to get the opposite of the verdict `['x']` got, and now gets the same one.
+  
+  Unchanged: a field the object does not declare multi-valued is judged as written; a list, `null`, a blank string and an object are judged as written, as the write door leaves them; the check's comparands are left as written, since `contains` takes one member; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
+  
+  **`@objectstack/core`** (one new root export, so `minor`; this export is the widening the `Clause-②: yes (widening)` line declares): `multiValueStorageForm(value)`, the rule itself. It wraps a string, a number or a boolean into a one-member list and returns every other value as the same value. `@objectstack/objectql`'s `normalizeMultiValueFields` now calls it, with no change in what the write door stores (`patch`). `@objectstack/plugin-security` is `minor` because the set of writes its check admits widens (the first and third rows above); that is a security-floor behaviour change, not the declared widening.
+
+### Patch Changes
+
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- cd901d7: fix(plugin-security): `security/explain` answers enforcement's refusal at the object level too, and explains another user in the organization they are resolved in (#20604)
+  
+  Clause-②: no
+  
+  Two answers of `POST /api/v1/security/explain` disagreed with what the same principal's own request gets from enforcement.
+  
+  **A row-level policy that compares two fields of no shared comparison class** (text against a number, or any field against a file field, a formula field, or a field that holds a list or an object). The SQL driver refuses to compile such a read, so the find answers `INVALID_FILTER` / 400. A by-id update or delete fails closed at its row-level gate, and an insert whose check judges the policy is refused with `INVALID_FILTER` / 400. An object-level explanation (no `recordId`) still answered `allowed: true`, the `rls` layer `narrows`, and the predicate as `readFilter`, for every operation. A `recordId` that no row carries was answered `visible: false` with no deciding layer. Both are now refused with the envelope a record-grained explanation already gives: `INVALID_FILTER` / 400, with the message that names the policy and both fields. A request that the capability gate or the CRUD grant denies is still explained as denied there.
+  
+  **Another user explained by an administrator.** The explanation now carries the organization the user is resolved in, as enforcement's context for that user does. Before, a current member of the administrator's organization was explained with no organization. Under `isolated`, that member was reported denied on a tenant object their own find reads. Under every posture, a permission set that their organization authored (a `sys_permission_set` row scoped to that organization) was missing from the explanation and from the verdicts it decides.
+  
+  `@objectstack/core`: the API-key arm of `resolveAuthzContext` asks `vetOrganizationClaim` for its membership rule, as the session arm does. This is a refactor with no behaviour change. A key whose owner is no longer a member of its organization is still refused.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A comparison between two fields of one class keeps its verdicts, at the object level and per record.
+  - Explaining yourself.
+  - A removed member's explanation (no organization, as enforcement resolves them).
+- 856321f: A date-bucket key spells its year with four digits at every granularity, as the SQL drivers' bucket expressions do, so the in-memory and pushed-down paths key a day in 0001..0999 alike and a drill-down from such a key finds its range.
+  
+  A `date` value names a year from 0001 to 9999, so these keys are reachable through a `date` field and through a stored `datetime` row. For 0050-06-15, `strftime('%Y-%m')` on SQLite and `to_char(…, 'YYYY-MM')` on PostgreSQL answer `0050-06`, while `bucketDateKey` answered `50-06`: the same `groupBy` keyed the same rows differently depending on which path ran it.
+  
+  - **`@objectstack/core` `bucketDateKey`** pads the year to four digits: `0050`, `0050-Q2`, `0050-06`, `0050-06-15`, and the ISO week key `0050-W24` (early January 0050 is `0049-W52`, its ISO week-year). The engine's in-memory `groupBy` and the memory cube face delegate to it, so both now answer the drivers' key. A year from 1000 to 9999 is spelled as before.
+  - **`@objectstack/core` `bucketKeyToCalendarRange`** reads exactly what `bucketDateKey` writes. Its week arm checked a key against the unpadded label, so a padded key such as `0050-W01` answered `null`; it now answers `{ start: '0050-01-03', end: '0050-01-10' }`. An unpadded key (`50-06`, `49-W52`) is not a bucket key and still answers `null`.
+  - **`@objectstack/service-analytics`** mints the `compareTo` alignment key through `bucketDateKey` instead of spelling it locally, so a comparison row in 0001..0999 merges onto its bucket (`0050-06`) instead of being appended under `50-06`.
+- 6b004c0: `isUninterpretableTemporalComparand` reads a bare wall clock on a `time` column by the spec's `ClockTimeValueSchema` (`@objectstack/spec/data`), not by a private copy of it (#20771)
+  
+  Clause-②: no
+  
+  The wall-clock half of core's `time` rule (`HH:MM[:SS[.fraction]]`, hours 00 to 23, minutes and seconds 00 to 59, no time zone) was spelled twice: once as the spec's `ClockTimeValueSchema`, the stored form of a `time` value, and once as a private regex in `@objectstack/core`. The two admitted the same strings, but nothing tied them together, so an edit to either one changed one side only. Core now asks the spec schema. Every caller of `isUninterpretableTemporalComparand('time', …)` therefore answers from the rule the spec's `time` default gate uses: the engine's temporal-comparand door, the analytics comparand check, the record validator's `time` arm and the import's `time` coercion.
+  
+  Unchanged:
+  
+  - Every string gets the verdict it got before. Measured over 8,655,360 generated strings: 8,640 read by both the old regex and the schema, the rest refused by both, 0 answered differently.
+  - An instant, a number or a `Date` on a `time` column is judged as before.
+- 682873d: fix(core): the refusal a filter gets for a scalar comparison or text operator on a multi-value or JSON field reads true on every backend that prints it, and reaches a REST caller whole
+  
+  Clause-②: no
+  
+  The `INVALID_FILTER` / 400 refusal `driver-sql`'s `where`, the engine's per-aggregation `filter` and `driver-memory` all print (`jsonColumnOperatorRefusalText`) explained itself with `driver-sql`'s storage ("a field this driver stores as a JSON TEXT column") and the two wrong answers SQL used to give. That is untrue on the engine and on `driver-memory`. The message was also 748 characters, and the REST envelope cuts a 4xx message at 499 plus an ellipsis, so callers on SQLite and PostgreSQL read `…Refused rather than compiled because the answ…` and never reached the sentence saying the field and the operator were withheld.
+  
+  The message now reads, on every backend, in 486 characters: `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison or text operator at a multi-value or JSON field, which it cannot test for one member.`, then the same `$contains` / `$or` of `$contains` remedy, then `For no value, use "$null" or "$empty".` (a `null` comparand such as `{ f: null }`, `$eq: null` or `$ne: null` is refused too, and `$contains` could not express it), then `The field and the operator are withheld from the message; the full diagnostic is in the server log.` The diagnostic (the server-log text, and what a filter's own author is shown) gives the same reason with the operator named, names the field, and spells the remedy with the field's name. It drops the storage and the SQL history too, and is now whole on the wire for field names up to 26 characters (it was 643 characters or more and always cut).
+  
+  Code, status, the refused operator set and the `$contains` remedy are unchanged. A client that matched on the old words `JSON TEXT column` or `Refused rather than compiled` should match on `code: "INVALID_FILTER"` instead.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [24d521e]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [1a75e39]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/types@17.6.0
+
+## 17.5.0
+
+### Minor Changes
+
+- 74eaab8: feat(spec,core)!: the startup contract describes what the kernel produces — the orchestrator vocabulary is retired and `PluginStartupResult` is declared once (#16059)
+  
+  <!-- adr-0087: registered startup-orchestrator-retired -->
+  
+  **BREAKING** — a published exported surface is removed, landing in the launch window as
+  `minor` (the lockstep convention: `major` is refused by `check-changeset-no-major`, and
+  breaking-ness is carried by this banner plus the ADR-0087 disposition above).
+  
+  `@objectstack/spec` declared a plugin startup ORCHESTRATOR that was never built, and its
+  one shape that *is* real had drifted away from the kernel that produces it. The maintainer
+  ruling on this card keeps a startup-result contract, and makes it describe what the kernel
+  actually returns.
+  
+  ## What is removed
+  
+  `IStartupOrchestrator` (`orchestrateStartup` / `rollback` / `checkHealth` /
+  `startWithTimeout`) and the three schemas it tied together. Nothing in any repository
+  implemented the interface and nothing parsed the schemas; `healthCheck` and `HealthStatus`
+  named a per-plugin startup health probe the runtime has never had.
+  
+  | removed | from | what to write instead |
+  |:--|:--|:--|
+  | `IStartupOrchestrator` | `@objectstack/spec/contracts` | nothing — plugin startup is the kernel's own boot loop |
+  | `StartupOptionsSchema` / `StartupOptions` / `StartupOptionsParsed` | `@objectstack/spec/kernel`, `/contracts` | `startupTimeout` on the plugin; `rollbackOnFailure` on the kernel config |
+  | `StartupOptions.healthCheck` | (with the schema) | **no replacement** — no startup probe system exists |
+  | `HealthStatusSchema` / `HealthStatus` | `@objectstack/spec/kernel`, `/contracts` | **no replacement** — see above |
+  | `StartupOrchestrationResultSchema` / `StartupOrchestrationResult` | `@objectstack/spec/kernel` | `ObjectKernel.getPluginStartupDurations()` |
+  
+  `StartupOptions.parallel` and `StartupOptions.context` have no replacement either: the
+  kernel starts plugins sequentially and passes its own `PluginContext`.
+  
+  ## What survives, re-declared
+  
+  `PluginStartupResultSchema` / `PluginStartupResult` stay on both entries, rewritten to the
+  shape `@objectstack/core` has always returned from `ObjectKernel.startPluginWithTimeout()`.
+  `@objectstack/core` now **imports** that type instead of declaring a twin, so the two
+  cannot drift again.
+  
+  | member | before (spec) | after (spec and core, one declaration) |
+  |:--|:--|:--|
+  | `plugin: { name, version? }` | required | **removed** — write `pluginName: string` |
+  | `pluginName` | absent | `string`, required |
+  | `success` | `boolean`, required | unchanged |
+  | `durationMs` | `number`, **required** | `number`, **optional** (absent when the plugin declares no `start()`) |
+  | `startTime` | absent (it was core's own deprecated alias) | **removed** — read `durationMs`, which always carried the same value |
+  | `error` | serializable projection | unchanged (a thrown `Error` satisfies it) |
+  | `timedOut` | absent | `boolean`, optional — set when the failure was the timeout |
+  | `health: HealthStatus` | optional | **removed** — no probe ever filled it |
+  
+  **The one-line fix:** rename `plugin: { name }` to `pluginName`, delete `health`, and read
+  `durationMs` wherever you read `startTime`. All three old spellings are `retiredKey()`
+  tombstones on the surviving schema, so each is a `tsc` error at the construction site and a
+  parse error carrying the prescription.
+  
+  `startTime` is the one member whose removal a reader can OBSERVE: `@objectstack/core`
+  populated it beside `durationMs` with the identical elapsed value, under its own ADR-0087
+  L1 deprecation, and `ObjectKernel.startPluginWithTimeout()` stops setting it here. Mirroring
+  it on the contract was the alternative and the tree refuses it — `check:duration-unit-keys`
+  (ruling B on #14478) fails an elapsed number whose key name carries no unit, and neither of
+  that rule's two schema-declared exemptions fits: it is not an `EpochMs` instant and it
+  mirrors no external standard. Renaming it to `startTimeMs` would mint a spelling nothing has
+  ever produced, for a member already documented as slated for removal.
+  
+  For `@objectstack/core` consumers the members are unchanged; the one narrowing is that
+  `PluginStartupResult.error` is now typed as the serializable projection
+  (`name` / `message` / `stack?` / `code?`) rather than `Error`. The kernel still puts the
+  thrown instance there, so `result.error instanceof Error` still narrows — only code that
+  reads an `Error`-only member such as `cause` off it without that guard needs the guard.
+  
+  ## The retirement kit
+  
+  Route 3 of the `spec-property-retirement` playbook: no authored document carried any of
+  the three defs, so there is no seam for a D2 conversion and no author to hand a tombstone
+  to. `RETIRED_DEFS_BY_MAJOR[18]` (`kernel/StartupOptions`, `kernel/HealthStatus`,
+  `kernel/StartupOrchestrationResult`) plus the D3 semantic entry
+  `startup-orchestrator-retired` **are** the declaration, and the three
+  `json-schema.manifest/kernel.json` keys plus their 16 `authorable-surface/kernel.json`
+  lines are deleted deliberately in this same change. The two keys of the SURVIVING result
+  schema (`plugin`, `health`) take the tombstone route instead, registered in
+  `RETIRED_KEYS_BY_MAJOR[18]`, because that def keeps emitting and its type is imported by
+  `@objectstack/core`.
+  
+  Runtime behaviour is deliberately unchanged: nothing ever read the retired surfaces, and
+  the kernel boot loop is untouched.
+- 271d6bb: Record the acting agent on the audit row — ADR-0090 D10 rule 4 dual attribution
+  
+  A `sys_audit_log` row written by an MCP OAuth client acting for a human used to
+  be byte-identical to a row that human wrote in the Console. The envelope carried
+  the delegation (`principalKind: 'agent'` + `onBehalfOf`), the row did not, and
+  nothing in between copied it: `assembleExecutionContext` consumed the OAuth
+  `azp` as a boolean and dropped the value, so the acting client did not exist
+  downstream of the door at all.
+  
+  The delegation now travels the whole way and lands on the row:
+  
+  - `ExecutionContext.performedBy` (`{ clientId }`) — decided at the `/mcp` OAuth
+    door, on the same branch that already decides `principalKind: 'agent'` and
+    `onBehalfOf`; a member of the closed entry field set like every other.
+  - `HookContext.provenance.performedByClientId` — the hook-layer carrier, beside
+    `flowRunId` and `attributedUserId`. Provenance, not `session`: no
+    caller-gating hook may read the client as the caller.
+  - `sys_audit_log.metadata` gains `{ performed_by, on_behalf_of }` on a delegated
+    write, and nothing at all on a personal one — the two shapes are told apart by
+    absence rather than by guesswork.
+  
+  Additive, and attribution only. `user_id` stays the human, so owner-stamping,
+  `current_user.*` RLS and the `sys_user` join are untouched (ADR-0073 D3 —
+  attribution is not ownership). `actor` is untouched too: ADR-0118 D1/D5 keeps
+  that column two-valued — a user id, or `null` for the system — and answers
+  "which non-user acted" with an added attribution field rather than a second
+  actor vocabulary. No existing row changes meaning, and no historical row is
+  rewritten.
+  
+  Rule 4's third element, the run id, is NOT delivered here and is not declared
+  either: nothing on the request path mints one today (`ExecutionContext.traceId`
+  is declared but resolved by no transport entry point), and declaring a carrier
+  nothing populates is the defect this change exists to close.
+- e7ff9c2: `dateRange`'s array arm has ONE arity everywhere: a two-element window, or the ADR-0112 refusal (#17596)
+  
+  The shared conformance kit
+  (`analyticsDateRangeConformanceFindings`) had exactly one array case — a
+  two-element window — so the ARITY of the array arm was governed nowhere and
+  every analytics face was free to invent a meaning for `dateRange:
+  ['2026-01-01']`. Four faces in one package had invented three (#17124), and a
+  fifth — `driver-memory`'s cube face — had invented a fourth.
+  
+  **The kit** now exports `ANALYTICS_DATE_RANGE_NOT_A_WINDOW` and holds every
+  registered face to the rule the `service-analytics` faces already carry: an
+  array that is not two non-empty string bounds is refused with
+  `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400. No new rule was invented for it, and
+  the existing two-element window case is untouched — it is this case's control,
+  so "refuse every array" cannot pass.
+  
+  **`driver-memory`** now answers that refusal instead of dropping the window.
+  MEASURED end to end over four rows spanning 2020…2099: `['2026-01-01']`, `[]`
+  and `['2026-01-01', '2026-01-31', '2026-02-01']` each emitted a pipeline
+  byte-identical to one with **no `dateRange` at all** — every row selected, the
+  "plot all of history" failure #3650 was filed about — and `[null, null]`
+  compared instants against the string `'null'` and selected none.
+  
+  **Levels.** `@objectstack/core` is `minor`: it gains a new exported symbol on
+  its index (`ANALYTICS_DATE_RANGE_NOT_A_WINDOW`), and a purely additive widening
+  of a published package's public surface takes at least `minor` whatever the
+  commit type says. `@objectstack/driver-memory` is `patch`: its public surface is
+  byte-unchanged — no new export, no new accepted key or value. Its behaviour does
+  change, from selecting every row to refusing with `400
+  ANALYTICS_DATE_RANGE_UNRECOGNIZED`, and that is a `patch` because the old
+  behaviour was a defect and never a contract: the spec's own refusal wording
+  already said an explicit window is the two-element array, and the #16322
+  migration table already told authors to write a single day as two bounds. A
+  release that stops answering a shape the contract never admitted is a fix, not a
+  feature — and the shapes it now refuses had no correct answer to lose.
+  
+  **If you wrote a one-element array**, write both bounds: `['2026-01-01']`
+  becomes `['2026-01-01', '2026-01-01']`, which selects exactly that day on every
+  face and did so before this change too. The refusal names the shape that
+  arrived, the two-element contract and that spelling.
+- 75237a9: fix(spec)!: `timeDimensions[].dateRange`'s array arm is exactly two string bounds, and each refusal ORIGIN gets a true sentence (#17598; ruling A, decision batch #117 item 3)
+  
+  <!-- adr-0087: registered analytics-date-range-array-two-bounds-required -->
+  
+  **BREAKING** accept-set narrowing at `timeDimensions[].dateRange` — shipped as
+  `minor` under this repo's launch-window convention for breaking changes
+  (`scripts/check-changeset-no-major.mjs`), above the `patch` floor the `fix`
+  commit type sets, and the same grade the one comparable precedent took: the
+  STRING-arm closing on this same schema is #16041, and it shipped
+  `"@objectstack/spec": minor` (`packages/spec/CHANGELOG.md` 17.4.0, under Minor
+  Changes). ⚠️ Its driver half #16322 declares `"@objectstack/spec": patch`, but
+  that entry is — in that changeset's own words — "a `PROVENANCE_WAIVERS` row
+  only", not an accept-set narrowing, so it is not a grade this one is measured
+  against. The maintainer
+  ruling calls it a "major changeset"; under the launch window that phrase maps to
+  the protocol MAJOR the migration registers against (18), not to the changeset's
+  bump level, which `scripts/check-changeset-no-major.mjs` reserves. The semantic
+  prescription is registered under protocol major 18 as
+  `analytics-date-range-array-two-bounds-required`.
+  
+  ### What changed
+  
+  `AnalyticsDateRangeSchema`'s array arm was `z.array(z.string())` with **no length
+  constraint**, so `['2026-01-01']`, `[]` and `['a', 'b', 'c']` were schema-valid.
+  It is now `z.tuple([z.string(), z.string()])` — a tuple rather than a length
+  refinement, so the arity is stated to the author's compiler before any parse runs.
+  Preset names, two-bound windows and an absent `dateRange` parse byte-identically
+  to before.
+  
+  `analyticsDateRangeRefusalMessage(input)` becomes
+  `analyticsDateRangeRefusalMessage(input, origin)`, where `origin` is `'schema'` or
+  `'runtime'` and is **required** — there is deliberately no default.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `dateRange: ['2026-01-20']` | `dateRange: ['2026-01-20', '2026-01-20']` — a single day is that day as both bounds, the shape the shipped #16322 table already prescribes |
+  | `dateRange: []` | no conversion. An empty array names no window: write the two bounds the widget was meant to show, or omit `dateRange` (it is optional, and absent means the query is not time-bounded) |
+  | `dateRange: ['a', 'b', 'c']` | no conversion. Decide which two bounds you meant and write them |
+  | `analyticsDateRangeRefusalMessage(value)` | `analyticsDateRangeRefusalMessage(value, 'schema')` at a parse door, `…(value, 'runtime')` past one |
+  
+  `os migrate meta --from 17` emits the first three as a structured TODO rather than
+  rewriting them: rewriting a one-element array to the same day twice at load would
+  be the platform deciding, silently, that the author meant one day rather than a
+  window whose end they forgot, and for the other two shapes there is nothing to
+  decide from.
+  
+  ### Why it is not a new class of breakage
+  
+  Since PR #17593 all four analytics faces (`ObjectQLStrategy`, `NativeSQLStrategy`,
+  the draft-preview evaluator, `DatasetExecutor.runCompare`) already refused anything
+  that is not exactly two bounds with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`, so
+  every stored range this narrowing refuses was **already failing at query time**.
+  The contract door was looser than every reader behind it; this moves the refusal
+  to authoring time and states it accurately. Blast radius is the WIDGET, not the
+  page: a stored dashboard carrying a now-refused range loses that widget with the
+  refusal shown and still loads.
+  
+  ### The wording half
+  
+  The shared sentence ended `"Refused at the schema"` and described every refused
+  array as `"received an array with a non-string bound"`. For a one-element window
+  refused by a face **both clauses were false** — every bound present is a string,
+  and it was refused past the schema, not at it — which is why
+  `@objectstack/service-analytics` had to overwrite the message rather than reuse it,
+  leaving one condition with two wordings. The origin is now a parameter and the
+  `received …` clause names the arity and the bad bound separately, so the sentence
+  is true for each origin both before and after the arm narrows.
+  
+  The same rule reaches the WIRE. Narrowing the arm to a tuple gave the union a
+  second voice: its arm answers `Too small: expected array to have >=2 items` for
+  the very arity the prescription just prescribed, and the ADR-0114 union
+  expansion emitted both as `fields[]` entries on `POST /analytics/query` and
+  `POST /analytics/dataset/query`. `fieldsFromZodIssues` (`@objectstack/types`),
+  the one mapper both doors report through, now drops the branch issues that land
+  at the union's OWN path for this refusal — recognised structurally through
+  `isAnalyticsDateRangeRefusalIssue`, never by message prose. A refusal that names
+  a DEEPER position keeps it: `dateRange: ['2026-01-01', 3]` still reports
+  `timeDimensions.0.dateRange.1`, because WHICH bound is not a string is a
+  location the prescription does not carry. Every other union expands exactly as
+  before. Client-visible effect: one `fields[]` entry for an arity refusal instead
+  of two, with the prescriptive one kept.
+- 920f887: `DbQueueAdapter` backs off while `sys_job_queue` is idle instead of polling flat at 1 s, and the loop that does it is now published from `@objectstack/core` as `DispatchLoop` (#17612).
+  
+  A registered-but-idle queue issued **3600 candidate reads an hour, per queue**, whatever was in the table — on a remote driver, 3600 HTTP round trips an hour of pure idle cost. Measured over one simulated idle hour on the engine boundary the adapter really talks to: **3601 reads before, 124 after**, with the flat-poll number re-measured on the same harness as a control so the new one is a reading about the backoff rather than about a loop that stopped ticking.
+  
+  - **One mechanism, not a third copy.** The idle-backoff loop was written for `NotificationDispatcher` (#17610), shared with `HttpDispatcher` (#17623), and lived unexported inside `@objectstack/service-messaging`. `DbQueueAdapter` was the third polling worker needing it. It moves to `@objectstack/core` — the package all three already depend on — because it is a timing primitive owned by neither the messaging domain nor the queue domain, and having `service-queue` depend on `service-messaging` to reach it would invert the dependency direction. **New export from `@objectstack/core`: `DispatchLoop`, `DispatchLoopOptions`, `DEFAULT_MAX_IDLE_INTERVAL_MS`.**
+  - **Nothing published moved.** `@objectstack/service-messaging` exports only its `index`, which never carried the loop; its two dispatchers now import it from `@objectstack/core` and its own surface is byte-unchanged.
+  - **New option `DbQueueAdapterOptions.maxIdleIntervalMs`** (default 30 s). Each tick that claims nothing doubles the delay to the next from `pollIntervalMs` up to this ceiling; anything claimed, and every wake, snaps it straight back. **Setting it at or below `pollIntervalMs` restores the flat poll exactly.**
+  - ⚠️ **What the backoff costs, and what it does not.** Work published through this adapter now wakes the loop, so a due `publish()` and `replay()` are picked up at the base interval as before — the ceiling is never on their latency path. What it does cost is up to `maxIdleIntervalMs` of extra latency on work this process was never told about: a row another node wrote, a deferred row coming due, a crashed worker's lease expiring. A deferred `publish()` deliberately does **not** wake the loop, since that tick would claim nothing and would throw the backoff away.
+- 98bd798: feat(spec)!: the three `kernel/plugin-lifecycle-advanced.zod.ts` duration keys carry their unit in the key name (#17780, ruling A on #15939)
+  
+  <!-- adr-0087: registered kernel-health-check-and-hot-reload-durations-unit-in-key -->
+  
+  **BREAKING** — the health-check period, the health-check deadline and the hot-reload debounce
+  now carry `Ms` in the key name.
+  
+  | | before | after |
+  |:--|:--|:--|
+  | `PluginHealthCheck` | `interval: 30000` | `intervalMs: 30000` |
+  | `PluginHealthCheck` | `timeout: 5000` | `timeoutMs: 5000` |
+  | `HotReloadConfig` | `debounceDelay: 1000` | `debounceDelayMs: 1000` |
+  | values, defaults, min bounds | ms; 30000 / 5000 / 1000; min 1000 / 100 / 0 | **unchanged** |
+  
+  ## Migration
+  
+  ```diff
+    const health = PluginHealthCheckSchema.parse({
+  -   interval: 30000,
+  -   timeout: 5000,
+  +   intervalMs: 30000,
+  +   timeoutMs: 5000,
+    });
+  
+    hotReload.registerPlugin('my-plugin', {
+  -   debounceDelay: 1000,
+  +   debounceDelayMs: 1000,
+    });
+  ```
+  
+  Rename the keys. Every value is the same number of milliseconds it always was, and the
+  30000 / 5000 / 1000 defaults are unchanged; nothing else on either def moves.
+  
+  ## Why
+  
+  Each key named milliseconds in a source JSDoc — "Health check interval in milliseconds",
+  "Timeout for health check in milliseconds", "Debounce delay before reloading (milliseconds)" —
+  and the JSDoc above a key is not what `content/docs/references/**` renders; `.describe()` is.
+  Measured by the `check:duration-unit-keys` census on this tree, all three read
+  `[name: -] [prose: -]`: no unit in the name and none in the published prose either.
+  `interval` was the sharpest of the three — its describe carried one unit-shaped token, the
+  parenthetical "(default: 30s)", naming SECONDS for a value the schema bounds and defaults in
+  MILLISECONDS. Executes director-seat ruling A on #15939 (2026-09-11, maintainer 「同意」,
+  decision batch #115), the per-file remediation of the #14478 rule.
+  
+  The suffix is the family's own spelling, counted on this tree: 100 key-position `*Ms`
+  declarations across `packages/spec`, `timeoutMs` 29 of them and `intervalMs` 3.
+  `debounceDelay` takes the plain suffix rather than a shortened form because it is the only
+  debounce-shaped key spelling in the repo (no `debounceMs` variant anywhere) while the
+  Delay-plus-`Ms` pairing is already attested (`maxDelayMs`, `initialDelayMs`, `retryDelayMs`,
+  `delayMs`) — so unlike the `Ttl`-versus-`TTL` question the sibling round settled, there was no
+  competing family spelling to choose between.
+  
+  ## The kit
+  
+  - a `retiredKey()` tombstone on each old spelling, so `tsc` types it `never` and a value
+    reaching the parse raises the rename prescription instead of being silently stripped —
+    neither `PluginHealthCheckSchema` nor `HotReloadConfigSchema` is `.strict()`, and here the
+    stripped value would land on a `setInterval` period, a race deadline and a `setTimeout` delay
+  - the ADR-0087 D3 semantic entry `kernel-health-check-and-hot-reload-durations-unit-in-key` and
+    three `RETIRED_KEYS_BY_MAJOR[18]` rows. No D2 conversion: neither def is an authorable
+    surface — both are library parameters a host passes to `PluginHealthMonitor` /
+    `HotReloadManager` in TypeScript — so the chain has no seam that runs on them, the same
+    reading `plugin-auto-restart-never-reinitialised` and `hot-reload-watch-placeholder-retired`
+    recorded for keys on these two defs
+  - `@objectstack/core` moves with the rename: `PluginHealthMonitor` and `HotReloadManager` read
+    the suffixed keys, and each class's registration-time refusal table gains a row so a host
+    still passing an old spelling is answered with an ADR-0112 `VALIDATION_ERROR` / 400 naming
+    the rename, rather than getting `undefined` where a duration belongs
+  - pin tests on both schemas and both classes: the refusal carries the rename prescription, the
+    suffixed keys parse at the magnitude the retired ones carried with the same defaults, and the
+    describes publish the unit. The two minimum-bound pins were rewritten rather than left: spelled
+    through the bare keys they would have stayed green off the tombstone's refusal instead of the
+    bound, so they now assert the `too_small` issue code on the suffixed keys
+  - `HotReloadConfig.shutdownTimeout` is deliberately NOT renamed with them — its JSDoc reads
+    "Graceful shutdown timeout" and names no unit anywhere, so it is the unit-nowhere shape the
+    #14478 gate leaves outside its verdict, not part of this row set
+- 5ba2ec3: feat(spec,core,objectql,driver-sql,driver-turso): a transport can declare it has no transactions, and every transaction gate reads the declaration instead of method presence (#18063)
+  
+  Maintainer ruling, decision batch #148 item 3, letter B, 「同意」 2026-09-17, verbatim and untranslated:
+  
+  > `packages/spec`: the driver contract gains a way for a transport to **declare 「no transactions」** (the dev picks the smallest spelling the existing capability/contract surface already has — a capability bit is preferred over a new key), and the engine's transaction gating reads the declaration instead of method presence.
+  
+  **`DriverCapabilities` gains one live bit, `transactionsUnsupported`.** A transport sets it to say that a handle it issued would be a FALSE SUCCESS rather than a missing feature: the caller gets a handle, the writes execute and are already durable, `rollback()` resolves and undoes nothing. Absence means `false`, exactly like `batchSchemaSync`, so a driver that declares nothing keeps the behaviour it has today.
+  
+  **⛔ This is not `DriverCapabilities.transactions` un-retired, and the difference is not cosmetic.** That key was tombstoned in 17.0.0 under ADR-0049 enforce-or-remove and STAYS tombstoned — writing it is still a compile error and still a parse refusal carrying its prescription. It claimed "I support transactions" and nothing read it; this one declares "my transport cannot honour one" and the engine dispatches on it. Reviving the name would have inverted the record's own `absence = false` convention into a tri-state, turned a documented refusal into silent acceptance of a value whose meaning had changed underneath it, and made the tombstone's published text ("no code in any repository ever read it") false. A new key costs one bit; the name costs all of that.
+  
+  **Adding a bit to a record enforce-or-remove has pruned SATISFIES that ADR rather than reversing it.** The audit removed thirty-one bits for one stated reason — no code anywhere read them — and kept the three where method presence provably cannot carry the signal. This change is the creation of the missing reader: `driverSupportsTransactions()` (exported from `@objectstack/spec`) is the one definition of the gate, and all FOUR places that used to spell `typeof driver.beginTransaction === 'function'` ask it — `ObjectQL.transaction()`, `ScopedContext.transaction`, the `ScopedContext` begin/commit/rollback trio, and `@objectstack/core`'s `engineCanRollBack`. The bit arrives WITH its reader, in the same change, which is the honest order the ADR asks for.
+  
+  **Why method presence could not carry it.** `TursoDriver extends SqlDriver`, whose `beginTransaction()` opens a real knex transaction, so the inherited method reported the libSQL REMOTE transport as transactional. It is not — `RemoteTransport`'s data methods take no `options` argument at all, so a handle cannot reach the statement that would have to join it. A subclass cannot opt out of a door it did not open. This is the mirror of `batchSchemaSync`, which exists because a subclass can inherit `syncSchemasBatch` from a base whose transport batches while its own cannot.
+  
+  **What changes for a caller.** On a datasource whose driver declares the bit, `engine.transaction()` now takes the DECLARED non-transactional path (ADR-0119 D1) instead of opening a transaction it cannot honour: the degrade warns once per datasource — naming the declaration, not a missing method — and `{ require: true }` throws `TransactionUnsupportedError` before the callback writes anything. `ScopedContext.transaction` and the discrete begin/commit/rollback trio read the same predicate; the trio's `begin` returns `null`. Both are the answers a driver with no `beginTransaction` already received.
+  
+  **`driver-turso`.** The remote face declares `transactionsUnsupported: true`; local and embedded-replica inherit `false` from the base and are untouched. `TursoDriver.beginTransaction()` publishes the inherited declaration instead of `Promise<any>` — the annotation the earlier `any` was masking an LSP violation to avoid, dissolved rather than widened: the remote arm returns `never` (it refuses), so the only arm that still returns is the base's. `SqlDriver.beginTransaction()` keeps its narrow `Promise<Knex.Transaction>`; nothing in the base was widened.
+  
+  **`@objectstack/core`.** `engineCanRollBack()` — the ADR-0119 D4 gate that `@objectstack/metadata-protocol` uses for `batchData` / `updateManyData` / `deleteManyData` under `options.atomic`, and that `runMigrationJournal()` uses to decide whether to start at all — reads the same predicate. It has to: it does not open the transaction itself, it vouches that `engine.transaction()` will, and on a driver that declares the bit the engine now takes its non-transactional path. A gate still reading method presence would vouch for a runtime that is about to run the callback with no transaction, so the atomic batch would answer `rollback` over writes that stayed on disk and the journal would write `chunk_done` rows its own contract says mean "committed". What a caller sees on such a datasource instead: `batchData({ atomic: true })` refuses with `501 NOT_IMPLEMENTED` — retry without `atomic`, or probe `capabilities.transactionalBatch` on `/discovery` first — and `runMigrationJournal()` refuses with `MigrationJournalRefusal('NOT_IMPLEMENTED')` before writing a single journal row. Both are the answers a driver with no `beginTransaction` already received.
+  
+  **`RemoteTransport` loses `beginTransaction()`, `commit()` and `rollback()`.** They are a published surface, and this is **minor** rather than major on the ruling's own stated ground: that transport never honoured a transaction, so no working behaviour is withdrawn. They had already become unreachable from every caller in the repository when the driver started refusing them; they are now gone, and the declaration keeps them gone by design rather than by audit.
+- 74832b6: **Breaking (shipped as `minor` under the launch-window convention).** Under a **walled** tenancy posture (`group` / `isolated`), a legacy unscoped `admin_full_access` grant row no longer confers `PLATFORM_ADMIN`; platform standing there is derived from `OS_PLATFORM_OWNER_EMAIL` and from nothing else. The migration pointer that announced this since 17.3.0 is retired with it: `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` are **removed from `@objectstack/core`'s published entry** (#18336, #11663 leg L5).
+  
+  ⚠️ **The `single` posture is untouched, deliberately.** Its zero-config first-user promotion still mints that row and that row still confers `PLATFORM_ADMIN` — a development environment started for a moment cannot be asked to declare an administrator first. Choice 4A (#11974) rules that promotion correct, and the maintainer's 2026-09-08 ruling on #16682 is verbatim: 「retiring the walled write must not retire the `single` one」. The `single` half's disposition is #11979's. ADR-0131 D5, as amended 2026-09-17 (#18413), is the governing record.
+  
+  **What a walled deployment must do.** Declare each administrator's **verified** address in `OS_PLATFORM_OWNER_EMAIL` (comma-separated for several) before upgrading. A walled rig that upgrades with the variable undeclared and an unscoped grant row still in place has **zero** platform administrators; the bootstrap now says so **at error**, naming the variable, the row and its holder — L4 used to skip that line for exactly this rig, on the ground that the deprecation pointer carried the remedy instead, and both halves of that arrangement have now expired.
+  
+  - **17.3.0 opened the window, this closes it.** L4 (17.3.0) stopped the walled bootstrap from ever *writing* the row and started the once-per-process pointer; L5 stops the walled derivation from *reading* it. The window was time-boxed and loud by design (#11663 P5).
+  - **The retirement takes the ANCHOR, not the ROW.** Nothing here writes, deletes or re-owns any grant row — a walled holder keeps the `admin_full_access` permission set they hold, and loses only platform-admin *standing*: the rung and the built-in `platform_admin` position. That row's ownership is ADR-0131 C3's, on the v18 line.
+  - **No new query.** The posture gate reads the environment, never the engine, so the recorded query multiset is identical under both of its answers — measured, not asserted. Under a wall the guard's grade-1 scan is skipped outright, so that path issues one read fewer.
+  - **`@objectstack/plugin-auth` moves with it, at TWO readers.** `ensureDefaultOrganization`'s step-2 legacy fallback is keyed on the same expression: under a wall it no longer answers「which user is the platform admin?」from the oldest unscoped grant, so the account it would have bound as the Default Organization's `owner` — and handed the org's seeded rows to — is no longer selected. ⛔ That reader does not merely count the population, it **confers** on it, which is why it is keyed here rather than sequenced. Its bootstrap-trigger predicate retires the matching `sys_user_permission_set`-insert arm under a wall with it (cost only; the `sys_user` arms are untouched, and on a walled rig the declared owner's verifying update is the only write that ever grows the population). And:
+  - **`@objectstack/plugin-auth`'s break-glass guard moves with it.** `last-admin-guard.ts` enumerates the administrator population from the SAME anchor, and its contract is to answer the same question the derivation answers. Its grade-1 (grant-anchored) enumeration is now keyed on the identical expression, so under a wall the guard no longer counts a holder the derivation does not recognise. Consequence on a walled rig: a write that would end the last **config**-anchored administrator's standing is now REFUSED where it was permitted, and a write that removes the now-inert grant row is no longer refused as though it removed the last administrator. Under `single` the guard is unchanged. Its two zero-population refusals also gained a walled clause, because「restore the `admin_full_access` row」stopped being a remedy that ends the emptiness there.
+  - **`@objectstack/organizations`' walled bootstrap moves with it.** That package wraps `ensureDefaultOrganization` and is the runtime that actually performs the default-organization bootstrap on a walled deployment (plugin-auth's own wiring skips it there). With the helper's legacy fallback keyed off, a walled rig carrying a legacy grant row **no longer** has a Default Organization created for that holder, and that holder is no longer bound as its `owner`; the bootstrap waits for a declared administrator to verify instead. ⚠️ Named because the behaviour an operator gets **from this package** moves — its own source does not change, and the pin re-authored inside it is not the reason.
+  - **Why `@objectstack/runtime` and `@objectstack/plugin-hono-server` are named.** Neither package's own source changes. Both carry `export * from '@objectstack/core'` (`runtime/src/index.ts`, `plugin-hono-server/src/adapter.ts`) and their built `.d.ts` carry that statement, so the two removed names leave their published surfaces too. All publishable packages sit in one Changesets `fixed` group, so naming them moves no version — it is named so the tombstone reaches the CHANGELOG an upgrading consumer of THOSE packages greps. Precedent is mixed (a core-only declaration exists); this follows the `ApiRegistry` precedent, which named every package the removal reached.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing here is a metadata surface: the two removed symbols are plain runtime functions in `packages/core/src/security/platform-admin.ts` with no Zod schema, no `packages/spec` declaration and no stored representation, and the behaviour change is an authorization derivation keyed on an environment variable. `objectstack migrate meta` therefore has nothing to rewrite — the channels that reach an affected consumer are the compiler (for the removed exports) and the boot-time fail-closed log line (for the walled standing). No grant row is written, deleted or re-owned by this change; that rows own migration is ADR-0131 D10/C3 and stays on the v18 line. The plugin-auth guard change and the two re-export packages add no metadata surface either. -->
+- fc91239: feat(spec)!: the canon for "the version of a package or plugin" is SemVer 2.0.0 — nine carriers, one grammar
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered manifest-version-semver-2-0-0, plugin-version-semver-2-0-0, package-version-row-semver-2-0-0, package-manifest-version-grammar-enforced -->
+  
+  **BREAKING** — four published accept sets converge on one, and the fringe each
+  of them carried outside SemVer 2.0.0 is refused. The widening half needs no
+  action from anyone; the narrowing half is listed per carrier below, with its
+  FROM → TO.
+  
+  One concept was judged by four different grammars across ten carriers in two
+  repositories, and the strictest refused `2.0.0-beta.1` — the exact string a
+  sibling declaration documented as an example of itself. The disagreement was
+  observable between doors on the same resource, not merely between schema files:
+  `os plugin build` refused a prerelease the publish door accepted, the Studio
+  form refused it twice over, the `PATCH` door answered `400`, and the install
+  door parsed nothing at all. An earlier change collapsed the eight regex literals
+  onto three exported constants, which removed the drift but not the disagreement.
+  
+  `@objectstack/spec/kernel` now exports ONE grammar —
+  `SEMVER_2_0_0_VERSION_PATTERN`, semver.org's own published expression — and
+  every carrier references it.
+  
+  ## What every author gains, with no edit
+  
+  Prerelease and build suffixes are accepted on the five carriers that demanded a
+  bare three-segment core, so `2.0.0-beta.1`, `17.0.0-rc.5`, `1.0.0+20230101` and
+  `1.0.0-rc.1+exp.sha.5114f85` now pass a key that refused all of them. Identifiers
+  are case-preserving everywhere, as the standard requires. This repository cuts
+  prereleases of its own packages while the key describing a package could not
+  express one; that ends here.
+  
+  ```
+  FROM  ManifestSchema.parse({ id: 'com.acme.crm', version: '2.0.0-beta.1', … })
+        -> throws                              // and `os plugin build` exits 1
+  
+  TO    ManifestSchema.parse({ id: 'com.acme.crm', version: '2.0.0-beta.1', … })
+        -> parses
+  ```
+  
+  ## What stops being accepted, per carrier
+  
+  Eight strings, all of them forms SemVer 2.0.0 forbids and none of them a valid
+  prerelease. What they have in common is that no precedence order exists for any
+  of them — `dependency-resolver.ts` can place none in an order — so a package
+  versioned this way could be published and never compared against its own
+  successor.
+  
+  ```
+  FROM  version: '01.1.1'        TO  version: '1.1.1'     // §2 no leading zero in
+  FROM  version: '1.01.1'        TO  version: '1.1.1'     //    a numeric identifier
+  FROM  version: '1.1.01'        TO  version: '1.1.1'
+  FROM  version: '1.0.0-0123'    TO  version: '1.0.0-123' // §9 no leading zero in a
+                                                          //    numeric prerelease id
+  FROM  version: '1.0.0-alpha..1' TO version: '1.0.0-alpha.1'  // §9 no empty
+  FROM  version: '1.0.0-alpha..'  TO version: '1.0.0-alpha'    //    identifier
+  FROM  version: '1.0.0-.'        TO version: '1.0.0'
+  FROM  version: '1.0.0+.'        TO version: '1.0.0'     // §10 no empty build id
+  ```
+  
+  ⛔ Each repair above is one defensible reading and not the only one, which is
+  why they ship as ADR-0087 D3 semantic TODOs rather than as mechanical D2
+  conversions: a version is how a release is addressed, so rewriting one
+  re-points whatever already resolved the old string. Run
+  `objectstack migrate meta --from <N>` for the per-site list.
+  
+  Per carrier:
+  
+  - `ManifestSchema.version` and its three sibling declarations
+    (`MetadataPluginManifestSchema`, `PluginRegistryEntrySchema`,
+    `PluginMetadataSchema`), plus the `PATCH /api/v1/packages/:id` door: gain the
+    whole prerelease and build space; lose a leading zero in the numeric core.
+  - `PluginSchema.version` and the plugin boot path in `@objectstack/core`: lose
+    those eight and **nothing else**. ⭐ Every valid prerelease and build form the
+    loader accepts today it still accepts, which is what keeps the widen-never-
+    narrow ruling on that path honoured rather than reversed; both halves of that
+    bound are pinned in `plugin.test.ts` and `plugin-loader.test.ts`.
+  - `PackageVersionSchema.version`: gains case-preserving identifiers
+    (`1.0.0-Beta.1`, `1.0.0+Build.5`), which the boot path has always accepted and
+    this key alone refused; loses the same eight.
+  - `PackageManifestSchema.version`: was a bare `z.string()` constraining nothing,
+    so it is the one carrier where the grammar is entirely new. `latest`,
+    `v1.0.0`, `1.0`, the empty string and `2.0.0-beta.1extra!` were accepted and
+    frozen into a published manifest snapshot; each is refused now. A dist-tag
+    becomes the version it pointed at, a `v`-prefix drops, a two-segment string
+    gains its patch.
+  
+  ## The prose moved with the grammar
+  
+  Every `.describe()` names SemVer 2.0.0 and the nine generated reference-doc rows
+  follow; the `PATCH` door's refusal says so; `manifest.test.ts`'s
+  「should enforce semantic versioning」 case stops listing `1.0.0-beta` among the
+  invalid versions. `PluginLoader.isSemverShapedVersion` becomes `isSemverVersion`
+  — a predicate named for a standard it does not implement gets misused by the
+  next caller whatever its docblock says, and the name is true now.
+  
+  Three exported constants are retired, each replaced by the one canon:
+  
+  ```
+  FROM  import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from '@objectstack/spec/kernel'
+  FROM  import { SEMVER_SHAPED_VERSION_PATTERN } from '@objectstack/spec/kernel'
+  FROM  import { SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN } from '@objectstack/spec/kernel'
+  TO    import { SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel'
+  ```
+  
+  ⛔ They are not interchangeable with what they replaced — each named an accept
+  set that no longer exists, which is why they are retired rather than aliased. A
+  consumer that referenced one to REPRODUCE a verdict gets the canon's verdict
+  now; one that referenced it to match a foreign grammar owns that grammar itself.
+  
+  The accept set is pinned witness by witness in `version-grammar.test.ts`: move a
+  cell there and you have moved a published accept set on nine carriers at once,
+  in one visible edit.
+- 0318faf: feat: the server answers `current_user.can(object, verb)` in an option's `visibleWhen` (#18783)
+  
+  A `select` / `multiselect` / `radio` / `checkboxes` option can gate itself on the acting subject's grants:
+  
+  ```ts
+  stage: Field.select({
+    label: 'Stage',
+    options: [
+      { value: 'open', label: 'Open' },
+      { value: 'escalated', label: 'Escalated', visibleWhen: "current_user.can('crm_account', 'edit')" },
+    ],
+  }),
+  ```
+  
+  `@objectstack/formula` answers `can` from `EvalContext.permissions` and refuses loudly when none is passed — and until now nothing on the write path passed one. Every authenticated write that picked such an option took the evaluator's fail-open branch: the value was admitted, one `warn` said the predicate "failed to evaluate", and the gate was never enforced for anyone.
+  
+  **What changes.** The write path now evaluates the predicate with the subject's effective object permissions — on `insert` (single and batch), by-id `update`, bulk `update`, and the `validate()` preview. A subject whose map withholds the verb is refused with `VALIDATION_FAILED` and a field error `invalid_option` on that field; a subject who holds it is admitted. Options whose `visibleWhen` never calls `can` are unaffected.
+  
+  **Where the map comes from — one producer.**
+  
+  - `@objectstack/plugin-security` implements `ISecurityService.getEffectiveObjectPermissions` (declared optional in `@objectstack/spec`) and registers the same method on the engine.
+  - `@objectstack/objectql` gains `registerEffectiveObjectPermissionsResolver(fn)`. The engine asks it at most ONCE per write (an N-row bulk update is one resolution), only when a picked option's predicate calls `can`, never for a write with no acting user, and never keeps the answer past the write. The answer goes through formula's `toEvalPermissions`, so a map that is not the published shape is refused rather than answered from.
+  - `@objectstack/core` exports `buildEffectiveObjectPermissions`: the most-permissive merge plus the super-user seed, wildcard fold, managed-write clamp and `apiOperations` annotation. `/auth/me/permissions` builds its `objects` slot with it and the new security method returns it, so the console and the server's own `can()` read the same map. The four folds (`foldWildcardSuperUser`, `clampManagedObjectWrites`, `seedSuperUserRestrictedObjects`, `annotateEffectiveApiOperations`) and the `ManagedSchemaLike` / `ApiExposureSchemaLike` types moved from `@objectstack/plugin-hono-server` to `@objectstack/core`; `@objectstack/plugin-hono-server` re-exports them under the same names, so no import changes. The `/auth/me/permissions` response is byte-identical for the same resolved sets (measured on five fixtures against the previous build).
+  
+  **Failure stance.**
+  
+  - If the security service cannot resolve the map, a write that needs it is refused with the resolution's own error — fail closed. It is never read as "no grants".
+  - With no security plugin, or an engine older than the seam, there is no permission data. The gate stays unevaluable and the value is admitted with the same `warn` as before, which names the missing input. The security plugin logs one `warn` at start when the engine lacks the seam.
+  
+  **Plain-wildcard coverage, closed in this release.** `can()` reads only the per-object entries of the map. Before #20083, `/auth/me/permissions` listed an object for a `'*'` wildcard grant only when that grant carried a super-user bit, so a subject whose access to an object came only from a plain wildcard — for example `organization_admin_no_bypass`, which a deployment without an organization wall grants to organization owners and admins — got `false` from `current_user.can()` for that object, although the data plane admits the write, and was refused on a `can`-gated option. That gap is closed in this same release by #20083 (`.changeset/20083-effective-map-plain-wildcard.md`): `buildEffectiveObjectPermissions` now puts each set's plain `'*'` on the registered public objects that set does not name, so that population's map — and any client that answers `can()` from the same `/auth/me/permissions` map — carries an entry for each object the wildcard covers, with the wildcard's grants, narrowed on a guarded managed object by the same managed-write clamp as every other entry. The map also differed from `PermissionEvaluator.checkObjectPermission` for subjects holding a super-user wildcard: an entry the super-user set itself names narrower read as granted, which is closed in this same release (`.changeset/20136-super-user-fold-per-set.md`). Its missing `transfer` is closed in this same release (`.changeset/20134-super-user-entries-every-bit.md`).
+  
+  **No spec key, route or config key is added or removed.**
+- 4ec3987: **BREAKING for runtime-authored `translation` items** — the registered `translation` metadata type no longer declares `settings`: platform settings copy is platform-only at BOTH application doors (#19620)
+  
+  Clause-②: no
+  
+  `TranslationItemSchema` — one `translation` metadata item, authored with
+  `defineTranslation`, in Studio, or through the metadata API — now takes the same
+  ten groups as a per-app bundle entry (`TranslationData`). `settings`, and its
+  singular `setting`, are refused by name with the platform-only prescription,
+  exactly as the per-app bundle has refused them since #15178. The file door and
+  the item door are two authoring surfaces for one app metadata type, so they
+  accept one shape.
+  
+  ### Migration — FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `defineTranslation({ locale: 'zh-CN', settings: { mail: { title: '邮件投递' } } })` | delete the `settings` group — there is no application-side replacement key |
+  | a `translation` item saved through the metadata API or Studio carrying `settings` | delete the `settings` group; the save answers `422 INVALID_METADATA` until you do |
+  | `const t: TranslationItem = { locale: 'en', settings: … }` | move the copy to the PLATFORM bundle (`PlatformTranslationData`), or delete it |
+  
+  **The one-line fix: delete the `settings` group from the item.** Settings copy is
+  not application-authorable — `settings` is keyed by `SettingsManifest.namespace`
+  and only platform code declares a manifest. `settingsCommon` is **not** affected:
+  the Settings UI shell strings (the source badges, under
+  `settingsCommon.sourceLabels`) stay on both application faces.
+  Run `os migrate meta --from 17` to list the mechanical edits for existing
+  sources; apply them by hand.
+  
+  ### Rows already stored are converted, not refused
+  
+  A `translation` row saved before this change keeps loading. The runtime
+  translation sync (`@objectstack/core`'s `authored-translation-sync`) reads
+  `sys_metadata` itself and used to merge the RAW stored payload; it now replays
+  the ADR-0087 conversion chain over each row before merging it, the same policy
+  as every other stored-metadata read seam. `translation-per-app-settings-removed`
+  has learned the item shape, so a stored row's `settings` is dropped there, the
+  rest of the item (`objects`, `apps`, …) still loads, and the server logs one
+  warning per row naming the row, the group and the conversion. Run
+  `os migrate meta --stored --apply` to persist the canonical rows.
+  
+  ### What changes on screen, which is not nothing
+  
+  On the item door the group was STRONGER than on the bundle door. A published
+  item is loaded into the runtime-authored layer, which both i18n adapters read
+  **over** the shipped bundles — so an item's `settings` overrode the platform's
+  own Settings copy for its locale, rather than only filling gaps. After
+  upgrading, re-read the Settings screens in each locale such an item covered:
+  where it overrode a platform string, **the platform's string renders again**;
+  where it filled a gap the platform bundle leaves, the **manifest's own literal
+  renders, which is English**. If a platform string is wrong or missing for your
+  locale, correct it in the platform bundle (`@objectstack/service-settings`'s
+  `settingsBuiltinTranslations`).
+  
+  No deprecation window: the item door refuses the key by name from this major.
+  
+  ### Unchanged
+  
+  The platform face — `PlatformTranslationDataSchema`, `settingsBuiltinTranslations`,
+  and `GET /api/v1/i18n/translations/:locale`, whose served document is the merged
+  tree — still declares `settings`. The liveness ledger's `translation.settings`
+  row is deleted because the key left the ITEM's shape; the platform capability it
+  evidenced is untouched.
+  
+  Ruling batch #210 item 2 letter B (2026-09-22) — maintainer 「210 同意」.
+  
+  <!-- adr-0087: not-required (already-registered translation-per-app-settings-removed, translation-per-app-settings-platform-only) both entries already existed for the per-app bundle door; this change EXTENDS them to the translation item door in the same unreleased major — the D2 conversion learns the bare item shape and the D3 semantic entry covers both doors -->
+- a9fb83e: fix(core,runtime,plugin-dev,plugin-security): a release artifact whose `packages` is `null` is refused as malformed, never read as absent (#19926)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves: no spec key, Zod schema, export, config field or stored metadata shape is added, removed, renamed or re-spelled. ObjectStackDefinitionSchema already refused packages null, and so did composeStacks with two or more inputs, so an authored stack that passed its schema reads exactly as before; what narrows is the runtime readers' behaviour on an artifact that bypassed that parse, and objectstack migrate meta has no document to rewrite for it. -->
+  
+  **BREAKING** — an accept-set narrowing on a value the schema already refuses, shipped as `minor` under the launch-window convention (`check-changeset-no-major` refuses `major` until GA; breaking-ness is carried by this banner and the ADR-0087 disposition above, not by the level).
+  
+  `ObjectStackDefinitionSchema.packages` is `z.array(ArtifactPackageSchema).optional()`, and `.optional()` admits `undefined`, not `null`. The schema refused `packages: null` (`invalid_type`), and `composeStacks` refused it with two or more inputs (`STACK_SCHEMA_INVALID`, `status: 422`). The runtime readers below read it as absent instead: a single-package artifact whose own top level is the one package body. Those readers now follow the declaration. An absent `packages` is `undefined` and nothing else; `null` is one of the present, non-array values the rule beside `AssembledPackageBodySchema` calls malformed, like `{}`, `0` or `'x'`, and it is refused with the same envelope: `INVALID_ARTIFACT_PACKAGES`, `status: 422`. No error code is added.
+  
+  - **`@objectstack/core`**: `resolveArtifactPackageOrder` refuses `packages: null` where it returned `[artifact]`. The refusal message names the value `null`, not `object`. The resolver's callers that hand it the whole artifact raise the refusal: the kernel `manifest` service's `register()` (`ObjectQLPlugin`) and `@objectstack/verify`'s collection reader for a collection the stack's top level does not carry.
+  - **`@objectstack/runtime`**: `resolveArtifactCollections` drops `null` from its absent branch, so `AppPlugin`, `createStandaloneStack`, `loadArtifactBundle`'s runtime-module merge and `resolveProjectDatabaseUrl` answer a `packages: null` artifact exactly as they already answer `packages: {}`. `carriedPackageIds`, and `resolveArtifactGrantBinding` for an artifact whose `grantedPermissions` is a record, read the package list through the core resolver and raise its refusal too.
+  - **`@objectstack/plugin-dev`**: the i18n detector's private absent guard moves in lockstep with the resolver's absent branch, so `devI18nPluginOptions` reaches the resolver and raises its refusal when the `i18n` config (on the stack or its `manifest`), a non-empty `manifest.translations` and a non-empty top-level `translations` do not answer first. `DevPlugin` keeps its posture: it reports the metadata defect on its `error` line and boots on the in-memory i18n fallback.
+  - **`@objectstack/plugin-security`**: `appSecurityPluginOptions` has no guard of its own and raises the resolver's refusal for `packages: null`.
+  - **What does not change**: the schema; an absent `packages` (no key, or an explicit `undefined`), which still returns the caller's own object by identity; a well-formed `packages[]`; and `composeStacks` with a single input, which still returns that input by identity.
+  
+  No in-repo producer writes `packages: null`, and `os build` and `os validate` refuse it at the schema before any reader runs. For a single-package artifact, leave the `packages` key out.
+- e7f69db: A record-scoped filter token, `{record_id}`: the id of the record a `type: 'record'` page is showing. It resolves where a record is in context, and is refused by name everywhere else (#20003).
+  
+  On a record page, `record:related_list` was the only component that could scope itself to the record in view. Every other data-bearing component takes a `FilterCondition`, and the only dynamic values a filter could hold named the signed-in viewer. So "open tasks" on a person's record page counted the whole organisation's tasks, under that person's name. `{ assignee: '{record_id}' }` now says "this record's".
+  
+  **Where it is accepted, and where it is refused:**
+  
+  - **Accepted:** a filter on a component of a `type: 'record'` page (`regions[].components[]`, `slots`, and any filter key inside them). `os lint` / `os validate` pass it there. A page with no `type` is a record page by `PageSchema`'s default.
+  - **Refused by `os lint` / `os validate`** (rule `filter-token-unknown`, `error`), with the reason "no record in context on this surface" rather than the unknown-token message: list views (top-level `views` and an object's list views and field filters), dashboard widgets and dashboard filters, reports, datasets, app navigation filters, and every page whose `type` is not `'record'` (`home`, `app`, `utility`, `list`, including a list page's `interfaceConfig.filterBy`).
+  - **Refused on every server path.** `resolveFilterTokens()` in `@objectstack/core` throws `UnresolvedFilterTokenError` (`FILTER_TOKEN_UNRESOLVED` / 400, `token: 'record_id'`) on the ObjectQL read path (`find`, `findOne`, `count`, `aggregate`), the write path (`update` / `delete`, by id or `multi`), the analytics query door and the dataset executor. That is the same envelope a session token gets when the request has no value for it. It happens whatever the request carries, because no server path knows which record a page is showing. The token never becomes `null` (a count "about nobody"), is never dropped (a count "about everybody"), and never reaches the driver.
+  
+  **What is in `@objectstack/spec/data`:**
+  
+  - `RECORD_CONTEXT_TOKENS` (`['record_id']`), `RecordContextToken` and `isRecordContextToken()`: a sibling of `CONTEXT_TOKENS`, not a member. `CONTEXT_TOKENS` resolves against the caller's session, and `{record_id}` resolves against the surface. So `isContextToken('record_id')`, `ContextTokenSchema` and `ContextTokenPlaceholderSchema` are unchanged and still reject it, and a client resolver that fills `CONTEXT_TOKENS` from the session does not pick it up.
+  - `classifyFilterToken('{record_id}')` returns the new kind `{ kind: 'record-context', token: 'record_id' }` instead of `unknown`. A consumer that switches exhaustively on `kind` gets a compile error until it handles the new kind.
+  - `isKnownFilterToken('record_id')` stays `false`. That predicate answers "can the server resolve it?", and its one consumer, the flow engine's filter hand-off, is a server position. A flow addresses its own record as `{record.id}`.
+  - Near misses are still refused, now with `{record_id}` suggested: `{recordId}` (the URL / flow-template placeholder), `{record.id}`, `{record-id}`, `{current_record_id}`. `CONTEXT_TOKEN_SUGGESTIONS`' value type widens to `ContextToken | RecordContextToken`.
+  
+  **Presentation scope, not access.** Like `{current_user_id}`, `{record_id}` narrows what a component shows. It decides nothing about which rows the caller may read; that is still RLS.
+  
+  **What you do:** on a record page, filter a component on the record in view with `{ <field>: '{record_id}' }`. If `os validate` refuses it with "no record in context on this surface", the filter is on a surface with no record: move it onto a component of a `type: 'record'` page, or filter on a concrete id. Until the renderer you run resolves `{record_id}`, a record-page query that carries it is refused by the server with `FILTER_TOKEN_UNRESOLVED` rather than answered with a wrong number.
+- fe677ae: fix(core): the effective object-permission map covers what a plain `'*'` grant covers, so `current_user.can()` agrees with the server for a wall-less org admin (#20083)
+  
+  `buildEffectiveObjectPermissions` builds the `objects` slot of `GET /auth/me/permissions` (`@objectstack/plugin-hono-server`) and the map `ISecurityService.getEffectiveObjectPermissions` returns (`@objectstack/plugin-security`), which the engine hands to `current_user.can(object, verb)` on the write path. It merged each permission set's EXPLICIT entries and kept `'*'` as a key of its own. The server's check does not stop there: `PermissionEvaluator.checkObjectPermission` resolves each set to its explicit entry for the object when it has one, and otherwise to its `'*'` — for a public object always, for a private one only when the wildcard carries a super-user bit. So an object reached only through a plain wildcard (no `viewAllRecords` / `modifyAllRecords`) had no entry in the map, and `can()` — which reads an absent entry as "no grant" — answered `false` where the server allows.
+  
+  The population it hit: `organization_admin_no_bypass`, which a deployment without an organization wall grants to organization owners and admins. With it and `member_default`, `current_user.can('crm_account', 'edit')` was `false` while the data plane accepted the edit, so a `can()`-gated option was refused on the write path, and a client that answers `can()` from `/auth/me/permissions` got the same `false`. `viewer_readonly` read the same way (`read` on every object it covers).
+  
+  **What changes.** A new step in `buildEffectiveObjectPermissions`, after the super-user seed and before the wildcard fold, applies each set's plain `'*'` to the registered objects that set does not name:
+  
+  - only registered objects, and only public ones (`access.default` other than `'private'`);
+  - a set that names the object keeps its explicit entry as its whole answer, as on the server;
+  - another set's plain wildcard widens an entry that is already present, bit by bit;
+  - only `true` grant bits are copied; a wildcard's `false` or unset bit adds nothing;
+  - an object the step would add, but whose entry grants no verb on its own, is left out.
+  
+  The step reads `name` and `access.default` off the `allSchemas` entries, so the element type of `allSchemas` on `buildEffectiveObjectPermissions`' schema source gains an optional `access?: unknown` member (the package exports no new name for it). That is a type widening only: every call that compiled before still compiles, and a schema literal carrying `access` now does too. A direct caller passes the registered schemas themselves there, as both in-repo callers do; an entry without `access` reads as public, exactly as the server reads it.
+  
+  **What a reader of `/auth/me/permissions` sees.** For a subject holding a plain wildcard, `objects` gains an entry for every registered public object the wildcard covers that had none, annotated with `apiOperations` by the same rule as every other entry. An entry that was already there may gain `true` bits. Nothing is removed. For a subject holding no plain wildcard — `admin_full_access`, a walled `organization_admin`, `member_default` alone — the response is byte-identical to before. The response shape, its keys and the route are unchanged.
+  
+  This closes the known gap that the `current_user.can()` write-path entry in this release describes: `organization_admin_no_bypass` now reads `true` from `can()` where the data plane allows.
+- 437bb0d: fix(core): an effective-map entry reached through a super-user `'*'` carries every bit the server grants, so `current_user.can(object, 'transfer')` agrees with `checkObjectPermission` for a platform admin (#20134)
+  
+  `buildEffectiveObjectPermissions` builds the `objects` slot of `GET /auth/me/permissions` (`@objectstack/plugin-hono-server`) and the map `ISecurityService.getEffectiveObjectPermissions` returns (`@objectstack/plugin-security`), which the engine hands to `current_user.can(object, verb)` on the write path. For a subject holding a super-user wildcard — a `'*'` carrying `viewAllRecords` or `modifyAllRecords`, as `admin_full_access` and `organization_admin` do — its entries diverged from `PermissionEvaluator.checkObjectPermission` in three places, each in the refuse direction:
+  
+  - **`transfer`.** The fold put only read, create, edit and delete on an entry. `modifyAllRecords` also grants `transfer` on the server, so `can(object, 'transfer')` answered `false` for `admin_full_access` on every object, and for the walled `organization_admin` on every object its own set does not name.
+  - **A super-read wildcard's own bits.** A `'*'` carrying `viewAllRecords` beside plain bits (`allowEdit`, `allowTransfer`, …) put only the read on an entry, so `can(object, 'edit')` answered `false` where the server edits.
+  - **A super-user wildcard carrying `allowExport`.** The super-user seed skipped every unrestricted object whose export stays allowed, because it needs no `apiOperations`. That left no entry at all, and `can()` reads an absent entry as "no grant", so every verb answered `false` on those objects.
+  
+  **What changes.** The seed now places an entry for every registered object the merged map does not already carry. A new step after the fold then applies each set's super-user `'*'` to every entry that set does not name, and sets every bit the spec's `objectPermissionGrants` says that wildcard grants: `transfer` through `modifyAllRecords`, the wildcard's own plain bits, and its `allowExport`. This is the per-set reading `checkObjectPermission` applies. A set that names an object keeps its explicit entry as its whole answer for that object, and a private object is covered, as on the server. Only `true` bits are set. The step runs before the managed-write clamp, which still narrows create, edit and delete on a guarded managed object. No exported name or type changes.
+  
+  **What a reader of `/auth/me/permissions` sees.** For a subject holding a super-user wildcard, entries gain `true` bits (`allowTransfer`, and the wildcard's own plain and export bits). Where that subject's wildcards also grant `allowExport`, the map gains an entry for each registered unrestricted object that had none. That entry carries no `apiOperations` — unless the object declares `enable.apiEnabled: false`, which is annotated `[]` since #20135 — so for every other such object the operation channel says what it said before and a client's default-allow path is unchanged. Nothing is removed and no `true` bit turns `false`. The response is byte-identical for a subject holding no super-user wildcard: `member_default` alone, and `viewer_readonly` or `organization_admin_no_bypass` beside it. The response shape, its keys and the route are unchanged. On the write path, a `can(object, 'transfer')`-gated option or default is now admitted for these subjects wherever the server grants `transfer`.
+  
+  **Still broader than the server, unchanged here.** The fold still folds the merged super-user bits into an entry the super-user set itself names narrower. It also still pulls `allowCreate` on `modifyAllRecords` alone, which the server does not grant. Both over-grants are left exactly as they were by this change, and both are closed in this same release (`.changeset/20136-super-user-fold-per-set.md`).
+- e5cf27d: fix(objectql,core): a per-aggregation `filter` and `having` on `engine.aggregate` read a temporal comparand by the column's storage rule, the rule `where` already applies — one function, `temporalStorageForm`, now exported by `@objectstack/core` and shared by both drivers (#20176)
+  
+  A per-aggregation `filter` (`aggregations[i].filter`) and `having` are evaluated by the engine itself, over the rows (or aggregated rows) a driver returns. Both compared a temporal comparand exactly as written, while the same condition as a `where` is put into the column's storage form by the driver first. So they counted differently. Measured through `engine.aggregate` and through `POST /data/:object/query`, on `driver-memory` and `driver-sql`, over six rows:
+  
+  | in `aggregations[i].filter` (or `having`) | before | now, and the `where` twin |
+  |:--|:--|:--|
+  | an ISO instant on a `date` field, `{ placed_on: { $gte: '2026-02-01T00:00:00.000Z' } }` | 1 | 3 |
+  | the same instant under `$eq` | 0 | 2 |
+  | a bare day as the upper bound of a `datetime`, `{ opened_at: { $lte: '2026-02-01' } }`, or as a `$between` max | 2 | 3 |
+  | an epoch-millisecond bound on a `datetime` | 0 | 3 |
+  | a `Date` carrying a time of day on a `date` field, `$gte` / `$lt` / `$eq` (in-process only) | 1 / 5 / 0 | 3 / 3 / 2 |
+  | a `Date` on a `time` field (in-process only) | 0 | 3 |
+  | `having` on `max` of a `date` field with an ISO-instant bound | kept one group | keeps the two groups whose day is on or after it |
+  
+  The same holds for `$ne`, `$in` / `$nin` members, `$between` endpoints, implicit equality, an offset instant (`'…T18:00:00+08:00'`), an epoch-millisecond string, a zone-naive `'2026-02-01T10:00'`, and a short wall clock (`'11:00'`) or an ISO instant on a `time` field. On a `having` column, the class comes from the query, as the `addDays` rule already reads it: `min` / `max` take the class of the field they read, a `groupBy` projection takes its field's, and a `day` date bucket is a `date`.
+  
+  What the rule does, now in one place:
+  
+  - A comparand, and the row's value, are put into the column's storage form: canonical UTC ISO text for `datetime`, `YYYY-MM-DD` for `date`, and `HH:MM:SS` (`.fff` only when non-zero) for `time`.
+  - A bare `YYYY-MM-DD` used as the upper bound of a `datetime` (`$lte`, a `$between` max) means that whole day, as it does in a `where` (ADR-0053 D-D). On a `date` or `time` column it is not widened.
+  - A value the rule cannot read is compared as written, and so is every non-temporal column, presence tests (`$exists`, `$null`), the text operators and a `{ $field }` reference.
+  - An object whose declared fields the engine cannot see keeps the previous comparison.
+  
+  `@objectstack/core` exports the rule as `temporalStorageForm(value, kind)`, `kind` being `'datetime' | 'date' | 'time'`. `driver-sql` (`canonicalUtcDatetime`, `toDateOnly`, `canonicalTimeOfDay`) and `driver-memory` (`coerceTemporalValue`) each carried a copy of it; both now call it. The copies agreed on every shape measured when they were lifted, so the lift itself changes no `where`, write or read answer of either driver (#20203, in the same release, then reads an epoch-millisecond number on a `date` field as its UTC calendar day). MySQL still binds a `datetime` in its own literal spelling.
+  
+  `@objectstack/objectql`'s `applyInMemoryAggregation(rows, ast, timezone?, fields?)` takes the object's declared field map as an optional fourth argument, and a per-aggregation `filter` reads a temporal comparand by the rule only when it is given. Called without it, the function answers as before.
+  
+  Not changed, measured identical before and after on both drivers: every `where` answer, every refusal a per-aggregation `filter` or `having` gives, and every per-aggregation `filter` and `having` cell whose column is not temporal.
+- 89f87f2: fix(core,objectql)!: a number or `Date` compared against a `date` field spells its year with four digits, and one whose UTC year falls outside 0..9999 is refused `INVALID_FILTER` / 400, as its ISO string already was (#20240)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a query-time refusal of a comparand VALUE on a `date` field: no authorable key, spelling or stored shape moves, `packages/spec` is untouched, and a stored row keeps the form it has. What is refused is a number or `Date` whose day has no `YYYY-MM-DD` form, and which in-range day the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a comparand value (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a filter on a `date` field accepts. A number or `Date` whose UTC calendar day falls in a year below 0 or above 9999 used to answer 200 with the wrong rows, or a 500 on PostgreSQL; it now answers `INVALID_FILTER` / 400. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  `temporalStorageForm(value, 'date')` in `@objectstack/core` spelled the year of a `Date` or an epoch-millisecond number unpadded: `999-06-15`, `10000-01-01`, `-1-01-01`. The ISO string and the bare day of the same instant spelled `0999-06-15`, and as text an unpadded year sorts as no day does. Measured through `engine.find` / `engine.aggregate` and `POST /data/:object/query` (the two doors agree), on a `date` field holding six 2026 days and 0999-06-15, `$gt` / `$lt` / `$eq`:
+  
+  | position | comparand | before: memory · SQLite · PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|
+  | `where` | a number (or, in-process, a `Date`) for 0999-06-15 | 0/7/0 · 0/7/0 · 6/0/1 | 6/0/1 |
+  | per-aggregation `filter` | the same | 0/7/0 on all three | 6/0/1 |
+  | `having` on `max(date)` | the same | no group / every group / no group | the three 2026 groups / none / the 0999 group |
+  | `where` | a number (or `Date`) for 10000-01-01 | 6/1/0 · 6/1/0 · 0/7/0 | `INVALID_FILTER` / 400 |
+  | `where` | a number (or `Date`) for -1-01-01 | 7/0/0 · 7/0/0 · `DATABASE_ERROR` (500) | `INVALID_FILTER` / 400 |
+  | per-aggregation `filter` | either of those two | 6/1/0 and 7/0/0 on all three | `INVALID_FILTER` / 400 |
+  | `where`, per-aggregation `filter` | the ISO string of either | `INVALID_FILTER` / 400 | unchanged |
+  
+  What changes:
+  
+  - The rule pads a year from 0 to 999 to four digits, for a `Date` and a number alike, so a number, its `Date` and its ISO string spell one day. `driver-sql` (`toDateOnly`, `temporalFilterValue`), `driver-memory` (`coerceTemporalValue`) and the engine's per-aggregation `filter` and `having` all call it.
+  - `isUninterpretableTemporalComparand('date', value)` is now also true for a finite number or a valid `Date` whose UTC year is below 0 or above 9999, a finite number past the `Date` range (±8.64e15) included. The engine's temporal-comparand door refuses such a comparand on `where` for every verb (`find`, `findOne`, `count`, `aggregate`, `update`, `delete`), in both the object and the array spelling, and in a per-aggregation `filter`, before any driver read. `IObjectQLEngine.judgeFilter` runs the same door.
+  - The write path: `create()` / `update()` on `driver-memory` or SQLite, given a year-0..999 number or `Date` for a `date` field, now stores `0999-06-15` where it stored `999-06-15`; `engine.insert` of such a `Date` does the same. PostgreSQL and MySQL already stored a three-digit year's day, but not a shorter one: under its default `DateStyle` (`ISO, MDY`) PostgreSQL stored the unpadded `9-03-04` as 2004-09-03 and refused `99-03-04` (`22008`), and MySQL 8.0 stored `99-03-04` as 1999-03-04. All three dialects now store the day. A year outside 0..9999 keeps the spelling it had on the write and read paths; no ordered form is invented for it.
+  
+  **Who is affected.** A caller that compares a `date` field with an epoch-millisecond number or a `Date` in a year below 0 or above 9999. No writer that stores or queries such a day has been measured; the reach is the public query door.
+  
+  **Fix.** Compare against a `YYYY-MM-DD` day, or a number or `Date` whose UTC calendar day falls in a four-digit year.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL through the engine and REST: every `datetime` and `time` cell, the same numbers included (#20264, in the same release, then narrows the range to 0001..9999 on `date` and `datetime` alike: year 0 is refused too, and so is a `datetime` number, `Date` or string outside it, and the padding covers 0001..0999); every string comparand on a `date` field; every number and `Date` in the years 1000 to 9999; `NaN`, ±Infinity and an Invalid Date, which name no year and are not judged; and every read-path presentation on those three. On MySQL, measured at the driver door, a stored year from 100 to 999 now reads back padded (`0999-06-15`, where it read `999-06-15`); a stored year below 100 read back a century late (`0009-03-04` as `1909-03-04`, mysql2's `Date.UTC` reading of a `DATE`), which this change does not touch and #20280, in the same release, corrects by reading a MySQL `DATE` as its text. `having` reaches the same door in the same release (#20263), so a number or `Date` outside 0..9999 is refused there too. `service-analytics`' raw-SQL decline reads a time dimension by the `datetime` rule, so its answer does not move. `driver-mongodb` keeps its own copy of the `date` rule and is not changed here.
+- 3062e50: fix(core,objectql)!: a `date` or `datetime` value names a year from 0001 to 9999, or it is refused: `INVALID_FILTER` / 400 as a comparand on `where`, a per-aggregation `filter` and `having`, and `VALIDATION_FAILED` / 400 as a written value (#20264)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a temporal VALUE at the query door and the write door: no authorable key, spelling or stored shape moves, `packages/spec` is untouched, and a stored row keeps the form it has. What is refused is a day or an instant whose year falls outside 0001..9999, and which in-range year the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a comparand or a written value (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a `date` or `datetime` field accepts, as a filter comparand and as a written value. A value whose year falls outside 0001..9999 used to answer 200 with the wrong rows, 201 with a non-day stored, or a 500 on PostgreSQL; it now answers 400. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  FROM a `date` or `datetime` value in year 0, before it, or after 9999 (`"+010000-01-01T00:00:00.000Z"`, `"-000001-…"`, `"0000-06-15"`, or the epoch-millisecond number or `Date` of such an instant) → TO `INVALID_FILTER` / 400 as a comparand and `VALIDATION_FAILED` / 400 (`invalid_date`) as a written value. The fix is one line: write a year from 0001 to 9999.
+  
+  Measured through `engine.find` / `engine.aggregate` / `engine.insert` and `POST /data/:object/query` / `POST /data/:object` (the two doors agree), over seven 2026 rows, `$gt` / `$lt` / `$eq`:
+  
+  | position | value | before: memory · SQLite · PostgreSQL 16 | now, on all three |
+  |:--|:--|:--|:--|
+  | `where` on a `datetime` | year 10000 or −1: a number, `Date` or ISO string | 7/0/0 · 7/0/0 · `DATABASE_ERROR` (500) | `INVALID_FILTER` / 400 |
+  | per-aggregation `filter`, `having` on `min` of a `datetime` | the same, `$gt` | 7 rows, every group, on all three | `INVALID_FILTER` / 400 |
+  | `where` on a `datetime` | year 0, every spelling | 7/0/0 · 7/0/0 · 500 | `INVALID_FILTER` / 400 |
+  | `where` on a `date` | year 0: a number, `Date`, ISO string or bare `0000-06-15` | 7/0/0 · 7/0/0 · 500 | `INVALID_FILTER` / 400 |
+  | create a `date` | `"+010000-01-01T00:00:00.000Z"` | 201, read back verbatim (not a day) · the same · 500 | `VALIDATION_FAILED` / 400 |
+  | create a `date` or a `datetime` | year 0, year −1, year 10000 | 201 · 201 · 500 | `VALIDATION_FAILED` / 400 |
+  
+  MySQL 8.0 answered the year-10000 and year-−1 cells with a 500 and the year-0 cells like SQLite. A `datetime` in year 10000 spells `+010000-…`, which sorts below every four-digit year as text (its `where` answer was 7/0/0 for `$gt` / `$lt` / `$eq`, where the right answer is 0/7/0); PostgreSQL's `DATE` and `timestamptz` have no year 0 (`22008`). Year 0 was answered right on memory and SQLite and a 500 on PostgreSQL; it is refused everywhere now, one answer on every driver. Each refused query or write now reaches no driver.
+  
+  What changes:
+  
+  - `@objectstack/core` exports `isOutsideTemporalYearRange(value, kind)`, the one range both doors ask. The year is the one the kind's storage rule reads: a `datetime`'s UTC year, a `date` string's leading `YYYY-MM-DD` year (otherwise the UTC year of the instant it names), never a `time`'s.
+  - `isUninterpretableTemporalComparand` is true for a `date` or `datetime` number, `Date` or readable string whose year falls outside 0001..9999; before, it judged only a `date` number or `Date`, against 0..9999. The engine's temporal-comparand door refuses such a comparand on `where` (every verb, both spellings), in a per-aggregation `filter` and on `having`, before any read, in words that name the year range. `IObjectQLEngine.judgeFilter` and `service-analytics`' raw-SQL decline read the same predicate.
+  - The record validator's `date` / `datetime` arm refuses a value outside the range on insert, update, a multi-row update and `engine.validate`, with the field's `invalid_date` code and its existing message.
+  - `temporalStorageForm(value, 'date')` pads a `Date`'s or a number's year to four digits for 0001..0999 only; year 0 keeps its unpadded spelling (`0-06-15`) like every other year outside the range. Only a direct driver write, which bypasses both doors, reaches that arm with year 0.
+  
+  **Who is affected.** A caller that filters on or writes a `date` or `datetime` in year 0, before it, or after 9999. No writer that stores or queries such a year has been measured; the reach is the public query and write doors.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL through the engine and REST: every year from 0001 to 9999 (the edges 0001-01-01 and 9999-12-31T23:59:59.999Z included) and every 2026 control; every `time` cell; every string the rules could not read before, refused in its existing words, except a `date`-column string whose instant names a year outside 0001..9999 (`+010000-01-01T00:00:00.000Z`, `-000001-…`, an out-of-range epoch-millisecond string), refused with the same code and status on `where`, the per-aggregation `filter` and `having` but now in the year-class words; `NaN`, ±Infinity and an Invalid Date, which name no year; the `datetime` storage rule's own spelling of any instant on the write and read paths. On MySQL 8.0, a `datetime` in years 0001..0099 is still stored right and read back a century late through mysql2's instant parser (`0009-03-04T10:00Z` as `2004-09-03T10:00Z`), which ADR-0053 D-F2 keeps and this change does not touch; from year 0100 up it reads back as written. `driver-mongodb` keeps its own copy of the storage rule and is not changed; both doors sit in the engine, in front of it.
+- 5a6267f: `os test` reports the suite and scenario names an author writes, and selects scenarios with `--tags` (#20289)
+  
+  Clause-②: no
+  
+  A Quality Protocol suite's `name`, each scenario's `name` and `description`, and scenario `tags` were parsed at load and then read by nothing: the report headed each suite with its file's basename, printed every scenario by its `id`, and `os test --tags critical` failed with `Nonexistent flag: --tags`.
+  
+  - **Names in the report.** The suite heading is now the suite's `name` followed by its file — `📄 Running suite: Accounts smoke (accounts.test.json)` — and each scenario line is its `name` with the `id` in brackets — `✅ Scenario: An account can be created [acct-create] (12ms)` (the id alone when the two are equal). A failed scenario's `description` is printed under its line, before the error. A suite whose file fails to load is still headed by the file alone, since no name was parsed.
+  - **`--tags TAG[,TAG...]`** runs only the scenarios carrying AT LEAST ONE of the listed tags (any-of, exact, case-sensitive) — the comma-list reading of Odoo's `--test-tags` and the everyday use of Playwright's `--grep @a|@b`. With the flag, an untagged scenario is left out. Left-out scenarios are **deselected**: not run, counted on the summary (`--tags smoke selected 1 of 4 scenarios; 3 deselected (not run, not counted as passed).`), never counted as passed. A requested tag that no loaded scenario carries is named on the summary. An empty entry (`--tags smoke,`) is refused before anything runs. Without the flag nothing changes: every scenario runs.
+  - **Exit status.** A selection that matches no scenario takes the posture an empty pattern already has: exit `0` with `No scenario matched --tags …`, and exit `1` under `--fail-on-empty`, whose description now covers both cases. The `Found N test suites.` line and the `SUCCESS: All N scenarios passed.` / `FAILED: …` summary lines keep their spelling.
+  - **`@objectstack/core`:** `QA.TestResult` gains `scenarioName` and `description` on every result, and `suiteName` on every result `runSuite` produces (absent only from a lone `runScenario` call, which has no suite).
+  - **`@objectstack/spec`:** the liveness ledger (`liveness/qa.json`) moves the four keys above to `live`, citing their readers. `TestScenario.requires`, the family's fifth key, is checked in this same release and has its own note: an unmet `params` or `services` entry skips the scenario with its reason, and `requires.plugins` is retired into `requires.services`.
+- 0bbe400: feat(spec,core,cli)!: a scenario's `requires` is checked before it runs — unmet `params` or `services` SKIP it with a reason; `requires.plugins` is retired into `requires.services` (#20289)
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING** — shipped as `minor` under the launch-window convention
+  (`check-changeset-no-major` refuses `major` until GA; breaking-ness is carried by
+  this banner, the `(narrowing)` arm above and the ADR-0087 disposition below,
+  never by the level).
+  
+  A Quality Protocol scenario's `requires` block declared preconditions —
+  `params` (environment variables) and `plugins` (plugins that must be loaded) —
+  that nothing checked: measured on a stub target, a scenario naming a missing
+  plugin and an unset variable reported PASSED exactly like its no-requirements
+  control. ADR-0049 enforce-or-remove, verdict ENFORCE (the mainstream has
+  declared preconditions: JUnit `@EnabledIfEnvironmentVariable`, pytest `skipif`),
+  ruled B for the shape: each key is judged against something `os test` can
+  actually observe.
+  
+  - **`requires.params`** — each variable must be set to a non-empty value in the
+    environment of the process running `os test` (not the target server's, which a
+    suite cannot see). An empty value counts as unset: an unconfigured CI secret
+    arrives as an empty string.
+  - **`requires.services`** (new) — each entry is a discovery service key
+    (`CoreServiceName`: `auth`, `automation`, `analytics`, `ai`, `storage`, …; a
+    misspelling is refused when the suite loads) that the target must declare
+    `enabled` with status `available` in its discovery document (ADR-0076 D12).
+    It is read from the discovery request the HTTP adapter already makes once per
+    run; a suite that requires no service issues no extra request.
+  - **SKIPPED.** A scenario with an unmet entry runs no step — `setup` included —
+    and `os test` prints it with its reason, naming every unmet entry and, for a
+    service, the services the target does declare available:
+    `Skipped: requires.services 'ai' is not available on the target (enabled: false, status: unavailable). The target declares available: auth, data, metadata.`
+    It is counted on its own — `SUCCESS: 3 scenarios passed. 1 skipped (not run, not counted as passed).` —
+    and never as passed. Skips alone exit `0`; a run in which EVERY selected
+    scenario was skipped prints `No scenario ran: …` instead of `SUCCESS`, exits
+    `0`, and exits `1` under `--fail-on-empty`. With nothing skipped, the summary
+    lines keep their spelling.
+  - **`@objectstack/core`:** `QA.TestResult` gains `status` (`'passed' | 'failed' | 'skipped'`)
+    and, on a skipped result, `skipped` (`reason`, `unmet[]`, `availableServices`);
+    `passed` stays and is `false` on a skip. `TestRunner` takes an optional
+    `{ env }` (default: this process's environment), and `TestExecutionAdapter`
+    gains an optional `readTargetServices()` — `HttpTestAdapter` answers it from
+    its one discovery probe. An adapter without it skips a service requirement
+    rather than running it.
+  
+  ```
+  FROM  { "id": "ai-summary", "requires": { "plugins": ["@objectstack/service-ai"] }, "steps": [...] }
+        -> ran anyway; the missing plugin surfaced as whatever failure it caused, or passed
+  TO    -> os test refuses the suite at load:
+             ✗ scenarios.0.requires.plugins: `scenarios[].requires.plugins` was removed in
+               @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever checked it: …
+               Delete the key and name the service the scenario needs in `requires.services`, …
+               Plugin → service: @objectstack/service-analytics → analytics, @objectstack/plugin-auth → auth, …
+  
+  FROM  { "requires": { "services": ["ai"] }, … }   (new key)
+  TO    -> against a target whose discovery does not declare `ai` enabled and available:
+             ⏭️  Scenario: Summarise an account [ai-summary] (skipped)
+                Skipped: requires.services 'ai' is not available on the target (…). The target declares available: …
+  ```
+  
+  **Fix.** `requires.plugins: ["<package>"]` → `requires.services: ["<service>"]`,
+  using the mapping the refusal prints (derived from `CORE_SERVICE_PROVIDER`, the
+  provider table discovery itself reports): `@objectstack/plugin-auth` → `auth`,
+  `@objectstack/service-analytics` → `analytics`, `@objectstack/service-automation`
+  → `automation`, `@objectstack/service-storage` → `storage`, and so on; the `ai`
+  service is provided by ObjectStack Cloud/Enterprise. A plugin that fills no
+  discovery service slot has no service to require — gate that scenario with a
+  `params` variable or select it with `--tags`. `tsc` refuses `plugins` at a typed
+  authoring site (its input type is `never`). A `TestResult` consumer that counted
+  `!passed` as a failure should read `status` — a skipped result is `passed: false`
+  and is not a failure.
+  
+  **What does not change.** A scenario without `requires` runs exactly as before,
+  and a suite that requires no service issues no discovery request it did not
+  already issue.
+  
+  ### The retirement kit
+  
+  - **Schema.** `TestScenarioSchema.requires` is a non-strict `z.object()`, so
+    `plugins` is a `retiredKey()` tombstone carrying its prescription (a bare
+    deletion would have stripped it in silence); `services` is new, closed over
+    `CoreServiceName`.
+  - **ADR-0087.** `RETIRED_KEYS_BY_MAJOR[18]` gains `qa/TestScenario:requires.plugins`.
+    No D2 conversion: a QA suite is a loose JSON file `os test` loads, never a
+    stack collection member or a stored row. The family's D3 entry,
+    `qa-scenario-requires-plugins-retired`, carries the prescription to
+    `os migrate meta` and the upgrade guide.
+  - **Ledger and docs.** `liveness/qa.json` moves `qa.scenarios.requires` from
+    `dead` to `live`, citing the runner's judgement and the adapter as producer;
+    `state-counts.md` moves `qa` to 9 live / 0 dead. The `os test` section of the
+    CLI reference documents the check, the skip line and the exit posture, and the
+    generated `qa/testing` reference page is regenerated.
+  
+  <!-- adr-0087: registered qa-scenario-requires-plugins-retired -->
+- f6ceddc: A grants resolution with no active organization now applies only the global grants. `resolveUserAuthzGrants` applies a grant scoped to an organization only while that organization is the active tenant, and one rule decides it for all three kinds of grant row it reads: position assignments (`sys_user_position`), permission-set grants (`sys_user_permission_set`) and the organization's own position rows whose bound permission sets it collects (`sys_position`).
+  
+  **BREAKING** for a principal acting with no active organization. Before, "no organization" read as "every organization": each organization-scoped grant the user held anywhere applied, with no organization boundary left on it. That is the resolution a session falls back to when it names an organization its owner no longer belongs to, so a member removed from an organization kept the capabilities that organization had granted until someone revoked each grant by hand. Such a principal now holds its global grants and nothing scoped to an organization.
+  
+  - **Unchanged:** a principal with an active organization resolves exactly as before, and a global grant (no organization) applies everywhere as before. Platform-admin standing is unchanged: it was only ever derived from the unscoped `admin_full_access` grant or the declared administrator list, never from an organization-scoped grant.
+  - **If a principal relied on it:** act in the organization. Select it as the active organization, or mint the API key from a session that has it active, or grant the permission set globally (no organization) when it is meant to apply everywhere.
+  - **No "every organization" mode.** No option asks the resolver for every organization's grants, and nothing falls back to that reading.
+  - **`@objectstack/plugin-security`:** `buildContextForUser(ql, userId, nowMs?, tenantId?)` takes the organization to resolve the user in. The access explainer (`explainAccessForCaller`) resolves the explained user in the caller's organization, and the delegator behind an on-behalf-of principal is resolved in the live principal's organization, so the delegated intersection counts the delegator's grants where the request actually runs.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves: no `packages/spec` schema, key or export changes, and no stored row changes shape, so `objectstack migrate meta` has nothing to rewrite and no conversion entry has anything to convert. What narrows is which already-stored grant rows apply to a resolution that names no organization; the remedy is operational (act in the organization, or grant globally) and is stated above. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers this (not `registered` / `already-registered`); and the change is runtime behaviour, not a TypeScript declaration alone (not `runtime-interface-only` / `type-surface-only`). -->
+- 0da638c: fix(analytics)!: every analytics face lowers the closed `dateRange` preset vocabulary to one window and refuses the rest with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` (#16322)
+  
+  <!-- adr-0087: not-required (already-registered analytics-time-dimension-date-range-vocabulary-closed) the driver half of #16041 implements the migration that card registered; the accept set narrowed at the contract there, and the prescription an author needs is that entry's, unchanged -->
+  
+  **BREAKING** for an in-process caller that reaches an analytics face PAST the
+  schema door with a string the closed vocabulary does not contain: it used to be
+  answered, and is now refused. Shipped as `minor` under the repo's launch-window
+  convention. The driver half of #16041, whose spec change closed
+  `AnalyticsQuery.timeDimensions[].dateRange`'s string arm to the thirteen
+  dashboard preset names; every value affected here was already refused at
+  `POST /analytics/query` and `/analytics/sql` when that landed.
+  
+  ## What was wrong
+  
+  #16041 closed the contract; the faces behind it never aligned, so the defect it
+  abolished simply moved onto the newly-blessed vocabulary. Measured on the built
+  `driver-memory` dist over five probe rows (2020, 2026-08-31, 2026-09-05, now,
+  2099):
+  
+  | input | before | after |
+  |:--|--:|--:|
+  | `today` | 1/5 | 1/5 |
+  | the other twelve declared presets | **5/5 — 2020 and 2099 included** | a real window each |
+  | `'not a range at all'`, `'Last 7 Days'` | 5/5 | `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` |
+  
+  `driver-memory` recognised exactly `today`: every snake_case preset missed its
+  `startsWith('last ')` branch and fell to a `[range, range]` pseudo-window whose
+  two bounds were the preset's own NAME, which matched every `Date`-typed row
+  under BSON cross-type ordering. Both `service-analytics` SQL strategies lowered
+  the same names — and unrecognised strings, and `today` — to the point window
+  `created_at >= 'last_30_days' AND created_at <= 'last_30_days'`, whose answer is
+  whatever the dialect decides a vocabulary word compares as. So a dashboard
+  asking for one month got all of history on one backend and a nonsense
+  comparison on the other, at HTTP 200 on both.
+  
+  ## What it does now
+  
+  - **One lowering, in `@objectstack/core`.** `resolveAnalyticsDateRangePreset` /
+    `resolveAnalyticsDateRangeString` resolve every declared preset to
+    `{ start, end, endExclusive }`. The window is a pair of `{date-macro}` tokens
+    handed to the existing macro resolver, so `dateRange: 'this_month'` and a
+    `{month_start}` filter token cannot answer differently, and the anchoring on
+    `AnalyticsQuery.timezone` (#16042) plus the one-calendar arithmetic (#15825)
+    come from that resolver rather than from each face.
+  - **One refusal.** `analyticsDateRangeUnrecognizedError` stamps the ADR-0112
+    envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` with the spec's own
+    `analyticsDateRangeRefusalMessage` wording — the same sentence the schema door
+    answers with. `driver-memory`, both SQL strategies and the draft-preview evaluator call
+    it, so "memory and SQL refuse identically" is one function rather than an
+    agreement.
+  - **The upper bound keeps #16179's separation.** A window a face RESOLVED is
+    compared exclusively (`$lt` / `<`) for the ten calendar presets and
+    inclusively for the three rolling `last_N_days`, whose bound is NOW; an
+    explicit `[a, b]` a CALLER wrote is untouched and keeps `$lte`.
+  - The fifteen `driver-memory` date-range pins #16041 retired are reinstated in
+    preset form (DST cells re-measured under calendar semantics, not re-spelled),
+    and one cross-face conformance fixture holds all FOUR faces to the same
+    windows and the same refusal.
+  - **The draft-preview evaluator is the fourth face**, and it is in that fixture
+    for the same reason the other three are. `preview-evaluator.ts` (ADR-0037 P3 —
+    the Live Canvas preview over a pending seed draft) carried the identical
+    `[range, range]` fallback, so a valid `last_30_days` selected NOTHING there,
+    silently, while the published chart beside it answered a real window — across
+    a publish boundary the preview exists to make continuous, since publish
+    materialises the same seed.
+  
+  ## FROM → TO
+  
+  Unchanged from #16041's — the spelling that is refused here is the spelling that
+  was already refused at the door.
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `dateRange: 'Last 7 days'` / `'last 7 days'` | `dateRange: 'last_7_days'` |
+  | `dateRange: 'last 3 months'` | `dateRange: 'last_90_days'`, or an explicit `['{90_days_ago}', '{today}']` |
+  | `dateRange: '2026-01-20'` (the SQL single-day dialect) | `dateRange: ['2026-01-20', '2026-01-20']` |
+  | `dateRange: ['2026-01-01', '2026-01-31']` | unchanged |
+  
+  The `@objectstack/spec` entry is a `PROVENANCE_WAIVERS` row only: the refusal's
+  code stays registered under `@objectstack/runtime` (the door that names the wire
+  vocabulary), and the waiver records that the shared constructor spelling it
+  lives one package over.
+- f03f6c7: fix(driver-memory)!: an analytics time dimension buckets by its declared `granularity`, and refuses a sub-day one instead of ignoring it (#16178)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. `packages/spec` is untouched: `TimeUpdateInterval` still declares all eight intervals, `AnalyticsQuery.timeDimensions[].granularity` keeps its name, its type and its optionality, and every analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is one BACKEND's accept set at request time: `driver-memory`'s analytics face refuses the three sub-day granularities it cannot label, where it previously accepted them and produced an ungrouped answer. The remedy is a coarser granularity in the request itself, which is data a caller holds rather than an authored artifact with a stored representation; the spec-side narrowing of `TimeUpdateInterval` is filed separately as issue #17296, a `domain:spec` question under ADR-0049, and is deliberately not performed here. The other two packages add exports and relocate an implementation, both additive. -->
+  
+  **BREAKING** in three senses, all on `driver-memory`'s analytics face, landing in
+  the launch window as `minor` under the lockstep convention this cluster's
+  siblings already use:
+  
+  - an accepted request now answers **differently**: a time dimension carrying a
+    `granularity` folds its rows into calendar buckets instead of returning one
+    group per distinct timestamp. Every affected answer was wrong before;
+  - a **trend query answers rows where it used to answer one total**: a
+    `granularity` on a member `dimensions` does not also list is now a group
+    column of its own, so `{measures, timeDimensions: [{dimension, granularity}]}`
+    — the canonical trend shape — comes back one row per bucket, carrying the
+    member and a `fields` entry for it, instead of a single ungrouped total with
+    no such column;
+  - an accepted request is now **refused**: `granularity: 'second' | 'minute' |
+    'hour'` answers `NOT_IMPLEMENTED` / 501 instead of being silently dropped.
+  
+  ## What was wrong
+  
+  `AnalyticsQuery.timeDimensions[].granularity` is declared by the spec and a cube
+  dimension enumerates the granularities it offers (`granularities: ['day']`).
+  `memory-analytics.ts` read neither. The `$group` stage keyed on the raw field
+  path, so a time dimension bucketed **one group per distinct timestamp** — one bar
+  per row in a "new accounts by month" chart, which is the symptom #3588
+  catalogued and repaired for `service-analytics`.
+  
+  Measured through the public entry against the built package, two rows on one UTC
+  calendar day (`2026-09-06T01:00:00Z` and `2026-09-06T23:00:00Z`) under
+  `granularity: 'day'`:
+  
+  | | before | after |
+  |:--|--:|--:|
+  | `granularity: 'day'` | **2 groups**, keyed on the raw instants | 1 group, `2026-09-06` |
+  | no granularity (control) | 2 groups | 2 groups, unchanged |
+  | `granularity: 'hour'` | **2 groups**, silently | `NOT_IMPLEMENTED` / 501 |
+  | same, but with no `dimensions` | **`{count: 2}`** — one total, no time column, and no `fields` entry naming it | `{'events.createdAt': '2026-09-06', count: 2}`, `fields` naming both |
+  | `granularity: 'fortnight'` past the schema door | — | `INVALID_QUERY` / 400 |
+  
+  The emitted pipeline was byte-identical across all three, which is the whole
+  finding: the request was accepted, no warning was emitted, and the key was inert.
+  
+  ## What it does now
+  
+  - **One forward labeller, in `@objectstack/core`.** `bucketDateKey(value,
+    granularity, timezone)` sits beside the inverse `bucketKeyToCalendarRange` and
+    the `calendarPartsInTzOrUtc` primitive it builds on, and it is now the only
+    statement of the rule. `BUCKET_GRANULARITIES` and `isBucketGranularity` name
+    the five granularities that HAVE a canonical key, so a face that must refuse
+    the other three quotes the accepted set instead of hand-listing it.
+  - **`@objectstack/objectql`'s `bucketDateValue` is a delegate**, export name and
+    signature unchanged, answers unchanged — pinned across granularity, timezone
+    and input form rather than asserted. A driver that pushes the bucket down into
+    SQL and this in-memory path must label one instant identically or a drill-down
+    breaks at the seam, and that is now one function rather than an agreement
+    between two.
+  - **A granular time dimension is a group column, listed or not.** `dimensions`
+    no longer decides alone what `$group` keys on: every `timeDimensions` entry
+    carrying a `granularity` is grouped, projected and named in `fields`, deduped
+    against `dimensions` on the resolved member so two spellings of one member
+    stay one column. This is the rule the SQL/ObjectQL face already records
+    (`projectedDimensions`, #4033/#5688) — one set feeding grouping, row mapping
+    and field metadata, because rows carrying a bucket under a `fields` list that
+    never mentions it is a trend chart with no x-axis. ⛔ An entry carrying only a
+    `dateRange` is a predicate and is still **not** projected.
+  - **`driver-memory` folds by granularity before its `$group`.** The pipeline is
+    cut at that stage: the `$match` half still runs in the driver, the bucket keys
+    are written onto the selected rows, and the grouping half runs over those. The
+    key travels under a synthetic field rather than overwriting the row's own, so a
+    member that is both a group key and a measure's aggregand still ranks instants
+    in `max()` while grouping on the label.
+  - **The output vocabulary is the published one** — `2026`, `2026-Q3`, `2026-09`,
+    `2026-09-06`, `2026-W36`. The week label is `YYYY-Www`, never the Monday's
+    `YYYY-MM-DD`: `DriverCapabilitiesSchema.queryDateGranularity` calls this an
+    output contract, and a second spelling is what breaks a drill-down across a
+    backend seam.
+  - **Bucketing honours `AnalyticsQuery.timezone`** — the same reference zone
+    #16042 threaded through the `dateRange` window resolver, so the window that
+    selects the rows and the bucket that folds them agree on where a calendar day
+    starts. The same two rows answer one group in UTC, two in `America/New_York`
+    and two in `Asia/Tokyo`. An absent zone buckets in UTC, the resolver's default.
+  
+    ⚠️ That agreement is about the PRESET arm of `dateRange`, which the resolver
+    reads in the reference zone. An explicit `[start, end]` array is the caller's
+    own **instant** window and keeps its published reading (#16179), while the
+    bucket beside it is always a **calendar** label (ADR-0053) — so an array
+    window and a bucket can still disagree about where a day starts. That
+    combination is legitimate and is not refused; it is stated here rather than
+    left to be discovered.
+  - **`second` / `minute` / `hour` are refused at compile**, in the ADR-0112
+    envelope this driver's other capability gaps speak (`NOT_IMPLEMENTED` / 501,
+    the class `refusePerAggregationFilter` uses for the same reason: the query is
+    spelled correctly, the spec declares the value, and it is this backend that
+    compiles nothing for it). The canonical key vocabulary defines no label for a
+    sub-day bucket, so there is no string another backend's pushed-down SQL would
+    agree with. Passing it through unbucketed is this card's own defect wearing a
+    new name.
+  - **An undeclared granularity is a 400, not a 501.** A 501 says "this backend
+    cannot", which is only honest about a value the contract declares.
+    `TimeUpdateInterval` is checked first, so a spelling it never declared —
+    reachable past the schema door, where `POST /analytics/dataset/query` types
+    `selection.timeDimensions` without Zod-parsing them — answers `INVALID_QUERY`
+    / 400 rather than a 501 asserting the spec declared it. The same separation
+    the `dateRange` half of this face already draws (#16322 / #16041).
+  
+  ## If a caller is refused
+  
+  A stored widget or a request asking for a sub-day granularity was never bucketed
+  by this backend — it received one group per distinct timestamp under an ordinary
+  200. Nothing that worked stops working. Ask for `day` or coarser and the answer
+  is a real bucket; keep the raw timestamps deliberately by dropping the key, which
+  is the behaviour that key used to produce by accident.
+- 71629a1: refactor(core): one `classifyAdmissionTenancyPosture`, so six admission seams cannot each get the classification wrong (#16013)
+  
+  Six admission doors each hand-wrote the same try/catch on the `tenancy` read that
+  feeds `resolveAuthzContext`: the registry's branded "never registered" rejection
+  (`isServiceNotRegisteredError`, #13905) resolves quietly to `undefined` — the
+  supported no-tenancy composition, where no posture-conditional refusal runs at
+  all — and every other rejection becomes `AuthzStoreUnavailableError('tenancy', err)`
+  (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because the posture is an authorization
+  INPUT and admission was therefore never DECIDED. That is #13906 decision 1
+  option A, and it is the part nobody may get wrong: a quiet `catch` at any one of
+  the six re-opens the defect, where a failure reads as "this check does not apply"
+  and an ex-member's org-stamped API key is admitted.
+  
+  Nothing is broken today — every copy was correct — so this removes a standing
+  hazard rather than fixing a defect. **No admission verdict changes**, on any
+  wiring: the classification is byte-for-byte the decision the six copies made,
+  now made once.
+  
+  - **`@objectstack/core` gains `classifyAdmissionTenancyPosture`** (and the
+    `TenancyServiceResolver` type), exported from the package index beside
+    `effectiveTenancyPosture`. It takes a THUNK and owns the classification only.
+    The thunk is not a style choice: the REJECTION is what gets classified, so the
+    resolution has to happen inside the helper's `try` — a caller that awaited the
+    service first would need a `catch` of its own, which is the thing being
+    deleted.
+  - **The RESOLUTION deliberately did not move.** `rest-server.ts` branches on
+    kernel-vs-provider, and asking twice would let a provider bound to the local
+    kernel answer for a request that resolved to another environment; four seams
+    read `ctx.getKernel()`; `service-storage` reads an already-normalised gate
+    registry; and each seam's reason why a MISSING async accessor must stay quiet
+    is its own argument (the storage door's is its declared degrade-to-ungated
+    contract, the others' is the `KernelBase`/`LiteKernel` host shape). A helper
+    that also owned how the service is reached would be wrong for one of them or
+    grow a flag per seam — the copies again, with an extra step. Every one of
+    those reasons stays written at its seam.
+  - **Folded**: `packages/rest/src/rest-server.ts` (both wirings),
+    `packages/cloud-connection/src/marketplace-install-local-plugin.ts`,
+    `packages/plugins/plugin-sharing/src/sharing-plugin.ts`,
+    `packages/services/service-datasource/src/admin-routes.ts`,
+    `packages/services/service-settings/src/settings-service-plugin.ts`,
+    `packages/services/service-storage/src/storage-service-plugin.ts`.
+  - **Pinned where the decision now lives**:
+    `packages/core/src/security/admission-tenancy-posture.test.ts` drives both
+    rejections at the production seam — a real `ObjectKernel` that never
+    registered `tenancy`, and one whose `tenancy` factory throws — each beside the
+    brand predicate's own answer on that same rejection, so "the outage throws" is
+    distinguishable from a helper that throws at everything. It also holds the
+    constraint mechanically: the helper's source may not name an accessor, a
+    kernel or a plugin context, and it takes exactly one parameter.
+- 07150b3: `PluginSchema.version` now accepts the whole of the SemVer 2.0.0 grammar, and `version` becomes the ninth declared key `kernel.use()` enforces.
+  
+  Two declarations in this repository disagreed about what a plugin `version` is, and the disagreement became load-bearing the moment the boot path started running the schema:
+  
+  | Declaration | Grammar | Accepted `1.0.0-alpha.1` / `1.0.0+20230101` |
+  |---|---|---|
+  | `PluginSchema.version` (`@objectstack/spec`, `kernel/plugin.zod.ts`), described `"Semantic Version"` | `/^\d+\.\d+\.\d+$/` | **no** |
+  | `PluginLoader.isValidSemanticVersion` (`@objectstack/core`), the check the boot path has always run | `/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/` | **yes** |
+  
+  SemVer 2.0.0 defines prerelease and build metadata as **parts of** a semantic version, so the key's own `describe()` — `"Semantic Version"`, no qualifier — claimed the wide grammar while its regex implemented a subset of it. The spec key was the one that was wrong, and it is the one that moved.
+  
+  **The spec adopts the loader's grammar character for character**, deliberately, rather than a third spelling: that is the check the boot path has always run, so the two declarations now converge exactly and nothing that loaded before is refused now.
+  
+  **`@objectstack/spec` — a WIDENING of a published contract.** `Plugin.json`'s `pattern` in the shipped `json-schema/` tree changes from `^\d+\.\d+\.\d+$` to `^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$`. This is a strict superset — same three-segment core, two **optional** suffix groups — so every string that validated before still validates. A tool that mirrors this schema to validate plugin manifests should widen with it; one that does not will merely keep refusing prerelease versions the platform accepts.
+  
+  **`@objectstack/core` — `version` joins the enforced set, which NARROWS `LiteKernel`.** **BREAKING** accept-set narrowing on a published runtime entry point, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A plugin object `LiteKernel` accepted before can be refused now.** `assertPluginContract` filtered `version` issues out while the two spellings disagreed; that stopgap is gone. The full enforced set is now **NINE** keys, each refused with the offending key named in the message:
+  
+  - **`id`** — a non-string, or the empty string.
+  - **`type`** — any value outside the closed set `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.
+  - **`staticPath`** — a non-string.
+  - **`slug`** — a non-string, or a string that does not match `/^[a-z0-9-_]+$/`.
+  - **`default`** — a non-boolean.
+  - **`version`** — a non-string, or a string outside the SemVer grammar above. **New in this release.**
+  - **`description`** — a non-string.
+  - **`author`** — a non-string.
+  - **`homepage`** — a non-string, or a string that is not a URL.
+  
+  **`null` is refused on every one of the nine**, and a `type: 'ui'` plugin missing `staticPath` or `slug` is still refused with `PLUGIN_UI_REQUIRED_KEY_MISSING` inside the same envelope.
+  
+  ⚠️ **This supersedes the eight-key enumeration published in `@objectstack/core@17.4.0`.** Both of that release's entries — the `kernel.use()` and the `LiteKernel.use()` enforcement notes — say the enforced set is eight keys and that `version` is excluded, and both point at reconciling the two `version` spellings as separate spec work. This is that work. Those entries stay as written, because they describe what 17.4.0 did; **nine is the current set**, and `version` is no longer excluded from anything.
+  
+  **What actually changes behaviour, stated narrowly.** On **`ObjectKernel`** nothing moves: `PluginLoader.validatePluginStructure` already judged `version` with this exact grammar and still runs first, so a malformed `version` is still refused as `Invalid semantic version`, never as `PLUGIN_CONTRACT_VIOLATION`. On **`LiteKernel`** a plugin object with a malformed `version` — `version: 'v1.0.0'`, say — was **registered** before and is **refused** now, with `PLUGIN_CONTRACT_VIOLATION` at `'version'`. `LiteKernel` has never run the loader's structural checks, so `version` was the one declared key it did not judge at all: such a plugin was green in vitest and refused by `ObjectKernel` at production boot. That is exactly the split the `LiteKernel` convergence closed for the other eight keys, closed now for the ninth.
+  
+  **What is unchanged.** `1.0.0-alpha.1`, `1.0.0+20230101` and `0.0.0-fixture` load on **both** kernels, as they did before — measured, not assumed, and pinned per kernel. A version-less plugin still loads; `version` is `.optional()`. Unknown keys still pass (`PluginSchema` carries no `.strict()`, and the parse output is discarded, so the stored object is the object that was passed in). A class-based plugin keeps its identity, prototype and prototype methods.
+  
+  ⚠️ **The accepted grammar is wider than SemVer 2.0.0 itself**, and this release neither introduced nor widened that fringe: leading zeroes in the numeric core (`01.1.1`) were accepted by **both** spellings before this change and are accepted by both after it, and the loader's prerelease/build classes admit degenerate identifiers SemVer forbids (`1.0.0-alpha..1`, `1.0.0-0123`, `1.0.0+.`). Tightening to the official SemVer regex would have **narrowed** this key rather than widening it, so it is deliberately not done here.
+  
+  **Migration.** Nothing to rename, and nothing to do if your plugin's `version` is a real semantic version. If you register plugins on `LiteKernel` with a `version` string that is not one — a leading `v`, a two-segment `1.0` — spell it `MAJOR.MINOR.PATCH` with optional `-prerelease` and `+build`, or drop the key. The refusal names the plugin and the key.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A regex widening on one declared key of `PluginSchema`, plus the removal of a runtime filter that had excluded that key from an existing check. No metadata key, spec symbol, Zod schema, object definition or stored representation is added, removed or given a different name, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Stored metadata is untouched; what moves is which plugin OBJECTS a boot accepts — strictly more of them at the schema, and on `LiteKernel` the malformed-`version` objects `ObjectKernel` already refused. The channel that reaches an affected plugin author is the refusal itself, which names the plugin and the offending key at `use()`, and which value a malformed `version` should carry is authoring intent no ledger entry can decide. -->
+
+### Patch Changes
+
+- 0f95f43: docs(identity): re-point the cloud-identity `ADR-0024` citations at the records that decide them (#14361)
+  
+  From this repository's point of view `ADR-0024` names two unrelated decisions.
+  `docs/adr/0024-mcp-connectors.md` is *MCP Servers as Connectors* — an open,
+  vendor-neutral tool protocol, with a Decision section numbered §1–§5 and no
+  D-lettered clauses at all. The identity surface's citations mean something else
+  entirely: the identity-and-access decision taken in `objectstack-ai/cloud` as
+  its own ADR-0024, whose open mechanism half has been mirrored into this repo
+  since 2026-09-07 as
+  [ADR-0135](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0135-identity-and-access-architecture.md).
+  A reader following one of those citations landed on a real page about the wrong
+  subject, which is worse than a dangling id: a plausible-looking record invites
+  belief rather than a second question.
+  
+  79 citation lines were read one at a time and re-pointed. 73 mean a clause
+  ADR-0135 restates and now name it with its letter — D4 (source-of-truth marking,
+  managed vs env-native), D5.2 (the break-glass last-administrator invariant), D6
+  (SSO per production environment, including the opt-in DNS domain-verification
+  clause this tree spelled `ADR-0024 ②`) and D9 (environment users and
+  organization membership). 6 mean a clause ADR-0135 deliberately leaves in the
+  cloud record and now carry the anchors gate's cross-repo qualifier
+  `cloud ADR-0024`: `V1` (the SSO default-role provisioning, the roadmap and
+  commercial framing) and `§7` (the `ai_seat` synthesis, which ADR-0135 does not
+  restate).
+  
+  What actually reaches a consumer of these packages:
+  
+  - `@objectstack/plugin-auth` — the **operator-facing break-glass refusal
+    detail** now reads `break-glass invariant, ADR-0135 D5.2 — an environment must
+    always keep at least one administrator who can sign in`. The condition that
+    raises it, its status, its error code and the rest of its wording are
+    unchanged; only the ADR number moves. ⚠️ A deployment that greps that message
+    for the literal `ADR-0024` should grep for `ADR-0135`. The guard's
+    registration log line moves the same way.
+  - `@objectstack/platform-objects` — `sys_sso_provider`'s `domain_verified` field
+    help text, its `protection.reason`, and the matching leaf in all four shipped
+    locale bundles (`en`, `es-ES`, `ja-JP`, `zh-CN`).
+  - `@objectstack/spec` — the doc comment above `AuthConfigSchema`'s
+    `ssoDomainVerification`, published both in `dist/` and as
+    `src/system/auth-config.zod.ts`.
+  - `@objectstack/core`, `@objectstack/cli` — doc comments only, published in
+    `dist/`; no runtime string and no behaviour.
+  
+  No behaviour moves. No schema accepts or refuses anything it did not accept or
+  refuse before, no security or permission semantics are touched, and no ADR
+  record is written or edited. Bare `ADR-0024` still resolves exactly as it did:
+  the 15 citations that mean the local MCP-connectors record are byte-identical to
+  `main`, and `check:adr-anchors` reports the same resolving-citation totals before
+  and after. Historical archives are deliberately untouched — 36 CHANGELOG lines
+  across seven packages, and the 22 lines under `docs/adr/`, which is a governed
+  surface this change does not enter.
+- baf9745: Three source comments now state the registered position for the `door: 'none'` boot-refusal codes instead of the pre-#16404 one
+  
+  `SERVICE_NOT_REGISTERED`, `PLUGIN_CONTRACT_VIOLATION` and — as the worked
+  example the `driver-sql` comment cites — `MONGODB_MULTI_TENANT_UNSUPPORTED` are
+  all registered in `ERROR_CODE_LEDGER`. #16649 registered fourteen `door: 'none'`
+  codes under the #16404 door-or-no-door ruling, and re-registered the MongoDB one
+  that #8035 had removed. Three TSDoc comments still asserted the position that
+  preceded that ruling — that these codes are deliberately not wire vocabulary,
+  and that registering one is "not something to start doing at a door" — and each
+  was false the moment #16649 landed. They also pointed at
+  `dispatcher-error-vocabulary.ts`'s `boot-refusal` verdict, which the same PR
+  ratcheted from fourteen rows to zero, so the pointer dangled.
+  
+  These docblocks ship inside each package's `dist/*.d.ts`, which is why this is a
+  published change rather than an internal one: the sentence is what an agent or
+  an IDE reader sees at the point it decides whether the code needs registering.
+  
+  ⛔ No behaviour changes. Every reachability sentence is kept verbatim — none of
+  these codes reaches an HTTP door on this tree — no code is added, removed or
+  re-registered, and no gate moves. With every comment character removed by
+  `scripts/js-comment-mask.mjs`, all three files' executable token streams are
+  byte-identical to the commit this branched from.
+- aaacf1d: Say what the install-time granted permission set actually does: it is REGISTERED at load and refuses nothing.
+  
+  Four shipped sentences claimed the structured `manifest.permissions` / `granted_permissions` set was enforced. Measured on `9bd4344e4`: `SecurePluginContext` — the only reader of `PluginPermissionEnforcer`'s service and hook gates — has zero production construction sites, and `enforceFileRead` / `enforceFileWrite` / `enforceNetworkRequest` are called by nothing at all, `SecurePluginContext` included. So #13457's binding registers a consented set that nothing queries, and the `fs` and `network` classes have no enforcement surface even in principle.
+  
+  Corrected, each to the same truthful split ("registered at load · queried by nothing · refuses no operation"): the `registerGrantedPermissions` docblock, the `PluginPermissions` schema docblock, the `manifest.loading` tombstone prescription, and the ADR-0087 D3 entry that ships that prescription into `docs/protocol-upgrade-guide.md`. The hand-written plugin development guide gains the same note beside its permission table.
+  
+  `plugin-runtime-tier-truthful-text.test.ts`'s coordination pin — which held the permissions half verbatim so it would go red the day that half was corrected — has been discharged and replaced by pins on the truthful text, in both carriers, each with the negative assertion that keeps the retracted sentence from returning beside it.
+  
+  New in `@objectstack/core`: `granted-permissions-not-enforced.pin.test.ts` pins the MEASUREMENT as well as the words, so the claim cannot rot in either direction. It fails the day a production `SecurePluginContext` construction site appears — i.e. the day the ADR-0025 materialize seam lands — and names every text that then becomes false.
+  
+  No behaviour changes: no accept/reject, no registration, no gate is added or removed.
+- 6548118: Sweep the retracted "enforces exactly the consented surface" phrasing repo-wide, not just in the file it shipped on.
+  
+  The #17147 pin read one file, and a post-merge sweep found what that missed: `artifact-granted-permissions.test.ts` carried the retracted sentence as a CASE TITLE — "a CONSENTED entry enforces exactly the consented surface" — beside a sibling titled "registered, and denies". Neither case asserts a refusal; both read a permission bag and check what it answers. But a case title is read as evidence (ADR-0033), and those two said the platform confines plugins while nothing on the tree queries the registry at all.
+  
+  Both titles now name what they assert, the file carries a verb-discipline note (`answers` / `registered` / `bound`; ⛔ never `enforces` / `denies` / `gates` / `refuses` / `blocks` until the seam exists), and the pin's negative assertion is a repo-wide `git grep` excluding only its own specimen — with an anti-vacuity limb so a broken scan cannot read as a clean one.
+  
+  No behaviour, no assertion semantics, and no accept/reject changes.
+- d3a2331: fix(spec,core): every ADR-0049 tombstone names the npm release that actually carries its removal, and a gate keeps it that way (#18048)
+  
+  Clause-②: no
+  
+  Thirty-six sites across fifteen files dated a removal to the next npm major of
+  `@objectstack/spec` — a bare **18** attached to the package name.
+  There is no npm 18, and under ADR-0087's level ruling (Amended 2026-09-13) there
+  will not be one as the carrier for a retirement: *"A tombstone names the npm
+  release it ships in, ⛔ never the protocol major […] a retirement shipping
+  `minor` lands in `17.x.y`"*. An author who met one of these was sent to a
+  version that does not exist. A sibling repository had already hung a cleanup
+  schedule on "the PR that pushes the spec package to its next major" — an event
+  that will never come.
+  
+  **The number was determined per site from `packages/spec/CHANGELOG.md`, not
+  pasted.** The sites split cleanly in two, and the two halves take different
+  spellings because different things are known about them:
+  
+  - **Already shipped ⇒ the release that carries it.** The three
+    `PluginHealthCheck` restart keys (`b72db01`), `HotReloadConfig.stateStrategy`
+    / `distributedConfig` (`4635f3e`), `HotReloadConfig.watchPatterns`
+    (`ee3595c`) and the form-view `options[].default` narrowing (`c459da6`) all
+    landed in **`17.3.0`**, which is published. These say `17.3.0` — the version
+    an upgrading reader greps in the CHANGELOG.
+  - **Not shipped yet ⇒ the bare published major `17`.** The seven cron-typed
+    positions, the `scheduled` cache-warmup strategy and the three
+    `PluginStartupResult` members are still unreleased changesets, so the carrier
+    minor is unknown at authoring time and any digit would be a guess — the same
+    guess that produced this defect. ADR-0087 guarantees the major: a pre-GA
+    retirement ships `minor`, so the carrier is some `17.x.y`. Bare `17` asserts
+    exactly what is known, cannot go stale as minors accumulate, and is the house
+    form already on 588 other sites.
+  
+  **Why `Clause-②: no`.** Every affected string is a docblock, a doc page, or a
+  `retiredKey()` / `guidance` MESSAGE. The key is refused before and after, so the
+  accept/reject result does not move for any input. The control that decides it:
+  the phrase has 0 hits across `packages/*/api-surface` and
+  `packages/*/export-origins`, so no published declaration baseline carries these
+  sentences and none moves.
+  
+  **No protocol-major reference is altered.** `toMajor: 18`, `step18` and the
+  `PROTOCOL_VERSION` ladder are correct and untouched — ADR-0087: *"the two move
+  independently"*.
+  
+  **Three sites are deliberately left saying 18**, because they quote the wrong
+  number in order to forbid it: the ADR-0087 ruling itself, and the two
+  `docs/v17-docs-sweep.md` rows that carry this class's detection fingerprint.
+  Four more say `99` on purpose — a synthetic "next major" fixture that must name
+  a version that does not exist.
+  
+  **A gate lands with the prose**, because this is the class's second appearance:
+  ten sites of it were corrected by hand in July with no gate, and the card closed
+  `completed`. `pnpm check:future-spec-major` derives the class from
+  `packages/spec/package.json` at runtime — a major above the published one, never
+  a hardcoded 18 — joins string-concatenation, JSDoc and plain-wrap line breaks
+  before matching, and reads the backticked package name, because each of those is
+  an independent way for a matcher to read zero and print green.
+- fe0ae5c: analytics `dateRange`: one condition, one refusal wording
+  
+  An array `dateRange` that is not a two-bound window is refused by the
+  `service-analytics` faces with the platform's ONE shared sentence
+  (`analyticsDateRangeRefusalMessage`, origin `runtime`) instead of a
+  package-private second wording. The envelope is unchanged —
+  `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400 — so nothing that classifies on
+  `code`/`status` is affected; only the `message` text changes, and it now agrees
+  byte-for-byte with the sentence the schema door answers with for the same value.
+  
+  The second wording existed because the shared sentence used to judge a bare
+  string against the preset vocabulary and to end with "Refused at the schema",
+  neither of which is true of an array refused past the schema door. Both grounds
+  were removed when `analyticsDateRangeRefusalMessage` gained its required
+  `origin` parameter and began describing a non-string by what is wrong with it.
+  
+  ⚠️ **The message no longer echoes the value you sent.** For an ARRAY
+  `dateRange` the shared sentence DESCRIBES the shape instead: what used to read
+  `dateRange ["a","b","c"] is a 3-element array` now reads `received a 3-element
+  array, not the two bounds [start, end]`. That applies to EVERY array shape this
+  face refuses, not to unusual ones only — `[null, null]` now reads `received an
+  array with a non-string bound`, and `['', '']` is where the description carries
+  least, `received a two-element array`. A bare STRING `dateRange` is still quoted
+  back to you. So a log line that used to carry the offending array no longer
+  does: if you need the value at that site, read it from the request you already
+  have, ⛔ not from the message.
+  
+  ⛔ If you match on the old text (`[service-analytics] dateRange …`), match on
+  `error.code === 'ANALYTICS_DATE_RANGE_UNRECOGNIZED'` instead — the message was
+  never the contract, the envelope is.
+- 2cac363: feat(spec): one declaration per version grammar — eight regex carriers of "the version of a package or plugin" now reference three exported constants
+  
+  Clause-②: yes (widening)
+  
+  **No accept set moves, and that is the whole point of this change.** Eight sites
+  spelled a version regex out as a literal of their own. Five of those spellings
+  were byte-identical to each other, two more were byte-identical to each other,
+  and the eighth stood alone — three accept sets written eight times, growing on
+  their own: three of the eight were published schema declarations with no parse
+  caller at all, added by authors who copied a neighbour's literal. Each site now
+  references the constant carrying the pattern it already enforced, byte for byte.
+  A ninth in-repo carrier of the same concept spelled no regex at all:
+  `PackageManifestSchema.version` is a bare `z.string()`, and it stays one here.
+  
+  `@objectstack/spec/kernel` gains three exported patterns:
+  
+  - `MAJOR_MINOR_PATCH_VERSION_PATTERN` — three numeric segments and nothing
+    else. Referenced by `ManifestSchema.version`,
+    `MetadataPluginManifestSchema.version`, `PluginRegistryEntrySchema.version`,
+    `PluginMetadataSchema.version`, and the `PATCH /api/v1/packages/:id` door in
+    `@objectstack/runtime`.
+  - `SEMVER_SHAPED_VERSION_PATTERN` — `major.minor.patch` with an optional
+    `-prerelease` and an optional `+build` suffix, identifiers in either ASCII
+    case. Referenced by `PluginSchema.version` and by
+    `PluginLoader.isSemverShapedVersion` in `@objectstack/core`. Those two
+    converged on one spelling under the widen-never-narrow ruling and were held
+    equal by hand until now; they reference one declaration and can no longer
+    drift apart.
+  - `SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN` — the same with the suffix
+    identifiers restricted to lowercase ASCII. Referenced by
+    `PackageVersionSchema.version`.
+  
+  ⛔ **The three are not interchangeable** — they are three different accept sets,
+  and referencing the wrong one moves a published accept set. None of the three is
+  a SemVer 2.0.0 conformance check and none is named as one: two accept forms
+  SemVer forbids (leading zeroes in the numeric core, empty and leading-zero
+  identifiers), one refuses forms it requires. For ordering or precedence,
+  `dependency-resolver.ts` in `@objectstack/core` is still the module to extend.
+  
+  **Nothing an author can write changes.** Every regex is byte-identical to the
+  literal it replaces — verified per carrier by sha256 over the extracted literal
+  — and every existing suite passes unedited. Those two together are the
+  neutrality proof, and they are the whole of it. `PackageManifestSchema.version`
+  keeps its bare `z.string()`; it is deliberately untouched here. No `.describe()`
+  text, refusal message or JSON Schema `pattern` moves. Regenerating the spec's
+  artifacts moved `api-surface/kernel.json` and `export-origins/kernel.json` and
+  nothing else, each gaining the three constant names — ⛔ read that as a check
+  that nothing unexpected regenerated, never as evidence about the accept set: the
+  artifacts that stayed byte-unchanged do not record a `.regex()` pattern in the
+  first place. A new pin,
+  `src/kernel/version-grammar.test.ts`, records each grammar's verdict on twelve
+  witness strings so the next deliberate move to any of them is one visible edit
+  to one matrix.
+- 95fb417: **The declared `zod` floor moves from `^4.4.3` to `^4.6.1`**, because on zod below 4.6.1 the three standard error formatters — `z.treeifyError()`, `error.format()` and `error.flatten()` — cannot render a refusal these packages actually emit (#19581).
+  
+  Clause-②: no
+  
+  **What breaks below the new floor.** All three formatters walked an issue's `path` by reading `curr[el]` and testing it for truthiness before creating a node, so a path element naming a member of `Object.prototype` was answered by the prototype and no node was ever created. Two different failures follow:
+  
+  | path shape | what happened on `^4.4.3` |
+  |:---|:---|
+  | terminal element (`['assignments','__proto__']`, `['x','toString']`) | the inherited member is adopted as the node, then `node._errors.push(...)` runs on it — `TypeError: Cannot read properties of undefined (reading 'push')` |
+  | non-terminal element (`['__proto__', …]`) | the walk continues **into** `Object.prototype` and writes the next segment onto it — the message is silently dropped from the returned tree and the process gains a global prototype key |
+  
+  **Why it reached this platform's consumers.** `@objectstack/spec` refuses a `__proto__` key on its open-key authoring surfaces, and that refusal's issue path is `['assignments','__proto__']` — precisely the terminal shape. Anything that formatted one of these refusals for display crashed on it, and the crash was in the formatter, not in the guard. The guards themselves are unchanged and still necessary: 4.6.1 still drops a `__proto__` key from `z.record()` and `.catchall()` output, which is what they exist to refuse.
+  
+  **What an upgrading consumer must do.** Nothing, if `zod` is resolved through these packages — the floor does it. A consumer that pins `zod` itself must move that pin to `^4.6.1` or higher; a pin below it reintroduces the crash on any refusal whose path names an `Object.prototype` member, including the ones these packages emit.
+  
+  `@objectstack/lint` also moves, but only in `devDependencies`, so nothing it publishes changes for a consumer and it takes no release here.
+  
+  ## The second half the floor move needs: an unknown key refuses TERMINALLY again
+  
+  From zod 4.5.0 an `unrecognized_keys` issue carries `continue: true`, so it no
+  longer aborts the shape that raised it. Two things follow, and both were
+  measured on this package with the same bodies on 4.4.3 and 4.6.1:
+  
+  1. **A closed shape's own refinements now run after the refusal**, adding a
+     second complaint that contradicts the first.
+  2. **A union containing that shape loses its envelope.** zod's
+     `handleUnionResults` returns a single non-aborted member's issues
+     *unwrapped* instead of raising `invalid_union`, so the union's message
+     becomes whichever branch zod judged closest.
+  
+  At `PUT /api/v1/meta/view` that turned a retired-value refusal into the wrong
+  branch's prescription. Writing `type: 'page'` on a ViewItem answered:
+  
+  ```
+  Unrecognized key(s) on this view container: `viewKind`, `config`.
+    • `viewKind` belongs to a single VIEW, not to the container. Wrap it: …
+  ```
+  
+  — naming neither `page` nor its removal. It now answers, as it did before:
+  
+  ```
+  config.type: 'page' was removed from the list-view `type` enum in
+  @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — …
+  ```
+  
+  **What an upgrading consumer must do.** Nothing. No key or value changed
+  status: everything this package accepted before it accepts now, and everything
+  it refused it still refuses. What changed is which of several competing
+  complaints an author reads, and that a refusal behind a union is again
+  reported as `invalid_union` with its branches, which is what `z.treeifyError()`
+  and this package's own `formatZodError` expand.
+  
+  ⚠️ A closed shape declared with a bare `z.object(…).strict()` or
+  `z.strictObject(…)` — zod's own, not this package's `strictObject` — does NOT
+  get this and will still collapse its union. Build closed authoring shapes with
+  `strictObject`, or re-declare an existing one through `closedObject`.
+- 49144fc: fix(core): the `apiOperations` of `/auth/me/permissions` offers only what the REST door serves — nothing on an object with `enable.apiEnabled: false`, and `export` only where the export door admits it (#20135)
+  
+  `buildEffectiveObjectPermissions` builds the `objects` slot of `GET /auth/me/permissions` (`@objectstack/plugin-hono-server`) and the map `ISecurityService.getEffectiveObjectPermissions` returns (`@objectstack/plugin-security`). Its last pass, `annotateEffectiveApiOperations`, attaches each entry's `apiOperations`: the operation set a client renders, where an absent annotation means default-allow. That set disagreed with the REST door in two places, both in the direction of offering an operation the door refuses:
+  
+  - **`enable.apiEnabled: false`.** The door answers `404 OBJECT_API_DISABLED` for every verb on such an object, whatever `apiMethods` says. The annotation ignored the switch. It carried the object's whole closure, or, for a subject whose export stays allowed on an otherwise unrestricted object, no annotation at all, which a client reads as default-allow.
+  - **The export slot.** It fell back to the merged `'*'` export bit whenever an entry carried no `allowExport` of its own. The merged bit cannot say which set's wildcard reaches which object, so `export` was offered on a private object that only a plain `'*': { allowExport: true }` reached (a plain wildcard never covers a private object), and on an object that the exporting set itself names without the grant. The export door answers both `403 EXPORT_NOT_PERMITTED`.
+  
+  Clause-②: no
+  
+  **What changes.** The annotation now asks the door's own two questions, entry by entry:
+  
+  - the object half is the spec's `canServeApiOperation`, the boolean face of `apiExposureDenialReason`, which `enforceApiAccess` in `@objectstack/rest` turns into its 404 and 405. An object with `enable.apiEnabled: false` is annotated `apiOperations: []`;
+  - the export half is the entry's own grant as the export door reads it: read and `allowExport`, through the spec's `objectPermissionGrants`. The coverage passes that run first have already put each set's `'*'` on exactly the entries that set reaches, per posture.
+  
+  The entry of an API-disabled object stays in the map with its grants: `apiEnabled` closes the API, not the data, and `current_user.can()` reads those grants on the server. Which entries carry an annotation keeps its rule: an unrestricted object whose every operation is still served gets none.
+  
+  **What a reader of `/auth/me/permissions` sees.** An object declaring `enable.apiEnabled: false` now reads `apiOperations: []` in every entry. That includes an unrestricted object whose export stays allowed, which used to carry no annotation at all; this release's notes for #18931, #18990 and #20134 name that exception. `export` leaves the annotation of a private object reached only through a plain wildcard export grant, and of an object named without the grant by the set whose wildcard carries it. A private, unrestricted object that lost its `export` this way is now annotated with its closure minus `export`. Nothing else moves: no entry is added or removed, no `allow*` bit changes, and no annotation gains an operation. The response shape, its keys and the route are unchanged. The REST door is unchanged, so no request changes its answer.
+  
+  **For a caller of the exported helper.** `annotateEffectiveApiOperations` keeps its signature. It no longer reads the map's `'*'` entry: it reads each entry's own grants, which `buildEffectiveObjectPermissions` puts there. A map composed some other way should be built with `buildEffectiveObjectPermissions`.
+- e2c4e12: fix(core): the effective object-permission map grants no cell the server refuses for a super-user subject — a super-user set's own narrower entry is that set's answer, and `modifyAllRecords` alone grants no create (#20136)
+  
+  `buildEffectiveObjectPermissions` builds the `objects` slot of `GET /auth/me/permissions` (`@objectstack/plugin-hono-server`) and the map `ISecurityService.getEffectiveObjectPermissions` returns (`@objectstack/plugin-security`), which the engine hands to `current_user.can(object, verb)` on the write path. For a subject holding a super-user wildcard — a `'*'` carrying `viewAllRecords` or `modifyAllRecords` — the map granted cells that `PermissionEvaluator.checkObjectPermission` refuses. Before building each set's own contribution, it ran a fold over the MERGED map that put the merged bypass bits on every entry:
+  
+  - **Into an entry the super-user set names itself.** The server answers each set with its explicit entry for the object when it has one, so the set's wildcard never reaches that object. The walled `organization_admin` names `sys_position`, `sys_permission_set`, `sys_position_permission_set`, `sys_user_permission_set` and `sys_user_position` read-only, and the identity tables write-denied; the map granted create, edit and delete on the first five anyway, and edit on `sys_organization`. With `member_default` that was 38 cells, and 44 without it (edit on `sys_user` and `sys_api_key` as well). An explicit `{}` entry read as readable and writable. An explicit entry granting `allowExport` without read read as readable and exportable, so `apiOperations` offered `export` where the export door answers `403 EXPORT_NOT_PERMITTED`.
+  - **`allowCreate` on `modifyAllRecords` alone.** The spec's `objectPermissionGrants` gives the write bypass no create cell, and the server grants none. A `'*': { modifyAllRecords: true }` without `allowCreate` read `create` and `import` as granted on every object the managed-write clamp does not cover.
+  
+  On the write path this failed OPEN: an option gated on `current_user.can('sys_position', 'edit')` was admitted for the walled `organization_admin`, whom the server refuses that edit.
+  
+  Clause-②: no
+  
+  **What changes.** The merged fold is no longer a step of `buildEffectiveObjectPermissions`. The super-user fold is the per-set one alone: each set's super-user `'*'` puts on every entry that set does not name exactly the bits the spec's `objectPermissionGrants` says that wildcard grants. A set that names an object keeps its explicit entry as its whole answer for that object, and another set's super-user wildcard still widens that entry bit by bit, as `checkObjectPermission` combines sets. The seed, the plain-wildcard coverage, the managed-write clamp and the `apiOperations` annotation are unchanged. `checkObjectPermission` and every route are unchanged, so no request changes its answer on the server.
+  
+  **What a reader of `/auth/me/permissions` sees.** For a subject whose super-user set names an object narrower than its wildcard, or whose only create grant was `modifyAllRecords`, the entry reads what the server enforces: `allowCreate`, `allowEdit`, `allowDelete` or `allowRead` turn from `true` to `false` on those cells, and an entry whose export no longer holds gains an `apiOperations` list without `export`. No entry is added or removed and no bit turns from `false` to `true`. The response is byte-identical for every subject whose super-user sets name no object narrower and grant `allowCreate` wherever they carry `modifyAllRecords` — `admin_full_access` alone or beside `member_default` — and for every subject holding no super-user wildcard. The response shape, its keys and the route are unchanged. On the write path, a `can()`-gated option for those cells is now refused and a `can()` default reads `false`, as the server refuses the write they describe.
+  
+  **For a caller of the exported helper.** `foldWildcardSuperUser` keeps its name, signature and body, and `@objectstack/plugin-hono-server` still re-exports it. It is no longer what the map is built from: over a merged map it cannot tell a set's own entry from another set's. Build the map with `buildEffectiveObjectPermissions`.
+- 615c468: fix(core): an epoch-millisecond number compared against a `date` field is read as the UTC calendar day of its instant, by every driver and at every position that compares it (#20203)
+  
+  Clause-②: no — no key, export or operator moves, and no comparand that was accepted is now refused: a number was already an accepted comparand on every `date` position, and its answer moves to the storage rule's reading.
+  
+  `temporalStorageForm(value, 'date')` in `@objectstack/core` returned a finite number unchanged, so each face compared it by its own type rules and they disagreed. Over six rows, with `1769940000000` (2026-02-01T10:00:00.000Z) against a `date` field:
+  
+  | face | `$gt` | `$lt` | `$eq` | `$in` (with a Jan 10 member) | `$between` (from Jan 2) |
+  |:--|:--|:--|:--|:--|:--|
+  | `where` on `driver-memory` | 0 | 0 | 0 | 0 | 0 |
+  | `where` on `driver-sql`, SQLite | 6 | 0 | 0 | 0 | 0 |
+  | `where` on `driver-sql`, PostgreSQL | `DATABASE_ERROR`, a 500 at REST | the same | the same | the same | the same |
+  | a per-aggregation `filter` on `engine.aggregate` | 0 | 0 | 0 | 0 | 6 |
+  | **now, on every face above** | **1** | **3** | **2** | **3** | **5** |
+  
+  The same holds through `engine.find` and `POST /data/:object/query`, and for `$gte`, `$lte`, `$ne`, `$nin` and implicit equality. PostgreSQL's server refused the bound number itself (`22008`, date/time field value out of range), on an empty table too. `having` over `max` of a `date` field kept no group for `$gt`, `$eq` or `$in`; it now keeps the groups whose day compares.
+  
+  A finite number is now read as the `datetime` rule already reads it, as epoch milliseconds. It takes the UTC calendar day of that instant: the day `new Date(value)` names, through the same conversion a `Date` takes. So a number and its `Date` always answer alike. A time of day is dropped, never rounded, a negative number is a day before 1970, and a fraction truncates toward zero as the `Date` constructor does. `driver-sql` (`toDateOnly`, `temporalFilterValue`), `driver-memory` (`coerceTemporalValue`) and the engine's per-aggregation `filter` and `having` all call this rule, so they now agree.
+  
+  The rule is shared by the drivers' write and read paths too:
+  
+  - `create()` / `update()` on either driver, given a number for a `date` field, stores its UTC day. Before, `driver-memory` and SQLite stored the number, and PostgreSQL refused the statement. The engine and REST write doors refuse a number on a `date` field before a driver sees it (`VALIDATION_FAILED`), as before.
+  - A number already stored in a SQLite `date` column is read back as its UTC day by `find()`, a `groupBy` key and `distinct()`. Only a direct driver write could have put one there.
+  
+  Not changed, measured identical before and after: `NaN`, ±Infinity, a number outside the `Date` range (past ±8.64e15), a bigint, an epoch-millisecond string, every `Date` and every string on a `date` field (#20240, in the same release, then pads a `Date`'s or a number's year 0..999 to four digits and refuses one whose year falls outside 0..9999, a number past the `Date` range included; #20264, in the same release, narrows that to 0001..9999, so year 0 is refused rather than padded), and every `datetime` and `time` reading. `driver-mongodb` keeps its own copy of the `date` rule and is not changed here.
+- 4c42fd1: fix(core): an absent or empty path is no longer exempt from the ADR-0069 auth gate (#7898)
+  
+  `isAuthGateAllowlisted` answered `true` for a falsy path — it treated "no path"
+  as allow-listed. That is a fail-OPEN default on an authorization seam: any
+  caller that reached the ADR-0069 gate with an absent or empty `path` was exempt
+  on **every** route, and a transport author who simply forgot to populate `path`
+  disabled the gate with no diagnostic of any kind.
+  
+  ```
+  FROM  isAuthGateAllowlisted(undefined)  ->  true   // exempt, on every route
+        isAuthGateAllowlisted('')         ->  true
+  
+  TO    isAuthGateAllowlisted(undefined)  ->  false  // exemption must be earned
+        isAuthGateAllowlisted('')         ->  false
+  ```
+  
+  Exemption is now something a path has to EARN by naming an allow-listed route,
+  so the failure mode of omission is a `403` rather than a bypass. The predicate
+  is split in two so it carries exactly one meaning: a private
+  `matchesAllowlistedRoute` answers the route question for a real, non-empty path
+  — its body is unchanged, the #16839 anchoring rules included — and the exported
+  predicate answers "is this request exempt", which a request with no path is not.
+  
+  **No current caller's behaviour moves.** The caller census was re-run: the same
+  four production call sites, and no fifth. Two of them (`RestServer.enforceAuth`,
+  `shouldDenyAnonymous`) already guard for a non-empty path and so only ever reach
+  the predicate with a real string; a corpus differential against the pre-flip
+  predicate over more than 10,000 paths moves exactly one input — the empty string
+  — and nothing else, in either direction.
+  
+  **The one exemption that remains for a genuinely pathless caller is explicit**,
+  and lives at the one seam that really routes by body: `shouldDenyAnonymous`
+  declares `path` optional and decides the no-path case itself (it denies), ahead
+  of this predicate. That guard is deliberately kept rather than collapsed into
+  the now-agreeing default — a seam's contract should not be re-derived from what
+  a predicate happens to do with a falsy argument.
+  
+  **Known follow-up, tracked as #17625.** The dispatcher's bare-root
+  `` `${prefix}/` `` arrives as `cleanPath === ''` (the trailing slash is
+  stripped), which was exempt via the fail-open default and is not exempt now, so
+  a *gated* session — one carrying an `authGate`, i.e. an expired password or a
+  required MFA enrollment — reaching the bare root gets a `403` instead of the
+  discovery payload. Every named remediation route (`/auth/*`, `/health`,
+  `/ready`, `/discovery`, `/me/apps`, `/me/localization`) is unaffected, so
+  remediation itself stays reachable. Normalising that empty `cleanPath` is step 2
+  of the same ruling and is **not** a tolerance re-added here.
+- bc2ec80: Build freshness: these three packages now write the repo's build-input content
+  stamp as the last step of their own build, and are checked for freshness (not
+  merely existence) by `check:dev-prereqs`.
+  
+  What changes for a consumer: each tarball now carries two extra inert metadata
+  files inside `dist/` — `.build-input-hash` and `.build-input-hash-dts`, the same
+  pair `@objectstack/spec` has always shipped. Nothing is imported, executed or
+  resolved from them, no export moves and no runtime behaviour changes.
+  
+  Why: a sibling checkout that links these packages by `link:` compiles against
+  their `dist/`, so a dist built from an older tree surfaces as a type error
+  naming an import nobody touched, with the symbol present in `src/` the whole
+  time. A HEAD-versus-pin comparison is silent through that; a content stamp
+  written by the build itself is not.
+- cf79182: `isAuthGateAllowlisted` matches allow-listed routes at a mount boundary, so an object named `auth` or a record whose id is `health` no longer bypasses the ADR-0069 authentication-policy gate.
+  
+  The predicate that decides which paths are exempt from the password-expiry / enforced-MFA gate matched with two UNANCHORED tests: `path.includes('/auth/')` matched at any position, and an `endsWith` test over `['/health', '/ready', '/discovery', '/me/apps', '/me/localization']` matched at any depth. A path segment whose VALUE merely spelled one of those tokens therefore carried the exemption — and object names and record ids are tenant-controlled. Both transport seams hand the predicate a data-plane path directly (`HttpDispatcher.enforceAuthGate` passes `cleanPath`, `RestServer.enforceAuth` passes `req.path`), so these were reachable requests. Measured on the built package before the repair: `/data/auth/123`, `/meta/auth/objects`, `/data/x/health` and `/data/xyz/me/apps` were all exempt, while `/auth/me` (exempt) and `/data/contacts/1` (gated) held as controls.
+  
+  - **What replaced them.** The path is read as segments and each test is anchored to a mount base — `/api/v1`, `/api`, or the empty base the dispatcher sees (the hono adapter hands `dispatch()` the app prefix already stripped) — plus at most one environment scope immediately after that base (`/environments/<id>`, or ADR-0006's superseded `/projects/<id>`), because the dispatcher evaluates the gate before its scoped-URL strip. `/auth/…` at that position stays exempt; the five bootstrap reads are EXACT routes there instead of suffixes. The scope is only recognised immediately after a base, which is why `/data/environments/x/health` is not a scoped `/health`.
+  - **This only ever removes exemptions.** Measured, not asserted: over a generated corpus of 111,152 paths, the number that are newly exempt is **0** and 25,979 stopped being exempt. The check is kept as a test, with the pre-anchoring predicate transcribed beside it, so a later widening cannot arrive quietly.
+  - **Every genuinely-exempt shape still is**, pinned in both directions: `/auth/sign-out`, `/health`, `/ready`, `/discovery` (dispatcher shapes); `/api/auth/sign-in`, `/api/v1/auth/change-password`, `/api/v1/auth/me/permissions`, `/api/v1/health`, `/api/v1/me/apps`, `/api/v1/me/localization`; and the scoped `/api/v1/environments/<id>/auth/sign-out`.
+  
+  **If you serve the API from a non-default mount,** an allow-listed route reached as `${basePath}/${version}/…` with `basePath`/`version` moved off `/api` and `v1` is no longer named by the allow-list. That price cannot be avoided: `/rest/v2/health` and `/data/xyz/health` are the same shape, so a rule that accepts an arbitrary base is the defect itself. It costs nothing at either live seam — the dispatcher's path arrives base-stripped, and REST registers its control-plane routes without `enforceAuth` at all — but if you gate a custom mount through this predicate, mount the remediation routes under one of the named bases.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [75237a9]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [6d2571f]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [172b4cf]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [8255a51]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [b8ec127]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [6e3462d]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/types@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

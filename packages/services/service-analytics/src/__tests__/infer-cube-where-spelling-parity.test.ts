@@ -20,9 +20,10 @@
  *
  * ## Why this had no user-visible symptom (the issue's own observation class)
  *
- * `NativeSQLStrategy.resolveFieldSql` falls back to the bare column name for a
- * member the cube does not declare, and `qualifyAndRegisterJoin` leaves bare
- * columns bare on a cube with no `joins` — which an ad-hoc cube never has. So
+ * `NativeSQLStrategy.resolveFieldSql` falls back to the column the member names
+ * for a member the cube does not declare, and `qualifyAndRegisterJoin` leaves
+ * that column bare in a statement that joins nothing ([#21249]: what the
+ * statement joins, not the cube's `joins`, which an ad-hoc cube never has). So
  * both spellings compiled the same SQL before the fix and still do; block 2
  * measures that rather than asserting it. The divergence was confined to the
  * dimension VOCABULARY, which is why this was filed as an observation and fixed
@@ -65,7 +66,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { FilterCondition } from '@objectstack/spec/data';
+import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import type { AnalyticsStrategy } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -80,15 +82,40 @@ const silentLogger = {
 const DEAL_FIELDS = ['id', 'stage', 'owner', 'amount', 'closed_at'];
 
 /**
+ * [#20381] The cube a request's strategies read for its name. An inferred cube
+ * lives only in the request that minted it — it is never registered, so
+ * `getMeta` never lists it — and this is the window onto it that remains: a
+ * probe ahead of every built-in strategy records `ctx.getCube(query.cube)` and
+ * declines, so the chain runs exactly as it would without it.
+ */
+function requestCubeProbe() {
+  const seen: Cube[] = [];
+  const strategy: AnalyticsStrategy = {
+    name: 'RequestCubeProbe',
+    priority: 0,
+    canHandle: (query, ctx) => {
+      const cube = ctx.getCube(query.cube!);
+      if (cube) seen.push(cube);
+      return false;
+    },
+    execute: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+    generateSql: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+  };
+  return { strategy, seen };
+}
+
+/**
  * A service with NO registered cube for `deal`, so every query takes the
- * auto-inference path. One service per query: `ensureCube` registers what it
- * infers, so a second query would find the cube and never infer again.
+ * auto-inference path — every query, since nothing a request infers is
+ * registered (#20381). `cubes` holds what each request's strategies read.
  */
 function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
   const sqls: string[] = [];
   const filters: unknown[] = [];
+  const probe = requestCubeProbe();
   const service = new AnalyticsService({
     logger: silentLogger,
+    strategies: [probe.strategy],
     queryCapabilities: () => ({
       nativeSql: !!opts.native,
       objectqlAggregate: !opts.native,
@@ -105,17 +132,17 @@ function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
     isRegisteredObject: (n: string) => n === 'deal',
     getObjectFieldNames: (n: string) => (n === 'deal' ? (opts.fields ?? DEAL_FIELDS) : undefined),
   });
-  return { service, sqls, filters };
+  return { service, sqls, filters, cubes: probe.seen };
 }
 
-/** The ad-hoc cube's dimension keys, read through the public discovery API. */
+/** The ad-hoc cube's dimension keys, read from the cube the request's strategies were handed. */
 async function inferredDimensions(where: unknown, opts?: { native?: boolean; fields?: string[] }) {
-  const { service, sqls, filters } = makeService(opts);
+  const { service, sqls, filters, cubes } = makeService(opts);
   await service.query({ cube: 'deal', measures: ['count'], where } as never);
-  const [meta] = await service.getMeta('deal');
+  expect(cubes).toHaveLength(1);
   return {
-    // `getMeta` prefixes with the cube name; the KEY is what seeding produced.
-    dimensions: meta.dimensions.map((d) => d.name.replace(/^deal\./, '')).sort(),
+    // The KEY is what seeding produced.
+    dimensions: Object.keys(cubes[0].dimensions).sort(),
     sqls,
     filters,
   };
@@ -266,19 +293,19 @@ describe('[#5353] inferCubeFromQuery — the `where` spelling does not change th
   }
 
   it('seeds the `where` keys ALONGSIDE the ones `dimensions` and `measures` contribute', async () => {
-    const { service } = makeService();
+    const { service, cubes } = makeService();
     await service.query({
       cube: 'deal',
       measures: ['amount_sum'],
       dimensions: ['stage'],
       where: [['owner', '=', 'u1']],
     } as never);
-    const [meta] = await service.getMeta('deal');
+    const [cube] = cubes;
 
-    expect(meta.dimensions.map((d) => d.name).sort()).toEqual(['deal.owner', 'deal.stage']);
+    expect(Object.keys(cube.dimensions).sort()).toEqual(['owner', 'stage']);
     // The measure arm is untouched by #5353 — `amount_sum` still infers a SUM
     // over `amount` rather than becoming a dimension.
-    expect(meta.measures.map((m) => m.name).sort()).toEqual(['deal.amount_sum', 'deal.count']);
+    expect(Object.keys(cube.measures).sort()).toEqual(['amount_sum', 'count']);
   });
 });
 
@@ -291,9 +318,9 @@ describe('[#5353] the seeded dimensions change no verdict and no statement', () 
 
     expect(arraySpelling.sqls).toEqual(objectSpelling.sqls);
     // A bare column stays bare: `qualifyAndRegisterJoin` only qualifies when the
-    // cube declares `joins`, and an inferred cube never does. This is the whole
-    // reason #5353 was an observation rather than a defect — and the assertion
-    // that keeps a newly-DECLARED dimension from starting to qualify.
+    // statement joins something ([#21249]), and this one joins nothing. This is
+    // the whole reason #5353 was an observation rather than a defect — and the
+    // assertion that keeps a newly-DECLARED dimension from starting to qualify.
     expect(objectSpelling.sqls[0]).toContain('WHERE stage = ');
     expect(objectSpelling.sqls[0]).not.toContain('"deal"."stage"');
   });
@@ -417,18 +444,27 @@ describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal',
     // `owner` — unchanged. The LEAF member is `owner.region`, which is why a
     // `collectFilterLeaves`-based seeder would have produced `region` here and
     // walked into the mis-cast above from a third direction.
-    const { dimensions, sqls } = await inferredDimensions({ owner: { region: 'NA' } }, NO_REGION);
+    // [#20887] The seeding is unchanged; what the query then runs is not. The
+    // nested form is the ENGINE's now (the related object read as the caller,
+    // capped), so it is asked of the engine path — handed over as written —
+    // where this case used to read the JOIN the native strategy compiled for
+    // the flattened `owner.region`.
+    const { dimensions, filters } = await inferredDimensions(
+      { owner: { region: 'NA' } },
+      { fields: NO_REGION.fields },
+    );
     expect(dimensions).toEqual(['owner']);
-    expect(sqls[0]).toContain('WHERE "owner"."region" = ');
+    expect(JSON.stringify(filters[0])).toContain('{"owner":{"region":"NA"}}');
   });
 
   it('bare and dotted keys reach parity together when both ride along', async () => {
     // Before the ruling only `stage` was unified and the whole query was refused
     // for `region`; now both keys are minted, on both spellings, and the query
-    // runs. The bare column stays BARE in the statement — `qualifyAndRegisterJoin`
-    // qualifies plain identifiers only for a cube declaring `joins`, and minting a
-    // dotted dimension does not give an inferred cube one (block 2's rule, still
-    // holding with a traversal in the same filter).
+    // runs. [#21249] The traversal makes the statement join `owner`, so the base
+    // column is qualified against the base table on both spellings alike —
+    // `qualifyAndRegisterJoin` reads what the statement joins, not whether the
+    // cube declares `joins` (block 2's bare column is the statement that joins
+    // nothing).
     const both = [['stage', '=', 'won'], ['owner.region', '=', 'NA']];
     const array = await inferredDimensions(both, NO_REGION);
     const object = await inferredDimensions(
@@ -439,6 +475,6 @@ describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal',
     expect(array.dimensions).toEqual(['owner.region', 'stage']);
     expect(object.dimensions).toEqual(array.dimensions);
     expect(object.sqls).toEqual(array.sqls);
-    expect(array.sqls[0]).toContain('WHERE (stage = $1 AND "owner"."region" = $2)');
+    expect(array.sqls[0]).toContain('WHERE ("deal"."stage" = $1 AND "owner"."region" = $2)');
   });
 });

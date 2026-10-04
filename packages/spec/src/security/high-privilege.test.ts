@@ -105,6 +105,20 @@ describe('describeHighPrivilegeBits — app-declared capability vs platform syst
     ).toMatch(/system permissions/);
   });
 
+  it('[#21260] puts the ledger audit capability on the floor with no list of its own: an app cannot launder it onto an anchor', () => {
+    // It unlocks the ledger rows the parent-record read gate otherwise
+    // withholds, so it must never reach `everyone` / `guest` wholesale. The
+    // floor is `PLATFORM_CAPABILITY_NAMES` itself, so declaring it there is the
+    // whole of putting it on the floor.
+    const LEDGER_AUDIT = 'view_all_audit_log';
+    expect(PLATFORM_CAPABILITY_NAMES.has(LEDGER_AUDIT)).toBe(true);
+    const set = { systemPermissions: [LEDGER_AUDIT] };
+    const declared = { declaredCapabilities: [LEDGER_AUDIT] };
+    expect(describeHighPrivilegeBits(set, declared)).toMatch(/system permissions/);
+    expect(describeAnchorForbiddenBits(set, 'everyone', declared)).toMatch(/system permissions/);
+    expect(describeAnchorForbiddenBits(set, 'guest', declared)).toMatch(/system permissions/);
+  });
+
   it('still refuses a mixed set — one unexcused token is enough', () => {
     expect(
       describeHighPrivilegeBits(

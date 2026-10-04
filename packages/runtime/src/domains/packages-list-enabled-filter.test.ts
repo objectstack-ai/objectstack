@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#19394] `GET /api/v1/packages` honours the declared `enabled` filter —
+ * [commit 0862063ba] `GET /api/v1/packages` honours the declared `enabled` filter —
  * ruling item 2 of #17667.
  *
  * ## The defect this file pins shut
@@ -39,7 +39,7 @@
  *   anything about them in either direction: pinning them as `201` would freeze
  *   known residuals as intended behaviour, and pinning them as refused would be
  *   this file quietly widening a graded scope.
- * - **`hasMore` / `nextCursor`.** #19364 retired the request half
+ * - **`hasMore` / `nextCursor`.** Commit ada701220 retired the request half
  *   (`limit` / `cursor`) and left `hasMore` a constant `false` that is now true
  *   by construction. §5 asserts it is UNMOVED by this card — that is a
  *   preservation pin, not a re-adjudication.

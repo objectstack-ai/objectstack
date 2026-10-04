@@ -35,7 +35,7 @@
  * `sys_permission_set`. The batched existence oracle
  * (`seed-name-lookup.ts`'s `buildExistingByName`) capped its UNSCOPED page at
  * `limit: names.length`, which truncates the moment one name can carry more
- * than one row — and a truncated page read as `absent`. #11518 has since
+ * than one row — and a truncated page read as `absent`. Commit e1d773eb7 has since
  * repaired that: the page budget is measured (one row more than it will hold is
  * requested, so overflow is DETECTED) and an overflowing page degrades to the
  * per-item read instead of answering. ⚠️ That does not make this oracle safe to

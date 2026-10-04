@@ -194,17 +194,17 @@ export function unresolvedPostureExplainDetail(
   const unknown =
     `The security posture of '${object}' could not be resolved (neither the live schema nor the `
     + `metadata service returned it) — its 'private' flag and required-capability contract are `
-    + `unknown, so access fails CLOSED rather than defaulting to public/uncontracted (#3545). ${remedy}`;
+    + `unknown, so access fails CLOSED rather than defaulting to public/uncontracted. ${remedy}`;
   switch (cause) {
     case 'unpublished_draft':
       return `'${object}' is not published — a draft declaration exists but no published one, so its 'private' `
         + `flag and required-capability contract are unknown and access fails CLOSED rather than `
-        + `defaulting to public/uncontracted (#3545). ${remedy}`;
+        + `defaulting to public/uncontracted. ${remedy}`;
     case 'metadata_unavailable':
       return `The security posture of '${object}' could not be resolved: the metadata service reported its `
         + `own read as DEGRADED, so this is a metadata-store OUTAGE and not necessarily an absent `
         + `declaration. Its 'private' flag and required-capability contract are unknown, so access fails `
-        + `CLOSED rather than defaulting to public/uncontracted (#3545). ${remedy}`;
+        + `CLOSED rather than defaulting to public/uncontracted. ${remedy}`;
     case 'unknown':
       return unknown;
     default:
@@ -226,11 +226,11 @@ export function unresolvedPostureLogLine(
 ): string {
   const unknown =
     `[security] object security posture unresolvable for operation '${operation}' on `
-    + `object '${object}' (user ${userId}) — denying request (fail-closed, #3545)`;
+    + `object '${object}' (user ${userId}) — denying request (fail-closed: an unreadable posture never defaults to public or uncontracted)`;
   switch (cause) {
     case 'unpublished_draft':
       return `[security] object '${object}' has a DRAFT declaration and no published one — denying operation `
-        + `'${operation}' (user ${userId}) with the unpublished-object refusal (fail-closed, #3545/#10401)`;
+        + `'${operation}' (user ${userId}) with the unpublished-object refusal (fail-closed: an unreadable posture never defaults to public or uncontracted)`;
     // [#10424] The operator-facing half of the split, and the reason the log
     // line is worth changing at all: a metadata-store outage is an INCIDENT and
     // a query against a missing object is routine, and they were the same line.
@@ -239,7 +239,7 @@ export function unresolvedPostureLogLine(
       return `[security] object security posture unresolvable for operation '${operation}' on `
         + `object '${object}' (user ${userId}) — the metadata service reported a DEGRADED read, i.e. a `
         + `metadata-store OUTAGE rather than an absent declaration — denying request `
-        + `(fail-closed, #3545/#10424)`;
+        + `(fail-closed: an unreadable posture never defaults to public or uncontracted)`;
     case 'unknown':
       return unknown;
     default:

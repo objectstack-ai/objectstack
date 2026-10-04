@@ -1,15 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #12194 — the metadata item-name grammar is enforced at the publish door.
+ * Commit 311433f6b — the metadata item-name grammar is enforced at the publish door.
  *
- * Stage 1 of #12176's maintainer-ruled retirement of compound-name addressing
+ * Stage 1 of the maintainer-ruled retirement of compound-name addressing
  * (2026-08-25): item names are lowercase snake_case segments, optionally
  * dot-qualified (`METADATA_ITEM_NAME_PATTERN`, `@objectstack/spec/shared` —
  * the same segment source as `ViewItemNameSchema`'s dot-required arity), and
  * `saveMetaItem` / `publishMetaItem` refuse an off-grammar name loudly.
  *
- * What the #12176 census measured BEFORE this landed — every refusal case in
+ * What the census measured BEFORE this landed — every refusal case in
  * this suite was an acceptance then: `''`, `'a//b'`, `'Views/All Leads'` and
  * `'views/all_leads'` were all accepted and stored as item names, and a slash
  * in the name BYPASSED the #8421 unrecognised-type refusal entirely
@@ -141,9 +141,15 @@ function makeProtocol(seedRows: Array<Partial<Row>> = []) {
 
 const metaRows = (rows: Map<string, Row>) => [...rows.values()].filter((r) => r.type !== undefined);
 
-/** Spec-valid `view` body, so the ONLY variable under test is the NAME. */
+/**
+ * Spec-valid `view` body, so the ONLY variable under test is the NAME.
+ *
+ * [#21470] It carries no `name` of its own: the door stamps the request name
+ * onto a view body that has none, and a body `name` that differed from the
+ * request name would now be refused by the write doors' name judge — a second
+ * variable this suite does not measure.
+ */
 const VIEW_BODY = {
-    name: 'probe_item',
     label: 'Probe',
     object: 'task',
     viewKind: 'list',
@@ -178,7 +184,7 @@ describe('#12194 — the names that must keep working', () => {
 });
 
 describe('#12194 — the junk shapes the census measured ACCEPTED are now refused', () => {
-    // Each entry was accepted and stored on the pre-#12194 tree (census P2–P8).
+    // Each entry was accepted and stored on the tree before commit 311433f6b (census P2–P8).
     // The refusal asserts the ADR-0112 envelope — `code` AND `status` — never a
     // bare `.toThrow()`, which an unrelated 422 one layer down would satisfy.
     const JUNK: Array<[label: string, name: string]> = [
@@ -219,7 +225,7 @@ describe('#12194 — the junk shapes the census measured ACCEPTED are now refuse
 
 describe('#12194 — the slash bypass of the unrecognised-type refusal is CLOSED', () => {
     it('refuses unrecognised type + slash name (the census P10 acceptance)', async () => {
-        // Pre-#12194: `refuseUnmintableMetaType` opened with
+        // Before commit 311433f6b: `refuseUnmintableMetaType` opened with
         // `if (request.name.includes('/')) return;` — so this exact request was
         // ACCEPTED and stored `type='fieldz' name='a/b'` (census P10, and the
         // residue #8421's own docblock stated rather than hid). The grammar

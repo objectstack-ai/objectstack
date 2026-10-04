@@ -65,14 +65,14 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: Object.fromEntries(
     ['id', 'stage', 'owner', 'amount', 'closed_at'].map((n) => [
       n,
-      { name: n, label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
+      { label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
     ]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */

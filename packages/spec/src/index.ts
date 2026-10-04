@@ -129,35 +129,37 @@ export { defineAgent } from './ai/agent.zod';
 export { defineTool } from './ai/tool.zod';
 export { defineSkill } from './ai/skill.zod';
 
-// [#11350] Root-entry nameability of the root's own inferred types. `defineStack`
-// returns `ObjectStackDefinition`, which is declared `z.input<typeof
+// [commit ece4dad31] Root-entry nameability of the root's own inferred types.
+// `defineStack` returns `ObjectStackDefinition`, which is declared `z.input<typeof
 // ObjectStackDefinitionSchema>` — a generic instantiation the declaration
 // emitter does not preserve as an alias — so an un-annotated
 // `export default defineStack(...)` is emitted as the STRUCTURAL expansion,
-// and that expansion mentions these three types. Without root re-exports, tsc
+// and that expansion mentions these types. Without root re-exports, tsc
 // can only name them through the hash-named internal dist chunk that declares
 // them (unaddressable through the package's `exports` map → TS2883 in every
-// consumer inferring through a root-entry function). All three are already
-// public on their domain subpaths (`/ui`, `/automation`); this block makes the
+// consumer inferring through a root-entry function). Both are already
+// public on their domain subpath (`/ui`); this block makes the
 // root entry self-consistent. Invariant (maintainer ruling 2026-08-23,
-// recorded on #11350): a type that appears structurally in an entry's public
-// declarations must be nameable from that same entry.
+// recorded in commit ece4dad31): a type that appears structurally in an entry's public
+// declarations must be nameable from that same entry. The third name this
+// block carried, `/automation`'s `StateNodeConfig`, left the package with the
+// `StateMachineSchema` family (#21320): its one structural mention was the
+// tombstoned `agent.lifecycle`.
 export type { FormFieldInput } from './ui/view.zod';
 export type { NavigationItemInput } from './ui/app.zod';
-export type { StateNodeConfig } from './automation/state-machine.zod';
-// [#11709] #11350's recorded premise delta, ruled the same way (maintainer
+// [#11709] Commit ece4dad31's recorded premise delta, ruled the same way (maintainer
 // decision 2026-08-25, recorded on #11709): the MINIMAL one-file consumer —
 // no `/data` subpath import anywhere in its program — leaks two more
-// structural mentions of `defineStack`'s return type that the three lines
+// structural mentions of `defineStack`'s return type that the lines
 // above do not cover. Same invariant, same fix shape: re-export from the
 // declaring module (both already public on `/data`).
 export type { BaseValidationRuleShape } from './data/validation.zod';
 export type { FilterCondition } from './data/filter.zod';
 // [#12414] The invariant generalized to every public entry, not just the root:
 // probing every `define*` factory across all 17 subpaths found the class was
-// never closed by #11350/#11709 — four more entries leak a structurally-
+// never closed by commit ece4dad31 or #11709 — four more entries leak a structurally-
 // mentioned type through a factory return value. Same invariant (maintainer
-// ruling recorded on #11350), same one-line-per-name repair: re-export from
+// ruling recorded in commit ece4dad31), same one-line-per-name repair: re-export from
 // the declaring module. All three are already public on their own subpaths
 // (`/system`, `/ui`).
 export type { Book } from './system/book.zod';
@@ -204,7 +206,8 @@ export type {
 } from './data/authoring-key-lint';
 export { defineCube } from './data/analytics.zod';
 export { defineMapping } from './data/mapping.zod';
-// `defineTheme` was removed at #10485 with `ui/theme.zod.ts` (ADR-0049) — see
+export { definePicklist } from './data/picklist.zod';
+// `defineTheme` was removed by commit 35ad101bc with `ui/theme.zod.ts` (ADR-0049) — see
 // the block in `./ui/index.ts`; `app.branding` is the one colour surface.
 export { defineTranslationBundle } from './system/translation.zod';
 export { definePage } from './ui/page.zod';
@@ -223,8 +226,13 @@ export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOpt
 // Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.
 export * from './conversions/index.js';
 
-// Metadata migration chain + change manifest (ADR-0087 D3/D4).
-export * from './migrations/index.js';
+// The metadata migration chain + change manifest (ADR-0087 D3/D4) is NOT re-exported
+// here: it is the `@objectstack/spec/migrations` subpath. Its registry is mostly the
+// `os migrate meta` guidance text, and the registry's import-time work pins all of it
+// into every bundle of the entry that carries it, so a root re-export made every
+// consumer of any root name (a browser first screen included) download it. The
+// conversion layer above stays here: `defineStack` / `normalizeStackInput` read it at
+// run time. `root-entry-migrations-split.pin.test.ts` holds both halves.
 
 export { type PluginContext } from './kernel/plugin.zod';
 

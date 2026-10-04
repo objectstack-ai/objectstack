@@ -61,7 +61,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { composeStacks } from '@objectstack/spec';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { MetadataPlugin } from './plugin.js';
 
 const CORE_ID = 'com.example.multi.core';
@@ -130,7 +130,10 @@ const ordersStack = {
 /** The module is listed FIRST — array order must not be what orders the load. */
 const twoPackageArtifact = () =>
     JSON.parse(JSON.stringify(composeStacks(
-        [ordersStack, coreStack] as never,
+        // Through `defineStack` first — `composeStacks` refuses an input no
+        // producer built (#20367 ruling B); `strict: false` keeps each input
+        // exactly as authored here.
+        [defineStack(ordersStack as never, { strict: false }), defineStack(coreStack as never, { strict: false })],
         { manifest: 'preserve' },
     )));
 

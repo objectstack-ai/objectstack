@@ -37,81 +37,6 @@ allowlist that omits them and refuse — `Unsupported filter operator`,
 `INVALID_FILTER` / 400 — rather than approximating. A pattern ending in a lone
 unpaired backslash is refused by every face.
 
-## Implicit Equality (Shorthand)
-
-The most common filter — equality — has a shorthand:
-
-```typescript
-// ✅ Implicit equality (preferred for simple cases)
-where: { status: 'active' }
-
-// ✅ Explicit equality (same result)
-where: { status: { $eq: 'active' } }
-```
-
-## Logical Operators
-
-### AND (implicit)
-
-All top-level conditions are AND-combined by default:
-
-```typescript
-// ✅ Implicit AND — all conditions must match
-where: {
-  status: 'active',
-  role: 'admin',
-  age: { $gte: 18 }
-}
-
-// ✅ Explicit $and — same result
-where: {
-  $and: [
-    { status: 'active' },
-    { role: 'admin' },
-    { age: { $gte: 18 } }
-  ]
-}
-```
-
-### OR
-
-```typescript
-// ✅ Find admins OR managers
-where: {
-  $or: [
-    { role: 'admin' },
-    { role: 'manager' }
-  ]
-}
-
-// ✅ Equivalent using $in
-where: {
-  role: { $in: ['admin', 'manager'] }
-}
-```
-
-### NOT
-
-```typescript
-// ✅ Exclude deleted records
-where: {
-  $not: { status: 'deleted' }
-}
-```
-
-### Combining Logical Operators
-
-```typescript
-// ✅ Active users who are admin OR have high score
-where: {
-  status: 'active',            // AND
-  $or: [
-    { role: 'admin' },
-    { score: { $gte: 90 } }
-  ]
-}
-```
-
 ## Field References
 
 > ✅ **Enforced.** `{ $field: '...' }` compares two columns of the same row.
@@ -129,34 +54,43 @@ Legal in a **comparison** position only. As an `$in` / `$nin` member or a
 `$between` endpoint it is refused at parse — no evaluation path resolves a
 reference there.
 
-## Nested Relation Filters
+## Relation Filters
 
-Filter by a related object's fields:
+A condition on a related record's fields beneath a relation field (`lookup`,
+`master_detail`, `user`, `tree`) is served in `where`: the engine reads the
+related object with it **as the caller**, then matches the field against the
+ids it returns (`$in`; any member when `multiple: true`).
 
 ```typescript
-// ✅ Find orders where the customer is in the US
-where: {
-  customer: {
-    country: 'US'
-  }
-}
-
-// ✅ Deeper nesting
-where: {
-  customer: {
-    organization: {
-      industry: 'Technology'
-    }
-  }
-}
+// ✅ Orders whose customer is in the US
+where: { customer: { country: 'US' } }
 ```
+
+Limits — one level: every key a field the related object declares, no relation
+or dotted key inside; forward only: never a parent by its children; `where`
+only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
+at most 1000 related ids, refused past that, `INVALID_FILTER` / 400, never
+truncated; as the caller: the related object's row scope and field permissions
+apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
+never an empty result. Past the cap, run the two steps yourself — filter the
+related object, then `$in` its ids:
+
+```typescript
+const us = await engine.find('customer', { where: { country: 'US' }, fields: ['id'] });
+where: { customer: { $in: us.map((c) => c.id) } }
+```
+
+On a `multiple: true` lookup match each id with `$contains` (an `$or` of those
+for several); the SQL driver refuses `$in` there. A parent by its children's
+fields is the same two steps reversed: query the child with the condition and
+`fields: [the lookup]`, then `{ id: { $in: … } }` on the parent.
 
 ## Common Mistakes
 
 ### ❌ Wrong: expecting sibling keys to be an OR
 
 `where: { role: 'admin', status: 'active' }` is an AND — sibling keys always
-are. For OR, wrap them in a `$or` array (see **Logical Operators** above).
+are. For OR, wrap them in a `$or` array (SKILL.md, **Logical Operators**).
 
 ### ❌ Wrong: Using string operators on non-string fields
 

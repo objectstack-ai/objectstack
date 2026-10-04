@@ -10,9 +10,9 @@ const cube: Cube = {
   name: 'sales',
   title: 'Sales',
   sql: 'opportunity',
-  measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
-  dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' } },
-  public: false,
+  measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
+  dimensions: { region: { label: 'Region', type: 'string', sql: 'account.region' } },
+  public: true,
 };
 
 const query: AnalyticsQuery = {
@@ -118,13 +118,13 @@ describe('NativeSQLStrategy — base-column qualification under joins', () => {
     name: 'sales',
     title: 'Sales',
     sql: 'opportunity',
-    measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
+    measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
     dimensions: {
-      status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
-      region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' },
+      status: { label: 'Status', type: 'string', sql: 'status' },
+      region: { label: 'Region', type: 'string', sql: 'account.region' },
     },
     joins: { account: { name: 'account' } },
-    public: false,
+    public: true,
   };
 
   it('qualifies a base-table dimension with the base table when the cube has joins', async () => {
@@ -144,9 +144,9 @@ describe('NativeSQLStrategy — base-column qualification under joins', () => {
   it('leaves base columns BARE for a single-object cube (no joins) — generated SQL unchanged', async () => {
     const soloCube: Cube = {
       name: 'tasks', title: 'Tasks', sql: 'task',
-      measures: { c: { name: 'c', label: 'Count', type: 'count', sql: '*' } },
-      dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
-      public: false,
+      measures: { c: { label: 'Count', type: 'count', sql: '*' } },
+      dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+      public: true,
     };
     const strategy = new NativeSQLStrategy();
     const ctx = ctxWith({ getCube: (n) => (n === 'tasks' ? soloCube : undefined) });
@@ -163,15 +163,15 @@ describe('NativeSQLStrategy — multi-hop joins (ADR-0071)', () => {
     name: 'sales',
     title: 'Sales',
     sql: 'opportunity',
-    measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
+    measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
     dimensions: {
-      owner_region: { name: 'owner_region', label: 'Owner Region', type: 'string', sql: 'account.owner.region' },
+      owner_region: { label: 'Owner Region', type: 'string', sql: 'account.owner.region' },
     },
     joins: {
       account: { name: 'crm_account' },
       'account__owner': { name: 'core_user' },
     },
-    public: false,
+    public: true,
   };
   const mhQuery: AnalyticsQuery = {
     cube: 'sales',

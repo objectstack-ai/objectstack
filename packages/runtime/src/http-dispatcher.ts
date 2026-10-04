@@ -13,8 +13,11 @@ import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } f
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
-import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import type { ServiceInfo } from '@objectstack/spec/api';
+// [#20477] The caller's VETTED organization, read by the one helper `RestServer`
+// and the dispatcher's `/meta` doors share — imported, never restated.
+import { metaCallerOrganizationId } from '@objectstack/rest';
 import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -660,7 +663,7 @@ export class HttpDispatcher {
                 acceptOAuthAccessToken: /^(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
             });
         } catch (err) {
-            // [#13906 decision 1 A / #13279] The ONE fault that must stay loud:
+            // [#13906 decision 1 A / commit 6a180e42d] The ONE fault that must stay loud:
             // an authorization input that exists and could not be read (a
             // failed permission-store read, a `tenancy` service that is
             // registered and failed to build). Swallowing it here answered an
@@ -1122,7 +1125,7 @@ export class HttpDispatcher {
         // and parses the body against `ApiErrorSchema`, which now PASSES for
         // every body this door emits — the "parse every body it emits" half.
         const declaredCode = demotedDeclaredCode(thrown);
-        // [#9934] The producer-side user-facing marking rides as a declared
+        // [commit 79c46da90] The producer-side user-facing marking rides as a declared
         // sibling of `code`/`message` (`ApiErrorSchema.userMessage`), exactly
         // like `declaredCode` — the shared resolver already answered whether
         // the throw declared one (`declaredUserMessage`'s non-empty-string
@@ -1772,6 +1775,15 @@ export class HttpDispatcher {
         const hasComments = !!(objectqlSvc as { registry?: { getObject?: (n: string) => unknown } } | null)
             ?.registry?.getObject?.('sys_comment');
 
+        // [#21046] Which optional `/auth` route families are mounted — the auth
+        // service's OWN public-config answer, the object `GET /auth/config`
+        // serves, read through the one shared reader both discovery producers
+        // call (`readAuthFamilies`, `@objectstack/spec/api`). Nothing here
+        // re-derives "is the admin plugin on": a second derivation is how two
+        // machine-readable answers about one boot come apart. `undefined` (no
+        // auth service, or one that publishes no public config) emits no key.
+        const authFamilies = readAuthFamilies(authSvc);
+
         // Derive locale info from actual i18n service when available
         let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
         if (hasI18n && i18nSvc) {
@@ -2092,6 +2104,7 @@ export class HttpDispatcher {
                                     : svcUnavailable('search'),
             },
             locale,
+            ...(authFamilies ? { authFamilies } : {}),
         };
     }
 
@@ -2181,51 +2194,45 @@ export class HttpDispatcher {
     }
 
     /**
-     * Resolve `resolveActiveOrganizationId` — the ACTIVE ORGANIZATION id on the
-     * request's auth session, i.e. `session.activeOrganizationId`, normalising
-     * plain-object headers into a `Headers` instance first because the auth
-     * API's `getSession` requires one. Returns `undefined` for anonymous calls,
-     * when auth is not wired up, when the session names no active organization,
-     * and on any failure reaching the auth service — the caller cannot
-     * distinguish those four, by design.
+     * Resolve `resolveActiveOrganizationId` — the caller's VETTED active
+     * organization: the `tenantId` the identity step wrote onto
+     * `context.executionContext` (`resolveRequestScope` →
+     * `resolveExecutionContext` → `resolveAuthzContext`), ⛔ never the auth
+     * session's `activeOrganizationId` as stored.
      *
-     * ⚠️ Until this was corrected the block here described `resolveCallerUserId`
-     * ("the calling user id from the request session"), a sibling deleted with
-     * the multi-tenant `/cloud` control plane. TSDoc binds a block by POSITION,
-     * so deleting the declaration under a docblock does not delete the docblock
-     * — it silently re-points it at the next declaration down, which then ships
-     * a description of a method that no longer exists. A rename sweep cannot
-     * catch that, because a sweep reads the docblock OF the method it is
-     * changing and this one read as if it already belonged there. Keep the
-     * first line naming the method it documents, so the next re-point is
-     * visible on sight rather than plausible.
+     * [#20477] Those are two different values. `resolveAuthzContext`
+     * (`@objectstack/core`) VETS the session claim: under a wall-enforcing
+     * tenancy posture, a claim naming an organization its owner no longer
+     * belongs to is DROPPED, and the request resolves with no active
+     * organization (maintainer ruling B on #15409, PR #15794). This source used
+     * to call the auth service's `getSession` and return the claim unread, so
+     * every door that asked it — the nine `/packages` doors — kept a removed
+     * member inside the organization they had left for the rest of the
+     * session: its commit history and export were served to them, and their
+     * publish-drafts, discard-drafts, revert, rollback, adopt-orphans,
+     * duplicate and uninstall ran inside it. Reading the vetted value HERE
+     * fixes every caller at once and adds no second vetting path. It is the
+     * value `RestServer` scopes a caller by (`ctx.tenantId`), read through the
+     * one helper the dispatcher's `/meta` doors already use (#20408), so no
+     * transport or domain can answer a different organization for one caller.
+     *
+     * An admitted API key's organization is its binding, so a key caller is
+     * answered that organization here; the session read found no session for a
+     * key and answered `undefined`.
+     *
+     * Returns `undefined` for an anonymous caller, a caller with no active
+     * organization, and one whose claim was dropped — one fact to every
+     * consumer. Every caller runs after `dispatch()`'s identity step: the
+     * `/packages` domain's anonymous-deny floor refuses a context carrying no
+     * resolved principal before any of them is reached.
+     *
+     * Keep the first line naming the method it documents: TSDoc binds a block
+     * by POSITION, so deleting a declaration from under its docblock silently
+     * re-points the block at the next declaration down (this one once described
+     * `resolveCallerUserId`, a sibling deleted with the `/cloud` control plane).
      */
     private async resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined> {
-        try {
-            // [#4127 FINDING, batch 5]
-            // Third `.api` reader on the auth service; see the note above.
-            const authService = await this.resolveService(this.requestKernel(context), CoreServiceName.enum.auth);
-            const rawHeaders = context.request?.headers;
-            let headers: any = rawHeaders;
-            if (rawHeaders && typeof rawHeaders === 'object' && typeof (rawHeaders as any).get !== 'function') {
-                try {
-                    const h = new Headers();
-                    for (const [k, v] of Object.entries(rawHeaders as Record<string, any>)) {
-                        if (v == null) continue;
-                        h.set(k, Array.isArray(v) ? v.join(', ') : String(v));
-                    }
-                    headers = h;
-                } catch {
-                    headers = rawHeaders;
-                }
-            }
-            const apiObj = authService?.auth?.api ?? authService?.api;
-            const sessionData = await apiObj?.getSession?.call(apiObj, { headers });
-            const oid = sessionData?.session?.activeOrganizationId;
-            return typeof oid === 'string' && oid.length > 0 ? oid : undefined;
-        } catch {
-            return undefined;
-        }
+        return metaCallerOrganizationId(context.executionContext);
     }
 
     /** Thin delegate — body extracted to `./domains/ui.ts` (D11③ PR-3). */
@@ -2797,7 +2804,7 @@ export class HttpDispatcher {
                     console.warn(`[HttpDispatcher] PERMISSION_DENIED on ${method} ${cleanPath} — ${withheld}`);
                 }
                 // [#13623] The producer's marked user-facing text rides out —
-                // the SECOND door that dropped it. #13241 repaired the
+                // the SECOND door that dropped it. Commit a21d2a9cf repaired the
                 // THROW-TRANSPARENT exit (`dispatcher-plugin.errorResponseBase`);
                 // a marked denial never reaches that exit, because this catch is
                 // not a pure rethrow: it recognises the denial and answers it
@@ -2824,7 +2831,7 @@ export class HttpDispatcher {
                 // FOR the caller, platform and driver code never set it, and it
                 // lands as a declared top-level sibling of `code`/`message`
                 // (`ApiErrorSchema.userMessage`), never inside `details`.
-                // The mark never moves the status or the `code` (#9934).
+                // The mark never moves the status or the `code` (commit 79c46da90).
                 const userMessage = declaredUserMessage(e);
                 return {
                     handled: true,

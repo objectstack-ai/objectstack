@@ -81,12 +81,22 @@
 //     --run <id> <summary.json>... [--merge-into <dataset>] [--out <path>]
 //   node scripts/measure-test-shard-timings.mjs --self-test
 
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-import { countTestFiles } from './partition-test-shards.mjs';
+// FILE_SHARDED_PACKAGES, PREVIOUS_FILE_SHARDED_PACKAGES and SLICE_ENV are read
+// only inside functions: this import is circular (the partitioner imports
+// samplesFromSummary from here), so a top-level read would meet an
+// uninitialised binding when the partitioner is the entry point.
+import {
+  countTestFiles,
+  FILE_SHARDED_PACKAGES,
+  PREVIOUS_FILE_SHARDED_PACKAGES,
+  SLICE_ENV,
+} from './partition-test-shards.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,6 +150,96 @@ export function sliceOfCliArguments(args) {
   return null;
 }
 
+// Which file-level slice a task ran as when the slice travelled in
+// `OS_TEST_SHARD` rather than as a passthrough (#19278), or null.
+//
+// Test Core's slice leg now runs `OS_TEST_SHARD=k/n turbo run test` with NO
+// passthrough -- a passthrough is folded into the hash of every task in the run,
+// which forced `--only`, which dropped the build closure out of the test's hash
+// -- so `cliArguments` is `[]` on that leg and sliceOfCliArguments() above sees
+// a WHOLE package. turbo does record the variable, but only as a digest: the
+// task's `environmentVariables.configured` carries `OS_TEST_SHARD=` followed by
+// the sha256 hex of the value (measured on turbo 2.10.10, executed summaries
+// and `--dry=json` alike: `1/16` -> `ece2d97a…`, `1/2` -> `d939926f…`), and
+// `OS_TEST_SHARD=` with nothing after it when the value is empty.
+//
+// So the digest is matched against every slice the partitioner CAN emit for
+// that package, or emitted under the map it replaced, and nothing else: `k/n`
+// for 1 <= k <= n, for n = FILE_SHARDED_PACKAGES[package] and n =
+// PREVIOUS_FILE_SHARDED_PACKAGES[package] from partition-test-shards.mjs. The
+// bound is those two closed maps -- n candidates per map that slices the
+// package, none for one that does not. The previous map is what lets a run
+// made before a map change still be read (its header says why it exists and
+// when it decodes nothing); a decoded slice is then summed within its run, so
+// an incomplete set still contributes nothing.
+//
+// ⛔ A digest that matches no candidate is REFUSED, never read as a whole
+// package. That is the #16173 direction exactly: one slice's window recorded as
+// the package's whole cost, a number that reads right and is n times too small.
+// It happens when the map changed twice within a summary's lifetime, or when
+// the variable was set by hand to a slice the partitioner does not emit; either
+// way the remedy is a summary from a run under the current map.
+//
+// An empty value is not a slice: the package's vitest config hands vitest an
+// empty `shard`, which it ignores, and the package runs whole. A task with no
+// `environmentVariables` record at all carries no evidence either way and is
+// read as carrying no env slice -- turbo 2.10.10 writes one on every task, and
+// the self-test fixtures predate it.
+export function sliceOfEnvironment(
+  environmentVariables,
+  name,
+  label,
+  sliced = FILE_SHARDED_PACKAGES,
+  previous = PREVIOUS_FILE_SHARDED_PACKAGES
+) {
+  const configured = environmentVariables?.configured;
+  if (configured === undefined || configured === null) return null;
+  if (!Array.isArray(configured)) {
+    throw new Error(`${label}: environmentVariables.configured is not an array -- did the summary format change?`);
+  }
+  const prefix = `${SLICE_ENV}=`;
+  const entry = configured.find((e) => typeof e === 'string' && e.startsWith(prefix));
+  if (entry === undefined) return null;
+  const digest = entry.slice(prefix.length);
+  if (digest === '') return null;
+  const counts = [];
+  for (const map of [sliced, previous]) {
+    const n = Object.hasOwn(map, name) ? map[name] : 1;
+    if (n > 1 && !counts.includes(n)) counts.push(n);
+  }
+  const candidates = [];
+  for (const count of counts) {
+    for (let index = 1; index <= count; index++) {
+      const spec = `${index}/${count}`;
+      if (createHash('sha256').update(spec).digest('hex') === digest) return { index, count };
+      candidates.push(spec);
+    }
+  }
+  throw new Error(
+    `${label}: ${name} ran with ${SLICE_ENV} set (digest ${digest.slice(0, 16)}…), and that digest ` +
+      'matches no slice the partitioner can emit for it, or emitted under the map it replaced ' +
+      `(${candidates.length ? candidates.join(', ') : 'none: neither FILE_SHARDED_PACKAGES nor PREVIOUS_FILE_SHARDED_PACKAGES slices it'}). ` +
+      'Refusing to read the window as a whole-package sample: it is one slice of the suite, and ' +
+      'recording it as the whole cost is the #16173 defect. If FILE_SHARDED_PACKAGES changed more ' +
+      'than once since this run, refresh from a run made under the current map.'
+  );
+}
+
+// The slice one measured leg ran as, from either carrier. Both present and
+// disagreeing is not a reading to pick from: vitest would have run the CLI's,
+// but no workflow here sets both, so it is refused rather than resolved.
+function sliceOfLeg(leg, name, label, sliced, previous) {
+  const fromArgs = sliceOfCliArguments(leg.cliArguments);
+  const fromEnv = sliceOfEnvironment(leg.environmentVariables, name, label, sliced, previous);
+  if (fromArgs && fromEnv && (fromArgs.index !== fromEnv.index || fromArgs.count !== fromEnv.count)) {
+    throw new Error(
+      `${label}: ${name} carries two different slices -- --shard=${fromArgs.index}/${fromArgs.count} ` +
+        `in cliArguments and ${fromEnv.index}/${fromEnv.count} in ${SLICE_ENV}. Refusing to guess.`
+    );
+  }
+  return fromArgs ?? fromEnv;
+}
+
 // The task names whose windows this file counts as a package's test cost.
 // #16550: since #16466, six packages (core, objectql, rest, runtime, spec,
 // types) split their suite into `test` and `test:repo` (the repo-scanning
@@ -172,7 +272,12 @@ const SAMPLED_TASKS = ['test', 'test:repo'];
 // Recording one leg's seconds alone (because the other was cached or failed)
 // would write a partial suite's cost as the package's whole cost, a reading
 // worse than today's undercount by #16466's own defect this card fixes.
-export function samplesFromSummary(parsed, label) {
+export function samplesFromSummary(
+  parsed,
+  label,
+  sliced = FILE_SHARDED_PACKAGES,
+  previous = PREVIOUS_FILE_SHARDED_PACKAGES
+) {
   const tasks = parsed?.tasks;
   if (!Array.isArray(tasks)) {
     throw new Error(
@@ -182,7 +287,7 @@ export function samplesFromSummary(parsed, label) {
   }
   // One entry per package, holding whichever of its sampled tasks this
   // summary carries (almost always just `test`; `test` + `test:repo` for a
-  // split package). Each leg is recorded as EITHER a seconds+cliArguments
+  // split package). Each leg is recorded as EITHER a seconds+slice-carrier
   // reading, OR a `cached`/`failed` flag -- never both -- so the fold below
   // can tell "this leg disqualifies the package" from "this leg is a real
   // measurement" without re-reading the raw task.
@@ -211,7 +316,7 @@ export function samplesFromSummary(parsed, label) {
     }
     const seconds = (endTime - startTime) / 1000;
     if (!(seconds >= 0)) throw new Error(`${label}: ${name}#${taskName} measured ${seconds}s`);
-    legs.set(taskName, { seconds, cliArguments: task.cliArguments });
+    legs.set(taskName, { seconds, cliArguments: task.cliArguments, environmentVariables: task.environmentVariables });
   }
 
   const samples = new Map();
@@ -230,13 +335,14 @@ export function samplesFromSummary(parsed, label) {
     }
     if (readings.some((leg) => leg.failed)) continue;
     let seconds = 0;
-    let cliArguments;
+    let slice = null;
     for (const leg of readings) {
       seconds += leg.seconds;
-      cliArguments ??= leg.cliArguments;
+      // A passthrough slice (`cliArguments`, the nightly tiers) or an
+      // `OS_TEST_SHARD` one (Test Core, #19278) -- see sliceOfEnvironment().
+      slice ??= sliceOfLeg(leg, name, label, sliced, previous);
     }
     samples.set(name, seconds);
-    const slice = sliceOfCliArguments(cliArguments);
     if (slice) slices.set(name, slice);
   }
   return { samples, skippedCached, slices };
@@ -480,11 +586,12 @@ export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = n
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
   'measure-test-shard-timings self-test': 56,
+  'env-carried slices (#19278)': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1064,6 +1171,188 @@ function selfTest() {
   const flat = packageDirForName('@objectstack/spec');
   check(() => {
     if (flat === null || path.basename(flat) !== 'spec') throw new Error('workspace: a depth-1 package stopped resolving');
+  });
+
+  // -- ENV-CARRIED SLICES (#19278) --------------------------------------------
+  //
+  // Test Core's slice leg carries k/n in OS_TEST_SHARD, which a summary records
+  // only as a sha256 digest in `environmentVariables.configured`. With the
+  // digest path dropped, the digest cases below fail: a slice read as a whole
+  // package (the #16173 direction), or an unmatched or conflicting digest let
+  // through. Three are controls that hold either way -- the passthrough
+  // carrier, an empty value, an unrelated variable -- and pin what the digest
+  // path must NOT read. Each case was ablated against the code it pins.
+  // `sliced` stands in for FILE_SHARDED_PACKAGES so the fixtures keep the short
+  // names above; one case reads the REAL maps, and one crosses a map change.
+  battery('env-carried slices (#19278)');
+  const digestOf = (value) => createHash('sha256').update(value).digest('hex');
+  const envTask = (pkg, start, end, value, extra = {}) => ({
+    ...testTask(pkg, start, end),
+    cliArguments: [],
+    environmentVariables: {
+      specified: { env: ['OS_TEST_SHARD', 'OS_TEST_TIERS'], passThroughEnv: null },
+      configured: [`OS_TEST_SHARD=${value === '' ? '' : digestOf(value)}`],
+      inferred: [],
+      passthrough: null,
+    },
+    ...extra,
+  });
+  const map3 = Object.freeze({ cli: 3 });
+
+  check(() => {
+    const r = samplesFromSummary(summary([envTask('cli', 0, 118_073, '2/3')]), 'f', map3);
+    const s = r.slices.get('cli');
+    if (!s || s.index !== 2 || s.count !== 3) {
+      throw new Error(`env slice: an OS_TEST_SHARD digest was read as ${JSON.stringify(s ?? null)}, not 2/3`);
+    }
+    if (r.samples.get('cli') !== 118.073) throw new Error('env slice: the slice window was not kept as the sample');
+  });
+  check(() => {
+    // The REAL maps, a real package name, digests of the form turbo writes: the
+    // defaults ARE the partitioner's live FILE_SHARDED_PACKAGES and
+    // PREVIOUS_FILE_SHARDED_PACKAGES. Written for whatever state those maps are
+    // in -- every count either names for the CLI must decode its own last
+    // slice, and a count neither names must be refused listing exactly their
+    // candidates -- so it reds when a default stops being its live map.
+    const name = '@objectstack/cli';
+    const counts = [];
+    for (const map of [FILE_SHARDED_PACKAGES, PREVIOUS_FILE_SHARDED_PACKAGES]) {
+      const n = Object.hasOwn(map, name) ? map[name] : 1;
+      if (n > 1 && !counts.includes(n)) counts.push(n);
+    }
+    for (const n of counts) {
+      const s = samplesFromSummary(summary([envTask(name, 0, 1000, `${n}/${n}`)]), 'f').slices.get(name);
+      if (!s || s.index !== n || s.count !== n) {
+        throw new Error(`env slice: the live maps did not resolve ${name} ${n}/${n} (got ${JSON.stringify(s ?? null)})`);
+      }
+    }
+    const stranger = Math.max(1, ...counts) + 1;
+    let message = '';
+    try {
+      samplesFromSummary(summary([envTask(name, 0, 1000, `1/${stranger}`)]), 'f');
+    } catch (e) {
+      message = e.message;
+    }
+    const listed =
+      counts.flatMap((n) => Array.from({ length: n }, (_, i) => `${i + 1}/${n}`)).join(', ') ||
+      'none: neither FILE_SHARDED_PACKAGES nor PREVIOUS_FILE_SHARDED_PACKAGES slices it';
+    if (!message.includes(`(${listed})`)) {
+      throw new Error(
+        `env slice: a ${name} digest of 1/${stranger}, a count neither live map names, was not refused ` +
+          `listing (${listed}) (got ${JSON.stringify(message || 'no throw')})`
+      );
+    }
+  });
+  check(() => {
+    // ACROSS A MAP CHANGE: a run made before it, under a map that cut `cli` in
+    // two, read by a generator whose current map slices nothing. Both halves
+    // decode against the previous map and are summed WITHIN the run to the
+    // whole cost -- the reading the refresh lane needs while every retained
+    // run predates the change -- and a count neither map names is still
+    // refused. Without the previous map both halves are refused and the run
+    // measures nothing.
+    const none = Object.freeze({});
+    const was2 = Object.freeze({ cli: 2 });
+    const legA = samplesFromSummary(summary([envTask('cli', 0, 300_000, '1/2')]), 'a', none, was2);
+    const legB = samplesFromSummary(summary([envTask('cli', 0, 433_330, '2/2')]), 'b', none, was2);
+    const set = buildDataset({
+      perSummary: [{ ...legA, run: 'r' }, { ...legB, run: 'r' }],
+      fileCounts: new Map([['cli', 300]]),
+      provenance: {},
+    });
+    if (set.packages.cli !== 733.33 || set.skippedIncompleteSlices.length !== 0) {
+      throw new Error(
+        `env slice: a pre-change run's two halves did not assemble to 733.33s (got ${set.packages.cli}; ` +
+          `incomplete ${JSON.stringify(set.skippedIncompleteSlices)})`
+      );
+    }
+    let message = '';
+    try {
+      samplesFromSummary(summary([envTask('cli', 0, 1000, '1/3')]), 'c', none, was2);
+    } catch (e) {
+      message = e.message;
+    }
+    if (!message.includes('(1/2, 2/2)')) {
+      throw new Error(`env slice: a digest neither map names was not refused (got ${JSON.stringify(message || 'no throw')})`);
+    }
+  });
+  check(() => {
+    // The passthrough carrier is untouched: the nightly tiers still use it.
+    const r = samplesFromSummary(summary([slicedTask('cli', 0, 400_000, 1, 3)]), 'f', map3);
+    const s = r.slices.get('cli');
+    if (!s || s.index !== 1 || s.count !== 3) throw new Error('env slice: the cliArguments carrier stopped working');
+  });
+  check(() => {
+    // ⛔ The refusal: a digest no candidate matches must never become a sample.
+    let message = '';
+    try {
+      samplesFromSummary(summary([envTask('cli', 0, 118_073, '1/16')]), 'f', map3);
+    } catch (e) {
+      message = e.message;
+    }
+    if (!message.includes('matches no slice the partitioner can emit') || !message.includes('1/3, 2/3, 3/3')) {
+      throw new Error(`env slice: an unmatched digest was not refused naming its candidates (got ${JSON.stringify(message)})`);
+    }
+  });
+  check(() => {
+    // A package the partitioner never slices has NO candidates, so any slice
+    // digest on it is refused as well.
+    if (!threw(() => samplesFromSummary(summary([envTask('a', 0, 10_000, '1/2')]), 'f', map3))) {
+      throw new Error('env slice: a slice digest on a package the partitioner does not slice was accepted');
+    }
+  });
+  check(() => {
+    // A refusal is a refusal of the whole summary: buildDataset never sees it.
+    if (!threw(() =>
+      buildDataset({
+        perSummary: [samplesFromSummary(summary([envTask('cli', 0, 400_000, '9/9')]), 'f', map3)],
+        fileCounts: new Map([['cli', 300]]),
+        provenance: {},
+      })
+    )) {
+      throw new Error('env slice: an unmatched digest reached the dataset');
+    }
+  });
+  check(() => {
+    // An empty value is no slice: vitest ignores an empty `shard`.
+    const r = samplesFromSummary(summary([envTask('cli', 0, 10_000, '')]), 'f', map3);
+    if (r.slices.size !== 0 || r.samples.get('cli') !== 10) {
+      throw new Error('env slice: an empty OS_TEST_SHARD was read as a slice');
+    }
+  });
+  check(() => {
+    // Other declared variables are not the slice.
+    const task = {
+      ...testTask('cli', 0, 10_000),
+      environmentVariables: { configured: [`OS_TEST_TIERS=${digestOf('queue')}`] },
+    };
+    if (samplesFromSummary(summary([task]), 'f', map3).slices.size !== 0) {
+      throw new Error('env slice: an unrelated configured variable was read as a slice');
+    }
+  });
+  check(() => {
+    const agree = envTask('cli', 0, 10_000, '1/3', { cliArguments: ['--shard=1/3'] });
+    const s = samplesFromSummary(summary([agree]), 'f', map3).slices.get('cli');
+    if (!s || s.index !== 1) throw new Error('env slice: two agreeing carriers were not read as that slice');
+    const disagree = envTask('cli', 0, 10_000, '2/3', { cliArguments: ['--shard=1/3'] });
+    if (!threw(() => samplesFromSummary(summary([disagree]), 'f', map3))) {
+      throw new Error('env slice: two disagreeing carriers were resolved instead of refused');
+    }
+  });
+  check(() => {
+    // The load-bearing case, env-carried: three slices are ONE package.
+    const ds = buildDataset({
+      perSummary: [
+        samplesFromSummary(summary([envTask('cli', 0, 400_000, '1/3')]), 'f', map3),
+        samplesFromSummary(summary([envTask('cli', 0, 380_000, '2/3')]), 'g', map3),
+        samplesFromSummary(summary([envTask('cli', 0, 420_000, '3/3'), testTask('a', 0, 10_000)]), 'h', map3),
+      ],
+      fileCounts: new Map([['cli', 300], ['a', 5]]),
+      provenance: {},
+    });
+    if (ds.packages.cli !== 1200) {
+      throw new Error(`env slice: three env-carried slices summed to ${ds.packages.cli}, expected 1200`);
+    }
   });
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
