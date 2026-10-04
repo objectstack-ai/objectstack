@@ -93,7 +93,7 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
   it('[#10194] `analytics_cube` now resolves the SAME schema at the saveMetaItem door', () => {
     // This pin used to assert the opposite — `getMetadataTypeSchema` answering
     // `undefined` — and its comment demanded that the ADR-0010 envelope
-    // question be re-asked before the line was "fixed". It was: #10194 bound
+    // question be re-asked before the line was "fixed". It was: commit 2306a765c bound
     // `analytics_cube` in `UNREGISTERED_KIND_SCHEMAS` (so `PUT
     // /meta/analytics_cube/:name` stops storing any JSON as `success: true`),
     // and CubeSchema now declares `...MetadataProtectionFields`, exactly per

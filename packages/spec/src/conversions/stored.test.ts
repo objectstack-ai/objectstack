@@ -126,7 +126,7 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
   // silently move a sqlite `file:` row's data to `:memory:`).
   describe('stored datasource rows (datasource-config-driver-key-aliases, #4456)', () => {
     // The fourth column is the driver id the stored pass SERVES, which differs
-    // from the stored one for exactly one row: #6345 renamed the canonical mongo
+    // from the stored one for exactly one row: commit e2798fab7 renamed the canonical mongo
     // id to `mongodb`, and `datasource-driver-mongo-to-mongodb` converges the
     // stored spelling in the same replay. Both conversions run over one row here,
     // which is the case worth pinning — the config-key rename is keyed by

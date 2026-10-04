@@ -794,7 +794,7 @@ describe('mongo options passthrough — nested credential-SPELLED keys refused a
  * config cannot work as written and the authoring door — the one place both
  * halves are visible at once — says so.
  *
- * Envelope note (same as the #8082/#9040 pins above): the zod issue's `code`
+ * Envelope note (same as the #8082 / commit 24206416a pins above): the zod issue's `code`
  * and its pathed location are the whole envelope at this layer — every schema
  * refusal is wrapped uniformly by the publish door (metadata-protocol's
  * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
@@ -1025,7 +1025,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
  * ''`); `buildMongoAuth`, the DSN branch's route, returns early on `!url`. So a
  * falsy `username` leaves the secret with nowhere to go.
  *
- * Envelope note (same as the #8082/#9040/#9041 pins above): the zod issue's
+ * Envelope note (same as the #8082 / commit 24206416a / commit d491625c1 pins above): the zod issue's
  * `code` and its pathed location are the whole envelope at this layer — every
  * schema refusal is wrapped uniformly by the publish door (metadata-protocol's
  * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).

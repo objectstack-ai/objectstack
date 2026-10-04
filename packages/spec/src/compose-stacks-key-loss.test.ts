@@ -170,7 +170,7 @@ describe('#5005 rule 3 — a key with no declared rule warns', () => {
     // One warning that both names the key AND carries the prescription — not
     // two unrelated ones (`defineStack` also warns about undeclared keys).
     // Anchored on the prescription's own words, never on a tracker id the
-    // author cannot resolve (#13156's strip).
+    // author cannot resolve (commit fd289be45's strip).
     const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
     expect(
       warnings.some((w) => w.includes('composeStacks') && w.includes("'futureThing'") && w.includes('COMPOSE_KEY_DISPOSITIONS')),

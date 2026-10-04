@@ -1,6 +1,6 @@
 /**
  * `composeStacks` refuses two INPUT STACKS whose action declarations resolve
- * to one scope-qualified runtime key — and only those (#14662).
+ * to one scope-qualified runtime key — and only those (commit 35dffeace).
  *
  * `defineStack` refuses the same collision within one stack
  * (`stack-duplicate-action-key.test.ts`); the runtime keys a composed artifact

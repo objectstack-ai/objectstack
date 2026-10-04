@@ -249,8 +249,8 @@ describe('rest_api retirement — ADR-0087 registration', () => {
     expect(entry!.surface).toBe('restServer.api.responseFormat / restServer.api.documentation.enabled');
     expect(entry!.replacement).toContain('`api.enableOpenApi`');
     // Plugin TS configuration has no stored or stack source for a conversion to
-    // rewrite — the #14691 / `openApi31` shape. A conversion id naming either
-    // key would be a strip with nothing to strip.
+    // rewrite — the `RestServerConfig` retirement (commit b3a63d32c) / `openApi31`
+    // shape. A conversion id naming either key would be a strip with nothing to strip.
     expect(step.conversionIds.filter((id) => /response-format|documentation-enabled/.test(id))).toEqual([]);
   });
 

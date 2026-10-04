@@ -913,7 +913,7 @@ describe('translation unknown-key strictness (#4001)', () => {
     });
 
     it('refuses `submitLabel` with the retirement prescription (#10926)', () => {
-      // Flipped, not deleted: until #10926 this case pinned `submitLabel` as
+      // Flipped, not deleted: until commit d173125fb this case pinned `submitLabel` as
       // an accepted copy key (latterly on a bespoke component type, after
       // #9249 retired `element:form`, its only spec-declared carrier). The
       // maintainer ruled retire over re-anchor, so the same authored shape now

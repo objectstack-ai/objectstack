@@ -100,7 +100,7 @@ describe('#8687 — unknown top-level stack keys are refused at parse', () => {
       ['workflows', 'state_machine'],
       // #3464: the collection was removed outright.
       ['portals', 'nothing ever consumed it'],
-      // #10485 (ADR-0049): the themes carrier retired; app.branding is the
+      // Commit 35ad101bc (ADR-0049): the themes carrier retired; app.branding is the
       // one colour surface.
       ['themes', 'app.branding'],
       // #4212: the uninvoked lifecycle family.

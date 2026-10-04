@@ -296,7 +296,7 @@ describe('operation message catalog — the row-level user copy (#7451)', () => 
 });
 
 /**
- * #12493 — two keys whose EMITTERS convert in follow-up cards: the sharing
+ * Commit aa5994e17 — two keys whose EMITTERS convert in follow-up cards: the sharing
  * middleware's by-id write denial (`record_write_denied`, consumer half
  * #12260) and plugin-approvals' non-submitter recall refusal
  * (`approval_recall_not_submitter`, consumer half #11993). Until those land,

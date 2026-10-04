@@ -217,7 +217,7 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     }
     // Anti-vacuity: the ui namespace we just probed is real and non-trivial —
     // otherwise a broken import would satisfy the three absences above.
-    // (`ThemeSchema` was the probe until #10485 retired it — ADR-0049.)
+    // (`ThemeSchema` was the probe until commit 35ad101bc retired it — ADR-0049.)
     expect('PageSchema' in ui).toBe(true);
   });
 
