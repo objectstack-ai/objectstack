@@ -4781,9 +4781,14 @@ export class AutomationEngine implements IAutomationService {
      */
     async pullConnectorSource(request: ConnectorSourcePullRequest): Promise<ConnectorSourcePullResult> {
         if (!this.connectorPullSource) {
-            throw new Error(
-                `[Automation] pullConnectorSource('${request.mapping}'): this automation engine has no connector sync `
-                + 'executor attached — it is attached by AutomationServicePlugin at init(); a bare engine cannot pull. Nothing was pulled.',
+            // ADR-0112: the code the executor itself answers for "cannot pull
+            // now" (a degraded connector), so a caller branches on one pair.
+            throw Object.assign(
+                new Error(
+                    `[Automation] pullConnectorSource('${request.mapping}'): this automation engine has no connector sync `
+                    + 'executor attached — it is attached by AutomationServicePlugin at init(); a bare engine cannot pull. Nothing was pulled.',
+                ),
+                { code: 'SERVICE_UNAVAILABLE', status: 503 },
             );
         }
         return this.connectorPullSource(request);

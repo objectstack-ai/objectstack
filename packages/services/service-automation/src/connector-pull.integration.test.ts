@@ -32,6 +32,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ConnectorRestPlugin } from '../../../connectors/connector-rest/src/index.js';
 import { AutomationServicePlugin } from './plugin.js';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { IAutomationService } from '@objectstack/spec/contracts';
 import type { ConnectorPullProtocol } from './connector-pull.js';
 
 const CONTACT = {
@@ -180,7 +181,12 @@ describe('[#20919] connector pull, end to end through a real rest connector', ()
         expect(first.watermark).toEqual({ field: 'updated_at', target: 'synced_at', param: 'since', from: undefined });
 
         // Pull 2: the starting point is the highest `synced_at` stored by pull 1.
-        const second = await automation.pullConnectorSource({ mapping: 'crm_contacts', context: SYSTEM });
+        // [#20281 stage ③] Taken through the kernel's `automation` SERVICE —
+        // `IAutomationService.pullConnectorSource`, the door a job's `pull` run
+        // form binds through — not the plugin instance: the engine serves it
+        // from the executor the plugin attached at init().
+        const service = kernel.getService<IAutomationService>('automation');
+        const second = await service.pullConnectorSource!({ mapping: 'crm_contacts', context: SYSTEM });
         expect(fixture.seen[1].get('since')).toBe('2026-01-02T00:00:00.000Z');
         expect(second.watermark?.from).toBe('2026-01-02T00:00:00.000Z');
         expect(second.summary.errors, JSON.stringify(second.summary.results)).toBe(0);
