@@ -802,6 +802,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.lock-door-read-agree.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.lock-gate-canonical-type.test.ts",
       "verb": "findOne",
       "pinned": 1
