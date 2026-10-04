@@ -33,6 +33,9 @@
  *   - anything else (bucketed in memory, or grouped by a driver that runs no
  *     SQL): the refusal on `/analytics/sql`, and no `sql` on the query.
  *
+ * A face's doors answer nothing, except on a named exception (below): its
+ * table is seeded and its doors pass through, so its rows are real.
+ *
  * The engine's predicate (`engine.aggregate`'s pushdown test: the driver's
  * `supports.queryDateGranularity`, `tzRequiresInMemory`, per-aggregation
  * filters) is not reachable from this package, so the strategy reads the
@@ -81,14 +84,30 @@
  *     SQLite's `supports`; the remote face publishes `queryDateGranularity: {}`,
  *     so the engine buckets in memory there.
  *
- * ## The one named exception
+ * ## The two named exceptions, and the equivalence each asserts
  *
- * `turso`'s remote face: the engine buckets in memory, and the echo prints the
- * SQLite expression the driver renders, because the hook answers. Run on
- * libSQL it answers the face's keys (the driver's own reason for inheriting
- * it). It is pinned as an exception, so moving either side is red. The other
- * cell of that kind, a measure carrying its own `filter`, is outside this
- * table's axes and is pinned in `objectql-echo-date-bucket.test.ts`.
+ * Two cells print while the engine buckets in memory. The echo prints a
+ * statement only if that statement, run on the query's own datasource,
+ * answers the face's keys and rows; otherwise it answers the refusal
+ * (#21647's triage). So each exception asserts that equivalence, not merely
+ * that a statement prints. If it ever breaks, the cell is red, and the cell
+ * falls under the refusal.
+ *
+ *   - `turso`'s remote face, in this table. The engine buckets in memory, and
+ *     the echo prints the SQLite expression the driver renders, because the
+ *     hook answers. A face declaring `printsWhileEngineBucketsInMemory` is
+ *     served over a seeded table (`EXCEPTION_DEALS`). Each printed cell (UTC
+ *     and unset, every granularity) runs the printed statement with its
+ *     params through the engine's raw-SQL bridge, on that face's datasource.
+ *     It asserts the `closed_at` / `amount_sum` pairs equal the face's rows.
+ *     The row's datasource is better-sqlite3, by code path. That libSQL
+ *     answers the labels better-sqlite3 answers for this expression is pinned
+ *     in `driver-turso`'s `turso-remote-inherited-members.test.ts`.
+ *   - A measure carrying its own `filter`, outside this table's axes. The case
+ *     "a measure filter, which the engine aggregates in memory" in
+ *     `objectql-echo-date-bucket.test.ts` asserts the same equivalence. It
+ *     runs on SQLite on every run, and on PostgreSQL where
+ *     `OS_TEST_POSTGRES_URL` is set.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -123,6 +142,33 @@ const CUBES = [
 
 const GRANULARITIES = TimeUpdateInterval.options;
 
+/**
+ * The table a named exception is served over (see the header). Every
+ * granularity answers several buckets, and at least one bucket sums two rows.
+ * e1 and e2 straddle an ISO week-year boundary: Sunday 2025-12-28 is
+ * 2025-W52, and Monday 2025-12-29 is 2026-W01, both in calendar 2025. e3 is
+ * 20:00 UTC on 31 January, e4 and e5 share a UTC day, and e6 opens Q2.
+ */
+const EXCEPTION_DEALS = [
+  { id: 'e1', closed_at: '2025-12-28T10:00:00.000Z', amount: 3 },
+  { id: 'e2', closed_at: '2025-12-29T10:00:00.000Z', amount: 20 },
+  { id: 'e3', closed_at: '2026-01-31T20:00:00.000Z', amount: 7 },
+  { id: 'e4', closed_at: '2026-02-03T08:00:00.000Z', amount: 1 },
+  { id: 'e5', closed_at: '2026-02-03T23:30:00.000Z', amount: 4 },
+  { id: 'e6', closed_at: '2026-04-02T00:30:00.000Z', amount: 5 },
+] as const;
+const EXCEPTION_TOTAL = EXCEPTION_DEALS.reduce((sum, deal) => sum + deal.amount, 0);
+
+/**
+ * Rows as `[closed_at, amount_sum]` pairs, ordered by the bucket. The key is
+ * compared verbatim, and the measure as a number. The query asks no `order`,
+ * so arrival order is not part of the answer on either side.
+ */
+const bucketPairs = (rows: unknown): Array<[unknown, number]> =>
+  (rows as Array<Record<string, unknown>>)
+    .map((row): [unknown, number] => [row.closed_at, Number(row.amount_sum)])
+    .sort(([a], [b]) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
+
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } };
 
 type Tier = 'pushdown' | 'in-memory';
@@ -154,7 +200,9 @@ interface DriverFace {
   /**
    * The named exception: where the zone's class lets the engine push a bucket
    * down, this face still buckets in memory, and the echo prints the hook's
-   * expression. The reason, in words.
+   * expression. The reason, in words. A face declaring it is served over
+   * `EXCEPTION_DEALS`, and each of its printed cells asserts the equivalence
+   * (see the header).
    */
   readonly printsWhileEngineBucketsInMemory?: string;
 }
@@ -230,7 +278,7 @@ const DRIVER_ROWS = {
       },
       release: releaseKnex,
       printsWhileEngineBucketsInMemory:
-        'it advertises no granularity, and inherits the SQLite expression, which libSQL runs and which answers the face\'s keys',
+        'it advertises no granularity, and inherits the SQLite expression, which libSQL runs and which answers the face\'s keys and rows',
     },
   ],
 } satisfies Record<BuiltinDriverId, readonly DriverFace[]>;
@@ -256,16 +304,31 @@ const bucketed = (granularity: string, timezone: string | undefined) => ({
 async function serve(face: DriverFace) {
   const driver = face.build();
   const doors: Tier[] = [];
-  // Spies, not passthroughs: the engine's choice is made before either door is
-  // called, so the rows are not asked here (the live block below asks them).
-  driver.connect = async () => {};
-  driver.aggregate = async () => { doors.push('pushdown'); return []; };
-  driver.find = async () => { doors.push('in-memory'); return []; };
+  // A named exception must show its equivalence, so its table is seeded and
+  // its doors record the tier and pass through: its rows are real. Every other
+  // face's doors are spies that answer nothing, because the engine's choice is
+  // made before either door is called (the block at the end asks the rows of
+  // `driver-memory`'s surface).
+  const seeded = face.printsWhileEngineBucketsInMemory !== undefined;
+  if (seeded) {
+    const aggregate = driver.aggregate.bind(driver);
+    const find = driver.find.bind(driver);
+    driver.aggregate = async (...args: unknown[]) => { doors.push('pushdown'); return aggregate(...args); };
+    driver.find = async (...args: unknown[]) => { doors.push('in-memory'); return find(...args); };
+  } else {
+    driver.connect = async () => {};
+    driver.aggregate = async () => { doors.push('pushdown'); return []; };
+    driver.find = async () => { doors.push('in-memory'); return []; };
+  }
 
   const engine = new ObjectQL({ logger: quiet } as any);
   engine.registerDriver(driver as any, true);
   await engine.init();
   engine.registry.registerObject(DEAL_OBJECT as any);
+  if (seeded) {
+    await engine.syncSchemas();
+    for (const deal of EXCEPTION_DEALS) await engine.insert(DEAL, { ...deal } as any);
+  }
 
   const registered: Record<string, unknown> = {};
   await new AnalyticsServicePlugin({ cubes: CUBES, debugSql: true } as any).init({
@@ -277,17 +340,27 @@ async function serve(face: DriverFace) {
   } as never);
   const analytics = registered.analytics as AnalyticsService;
 
-  /** Ask one cell: where the engine put the bucket, and both faces' echoes. */
+  /** Ask one cell: where the engine put the bucket, the face's rows, and both faces' echoes. */
   const ask = async (granularity: string, timezone: string | undefined) => {
     doors.length = 0;
     const query = bucketed(granularity, timezone);
     const res = await analytics.query(query as any);
     const tiers = [...doors];
     const dryRun = await analytics.generateSql(query as any).then(
-      (r) => ({ sql: r.sql, refusal: undefined }),
-      (e) => ({ sql: undefined, refusal: e as Error & { code?: string; status?: number; refusal?: unknown } }),
+      (r) => ({ sql: r.sql, params: r.params, refusal: undefined }),
+      (e) => ({ sql: undefined, params: undefined, refusal: e as Error & { code?: string; status?: number; refusal?: unknown } }),
     );
-    return { tiers, querySql: res.sql, dryRun };
+    return { tiers, rows: res.rows, querySql: res.sql, dryRun };
+  };
+
+  /**
+   * Run a printed statement with its params on this face's datasource,
+   * through the engine's raw-SQL bridge, as `objectql-echo-date-bucket.test.ts`
+   * runs its echo.
+   */
+  const run = async (sql: string, params: readonly unknown[]) => {
+    const result = await (engine as any).execute(sql.replace(/\$(\d+)/g, '?'), { args: params, object: DEAL });
+    return Array.isArray(result) ? result : (result as { rows: unknown[] }).rows;
   };
 
   /** The driver's own answer for this bucket, as the bridge receives it. */
@@ -297,7 +370,7 @@ async function serve(face: DriverFace) {
     return typeof answered === 'string' && answered !== '' ? answered : undefined;
   };
 
-  return { ask, expression, release: async () => { await face.release?.(driver); } };
+  return { ask, expression, run, release: async () => { await face.release?.(driver); } };
 }
 
 describe('[#21647] the echo of a date bucket: driver x timezone class x granularity', () => {
@@ -341,7 +414,7 @@ describe('[#21647] the echo of a date bucket: driver x timezone class x granular
         for (const zoneClass of ZONE_CLASSES) {
           for (const probe of zoneClass.probes) {
             it.each(GRANULARITIES)(`timezone ${probe ?? 'unset'} (${zoneClass.label}), %s`, async (granularity) => {
-              const { tiers, querySql, dryRun } = await served.ask(granularity, probe);
+              const { tiers, rows, querySql, dryRun } = await served.ask(granularity, probe);
               expect(tiers, 'the engine reached the driver exactly once').toHaveLength(1);
               const [tier] = tiers;
               const expression = served.expression(granularity);
@@ -360,6 +433,17 @@ describe('[#21647] the echo of a date bucket: driver x timezone class x granular
                 expect(selectedBucket(dryRun.sql!, 'closed_at')).toBe(expression);
                 expect(dryRun.sql).toContain(`GROUP BY ${expression}`);
                 expect(querySql).toBe(dryRun.sql);
+
+                if (face.printsWhileEngineBucketsInMemory !== undefined) {
+                  // The exception's equivalence: the printed statement, run
+                  // with its params on this face's datasource, answers the
+                  // face's keys and rows. If it stops, this cell is red and
+                  // belongs to the refusal.
+                  const faceRows = bucketPairs(rows);
+                  expect(faceRows.length, 'the face answered several buckets').toBeGreaterThan(1);
+                  expect(faceRows.reduce((sum, [, amount]) => sum + amount, 0), 'the face counted every seeded row').toBe(EXCEPTION_TOTAL);
+                  expect(bucketPairs(await served.run(dryRun.sql!, dryRun.params!)), face.printsWhileEngineBucketsInMemory).toEqual(faceRows);
+                }
               } else {
                 const err = dryRun.refusal;
                 expect(err, `expected the refusal; the dry run printed ${dryRun.sql}`).toBeDefined();
