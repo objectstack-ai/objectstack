@@ -1608,7 +1608,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the local path composed: an unread diff is not a narrow diff': 7,
   'the surfaces, imported rather than restated': 11,
   'T1 — a new key on a Zod object schema': 14,
-  'T2 — a new member of a closed set': 66,
+  'T2 — a new member of a closed set': 67,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
@@ -5653,6 +5653,12 @@ export function selfTest() {
     const narrowing = [];
     const rows = tellsInFile({ filename: CONSTRUCT_FILE, status: 'modified', patch: "@@ -1,2 +1,5 @@\n const SINGLE_SERIES_TYPES = [\n+  'pie',\n+  'donut',\n+  'sankey',\n ] as const satisfies readonly ChartType[];" }, { readSource: () => { reads += 1; return DENY_SET_SOURCE; }, narrowing });
     return reads === 1 && rows.length === 0 && narrowing.length === 3;
+  })());
+  t('…and TWO sets in one file still read it ONCE — the per-file read, not the per-set memo, is what holds this', (() => {
+    let reads = 0;
+    const narrowing = [];
+    const rows = tellsInFile({ filename: CONSTRUCT_FILE, status: 'modified', patch: "@@ -1,2 +1,6 @@\n const SINGLE_SERIES_TYPES = [\n+  'sankey',\n ] as const satisfies readonly ChartType[];\n+const OTHER_TYPES = [\n+  'other',\n+] as const;" }, { readSource: () => { reads += 1; return DENY_SET_SOURCE; }, narrowing });
+    return reads === 1 && narrowing.length === 1 && rows.length === 1 && rows[0]?.text === "'other',";
   })());
 
   // -- #16822: the accidental variables ------------------------------------
