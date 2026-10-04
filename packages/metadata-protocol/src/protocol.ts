@@ -161,6 +161,7 @@ import {
     evaluateLockForWrite,
     evaluateLockForDelete,
     resolveLockState,
+    MetadataLockSchema,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
@@ -9734,9 +9735,10 @@ export class ObjectStackProtocolImplementation implements
             } catch { /* reference diagnostics are best-effort */ }
         }
         // ADR-0010 — surface lock/provenance flags so Studio can render
-        // the correct affordances without a second round trip.
+        // the correct affordances without a second round trip. [#21670] They
+        // report the write doors' verdicts — see {@link servedLockState}.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        const lockState = resolveLockState(decorated, artifactBacked);
+        const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked);
         return {
             type: request.type,
             name: request.name,
@@ -10188,7 +10190,9 @@ export class ObjectStackProtocolImplementation implements
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
         // Lock resolution: artifact wins over overlay, matching getEffectiveLock.
         const lockSource: any = code ?? overlay ?? {};
-        const lockState = resolveLockState(lockSource, artifactBacked);
+        // [#21670] …joined with the locked-packaged-base verdict the write
+        // doors answer — the same derivation `getMetaItem` publishes.
+        const lockState = this.servedLockState(request.type, request.name, lockSource, artifactBacked);
 
         // [#8154] The per-type credential redaction, on the ONE read exit
         // `decorateMetadataItem` does not reach — this method never calls it
@@ -15518,6 +15522,70 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
         return null;
+    }
+
+    /**
+     * [#21670, ADR-0010 §5, ADR-0126 §2] The protection envelope a metadata READ
+     * publishes beside the document — `lock`, `editable`, `deletable` and the
+     * rest — for `(type, name)`, whose served document is `document`. The ONE
+     * derivation both reads call: {@link getMetaItem} and
+     * {@link getMetaItemLayered}.
+     *
+     * The flags are a promise about the write doors: `editable` says whether a
+     * write of this item is refused on lock grounds, `deletable` whether its
+     * removal is. Two limbs refuse such a write, so both are asked here, and
+     * neither is re-derived:
+     *
+     *  - the item's own ADR-0010 `_lock` — `resolveLockState`, unchanged;
+     *  - the locked packaged base: an item a code package ships, on a type with
+     *    no overlay channel — {@link packagedBaseRefusal}, the verdict the
+     *    `/meta` doors and the `/automation` doors already share (`NOT_OVERRIDABLE`,
+     *    or `ITEM_LOCKED` when the write names the read-only package). It
+     *    carries the registry's flags, the #6960 removal carve-out and the
+     *    `OS_METADATA_WRITABLE` hatch, and answers alike on every topology.
+     *
+     * Asked from the first limb alone, a packaged flow or action read
+     * `lock: 'none'`, `editable: true`, `deletable: true` while every door
+     * refused it in place: a client or an agent that reads `editable` was told
+     * the opposite of what the server enforces.
+     *
+     * `lock` is then the state whose ADR-0010 verdicts are exactly the two
+     * booleans — read off the lock algebra itself (`evaluateLockForWrite` /
+     * `evaluateLockForDelete`), never a second table — so the envelope keeps
+     * the shape the spec declares for it: `editable` false iff `lock` is
+     * `no-overlay` or `full`, `deletable` false iff `no-delete` or `full`. An
+     * item's own `_lock` and the package verdict JOIN; neither replaces the
+     * other. `lockReason` / `lockSource` / `lockDocsUrl` stay what the document
+     * declares: the package limb adds no prose of its own, and `provenance` /
+     * `packageId` already name the package.
+     *
+     * ⛔ Not a policy. Which writes are refused is decided at the doors; this
+     * method only reports their answer, so a door that moves moves this read
+     * with it.
+     */
+    private servedLockState(
+        type: string,
+        name: string,
+        document: unknown,
+        artifactBacked: boolean,
+    ): ReturnType<typeof resolveLockState> {
+        const declared = resolveLockState(document, artifactBacked);
+        const editable = declared.editable
+            && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
+        const deletable = declared.deletable
+            && this.packagedBaseRefusal({ type, name, operation: 'delete' }) === null;
+        const lock = MetadataLockSchema.options.find((state) =>
+            (evaluateLockForWrite(state) === null) === editable
+            && (evaluateLockForDelete(state) === null) === deletable);
+        if (lock === undefined) {
+            // Unreachable while the lock algebra covers all four verdict pairs;
+            // a state added to it without a write/delete answer must fail here,
+            // loudly, not publish a guessed lock.
+            throw new Error(
+                `No ADR-0010 lock state answers editable=${editable}, deletable=${deletable}.`,
+            );
+        }
+        return { ...declared, lock, editable, deletable };
     }
 
     /**
