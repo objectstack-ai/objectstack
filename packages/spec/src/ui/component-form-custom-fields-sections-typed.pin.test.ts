@@ -47,7 +47,8 @@ import {
   ObjectFormPropsSchema,
   ObjectMasterDetailFormPropsSchema,
 } from './component.zod';
-import { FormFieldSchema, FormSectionSchema } from './view.zod';
+import { FormFieldSchema, FormSectionSchema, FormSelectOptionSchema } from './view.zod';
+import { SelectOptionSchema } from '../data/field.zod';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
 type Row = 'object-form' | 'object-master-detail-form';
@@ -86,6 +87,8 @@ function objectOf(member: unknown): { shape: Record<string, unknown> } {
 }
 
 const runtimeField = () => objectOf(ObjectFormPropsSchema.shape.customFields);
+/** The element of the runtime field's `options`. */
+const runtimeOption = () => objectOf(runtimeField().shape.options);
 const section = () => objectOf(ObjectFormPropsSchema.shape.sections);
 /** The section `fields` entry union's three arms: name, `{ field }` entry, inline field. */
 const entryArms = () => {
@@ -129,6 +132,27 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
       customFields: [{
         name: 'state', label: 'State', type: 'select', dependsOn: 'country',
         options: [{ label: 'Open', value: 'open' }, { label: 'Closed', value: 'closed' }],
+      }],
+    }],
+    // An inline option's value is a RUNTIME value, not a stored field's identifier: the option
+    // widgets compare it by identity and stringify it only at the control (`matchOptionValue` maps
+    // the pick back), so a capitalised string, a number and a boolean each round-trip as written.
+    ['runtime option values: a capitalised string, a number and a boolean', 'object-form', {
+      customFields: [
+        { name: 'icon', label: 'Icon', type: 'select', options: [{ label: 'Box', value: 'Box' }, { label: 'Shopping cart', value: 'ShoppingCart' }] },
+        { name: 'size', label: 'Size', type: 'radio', options: [{ label: 'One', value: 1 }, { label: 'Two', value: 2 }] },
+        { name: 'agree', label: 'Agree', type: 'select', options: [{ label: 'Yes', value: true }, { label: 'No', value: false }] },
+      ],
+    }],
+    // The other two keys an option reader draws: a lookup's typeahead searches `description`
+    // (`LookupField.tsx`), and the cascade offers an option only while its `visibleWhen` holds.
+    ['an option\'s description and its visibility predicate', 'object-form', {
+      customFields: [{
+        name: 'region', type: 'lookup', dependsOn: 'country',
+        options: [
+          { label: 'Shanghai', value: 'sh', description: 'East China', visibleWhen: { dialect: 'cel', source: "record.country == 'cn'" } },
+          { label: 'Ohio', value: 'oh' },
+        ],
       }],
     }],
     ['validation rules and native bounds', 'object-form', {
@@ -191,6 +215,40 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     });
   }
 
+  // objectui `plugin-designer/src/ObjectManager.tsx` (about `:239`-`:247` at the `.objectui-sha` pin):
+  // the registered `object-manager` component's create / edit dialog, a `formType: 'modal'` block.
+  // Its two select members build their options from the file's own constants, each entry
+  // `{ label: v, value: v }`; the labels it draws through `t(...)` are written out as strings here.
+  it('object-form: parses the shipped object-manager dialog\'s inline fields byte-identical', () => {
+    const OBJECT_GROUPS = ['Custom Objects', 'System Objects', 'Integration', 'Analytics'];
+    const ICON_OPTIONS = [
+      'Box', 'Database', 'Users', 'FileText', 'Settings',
+      'ShoppingCart', 'Calendar', 'Mail', 'Briefcase', 'Building',
+      'Globe', 'Heart', 'Star', 'Tag', 'Bookmark',
+      'Folder', 'Archive', 'Package', 'Truck', 'CreditCard',
+    ];
+    const readOnly = false;
+    const props = {
+      objectName: 'object_definition',
+      formType: 'modal',
+      mode: 'create',
+      modalSize: 'lg',
+      readOnly,
+      customFields: [
+        { name: 'name', label: 'Object name', type: 'text', required: true, placeholder: 'api_name', disabled: readOnly },
+        { name: 'label', label: 'Object label', type: 'text', required: true, placeholder: 'Display Name', disabled: readOnly },
+        { name: 'pluralLabel', label: 'Plural label', type: 'text', placeholder: 'Display Names', disabled: readOnly },
+        { name: 'description', label: 'Description', type: 'textarea', disabled: readOnly },
+        { name: 'icon', label: 'Icon', type: 'select', options: ICON_OPTIONS.map((i) => ({ label: i, value: i })), disabled: readOnly },
+        { name: 'group', label: 'Group', type: 'select', options: OBJECT_GROUPS.map((g) => ({ label: g, value: g })), disabled: readOnly },
+        { name: 'sortOrder', label: 'Sort order', type: 'number', disabled: readOnly },
+      ],
+    };
+    const r = parse('object-form', props);
+    expect(issues(r)).toEqual([]);
+    expect(r.success && r.data).toStrictEqual(props);
+  });
+
   it('a bare CEL predicate parses to its envelope, as on every evaluated slot — and the envelope is kept', () => {
     const r = parse('object-form', {
       sections: [{ fields: ['a', { field: 'b', visibleWhen: 'record.x == 1' }], visibleWhen: 'record.y == 2' }],
@@ -238,6 +296,12 @@ describe('§2 off-shape values are refused with the code and the path', () => {
     ['a bare `validation.minLength`', 'object-form', { customFields: [{ name: 'a', validation: { minLength: 2 } }] }, [{ code: 'invalid_type', path: 'customFields.0.validation.minLength' }]],
     ['a column span past the grid', 'object-form', { customFields: [{ name: 'a', colSpan: 5 }] }, [{ code: 'too_big', path: 'customFields.0.colSpan' }]],
     ['a malformed field group key', 'object-form', { customFields: [{ name: 'a', group: 'Contact Info' }] }, [{ code: 'invalid_format', path: 'customFields.0.group' }]],
+    // The option element is closed too: a key no option reader draws is refused, not carried.
+    ['an undeclared option key', 'object-form', { customFields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a', bogus: 1 }] }] }, [{ code: 'unrecognized_keys', path: 'customFields.0.options.0' }]],
+    ['an option colour, which no option control draws', 'object-form', { customFields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a', color: '#f00' }] }] }, [{ code: 'unrecognized_keys', path: 'customFields.0.options.0' }]],
+    ['an option `default`, which seeds nothing', 'object-form', { customFields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a', default: true }] }] }, [{ code: 'unrecognized_keys', path: 'customFields.0.options.0' }]],
+    ['an option with no label', 'object-form', { customFields: [{ name: 'a', type: 'select', options: [{ value: 'a' }] }] }, [{ code: 'invalid_type', path: 'customFields.0.options.0.label' }]],
+    ['an object option value', 'object-form', { customFields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: { id: 1 } }] }] }, [{ code: 'invalid_union', path: 'customFields.0.options.0.value' }]],
     ['a number for `sections`', 'object-form', { sections: 42 }, [{ code: 'invalid_type', path: 'sections' }]],
     ['a section `visibleOn`', 'object-form', { sections: [{ fields: ['a'], visibleOn: 'record.b == 1' }] }, [{ code: 'unrecognized_keys', path: 'sections.0' }]],
     ['a string `columns`', 'object-form', { sections: [{ fields: ['a'], columns: '2' }] }, [{ code: 'invalid_type', path: 'sections.0.columns' }]],
@@ -280,6 +344,16 @@ describe('§2 off-shape values are refused with the code and the path', () => {
     expect(say({ validation: { pattern: { value: '^a', message: 'x' } } })).toMatch(/field's own `pattern` string/);
   });
 
+  it('each refused option key carries its prescription, and an option alias names its key', () => {
+    const say = (option: Record<string, unknown>) =>
+      firstMessage(parse('object-form', { customFields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a', ...option }] }] }));
+    expect(say({ color: '#f00' })).toMatch(/object field's own option/);
+    expect(say({ default: true })).toMatch(/block's\s+`initialValues`/);
+    expect(say({ disabled: true })).toMatch(/`visibleWhen`/);
+    expect(say({ icon: 'star' })).toMatch(/drawn as its `label`/);
+    expect(say({ text: 'A' })).toMatch(/`text` → `label`/);
+  });
+
   it('each refused section spelling carries the canonical one', () => {
     expect(firstMessage(parse('object-form', { sections: [{ fields: ['a'], visibleOn: 'record.b == 1' }] })))
       .toMatch(/gated nothing\. Write it as `visibleWhen`/);
@@ -308,6 +382,22 @@ describe('§3 the declared members, and one shape for both rows', () => {
       'placeholder', 'readonly', 'readonlyWhen', 'reference', 'required', 'requiredWhen', 'returnType', 'rows',
       'span', 'summaryOperations', 'type', 'validation', 'visibleWhen', 'widget',
     ]);
+  });
+
+  it('its option declares exactly the keys the form\'s option readers draw, with a runtime `value`', () => {
+    const option = runtimeOption();
+    expect(Object.keys(option.shape).sort()).toEqual(['description', 'label', 'value', 'visibleWhen']);
+    // Not the stored field's option: that one's `value` is a lowercase identifier.
+    expect(option).not.toBe(objectOf(FormSelectOptionSchema));
+    // The three keys the object field's option already declares are its own, by reference.
+    const own = SelectOptionSchema.shape as unknown as Record<string, { _zod: { def: unknown } }>;
+    const shape = option.shape as unknown as Record<string, { _zod: { def: unknown } }>;
+    for (const key of ['label', 'description', 'visibleWhen']) {
+      expect(shape[key]!._zod.def, key).toBe(own[key]!._zod.def);
+    }
+    const value = option.shape.value as z.ZodType;
+    for (const ok of ['Box', 'open', 2, 0, true, false]) expect(value.safeParse(ok).success, String(ok)).toBe(true);
+    for (const bad of [null, undefined, {}, ['a']]) expect(value.safeParse(bad).success, String(bad)).toBe(false);
   });
 
   it('no member of it is spelled snake_case', () => {
