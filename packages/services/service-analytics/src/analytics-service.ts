@@ -1145,9 +1145,9 @@ export interface AnalyticsServiceConfig {
    *
    * Answered by the plugin from the driver that executes the aggregate. Asked
    * only at a UTC or unset `timezone`: a non-UTC one is bucketed in memory, and
-   * the echo refuses it whatever is wired (#21630). At UTC, a host that wires
-   * nothing keeps the echo's representative `date_trunc(…)`, except on SQLite,
-   * where the echo refuses (#21595).
+   * the echo refuses it whatever is wired (#21630). At UTC, where this answers
+   * `undefined` or is not wired, the echo refuses the bucket too, on every
+   * dialect (#21647): it prints a bucket in no expression but the driver's.
    */
   dateBucketSql?: (object: string, field: string, granularity: string) => string | undefined;
   /**
