@@ -157,10 +157,16 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
     });
 });
 
-describe('ADR-0010 L3 lock enforcement — single-kernel bypass', () => {
+// [#21694] This block used to pin the opposite: "environmentId=undefined
+// bypasses L3 (control-plane bootstrap)". No ADR records that carve-out, and
+// `environmentId === undefined` is also the CLI's host-config kernel, which
+// serves end-user `/meta` writes (the inference #6710 refuted for the authoring
+// gate) — while the read reported the same `_lock` as locked. The gate now
+// answers on every topology.
+describe('ADR-0010 L3 lock enforcement — no topology bypass', () => {
     afterEach(() => vi.clearAllMocks());
 
-    it('environmentId=undefined bypasses L3 (control-plane bootstrap)', async () => {
+    it('environmentId=undefined (host-config) enforces L3 like an environment kernel', async () => {
         const registry = new SchemaRegistry({ multiTenant: false });
         const mockEngine: any = {
             registry,
@@ -172,17 +178,20 @@ describe('ADR-0010 L3 lock enforcement — single-kernel bypass', () => {
             count: vi.fn().mockResolvedValue(0),
             aggregate: vi.fn().mockResolvedValue([]),
         };
-        // No environmentId — single-kernel / control plane.
+        // No environmentId — the host-config / single-kernel shape.
         const protocol = new ObjectStackProtocolImplementation(
             mockEngine, undefined, undefined,
         );
         seedLockedArtifact(registry, 'view', 'case_grid', 'full');
 
-        // Even with lock=full, single-kernel mode bypasses L3.
-        const save = await protocol.saveMetaItem({
+        await expect(protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-        });
-        expect(save.success).toBe(true);
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+        await expect(protocol.deleteMetaItem({
+            type: 'view', name: 'case_grid',
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+        expect(mockEngine.update).not.toHaveBeenCalled();
+        expect(mockEngine.delete).not.toHaveBeenCalled();
     });
 });
 
