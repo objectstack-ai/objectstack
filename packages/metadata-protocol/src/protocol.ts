@@ -18893,12 +18893,13 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // [#21658] A hook whose `handler` names a function and that carries
-        // no `body` can never run once stored here: a stored hook ships with
-        // no code package, and a `handler` name resolves only inside the
-        // hook's own package. Refused in draft and in publish mode, after the
-        // schema (so `body` is absent or a declared body) and before the
-        // authoring gate and every write. See {@link runtimeHookWithoutBodyRefusal}.
+        // [#21658, #21689] A hook that carries no `body` can never run once
+        // stored here, whether its `handler` names a function or it has
+        // neither field: a stored hook ships with no code package, so its
+        // `body` is the only code it can run. Refused in draft and in publish
+        // mode, after the schema (so `body` is absent or a declared body) and
+        // before the authoring gate and every write. See
+        // {@link runtimeHookWithoutBodyRefusal}.
         {
             const hookRefusal = runtimeHookWithoutBodyRefusal(singularType, request.item, request.name);
             if (hookRefusal) throw hookRefusal;
