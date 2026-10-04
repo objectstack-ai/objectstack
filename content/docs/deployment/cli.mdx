@@ -1132,11 +1132,25 @@ report no secret and no file. A read the command cannot avoid and that fails for
 other reason still refuses and exits 1. Point `--database-url` at the deployment's
 database, or boot the deployment once first, to see what it holds.
 
+**`--object` narrows a run, and only a run over every object records a flag.**
+`files-to-references`, `value-shapes`, `summary-nulls` and `duplicates` take
+`--object` to restrict the run to the objects you name. `duplicates` takes one name,
+and the others are repeatable. A name your deployment does not declare is refused
+with `OBJECT_NOT_FOUND` and exit 1 before anything is read or written. The error
+names the unknown name and the declared objects, so a misspelling is never answered
+as a clean run over nothing. A narrowed `--apply` applies its fixes to the named
+objects. `files-to-references` and `value-shapes` then record **no** deployment flag,
+because the flag is a claim about every object's stored data and a narrowed run read
+only some. A narrowed `files-to-references` run does not move the media columns
+either. The output says so, a flag that an earlier full run recorded is left as it
+was, and `--json` carries `filter: { objects }`. Any `--object` narrows, even a list
+that names every object, so run the command without `--object` to record the flag.
+
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
 os migrate files-to-references --apply    # Convert, verify, record the flag (prompts)
 os migrate files-to-references --apply --yes --json   # CI / scripts
-os migrate files-to-references --object product       # Restrict to one object (repeatable)
+os migrate files-to-references --object product       # Restrict to one object (repeatable); records no flag
 ```
 
 A `file` / `image` / `avatar` / `video` / `audio` field value is an opaque
@@ -1189,7 +1203,7 @@ The same gate for the **non-media** value classes — references (`lookup`,
 os migrate value-shapes                    # Scan: full report, writes nothing
 os migrate value-shapes --apply            # Scan, then record the flag if clean (prompts)
 os migrate value-shapes --apply --yes --json   # CI / scripts
-os migrate value-shapes --object contact       # Restrict to one object (repeatable)
+os migrate value-shapes --object contact       # Restrict to one object (repeatable); records no flag
 ```
 
 **This one converts nothing.** Its sibling rewrites legacy file values because
