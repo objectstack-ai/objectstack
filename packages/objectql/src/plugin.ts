@@ -1124,6 +1124,7 @@ export class ObjectQLPlugin implements Plugin {
       objectName: string,
       session: any,
       isInsert: boolean,
+      seedReplay: boolean,
     ) => {
       const now = stamp();
       // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
@@ -1145,9 +1146,19 @@ export class ObjectQLPlugin implements Plugin {
       // the same payload were taken. Under `preserveAudit` the preservation is
       // DECLARED, so the same keep is the ruled historical-import channel and
       // stays — which is why the fix is this ternary and not a bare `= now`.
+      //
+      // [#21646] A SEED write keeps an authored `created_at` on insert too —
+      // the same `?? now` — because a seed is a snapshot of established facts
+      // (`ExecutionContext.seedReplay`), and the replay of the same row on a
+      // later boot already writes that value through the update path, which
+      // never touches `created_at`. Keyed on `seedReplay` alone: ⛔ not on
+      // `isSystem` (a system clone could carry its source row's `created_at`),
+      // and ⛔ the seed context gains no `preserveAudit` (the 2026-08-08 ruling
+      // keeps that flag's readonly exemption UPDATE-only). Every other caller
+      // — REST included — still stamps now.
       const preserveAudit = session?.preserveAudit === true;
       if (isInsert) {
-        record.created_at = preserveAudit ? (record.created_at ?? now) : now;
+        record.created_at = preserveAudit || seedReplay ? (record.created_at ?? now) : now;
       }
       record.updated_at = preserveAudit ? (record.updated_at ?? now) : now;
       // [#16311] `created_by` takes the SAME SHAPE as `updated_by`, one field
@@ -1190,17 +1201,32 @@ export class ObjectQLPlugin implements Plugin {
       objectName: string,
       session: any,
       isInsert: boolean,
+      seedReplay: boolean,
     ) => {
       if (Array.isArray(data)) {
         for (const row of data) {
           if (row && typeof row === 'object') {
-            applyToRecord(row as Record<string, any>, objectName, session, isInsert);
+            applyToRecord(row as Record<string, any>, objectName, session, isInsert, seedReplay);
           }
         }
       } else if (data && typeof data === 'object') {
-        applyToRecord(data as Record<string, any>, objectName, session, isInsert);
+        applyToRecord(data as Record<string, any>, objectName, session, isInsert, seedReplay);
       }
     };
+
+    /**
+     * [#21646] Whether this `beforeInsert` is a SEED write
+     * (`ExecutionContext.seedReplay`, set through `SEED_WRITE_EXECUTION_CONTEXT`
+     * by every seeder). Read from `input.options.context`, not `session`: the
+     * engine's `buildSession` copies `isSystem`, the skip flags and
+     * `preserveAudit` onto the hook session, never `seedReplay`, while a
+     * `before*` envelope's `input.options` IS the caller's own options bag
+     * (HookContext `input` PHASE contract), so its `context` is the write's
+     * ExecutionContext as the seeder built it. Server-constructed, like
+     * `isSystem`: no transport entry point assembles it from a request.
+     */
+    const isSeedReplay = (hookCtx: any): boolean =>
+      hookCtx?.input?.options?.context?.seedReplay === true;
 
     const builtinHooks: any[] = [
       {
@@ -1211,7 +1237,7 @@ export class ObjectQLPlugin implements Plugin {
         description: 'Auto-stamp created_by / updated_by / created_at / updated_at / tenant_id on insert (only when the field exists on the object schema)',
         handler: async (hookCtx: any) => {
           if (hookCtx.input?.data) {
-            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, true);
+            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, true, isSeedReplay(hookCtx));
           }
         },
       },
@@ -1223,7 +1249,8 @@ export class ObjectQLPlugin implements Plugin {
         description: 'Auto-stamp updated_by / updated_at on update (only when the field exists on the object schema)',
         handler: async (hookCtx: any) => {
           if (hookCtx.input?.data) {
-            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, false);
+            // `seedReplay` is moot here: the update stamp never writes `created_at`.
+            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, false, false);
           }
         },
       },
