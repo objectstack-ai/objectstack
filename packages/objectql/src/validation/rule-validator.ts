@@ -1847,7 +1847,7 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  *    all `isSystem: true`) legitimately set read-only columns and skip it.
  *    [#21663] They skip THIS strip and nothing else: the value they keep is
  *    stored, so the engine judges its SHAPE after the strip point on every
- *    path (`readonlyValues` in `record-validator.ts`, `ReadonlyValueScope`). A
+ *    path (`validateRecordInScope` in `record-validator.ts`, `ReadonlyValueScope`). A
  *    malformed readonly value from a system writer is refused with the same
  *    sentence a non-readonly field gets, never stored.
  *

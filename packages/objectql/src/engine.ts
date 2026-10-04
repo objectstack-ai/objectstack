@@ -262,7 +262,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -12738,9 +12738,8 @@ export class ObjectQL implements IObjectQLEngine {
         // above, so this is the payload the write stores — and the write
         // judges its readonly values' shape (insert in the same call, update
         // in a second pass after its own strip).
-        validateRecord(schemaForValidation, row, mode, {
+        validateRecordInScope(schemaForValidation, row, mode, 'include', {
           mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
-          readonlyValues: 'include',
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
@@ -13536,7 +13535,7 @@ export class ObjectQL implements IObjectQLEngine {
             // its SHAPE is judged here like any other field's. See
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
-            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, readonlyValues: 'include' });
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -14886,8 +14885,13 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
-               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [#21663] `'skip'`: the readonly strip has NOT run yet, so a
+               // readonly value here may be a caller's the strip is about to
+               // drop — judged, a whole-record write-back echoing a legacy
+               // stored value would become a refusal. Readonly values are
+               // judged after the strip (`'only'`, below).
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
+               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
                //
                // This gate used to ask `this.hooks.get('afterUpdate').length > 0`
@@ -15079,7 +15083,7 @@ export class ObjectQL implements IObjectQLEngine {
                // `validateRecord` above judged ahead of the strip — `'only'`,
                // because those are already judged. See `ReadonlyValueScope`.
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, readonlyValues: 'only' });
+               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // ── [#19989] The post-image seam on the BY-ID path ─────────────
                //
                // The by-id twin of the predicate-path call below, placed at the
@@ -15215,8 +15219,13 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
-               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [#21663] `'skip'`: the readonly strip has NOT run yet, so a
+               // readonly value here may be a caller's the strip is about to
+               // drop — judged, a whole-record write-back echoing a legacy
+               // stored value would become a refusal. Readonly values are
+               // judged after the strip (`'only'`, below).
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
+               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#2982] The middleware-composed AST — asserted present and
                // bound to the memoized row read in the pre-phase above, so the
                // injected row-scoping (RLS write filter, sharing's
@@ -15339,7 +15348,7 @@ export class ObjectQL implements IObjectQLEngine {
                // the final payload are stored, so their SHAPE is judged — before
                // N rows are written.
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, readonlyValues: 'only' });
+               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // ── [#19950] The post-image seam on the PREDICATE path ─────────
                //
                // An enforcement layer's write `check` must hold for EVERY row a

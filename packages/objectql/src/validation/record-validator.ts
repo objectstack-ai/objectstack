@@ -70,10 +70,11 @@
  * columns such as an injected `organization_id`) are never REQUIRED here —
  * the engine and the audit plugin supply them.
  *
- * [#21663] A `readonly` field's VALUE is still judged for its SHAPE whenever
- * the caller passes `readonlyValues: 'include' | 'only'` — see
- * {@link ReadonlyValueScope} for which arms that is and why the engine passes
- * it only where the payload is final (after the readonly strip). A `system`
+ * [#21663] A `readonly` field's VALUE is still judged for its SHAPE when the
+ * engine's write path calls {@link validateRecordInScope} with `'include'` or
+ * `'only'` — see {@link ReadonlyValueScope} for which arms that is and why the
+ * engine does so only where the payload is final (after the readonly strip).
+ * The public {@link validateRecord} is unchanged. A `system`
  * column that is NOT `readonly` (`owner_id`) and a lifecycle name with no
  * `readonly` flag keep the full skip.
  *
@@ -1860,18 +1861,6 @@ export interface ValidateRecordOptions {
    * truthiness test on a path that is already building an error message.
    */
   onAdmittedValueShapeViolation?: AdmittedValueShapeViolationSink;
-
-  /**
-   * [#21663] Whether this call also judges each `readonly` field's value for
-   * SHAPE — see {@link ReadonlyValueScope} for the three scopes, the arms a
-   * readonly value reaches, and why it is never one of its constraints.
-   * Omitted means `'skip'`, the walk before #21663, so a caller that has not
-   * said where its payload stands relative to the readonly strip judges
-   * nothing new. ⛔ The engine passes `'include'` / `'only'` only where the
-   * payload is FINAL; a readonly value judged ahead of the strip may be one the
-   * strip is about to drop.
-   */
-  readonlyValues?: ReadonlyValueScope;
 }
 
 /**
@@ -1880,11 +1869,38 @@ export interface ValidateRecordOptions {
  * `fields` map of `{ [fieldName]: FieldDef }`.
  *
  * Returns void on success; throws `ValidationError` on failure.
+ *
+ * A `readonly` field is not reached here, exactly as before #21663: this
+ * public helper has no readonly strip to stand before or after, so it cannot
+ * say whether a readonly value on `data` is one a write would store. The
+ * engine's write path asks {@link validateRecordInScope}, which can.
  */
 export function validateRecord(
   objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   mode: Mode,
+  options: ValidateRecordOptions = {},
+): void {
+  validateRecordInScope(objectSchema, data, mode, 'skip', options);
+}
+
+/**
+ * [#21663] {@link validateRecord}, told where its payload stands relative to
+ * the readonly strip — see {@link ReadonlyValueScope} for the three scopes,
+ * the arms a readonly value reaches, and why it is never one of its
+ * constraints.
+ *
+ * Module-internal on purpose: re-exported from neither package entry, so the
+ * published `validateRecord` signature is unchanged. The scope is a fact only
+ * the engine's write path knows. ⛔ It passes `'include'` / `'only'` only
+ * where the payload is FINAL; a readonly value judged ahead of the strip may
+ * be one the strip is about to drop.
+ */
+export function validateRecordInScope(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  mode: Mode,
+  scope: ReadonlyValueScope,
   options: ValidateRecordOptions = {},
 ): void {
   if (!objectSchema?.fields || !data) return;
@@ -1895,7 +1911,6 @@ export function validateRecord(
   const valueStrict = options.valueShapeStrict === true;
   const messages = options.messages;
   const onAdmitted = options.onAdmittedValueShapeViolation;
-  const scope = options.readonlyValues ?? 'skip';
 
   if (mode === 'insert') {
     // Walk all declared fields — required check applies even when
