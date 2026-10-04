@@ -710,7 +710,7 @@ Sort field and direction pair
 | **title** | `string \| Record<string, string>` | optional | Fallback for `label` (the renderer reads `label \|\| title`) |
 | **description** | `string \| Record<string, string>` | optional | One line of help text drawn above the grid's rows — a string, or an inline locale map resolved against the display locale |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | What the grid draws instead of an empty table: `{ title, message, icon }` — the list view's own empty-state shape |
-| **columns** | `any[]` | optional | Columns: field names or column definition objects |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view's `columns` declares. One spelling per list: an array mixing strings and column objects is refused |
 | **fields** | `string[]` | optional | Field-name fallback the grid reads when `columns` is absent — bare field names (`['name', 'amount']`); write column decoration such as `label` or `width` on `columns` |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **defaultFilters** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Legacy base-filter fallback, read only when `filter` is absent — the SAME ViewFilterRule array form `[{ field, operator, value }, ...]` as `filter`, lowered through the same sink. Prefer `filter`. The MongoDB-style record form, a bare string and an ObjectQL AST tuple array are refused — see migration `object-grid-default-filters-rule-array` |
@@ -753,6 +753,25 @@ Sort field and direction pair
 | **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
 | **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
 | **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
+
+### Nested Shape: `ObjectGridProps.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **width** | `number` | optional | Column width in pixels |
+| **align** | `Enum<'left' \| 'center' \| 'right'>` | optional | Text alignment |
+| **hidden** | `boolean` | optional | Hide column by default |
+| **sortable** | `boolean` | optional | Allow sorting by this column |
+| **resizable** | `boolean` | optional | Allow resizing this column |
+| **wrap** | `boolean` | optional | Allow text wrapping |
+| **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
+| **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
+| **action** | `string` | optional | Registered Action ID to execute when clicked |
 
 ### Nested Shape: `ObjectGridProps.filter[number]`
 
@@ -1116,8 +1135,8 @@ Sort field and direction pair
 | **variant** | `Enum<'card' \| 'bare'>` | optional | Layout variant |
 | **fallbackValue** | `string \| number` | optional | Static value shown when no data source is available |
 | **trend** | `{ value: number; label?: string \| Record<string, string>; direction?: Enum<'up' \| 'down' \| 'neutral'> }` | optional | Static trend badge `{ value, label?, direction? }` — `value` painted as a percentage, `direction` up / down / neutral. A `compareTo`-derived trend replaces it |
-| **drillDown** | `any` | optional | Click-through drill config — opens the underlying records |
-| **compareTo** | `any` | optional | Period-over-period comparison (`{ kind: 'previousPeriod' \| 'previousYear' }`) |
+| **drillDown** | `{ enabled?: boolean; title?: string; target?: Enum<'drawer' \| 'dialog' \| 'navigate'>; columns?: string[]; … }` | optional | Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric's own `filter`; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row |
+| **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'> }` | optional | Period-over-period comparison `{ kind }` — `previousPeriod` or `previousYear`, shifting the date macros in the tile's own `filter`. `dimension` is refused: this tile never reads a dataset time dimension |
 
 ### Nested Shape: `ObjectMetricProps.aggregate`
 
@@ -1144,6 +1163,23 @@ View filter rule
 | **value** | `number` | ✅ | The change shown on the badge, painted as a percentage (`12` reads `12%`) |
 | **label** | `string \| Record<string, string>` | optional | Badge caption — a string or an inline locale map. The tile-level `description` outranks it in the one caption slot they share |
 | **direction** | `Enum<'up' \| 'down' \| 'neutral'>` | optional | Arrow beside the value; omit it for no arrow |
+
+### Nested Shape: `ObjectMetricProps.drillDown`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional | Turn the tile's drill on or off; the block being present already means on, so this is only needed to force it off |
+| **title** | `string` | optional | Drill drawer/dialog heading; defaults to the tile's own `title`, then its `label`. A metric tile has no click context, so an `${event.*}` token here resolves to nothing |
+| **target** | `Enum<'drawer' \| 'dialog' \| 'navigate'>` | optional | Where the drilled list opens: 'drawer' (default, side sheet), 'dialog' (centered modal), or 'navigate' (skip the in-place view and open the object's full list page; needs host drill navigation, else falls back to 'drawer') |
+| **columns** | `string[]` | optional | Field names to show as columns in the drilled list (default: the table's own columns) |
+| **maxRows** | `integer` | optional | Rows per page in the drilled list |
+| **report** | `any` | optional | Drill into a report instead of the record list — not typed on this row yet: the tile draws a dataset-bound report here, but no spec drill shape declares a `report` member yet (the chart's drill-down refuses it) |
+
+### Nested Shape: `ObjectMetricProps.compareTo`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'previousPeriod' \| 'previousYear'>` | ✅ | Comparison window: previousPeriod (equal-length, immediately before) or previousYear (−1 calendar year) |
 
 
 ---

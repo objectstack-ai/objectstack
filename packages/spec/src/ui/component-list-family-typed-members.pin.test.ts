@@ -1,22 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#21464, stage 2] Eight of the list family's nine `z.unknown()` members are
- * typed: `object-grid` `fields`, `selection`, `selectable`, `rowActions`,
- * `bulkActions` and `batchActions`, `object-kanban` `columns`, and
- * `object-calendar` `calendar`. The ninth, `object-grid` `columns`, is held in
- * the enumeration pin's ledger: the grid draws a column's `options`, which the
- * list view's column entry does not declare (objectstack-ai/objectui#11544).
+ * [#21464, stages 2 and 5] The list family's nine `z.unknown()` members are
+ * typed: `object-grid` `columns`, `fields`, `selection`, `selectable`,
+ * `rowActions`, `bulkActions` and `batchActions`, `object-kanban` `columns`,
+ * and `object-calendar` `calendar`. Stage 2 typed eight and held `object-grid`
+ * `columns`, because at the `.objectui-sha` pin `89cad75d55` the grid's group
+ * headers drew a column's `options`, which the list view's column entry does
+ * not declare. objectui `b0bf413` (objectstack-ai/objectui#11544) retired that
+ * read: at the `.objectui-sha` pin `ab1879721595` the group-header labels come
+ * from the object field's `options` only, so stage 5 types `columns` too.
  *
  * ## The defect this file closes
  *
  * Each renderer reads these members with one shape (measured at the
  * `.objectui-sha` pin `89cad75d55`; the read points are in the members'
- * docblocks), and each row declared them `z.unknown()`. So an object entry in
- * the grid's `fields`, a `{ name }` entry in `bulkActions`, a kanban lane list
- * mixing objects and strings and a calendar block with no `startDateField` all
- * passed the component-props gate, and the block drew no column, skipped the
- * action, drew a blank lane or placed no event, with no report.
+ * docblocks), and each row declared them `z.unknown()`. So a grid column keyed
+ * `accessorKey`, an object entry in the grid's `fields`, a `{ name }` entry in
+ * `bulkActions`, a kanban lane list mixing objects and strings and a calendar
+ * block with no `startDateField` all passed the component-props gate, and the
+ * block drew no column, skipped the action, drew a blank lane or placed no
+ * event, with no report.
  *
  * ## What is pinned, and why each half
  *
@@ -24,15 +28,15 @@
  *   parses to what the shared schema itself answers. A refusal pin with no lit
  *   control passes just as well when the door refuses everything.
  * - §2 THE REFUSALS: an off-shape value of each member is refused with the
- *   code AND the path — and, for the kanban's two-array union, the issue
- *   inside the arm that should have taken it — so a refusal for the wrong reason reds.
- * - §3 ONE SCHEMA: the four members a list view also declares hold the list
+ *   code AND the path — and, for the two-array unions, the issue inside the
+ *   arm that should have taken it — so a refusal for the wrong reason reds.
+ * - §3 ONE SCHEMA: the five members a list view also declares hold the list
  *   view's own defs by identity (`batchActions` holds `bulkActions`'s), and the
  *   shapes declared here hold exactly the measured vocabulary.
  * - §4 THE REGISTRATION: the ADR-0087 D3 entry step 18 carries.
  *
  * The enumeration pin (`component-props-unknown-members.pin.test.ts`) holds the
- * other half: these eight left its ledger, so a member reverted to
+ * other half: these nine left its ledger, so a member reverted to
  * `z.unknown()` reds there.
  */
 
@@ -71,6 +75,15 @@ function armIssues(result: z.ZodSafeParseResult<unknown>): string[][] {
 
 describe('§1 each member accepts a value of its declared shape', () => {
   const BYTE_IDENTICAL: ReadonlyArray<readonly [label: string, row: Row, props: Record<string, unknown>]> = [
+    // The showcase's grids (`examples/app-showcase/src/ui/pages/my-work.page.ts`, `command-center.page.ts`).
+    ['grid columns as field names', 'object-grid', { columns: ['title', 'project', 'status', 'priority', 'due_date'] }],
+    ['grid columns as column entries', 'object-grid', {
+      columns: [
+        { field: 'name', label: 'Name', width: 240, sortable: true, link: true },
+        { field: 'amount', align: 'right', summary: 'sum', wrap: true, pinned: 'left', type: 'currency' },
+        { field: 'notes', hidden: true, resizable: false, action: 'open_note' },
+      ],
+    }],
     ['grid fields', 'object-grid', { fields: ['name', 'amount'] }],
     ['each selection type', 'object-grid', { selection: { type: 'single' } }],
     ['grid rowActions', 'object-grid', { rowActions: ['edit', 'delete', 'approve'] }],
@@ -110,6 +123,14 @@ describe('§1 each member accepts a value of its declared shape', () => {
       expect(r.success && r.data).toStrictEqual({ ...BASE, selectable });
     });
   }
+
+  it('parses a column with a prefix to exactly what the list view\'s columns answer (its default included)', () => {
+    const columns = [{ field: 'name', prefix: { field: 'status' } }];
+    const r = parse('object-grid', { columns });
+    expect(issues(r)).toEqual([]);
+    expect(r.success && (r.data as { columns?: unknown }).columns)
+      .toStrictEqual(ListViewSchema.shape.columns.parse(columns));
+  });
 
   it('parses an empty selection block to exactly what the list view\'s selection answers (its default included)', () => {
     const r = parse('object-grid', { selection: {} });
@@ -158,9 +179,26 @@ describe('§2 each member refuses an off-shape value', () => {
     });
   }
 
-  // The kanban's two-array union answers `invalid_union` at the member; the arm that
+  // The two-array unions answer `invalid_union` at the member; the arm that
   // should have taken the value says why it did not.
   const UNION_REFUSED: ReadonlyArray<readonly [label: string, row: Row, props: Record<string, unknown>, arms: string[][]]> = [
+    ['a grid column list mixing strings and column objects', 'object-grid',
+      { columns: ['name', { field: 'amount' }] }, [['invalid_type@1'], ['invalid_type@0']]],
+    ['a grid column keyed accessorKey / header', 'object-grid',
+      { columns: [{ accessorKey: 'amount', header: 'Amount' }] }, [['invalid_type@0'], ['invalid_type@0.field', 'unrecognized_keys@0']]],
+    ['a grid column keyed name', 'object-grid',
+      { columns: [{ name: 'salary' }] }, [['invalid_type@0'], ['invalid_type@0.field', 'unrecognized_keys@0']]],
+    ['a grid column with no field', 'object-grid',
+      { columns: [{ field: 'name' }, { width: 80 }] }, [['invalid_type@0', 'invalid_type@1'], ['invalid_type@1.field']]],
+    ['a grid column key the grid never reads (editable)', 'object-grid',
+      { columns: [{ field: 'name', editable: false }] }, [['invalid_type@0'], ['unrecognized_keys@0']]],
+    ['a grid column `options` (the group headers read the object field\'s)', 'object-grid',
+      { columns: [{ field: 'stage', options: [{ value: 'won', label: 'Won' }] }] }, [['invalid_type@0'], ['unrecognized_keys@0']]],
+    ['a grid column `reference` (relational metadata is the object field\'s)', 'object-grid',
+      { columns: [{ field: 'account_id', type: 'lookup', reference: 'crm_account' }] }, [['invalid_type@0'], ['unrecognized_keys@0']]],
+    ['a grid column summary hint the footer reads off the field (precision)', 'object-grid',
+      { columns: [{ field: 'amount', summary: 'sum', precision: 0 }] }, [['invalid_type@0'], ['unrecognized_keys@0']]],
+    ['a numeric grid columns', 'object-grid', { columns: 42 }, [['invalid_type@'], ['invalid_type@']]],
     ['a kanban lane list mixing objects and strings', 'object-kanban',
       { columns: [{ id: 'done', title: 'Done' }, 'todo'] }, [['invalid_type@0'], ['invalid_type@1']]],
     ['a numeric lane id', 'object-kanban', { columns: [{ id: 1, title: 'One' }] }, [['invalid_type@0'], ['invalid_type@0.id']]],
@@ -203,6 +241,10 @@ describe('§3 the members hold the list view\'s own defs, and the measured vocab
   const grid = () => ObjectGridPropsSchema.shape;
   const listView = () => ListViewSchema.shape;
 
+  it('object-grid columns is the list view\'s own columns member — the same union def', () => {
+    expect(grid().columns.unwrap()._zod.def).toBe(listView().columns._zod.def);
+  });
+
   it('object-grid selection, rowActions and bulkActions are the list view\'s own members — the same defs', () => {
     expect(grid().selection.unwrap()._zod.def).toBe(SelectionConfigSchema._zod.def);
     expect(grid().selection.unwrap()._zod.def).toBe(listView().selection.unwrap()._zod.def);
@@ -238,9 +280,10 @@ describe('§3 the members hold the list view\'s own defs, and the measured vocab
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('§4 the ADR-0087 entry', () => {
-  it('is registered as the D3 entry step 18 carries, beside the stage-1 entry', () => {
+  it('is registered as the D3 entries step 18 carries — stage 2\'s and stage 5\'s — beside the stage-1 entry', () => {
     const ids = MIGRATIONS_BY_MAJOR[18]!.semantic.map((s) => s.id);
     expect(ids).toContain('ui-object-grid-kanban-calendar-list-members-typed');
+    expect(ids).toContain('ui-object-grid-columns-typed');
     expect(ids).toContain('ui-object-map-gantt-tree-navigation-typed');
   });
 });

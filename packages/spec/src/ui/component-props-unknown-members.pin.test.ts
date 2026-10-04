@@ -31,18 +31,20 @@
  *   the code AND the path; its ADR-0087 D3 entry is registered.
  *
  * Later stages pin the members they type in their own file, beside this one:
- * the list family (`object-grid` `fields` / `selection` / `selectable` /
- * `rowActions` / `bulkActions` / `batchActions`, `object-kanban` `columns`,
- * `object-calendar` `calendar`) in
- * `component-list-family-typed-members.pin.test.ts`. The family's ninth,
- * `object-grid` `columns`, is held below. The form family (`object-form`
- * `contentLayout` / `submitBehavior` / `navigateOnSuccess` / `mobile`) in
+ * the list family (`object-grid` `columns` / `fields` / `selection` /
+ * `selectable` / `rowActions` / `bulkActions` / `batchActions`,
+ * `object-kanban` `columns`, `object-calendar` `calendar`) in
+ * `component-list-family-typed-members.pin.test.ts` — `object-grid` `columns`
+ * since stage 5, which exited its hold once objectui retired the grid's read of
+ * a column `options`. The form family (`object-form` `contentLayout` /
+ * `submitBehavior` / `navigateOnSuccess` / `mobile`) in
  * `component-form-family-typed-members.pin.test.ts`; its `fields` and
  * `sections`, and the master-detail form's two, are held below, and its
  * `customFields` waits with the objectui-held contracts. The metric tile
- * (`object-metric` `aggregate` / `trend`) in
- * `component-metric-family-typed-members.pin.test.ts`; its `drillDown` and
- * `compareTo` wait below on a ruling between the reference and the read.
+ * (`object-metric` `aggregate` / `trend` / `drillDown` / `compareTo`) in
+ * `component-metric-family-typed-members.pin.test.ts`; the drill-down's
+ * `report` waits below with the objectui-held contracts, until the spec
+ * declares a drill report.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -130,8 +132,7 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  * would refuse a measured writer is reported, not shipped.
  */
 const STAGES = {
-  'object-metric': 'the metric tile\'s `drillDown` and `compareTo`, each waiting on a fork: the by-reference candidate (the chart\'s `ChartDrillDownSchema`, the dashboard widget\'s `compareTo`) declares a key the tile never reads, and the chart\'s drill-down refuses one it draws, so the reference and the read are put to a ruling',
-  'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`); the spec declares each first, contract-first, then the row takes it',
+  'objectui-held': 'element contracts the spec does not declare yet, whose declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`), and the metric drill-down\'s `report`, which objectui types as the spec\'s own `ReportSchema` input while no spec drill shape declares a `report` member (the chart\'s drill-down refuses it); the spec declares each first, contract-first, then the row takes it',
   'held-for-decision': 'a typed shape exists (by reference, or the renderer\'s own declared type), but measured writers author values it refuses that the renderer draws — the narrowing waits for a ruling',
 } as const;
 type Stage = keyof typeof STAGES;
@@ -177,7 +178,11 @@ const SLOT: Reason = { kind: 'slot' };
 const RUNNER: Reason = { kind: 'runner' };
 const staged = (stage: Stage, reader: string): Reason => ({ kind: 'staged', stage, reader });
 
-/** `ObjectUI` source paths are at the `.objectui-sha` pin `89cad75d55`. */
+/**
+ * `ObjectUI` source paths are at the `.objectui-sha` pin `89cad75d55`, except
+ * the `object-metric` `drillDown.report` line, read at the `.objectui-sha` pin
+ * `ab1879721595`.
+ */
 const LEDGER = new Map<string, Reason>();
 const on = (types: readonly string[], paths: readonly string[], reason: Reason): void => {
   for (const type of types) for (const path of paths) LEDGER.set(`${type} ${path}`, reason);
@@ -229,15 +234,13 @@ on(['object-grid'], ['pagination.*'], {
 });
 
 // Read with a fixed shape at the pin — the later stages.
-// The metric tile's `aggregate` and `trend` are typed (stage 4). Its other two
-// wait on a fork between the by-reference candidate and the read: the chart's
-// drill-down declares `filter`, which the tile never reads, and refuses
-// `report`, which the tile draws as a report body (`DrillDownDrawer.tsx:77-114`;
-// objectui's `plugin-dashboard/src/__tests__/objectMetricDrillDownMembers-8071.test.tsx:277-294`
-// authors one); the dashboard widget's comparison declares `dimension`, which
-// this path never reads (`core/src/utils/compare-to.ts:28-33`).
-on(['object-metric'], ['drillDown'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:602-651 (`enabled` / `title` / `target` / `columns` / `maxRows` / `report`; `ObjectMetricDrillDownConfig`, :218, refuses `filter` and `mode`)'));
-on(['object-metric'], ['compareTo'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:468-469, :581 (`kind` alone; `CompareToConfig`, :241)'));
+// The metric tile's four members are typed (stages 4 and 5); the drill-down's
+// `report` is not. The tile hands it to the shared drawer, which draws a
+// dataset-bound report (`isDatasetBoundReport`) and lists the records for any
+// other value; objectui types it as the spec's own `ReportSchema` input, but no
+// spec drill shape declares a `report` member — the chart's drill-down refuses
+// it — so the spec declares that contract first.
+on(['object-metric'], ['drillDown.report'], staged('objectui-held', 'plugin-dashboard/src/DrillDownDrawer.tsx:92 (`isDatasetBoundReport`), used at :115; handed over at ObjectMetricWidget.tsx:742'));
 // The form's inline members are objectui's runtime form field (`FormField`,
 // identity key `name`), merged over the generated set and drawn whole; the spec
 // declares no such field — its own form field is keyed by `field`, and the
@@ -255,14 +258,6 @@ on(['action:menu'], ['actions[]{}'], staged('objectui-held', 'components/src/ren
 // `types/src/__tests__/kanban-conditional-formatting.test.ts:29-52`), so the
 // narrowing is reported for a ruling instead of shipped.
 on(['object-kanban'], ['conditionalFormatting'], staged('held-for-decision', 'plugin-kanban/src/KanbanBoardCore.tsx:114, evaluated at KanbanImpl.tsx:179 (`resolveConditionalFormatting`)'));
-// The list view's own `columns` is the by-reference shape, and the draw path
-// matches it — but the grid's group-header formatter also reads `options` off
-// an authored column (`colOverride?.options || objectDefField?.options`, the
-// column winning) and draws the group labels from it, which objectui pins as
-// behaviour (`plugin-grid/src/__tests__/gridGroupingMembers-8071.test.tsx:260-301`).
-// `ListColumn` declares no `options`, so the narrowing would refuse a value the
-// grid draws: held until objectstack-ai/objectui#11544 is ruled.
-on(['object-grid'], ['columns[]'], staged('held-for-decision', 'plugin-grid/src/ObjectGrid.tsx:2158 (`normalizeColumns`), `columns[].options` drawn by the group-header formatter at :2997-3001'));
 // The renderer's own declared type for the form's `fields` is field-name
 // strings (`ObjectFormSchema.fields: string[]`), but its read also draws a
 // `{ name }` entry by that name, and measured writers author one: objectui's
