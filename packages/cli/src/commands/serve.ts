@@ -4083,6 +4083,11 @@ export default class Serve extends Command {
             await kernel.use(new AuthPlugin({
               secret,
               baseUrl,
+              // The deployment's product name, from the resolver the email
+              // capability's template context uses: the auth emails'
+              // `{{appName}}` and the TOTP issuer. Unpassed, auth answered
+              // 'ObjectStack' whatever `OS_APP_NAME` said.
+              appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
               // Enable the admin plugin by default so the Setup app's
@@ -6406,6 +6411,27 @@ function envBooleanFlag(raw: string | undefined): boolean | undefined {
 }
 
 /**
+ * The deployment's product name: `OS_APP_NAME` > `config.email.appName` >
+ * `config.email.defaultTemplateContext.appName` > top-level `config.appName` >
+ * `'ObjectStack'` (the chain {@link resolveEmailCapabilityArg} documents).
+ *
+ * ONE resolver for every boot-time consumer of the name, so they cannot
+ * disagree: the email capability's template context, and the `appName`
+ * AuthPlugin receives (the auth emails' `{{appName}}` and the TOTP issuer an
+ * authenticator app lists the account under). AuthPlugin used to be built
+ * without it, so `OS_APP_NAME` never reached auth: its emails, whose own
+ * `appName` outranks the template context, said 'ObjectStack'.
+ */
+export function resolveDeploymentAppName(
+  cfgEmail: Record<string, any> = {},
+  env: NodeJS.ProcessEnv = process.env,
+  configAppName?: string,
+): string {
+  return env.OS_APP_NAME || cfgEmail.appName || cfgEmail.defaultTemplateContext?.appName
+    || configAppName || 'ObjectStack';
+}
+
+/**
  * Resolve what `EmailServicePlugin` is constructed with, from `config.email`
  * plus `OS_EMAIL_*` env (env wins, so an operator can override per environment).
  *
@@ -6520,8 +6546,7 @@ export function resolveEmailCapabilityArg(
   const cfgTemplateContext = cfgEmail.defaultTemplateContext || {};
   const defaultTemplateContext = {
     ...cfgTemplateContext,
-    appName: env.OS_APP_NAME || cfgEmail.appName || cfgTemplateContext.appName
-      || configAppName || 'ObjectStack',
+    appName: resolveDeploymentAppName(cfgEmail, env, configAppName),
   };
   // Provide a sensible fallback `from` so templates can render even before
   // operators configure SMTP/SaaS. The log transport simply prints to stdout;
