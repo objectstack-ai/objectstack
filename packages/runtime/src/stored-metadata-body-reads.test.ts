@@ -26,7 +26,7 @@
  *     bodies only.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { STORED_METADATA_BODY_OBJECTS } from '@objectstack/spec/kernel';
 import {
@@ -37,6 +37,7 @@ import {
 import { STORED_METADATA_BODY_BOUNDARY_CODE, STORED_METADATA_BODY_BOUNDARY_STATUS } from './stored-metadata-body-boundary.js';
 import { actionBodyRunnerFactory, hookBodyRunnerFactory, jobBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
+import { invokeBusinessAction } from './action-execution.js';
 
 const FAMILY = [...STORED_METADATA_BODY_OBJECTS];
 const ORDINARY = 'boundary_note';
@@ -301,4 +302,126 @@ describe('[#21594] through the real sandbox — every body face holds the refusi
         await expect(run({ jobId: 'job_reads_family' } as any)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
         expect(calls).toEqual([]);
     });
+});
+
+/**
+ * [#21594] The subject record: the `/actions` door loads an action's subject
+ * row before it dispatches and hands it to the handler as `ctx.record`. For a
+ * body, a family row there is refused before the body runs, whether the action
+ * was declared on a family table or an object-less action was addressed under
+ * one. The door is pinned end to end in `stored-metadata-reader-contexts.pin.test.ts`.
+ */
+describe('[#21594] an action body is not handed a family row as its subject record', () => {
+    const runner = new QuickJSScriptRunner({ hookTimeoutMs: 10_000 });
+    /** Writes a marker first, so a body that ran at all leaves a call behind. */
+    const reportsRecord = (name: string, object?: string) => actionBodyRunnerFactory(runner, { ql: {}, appId: 'boundary' })({
+        name,
+        type: 'script',
+        ...(object ? { object } : {}),
+        body: {
+            language: 'js',
+            capabilities: ['api.write'],
+            source: `await ctx.api.object('${ORDINARY}').insert({ label: 'ran' });\nreturn { keys: Object.keys(ctx.record || {}).sort() };`,
+        },
+    })!;
+    const expectSubjectRefused = (promise: Promise<unknown>, object: string) =>
+        expect(promise).rejects.toMatchObject({
+            code: STORED_METADATA_BODY_BOUNDARY_CODE,
+            status: STORED_METADATA_BODY_BOUNDARY_STATUS,
+            object,
+            operation: 'record',
+            message: expect.stringContaining('GET /api/v1/meta/:type/:name'),
+        });
+
+    for (const object of FAMILY) {
+        it(`an action declared on '${object}', handed one of its rows by the door, is refused and never runs`, async () => {
+            const calls: string[] = [];
+            const handler = reportsRecord('family_bound', object);
+            await expectSubjectRefused(
+                handler({ api: countingApi(calls), record: storedRow(), params: { objectName: object, recordId: 'row_1' } }),
+                object,
+            );
+            expect(calls).toEqual([]);
+        });
+
+        it(`an object-less action addressed under '${object}' with a record is refused the same way`, async () => {
+            const calls: string[] = [];
+            await expectSubjectRefused(
+                reportsRecord('object_less')({ api: countingApi(calls), record: storedRow(), params: { objectName: object, recordId: 'row_1' } }),
+                object,
+            );
+            expect(calls).toEqual([]);
+        });
+    }
+
+    it('with no routed object (an engine execute from host code), the declared family object stands in', async () => {
+        const calls: string[] = [];
+        await expectSubjectRefused(reportsRecord('family_bound', FAMILY[0])({ api: countingApi(calls), record: storedRow() }), FAMILY[0]);
+        expect(calls).toEqual([]);
+    });
+
+    it('an ordinary subject record is handed to the body as before (control)', async () => {
+        const calls: string[] = [];
+        const result: any = await reportsRecord('ordinary', ORDINARY)({
+            api: countingApi(calls),
+            record: { id: 'n1', label: 'x' },
+            params: { objectName: ORDINARY, recordId: 'n1' },
+        });
+        expect(result.keys).toEqual(['id', 'label']);
+        expect(calls).toEqual([`${ORDINARY}.insert`]);
+    });
+
+    it('a family-routed call carrying no record hands the body nothing, and runs (control)', async () => {
+        const calls: string[] = [];
+        const result: any = await reportsRecord('family_bound', FAMILY[0])({ api: countingApi(calls), record: {}, params: { objectName: FAMILY[0] } });
+        expect(result.keys).toEqual([]);
+        expect(calls).toEqual([`${ORDINARY}.insert`]);
+    });
+});
+
+/**
+ * [#21594] The MCP `run_action` door never reaches the subject load for a
+ * family table: it refuses an action on any `sys_*` object before it loads a
+ * record, and resolves an object-less action only under its own key. Pinned
+ * here because the composed kernel's metadata service lists no standalone
+ * action to drive the door with.
+ */
+describe('[#21594] the MCP run_action door stops a family subject before the record load', () => {
+    const familyAction = (name: string, objectName: string) => ({ name, objectName, type: 'script', body: { language: 'js', source: 'return 1;' }, ai: { exposed: true, description: 'probe' } });
+    const run = (name: string, input: Record<string, unknown>) => {
+        const callData = vi.fn(async () => ({ record: storedRow() }));
+        const ql = { executeAction: vi.fn(async () => ({ ran: true })) };
+        const meta = {
+            listObjects: async () => [],
+            loadMany: async (type: string) => (type === 'action'
+                ? [...FAMILY.map((o) => familyAction(`bound_${o}`, o)), { ...familyAction('object_less', ''), objectName: undefined }]
+                : []),
+        };
+        const deps: any = { resolveService: async () => undefined, getObjectQL: async () => ql };
+        const promise = invokeBusinessAction(deps, { request: {} } as any, name, input as any, {
+            driver: undefined, envId: undefined, ec: { userId: 'usr_admin' }, getMeta: () => meta, callData,
+        });
+        return { promise, callData, ql };
+    };
+
+    for (const object of FAMILY) {
+        it(`an action declared on '${object}' is refused, with no record loaded and no handler run`, async () => {
+            const { promise, callData, ql } = run(`bound_${object}`, { objectName: object, recordId: 'row_1' });
+            const err: any = await promise.catch((e: unknown) => e);
+            expect(err).toBeInstanceOf(Error);
+            expect(String(err.message)).toContain(`'bound_${object}'`);
+            expect(String(err.message)).toContain('system object');
+            expect(callData).not.toHaveBeenCalled();
+            expect(ql.executeAction).not.toHaveBeenCalled();
+        });
+
+        it(`an object-less action named under '${object}' does not resolve, with no record loaded`, async () => {
+            const { promise, callData, ql } = run('object_less', { objectName: object, recordId: 'row_1' });
+            const err: any = await promise.catch((e: unknown) => e);
+            expect(err).toBeInstanceOf(Error);
+            expect(String(err.message)).toContain(`'${object}'`);
+            expect(callData).not.toHaveBeenCalled();
+            expect(ql.executeAction).not.toHaveBeenCalled();
+        });
+    }
 });
