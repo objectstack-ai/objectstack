@@ -3008,8 +3008,9 @@ function codeOfLine(s) {
  * joined string inside the members-only region as the refusal's own prose. A
  * region that turned that string back into a DECISION before refusing — a
  * regex built from it, say — would be a second reader this function cannot
- * see. Measured at this change's base: one set in `packages/spec/src` meets
- * ①–④ (`SINGLE_SERIES_CHART_TYPES`), and its region does not.
+ * see. Measured at this change's base: of the 192 `const X = [` declarations
+ * in `packages/spec/src`, ONE meets ①–④ (`SINGLE_SERIES_CHART_TYPES`, its
+ * guard at `ui/dashboard.zod.ts:909`), and its region does not.
  *
  * @param {string} source — the file's head blob
  * @param {string} name — the binding the hunk's `[` head names
