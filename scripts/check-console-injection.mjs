@@ -1041,8 +1041,9 @@ function selfTest() {
     expect('pin 2: objectui\'s mirrored text is never named as the detector', leakedRun.stderr.includes(`"${MIRRORED}"`), false);
     expect('pin 2: a failing build writes no stamp', stampOf(leaked), null);
     // The replay half: the stamp a good build wrote, beside these assets — a cache
-    // entry whose dist no longer matches its proof.
-    fs.copyFileSync(path.join(good, STAMP_BASENAME), path.join(leaked, STAMP_BASENAME));
+    // entry whose dist no longer matches its proof. (No stamp to copy is pin 1's
+    // failure, already registered above; the wording assertion below fails too.)
+    if (goodStamp) fs.copyFileSync(path.join(good, STAMP_BASENAME), path.join(leaked, STAMP_BASENAME));
     const leakedReplay = evaluate({ distDir: leaked, specDir: injected, requireStamp: true });
     expect('pin 3: the replay agrees with the build on bundle 2', leakedReplay.code, 1);
     expect('pin 3: and says the dist carries the published spec', leakedReplay.err.join('\n').includes('carries the PUBLISHED'), true);
