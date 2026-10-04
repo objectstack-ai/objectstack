@@ -1,5 +1,171 @@
 # @objectstack/verify
 
+## 17.7.0
+
+### Patch Changes
+
+- 2df621a: `bootStack` (and so `os verify`) no longer creates a data key file in the key home, and no longer seals its fixtures under a key the host already holds (#21499)
+  
+  Clause-②: no
+  
+  The harness composed the settings service with no crypto provider and bound the engine to a default `LocalCryptoProvider`. `bootStack` forces a development posture. In that posture, with no `OS_SECRET_KEY`, no `OS_DEV_CRYPTO_KEY` and no key file, both providers wrote a new key file into the key home. So `os verify`, a one-shot command over an in-memory database, left key material behind, and the next development-posture process on that host adopted it. On a host that already had a key, the harness sealed its throwaway fixtures under that real key.
+  
+  - **What the harness uses now.** One `LocalCryptoProvider` over a random key held in this process's memory only. It never reads `OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY` or the key file, and it never writes anywhere. The settings service and the engine get the same instance, so `secret` fields and encrypted settings still seal and open on a host with no key at all.
+  - **One key per process, not per boot.** Two `bootStack` calls over one `databaseFile` in the same process (the harness's restart) still open each other's secrets.
+  - **Unchanged.** `BootOptions` and the rest of the public API, and `os verify`'s stdout and `--json` report. The one stderr line announcing the minted key file is gone.
+- bee8d1c: `os verify` writes each derived sample in the shape the engine stores it: a `select` declared `multiple: true` is written as a list and compared as a set
+  
+  Clause-②: no
+  
+  - The CRUD round-trip derivation now asks `@objectstack/spec`'s `isMultiValueField` whether a field is multi-valued, the same predicate the engine stores by. Before, the `select` / `radio` sample was one scalar option code compared `equal` whatever the field declared, so a multi-valued `select` read back as a one-element list and was reported as a fidelity gap the engine does not have. The shipped `examples/app-todo` (`todo_task.tags`) failed `os verify` with exit 1 on exactly that, and now passes.
+  - A single-valued `select` or `radio` keeps its scalar sample and its `equal` comparison. `multiselect` and `checkboxes` are unchanged.
+  - A relational field's `multiple` is answered by the same predicate. A `lookup` declared `multiple: true` still receives a list of ids. A `master_detail` or `tree` field carrying `multiple: true` now receives one id, which is how the engine stores those types. The spec already refuses `multiple` on those types at parse, so only an unparsed config could reach this.
+  - No export, type or accept-set change.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [f9bcd08]
+- Updated dependencies [cc07862]
+- Updated dependencies [e3ad492]
+- Updated dependencies [4916168]
+- Updated dependencies [f9f9f91]
+- Updated dependencies [44072fc]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [7aab759]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [97239c3]
+- Updated dependencies [c2cd651]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1caa603]
+- Updated dependencies [04f0cc4]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [ceb4a93]
+- Updated dependencies [16eefc6]
+- Updated dependencies [fbe2deb]
+- Updated dependencies [ee75aae]
+- Updated dependencies [6e33b67]
+- Updated dependencies [1d0600b]
+- Updated dependencies [ab52182]
+- Updated dependencies [57cc695]
+- Updated dependencies [0557c2f]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [49524f6]
+- Updated dependencies [9f13c94]
+- Updated dependencies [9f13c94]
+- Updated dependencies [d956910]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [d7d5b4f]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [8b123c0]
+- Updated dependencies [45efcfa]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [b206403]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [520f66f]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [81e69ca]
+- Updated dependencies [85e29b8]
+- Updated dependencies [086ad0a]
+- Updated dependencies [0b82391]
+- Updated dependencies [35dfb81]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [83b3d32]
+- Updated dependencies [a7ab047]
+- Updated dependencies [f9a8eb8]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [1ca1eb0]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [a4f0cb0]
+- Updated dependencies [bd70706]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [aa0d4b9]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [9e9d693]
+- Updated dependencies [5c9138b]
+- Updated dependencies [045b946]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [5d095a0]
+- Updated dependencies [a1ca156]
+- Updated dependencies [6946f2f]
+- Updated dependencies [5b5e83f]
+- Updated dependencies [96b0e31]
+- Updated dependencies [f40bb32]
+- Updated dependencies [1968d5e]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/service-datasource@17.7.0
+  - @objectstack/service-automation@17.7.0
+  - @objectstack/plugin-security@17.7.0
+  - @objectstack/plugin-sharing@17.7.0
+  - @objectstack/service-analytics@17.7.0
+  - @objectstack/runtime@17.7.0
+  - @objectstack/objectql@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/plugin-auth@17.7.0
+  - @objectstack/service-settings@17.7.0
+  - @objectstack/rest@17.7.0
+  - @objectstack/plugin-hono-server@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

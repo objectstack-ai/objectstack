@@ -1,5 +1,156 @@
 # @objectstack/service-external-datasource
 
+## 17.7.0
+
+### Patch Changes
+
+- f9bcd08: Datasource and approval refusals, warnings, field help and generated-draft comments no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these two packages show to operators, administrators and flow authors pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/service-datasource`: the credential-migration refusal says an unbindable key is either an alias spelling from before inline credentials were refused at publish, which no connection builder reads, or turso's `encryptionKey`, which has no secret slot of its own because the one slot carries the `authToken`; the remote-primary-key comment in a generated object draft says a driver's introspection can report only the first column of a composite key, so the list is a lower bound.
+  - `@objectstack/plugin-approvals`: the `queue` approver warning says the platform has no ownership queue to expand the type from, that the type is no longer offered for authoring, and to route the step to a team, department or position instead; the live-record warnings say approvers are being resolved against the trigger snapshot instead of the live record they are normally resolved from; the recall refusal's log line names the admin override; the `sys_approval_action` `via_override` help (in every shipped locale) says a platform or organization admin may act on any pending request, so that one nobody in its slate can decide never stays stuck; the cross-organization team, team-member and manager warnings, the expanded-to-nobody warning, the revise-window refusal, the `attachments` help and the `sys_approval_delegation` description drop their citations.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 57cc695: feat(spec): `CryptoContext` gains a required `scope` discriminant, and `LocalCryptoProvider` binds it into a delimiter-safe, versioned AAD (ADR-0128 D1–D3, #21326 stage 1)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers and for every direct caller of
+  `encrypt`, `decrypt` or `rotateKey`: `CryptoContext.scope` is required, so a
+  context literal without it stops compiling (`TS2741`), and the compiler names the
+  missing member. `LocalCryptoProvider` also refuses such a context at runtime with
+  `CryptoContextScopeError`, for a caller the compiler never saw. Code that only
+  injects a provider is unaffected.
+  
+  `scope` is a member of the new closed set `CRYPTO_CONTEXT_SCOPES` (type
+  `CryptoContextScope`), one member per producer of `CryptoContext`:
+  `settings` (`SettingsService`), `object_secret_field` (the ObjectQL engine's
+  secret-field path) and `datasource_credential` (the datasource secret binder).
+  Each producer in this release passes its own member on every call. A new producer
+  adds its own member; it never borrows an existing one.
+  
+  What the contract now requires of every provider that binds AAD:
+  
+  - **Producer-discriminated (D1).** The AAD binds `(scope, namespace, key)`, so a
+    ciphertext sealed by one producer does not authenticate under another
+    producer's context, whatever the two `(namespace, key)` pairs are.
+  - **Delimiter-safe (D2).** Distinct triples produce distinct AAD bytes. An
+    unescaped join is not permitted.
+  - **Versioned.** A ciphertext records which AAD derivation sealed it, and is
+    opened only with that derivation. An unknown derivation fails closed. No second
+    derivation or scope is ever tried after a failure (D3).
+  
+  `LocalCryptoProvider` seals every new value under derivation version 2: a lead
+  byte that never occurs in UTF-8, a versioned label, then the scope, namespace and
+  key, each prefixed with its 4-byte length. The ciphertext carries a `v2:` marker.
+  A ciphertext with no marker is version 1, the bare base64 every earlier release
+  sealed, and it still opens with the older `(namespace, key)` binding. Existing
+  secrets therefore keep working with no action, and carry the older binding until
+  they are re-wrapped. Re-wrapping existing ciphertext at rest is stage 2 of
+  #21326. `rotateKey` already re-seals a version-1 handle under version 2. Any other
+  marker is refused with `UnknownCiphertextVersionError`.
+  
+  Operational note: a secret set or rotated by this release carries the `v2:`
+  marker, and an earlier release cannot open it. A rollback past this release needs
+  those values to be set again.
+  
+  `@objectstack/objectql` and `@objectstack/service-datasource` pass their own
+  scope on every seal and open. Their public surface is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `CryptoContext` and `ICryptoProvider` are TypeScript contracts with no metadata surface: no Zod schema, no authorable key, no export renamed or removed, and no stored row changes shape (`sys_secret.ciphertext` is provider-defined, and every existing ciphertext still opens), so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer or a direct caller, and the compiler names the missing member at their call site. -->
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [db0cf22]
+- Updated dependencies [f97660c]
+- Updated dependencies [13a24ec]
+- Updated dependencies [fd5a1cd]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [35dfb81]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [440cd32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [5d095a0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/driver-memory@17.7.0
+  - @objectstack/driver-mongodb@17.7.0
+  - @objectstack/driver-sql@17.7.0
+  - @objectstack/driver-turso@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/driver-sqlite-wasm@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

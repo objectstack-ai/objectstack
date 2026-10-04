@@ -1,5 +1,128 @@
 # @objectstack/types
 
+## 17.7.0
+
+### Minor Changes
+
+- 748b240: feat(types,automation): a host's per-kernel scheduled-work OFF reports the host's own reason (#21110)
+  
+  Clause-②: yes (widening)
+  
+  `ScheduledWorkPolicy` (`@objectstack/types`) gains an optional
+  `hostDisabledReason`: the host's own sentence for why scheduled work is off on
+  this kernel, such as a plan that does not include scheduled flows. A new
+  export, `scheduledWorkDisabledReason(policy)`, gives the one answer for why
+  scheduled work is not armed under a policy. It returns the host's reason when
+  the policy carries one, and `SCHEDULED_WORK_DISABLED_REASON` otherwise.
+  
+  Every refusal site now reports that answer, read from the same policy reading
+  that refused:
+  
+  - the automation engine's bind log;
+  - the reason it records for `getTriggerBindingAudit()` and for the
+    `FlowRuntimeState.reason` that `GET /automation/_status` serves;
+  - the refusal of `ScheduleTrigger` and `TimeRelativeTrigger` when a host drives
+    them directly.
+  
+  Before this, a kernel that a host turned off through `scheduledWorkPolicy`
+  was reported with the deployment sentence. That sentence tells the reader to
+  set `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true`, even on a process where the
+  variable is already set, and to a tenant who cannot set it.
+  
+  Nothing changes without the new field. A policy with no `hostDisabledReason`,
+  and the zero-argument deployment resolver `resolveScheduledWorkPolicy()`, which
+  never sets it, report `SCHEDULED_WORK_DISABLED_REASON` byte for byte. The field
+  is read only when `enabled` is `false`.
+  
+  To use it, a host that turns one kernel off for its own reason sets
+  `hostDisabledReason` on the `enabled: false` policy it already hands to that
+  kernel's `AutomationServicePlugin`, `ScheduleTriggerPlugin` and
+  `TimeRelativeTriggerPlugin`. Give the same policy to all three, as before, and
+  make the reason a whole sentence that names the cause and the remedy. It is
+  shown verbatim.
+- 6d728b8: feat(types): the driver-fault redaction is exported from types, so a driver's own log lines take the same cut the engine applies
+  
+  Clause-②: no
+  
+  - **New exports.** `redactBoundStatement`, `redactStatementFromMessage`, `redactPropagatedDriverFault` and the `DriverFaultOrigin` type are exported from `@objectstack/types`, by name. They moved here from `@objectstack/objectql`, which never exported them from its entries. The cut is unchanged by the move: the same split, the same structural cut at the separator, the same value templates and the same property rules.
+  - **Why here.** `@objectstack/driver-sql`, `@objectstack/objectql` and `@objectstack/core` all depend on this package, and `operatorFacingErrorText` lives in it, so this is the lowest package all of them can import the cut from. The module imports only this package's own leak predicate, which is unchanged.
+  - **One widening, on the log face.** `redactStatementFromMessage` takes an optional second argument, `{ statementSent: true }`. With it the cut runs without asking the shared leak predicate, as `redactPropagatedDriverFault` already did with the same flag. Without it the function answers exactly as before.
+  - **Why minor.** The package gains four exported names, and `redactStatementFromMessage` gains the optional parameter above. No existing export of `@objectstack/types` changes.
+
+### Patch Changes
+
+- 85e29b8: fix(types): `operatorFacingErrorText` answers through the driver-fault redaction, so an operator-facing record carries no statement and no bound value
+  
+  Clause-②: no
+  
+  - **What changed.** `operatorFacingErrorText` passes every text it returns through `redactStatementFromMessage`, the one driver-fault redaction in this package. Text it reads off a raw-statement fault's `cause` is cut with `{ statementSent: true }`, which is the cut `@objectstack/driver-sql` applies to its own log line for the same fault. Every other text asks the shared leak predicate, as the engine's own log line does.
+  - **What an operator reads now.** The records this helper fills, in `os db clean` and in the metadata migrations and probes, keep the dialect's own diagnostic: the missing column, the failed constraint or the locked database. The value slots the redaction's dialect templates own are cut from it, and the redaction's marker stands where the statement was removed. The records no longer carry the statement or the values bound into it.
+  - **What does not change.** Text that is not a driver dump comes back exactly as before, empty text included. The thrown error is not touched: its `code`, `status`, class and `cause` reach every other reader as the driver composed them. The function's signature and the package's exports are unchanged.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

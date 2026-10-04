@@ -1,5 +1,364 @@
 # @objectstack/metadata-protocol
 
+## 17.7.0
+
+### Minor Changes
+
+- 96a9719: feat(automation): a flow's credentials live in a write-only channel, not in its stored definition (#20790)
+  
+  Clause-②: yes (widening)
+  
+  A flow's two credentials, an inbound hook's `secret` on its start node and an `http` node's `signingSecret`, are no longer stored in the flow definition. The metadata save door moves each explicit value into a new platform object, `sys_flow_credential`, owned by `@objectstack/service-automation`. Its one field is `type: 'secret'`, so the engine encrypts it through the host crypto provider, masks it on every read, and dereferences it only through `resolveSecretField`. This is the same seam the webhook signing secret uses. The stored row, every new version-history row and the row's content hash carry no credential. The engine reads the value only when it verifies an inbound post or signs an outbound request. Authoring does not change: you still write the literal, a save that leaves the key out (the form every read serves) keeps the stored secret, `''` clears it, and only an explicit new value rotates it.
+  
+  **⚠️ Rotate every inbound and outbound flow secret that existed before this release.** On the first boot with a crypto provider, or when a provider registers after a boot without one, each stored flow that still carries a credential is moved into the channel once, and the log prints one notice per flow: `[Automation] flow '<name>' (<state>): … was stored in cleartext … ROTATE: …`. The move guarantees no new copy, but the version-history rows and audit snapshots written before it stay as they were (both are append-only), so an administrator could have read those values. To rotate, save the flow with a new `config.secret` / `config.signingSecret`, then give the new value to whoever signs posts to the hook or verifies its deliveries. The run is recorded in `sys_migration` as `flow-credential-channel` (flow names only, never values). Packaged flows are not moved: a packaged flow's literal stays its source of truth, and where the channel holds a row for it, the row wins at verification.
+  
+  What else changes:
+  
+  - **`@objectstack/spec`**: `PLATFORM_OBJECTS_BY_PACKAGE['service-automation']` lists `sys_flow_credential`.
+  - **`@objectstack/metadata-protocol`**: `registerCredentialChannel(type, channel)` registers a type's write-only credential channel (exported type `MetadataCredentialChannel`). `saveMetaItem` stores the body the channel returns, after the carry-forward and before the put. The runtime authoring gate reads the channel's held positions as present, on an active save and when a draft is published. `SysMetadataRepository.restoreVersion` takes `deriveRestoredBody`, shaped like `promoteDraft`'s `deriveActiveBody`. Rollback and revert pass the channel's strip, so restoring a version written before the move never puts its credential back at rest, and the channel keeps its current credential.
+  - **`@objectstack/service-automation`**: exports `SysFlowCredential`, `FlowCredentialChannel` and `migrateFlowCredentialsIntoChannel`. `AutomationEngine` gains `setFlowCredentialSource`, `holdsFlowCredential`, `resolveFlowCredential` and `flowCredentialHoldings`. An `api` binding carries `resolveSecret()`, which reads the secret at verification time, so a rotation applies to the next post. A draft save never rotates the live secret; publishing the draft promotes it. Deleting a flow's stored row drops its credentials.
+  - **`@objectstack/trigger-api`**: `FlowTriggerBinding.resolveSecret` arms a hook without a literal. A post whose secret cannot be read is answered `503 SERVICE_UNAVAILABLE` and is never verified against nothing.
+  - **Refused now, loudly**:
+    - With no crypto provider, a save that carries a flow credential is refused with `503 SERVICE_UNAVAILABLE` before anything is written. Register a provider (`setCryptoProvider`) and save again.
+    - The clone door (`POST /api/v1/automation/:name/clone`) refuses a source that holds a credential, as a literal or in the channel, with `409 RESOURCE_CONFLICT`, because a copy would share it. ⚠️ Accepted cost: a packaged inbound flow can no longer be cloned in one step. Author the copy as a new flow under a new name, with its own secret.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the one-time move rewrites stored flow rows through the metadata save door itself, at boot; no authorable key, spelling, export or stored shape is retired, so an author or an upgrading agent has nothing to rewrite. The operator's action is the rotation stated above, which is not a FROM to TO mapping. The gate reads this changeset as non-breaking; the disposition is stated for the migration the ruling named. -->
+- 713b0fa: fix(metadata-protocol)!: a metadata body's stored content hash is served and compared only in keyed form, never copied, and never evaluated (#21207)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the stored content hash of a metadata body stays the canonical hash at rest and no metadata body, authorable key, spelling or export moves; what changes is the form a door serves the hash in (a keyed digest: the crypto provider's, or a process-scoped ephemeral key's when none is registered), the form an inbound version token is compared in, and which query shapes the doors accept over the two hash columns, so `objectstack migrate meta` has nothing to rewrite. The operator-run rewrite this release asks for is of audit, activity and decision-audit copies, not of metadata. The other categories are closed on facts: every package here publishes (not `unpublished`); no ADR-0087 id covers a served version token or a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the metadata doors serve and accept for the stored content hash of a metadata body — a hash over the whole stored body, withheld credential material included. Served beside the projected body it let a reader confirm a guess at that material offline; filtered on, it confirmed one online. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Three things change for callers and operators.**
+  
+  1. **A held version token gets one `409 METADATA_CONFLICT`.** Every door that hands out a metadata version token — the save, publish, package-publish and rollback receipts and the history read — now hands out a keyed digest of the stored hash instead of the hash itself, and the save and reset doors compare a token they are sent in that same form. The key is the crypto provider's; a host that registers none keys under a process-scoped ephemeral key instead, so a token is always issued and never empty. A token a client held from before the upgrade is refused once; take the token from the next read or receipt and retry. On a host with no provider the same happens after a restart, and on any host when a provider is first registered. An empty, withheld, raw or stale token is refused with the same `409`; it is never read as "no pin".
+  2. **Filter, sort and group on the two stored content-hash columns, and on the version history's change note, now answer `400 INVALID_FIELD`** — on the generic data door, the MCP stdio reader and the analytics door, before the engine runs. The change note is included because a draft promotion that stated no message of its own recorded the draft's stored hash in it; the publish door now always states a hash-free message, and a note written before this release is served with the quoted hash in keyed form. A data-door search over the two stored-metadata tables no longer scans those columns or the stored body column, and an explicit search-field list naming one answers the same `400`. Every other column of the two tables is served, filtered, sorted and grouped as before, and every other object is unchanged.
+  3. **Operators run `os migrate audit-metadata-bodies` once after upgrading, dry run first.** The audit ledger, the activity feed and the metadata decision-audit trail no longer copy the stored hash. The extended command drops it from the copies already written and withholds it in the decision-audit notes and their copies: a dry run by default, `--apply` to rewrite, idempotent. The version history stays the lineage.
+  
+  **What else changes.** The data door serves the two hash columns of the stored-metadata tables in keyed form, under the same key as the version tokens. The MCP stdio reader serves them keyed under the crypto provider's key, and omits them on a host with no provider. A `409` conflict refusal carries keyed values or none. The ObjectQL engine gains a read accessor for the registered provider's keyed digest; it is additive. A member's read of these tables is refused as before.
+- 5555047: The runtime save door refuses a view container whose own `name` disagrees with the name it is saved under
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at one door over an existing key: `ViewSchema.name` is not removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Which of the two names a divergent container meant (the body's, or the one it was saved under) is authoring intent no conversion entry can decide. New saves are refused with the remedy; a row stored before this change keeps its bytes. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what a runtime write door accepts, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing at the runtime save door, shipped as `minor` under the repo's launch-window convention for breaking changes, the grade the ObjectQL boot loop's refusal of the same divergence shipped with.
+  
+  **What was accepted before.** `saveMetaItem`, which `PUT /api/v1/meta/view/:name` and the dispatcher's metadata save both call, accepted an aggregated view container (`list` / `form` / `listViews` / `formViews`) whose body carried a `name` different from the name it was saved under. It stored the row under the save name and registered the container under the body's `name`, so one document answered under two names. The source registrars (the ObjectQL boot loop and the artifact/HMR loader) and `os validate` already refused a container whose `name` disagrees with the key they file it under.
+  
+  **What is refused now.** That body, with `VALIDATION_ERROR` / 400, before anything is stored or registered, through the same judge the source registrars call (`@objectstack/metadata/view-container-name`). The key judged here is the save name: a container saved under a name other than the object it binds to still saves, and so does the body the door stores for it when it is read and sent back.
+  
+  **The fix.** Drop the body's `name` (the door stamps the save name), or set it to the name the container is saved under.
+  
+  A standalone view record (`viewKind`) and every other metadata type are judged too, by the same release's every-type refusal at the save, restore and publish doors (its own entry).
+- 2f837a5: fix(runtime)!: the in-process reader contexts refuse the stored-metadata-body family's EVALUATE shapes and serve what a write returns, the way the generic data door does (#21454)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key, spelling, export or stored shape moves; what changes is which query shapes the in-process reader contexts accept over the two stored-metadata tables, and the form in which a write's returned row is served, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what an action or hook body's object API, an action handler's scoped API and an action handler's engine handle accept when they read the two stored-metadata tables. A read there that filters, sorts or groups on the stored body column or on a content-hash column, a read that names one of those columns in an explicit search-field list, and a `count` carrying such a filter, ran before this release and now answer the generic data door's `400 INVALID_FIELD` before the query runs. The route: filter, sort, group and search those tables by their scalar columns (the type, the name, the state and the like), and read the bodies with a plain list, which is served projected — the body as its type's read projection, the content hash in keyed form. A default search with no field list is not refused: it is narrowed to the columns the door serves. Every other column of the two tables, and every other object, is unchanged. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  - **`@objectstack/metadata-protocol`** now exports the generic data door's four evaluate-refusal predicates — `storedMetadataBodyGroupingRefusal`, `storedMetadataBodyPredicateRefusal`, `storedMetadataHashEvaluateRefusal` and `storedMetadataSearchRefusal` — so the `@objectstack/runtime` reader-context seam refuses the same shapes through the door's own predicates rather than a second copy. Additive: nothing that imported the package before is changed.
+  - **`@objectstack/runtime`** extends the stored-metadata reader-context seam (`ctx.api.object(...)` for action and hook bodies, a handler's `ctx.api`, and `ctx.engine.find`): a filter, sort, grouping or search that would evaluate the stored body or content hash of `sys_metadata` / `sys_metadata_history` is refused with the door's `INVALID_FIELD` / 400 before the query runs (a `count` with such a predicate included); a default `$search` is narrowed to the door's served field set rather than refused; and the row a write verb returns is served projected and keyed. The engine's own action verb (`ScopedRepo.execute`) is unreachable from a served body and is left untouched.
+- abe8f28: fix(runtime): a sandboxed body or an action handler that reads the stored-metadata tables is served what the generic data door serves (#21454)
+  
+  Clause-②: yes
+  
+  The two stored-metadata tables (the current metadata bodies and their version history) hold each body as stored, credential material included, and a content hash computed over it. The generic data door serves such a row with the body as its type's read projection, with the stored credential material withheld, and the hash in keyed form. Three in-process reader contexts served the same rows as stored:
+  
+  - a sandboxed action or hook body that reads through `ctx.api.object(...)`, inside `ctx.api.transaction(...)` too;
+  - an action handler that reads through `ctx.engine.find(...)`;
+  - an action handler that reads through `ctx.api.object(...)`.
+  
+  An action body and an action handler run elevated, so the stored form reached whoever could invoke the action, a member included.
+  
+  **What changes.** A read of either table through any of these contexts now answers the data door's form: the projected body, and the content hash under the same key the data door uses. That key is the crypto provider's, or the process-scoped ephemeral key when no provider is registered. `find`, `findOne` and `aggregate` are served this way, and so is every context the scoped API derives: `sudo()`, `withRunAs(...)`, a `transaction(...)` callback's context, and the context `beginTransaction()` returns. A hook body that copies what it read into another record can now copy only the projected form. A projection that names the body column without the type column reads the type beside it and drops it again, as on the data door.
+  
+  **What does not change.** Every other object, every write and `count` behave as before. The platform's own readers of these tables still read the stored form, because the projection is applied at the reader contexts and not in the engine.
+  
+  `@objectstack/metadata-protocol` now exports the data door's stored-row serve, so these contexts consume it and keep no copy: `storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows`, `ephemeralStoredHashDigest` and the `StoredHashDigest` type. The exports are additive.
+  
+  The four functions `storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows` and `ephemeralStoredHashDigest`, and the type `StoredHashDigest`, are new public API of `@objectstack/metadata-protocol`, and `@objectstack/runtime` consumes them.
+- 44defd4: Every runtime door that writes a metadata row refuses a body whose own `name` disagrees with the row's name, for every metadata type
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at the runtime write doors over an existing key: no `name` key of any metadata schema is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Which of the two names a divergent body meant (its own, or the one it was saved under) is authoring intent no conversion entry can decide. The at-rest census found no such row: 0 `sys_metadata` and 0 `sys_metadata_history` rows in the four bootable example apps, booted with their seeds; the hosted-tenant shape was not measured. New writes are refused with the remedy; a row stored before this change keeps its bytes and stays readable. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what runtime write doors accept, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing at the runtime write doors, shipped as `minor` under the repo's launch-window convention for breaking changes, the grade the view-container half of this refusal takes in the same release.
+  
+  **What was accepted before.** The runtime stores a metadata row under the name the request names and registers its body under the body's own `name`. These doors accepted a body whose `name` was not the row's, so the row answered under a name nobody saved it under, and under none by its own:
+  
+  - `saveMetaItem`, which `PUT /api/v1/meta/:type/:name` and the dispatcher's metadata save both call, for every type but a view container (a dashboard saved as `dash_a` with `name: 'dash_b'` registered as `dash_b`; a record view saved as `crm_lead.mine` with `name: 'crm_lead.other'` registered as `crm_lead.other`);
+  - `rollbackMetaItem` and `revertCommit`, which wrote such a stored history version back as the active row without passing `saveMetaItem`;
+  - `publishMetaItem` and `publishPackageDrafts`, which promoted such a stored draft the same way.
+  
+  **What is refused now.** Each of those bodies, with `VALIDATION_ERROR` / 400, before anything is stored or registered, through the judge the view-container refusal already used (`savedItemNameRefusal`, `@objectstack/metadata/view-container-name`). `rollbackMetaItem` and `publishMetaItem` throw it. `revertCommit` reports the item in `failed[]` with `code: 'VALIDATION_ERROR'`. `publishPackageDrafts` aborts the batch on it, as it does on any refused draft: nothing in the batch is published. A body with no `name` is accepted as before. A `name` the body carries is judged whatever its value; a `translation` saved with `name: ''`, which its schema accepts, is now refused instead of being registered under the empty string. A view at the save door is the exception: a missing or empty view `name` is still stamped with the save name. A `field` written through the `OS_METADATA_WRITABLE` operator hatch is accepted only without a body `name`: its row is named `object.field`, which the column `name` cannot spell, and registered it answered under the column name alone. Where the type's schema already refused such a body (an empty or non-string `name` on most types, any `name` on a `seed`, whose schema declares none), the answer is now this refusal (`VALIDATION_ERROR` / 400) instead of the schema's `INVALID_METADATA` / 422; nothing is stored either way.
+  
+  **The fix.** Set the body's `name` to the name you save it under, or save the item under the body's own `name`; for a view or a `field`, dropping `name` works too. To bring back a version or a draft that carries another `name`, save the item again with that fix, and publish that save if it is a draft.
+- 74281a8: fix(cloud-connection): an install-local uninstall runs the protocol's registered uninstall cleanups, so the package's permission sets and their grants go with it
+  
+  Clause-②: yes
+  
+  `DELETE /api/v1/marketplace/install-local/:manifestId` removed the package's ledger entry and nothing else. After a restart the package's objects were gone, but its `managed_by: package` rows in `sys_permission_set`, and every grant of them, survived the uninstall. That broke ADR-0090's "No ghost grants" promise on this door.
+  
+  The door now runs the uninstall cleanups that domain plugins register with the protocol (`registerUninstallCleanup`) once the ledger entry is gone. It uses the same registry and the same runner as the protocol's own uninstall, so `plugin-security`'s `security.package-permissions` cleanup removes the package's sets with their position and user bindings, and any cleanup registered later fires here too. The cleanups run with the package's manifest id and no organization, because an install-local package is installed for the whole runtime.
+  
+  The response carries each outcome as `data.cleanups`, the way the protocol's uninstall reports them. A failed cleanup is reported there and named in the operator log with its remedy (install the package again, then uninstall it again). When the protocol cannot run the cleanups, the response says so as one failed `protocol.runUninstallCleanups` outcome. An uninstall that does not happen (a refused caller, an id this door never installed, a ledger write that fails) revokes nothing.
+  
+  `@objectstack/metadata-protocol`: `ObjectStackProtocolImplementation` gains `runUninstallCleanups({ packageId, organizationId?, actor? })`, the one runner of the uninstall-cleanup registry. It runs every registered cleanup for the package and answers one `UninstallCleanupOutcome` per cleanup. It never throws: a failed cleanup is an outcome, and a thrown fault's driver text goes to the operator log, not into the outcome. `deletePackage` now calls it as its last step in place of its own loop, and its `cleanups` are unchanged. The only visible difference there is the log tag of a failed cleanup's warning, now `[protocol.runUninstallCleanups]` instead of `[protocol.deletePackage]`.
+  
+  `@objectstack/cloud-connection` now declares its dependency on `@objectstack/metadata-protocol`, which it already received through `@objectstack/runtime`, for the cleanup outcome types.
+- 5d0e4e2: fix(metadata-protocol)!: the generic data door refuses a stored-metadata filter that reads the body or a content hash through a cross-field comparand or below its depth backstop, and exports its one filter-field collector and one search narrowing for the reader-context seam (#21544)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key, spelling, export or stored shape moves; what changes is which read-query shapes the generic data door accepts over the two stored-metadata tables, and two module functions are added to the package surface, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour plus additive exports, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the generic data door (`GET /api/v1/data/:object`, `POST /api/v1/data/:object/query` and the in-process `findData`) accepts when it reads `sys_metadata` or `sys_metadata_history`. Two filter shapes read the stored body column or a content-hash column (`checksum`, `previous_checksum`, or the history table's `change_note`) without the family's refusal ever seeing them, and both ran before this release:
+  
+  - a cross-field comparand naming one of those columns — `{ "name": { "$ne": { "$field": "metadata" } } }`, in `where` or in an aggregation's `filter`, under `$not` included. The SQL drivers evaluate it row by row, so row presence disclosed the column's value;
+  - a filter on one of those columns nested more than 32 combinators deep, which the door's field collector stopped reading at. A body `$contains` of a stored credential answered the row and a wrong guess answered none.
+  
+  Both now answer the door's `400 INVALID_FIELD`, naming the column, before the query runs — the answer the same filter already gets when it names the column directly. The route: filter those tables by their scalar columns (the type, the name, the state and the like), compare scalar columns with each other, and read the bodies with a plain list, which is served projected. Every other column of the two tables, and every other object, is unchanged; a dotted key into one of those columns was, and stays, refused by the door's dotted-path rule. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  - **`@objectstack/metadata-protocol`** exports two module functions the generic data door now calls itself:
+    - `collectStoredMetadataFilterFields(object, query)` — the family's one filter-field collector: every column a read query's filters read (`where`, the engine's `filter` alias and each aggregation filter): each key's head and each cross-field `{ $field }` comparand, at any depth. `[]` outside the family.
+    - `narrowStoredMetadataSearch(object, query, schema, wireSpelling?)` — the family's one default-search narrowing: an explicit search-field list naming the body or a hash column is refused, a default search is narrowed to the searchable set without them (returned for the caller to run as `searchFields`), and a set that narrows to nothing is refused. The `StoredMetadataSearchSchema` type it reads is exported beside it.
+  - **`@objectstack/runtime`**: the stored-metadata reader-context seam (`ctx.api.object(...)` for action and hook bodies, a handler's `ctx.api`, and `ctx.engine.find`) calls those two functions instead of its own copy of the narrowing and `@objectstack/plugin-security`'s condition walk, so the seam and the door answer every family filter and search identically. A `count` through the seam now runs the query the guard returns. The seam's accept set is unchanged: every shape it refused before it still refuses, now through the door's collector.
+- e367002: The runtime save door refuses a view container saved under a name its own expansion produces
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at one runtime write door over existing keys: no key of `ViewSchema` or of any other metadata schema is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Whether such a container was meant as the object's container or as a view item of that name is authoring intent no conversion entry can decide. New saves are refused with the remedy; a row stored before this change keeps its bytes and is served as before, and no stored row is re-saved. The census found no such row and no writer that produces the shape by default: no seeded `sys_metadata` view rows in the example apps, no packaged container with a top-level `name` among the twelve `defineView` sites in `examples/`, and no Studio or in-repo AI writer that saves a container under an expanded name unless its author types that name into the container (Studio's generic metadata editor saves a body under its own `name`); hosted tenants were not measured. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what a runtime write door accepts, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing at the runtime save door, shipped as `minor` under the repo's launch-window convention for breaking changes, the grade the same door's `name` refusals shipped with.
+  
+  **What was accepted before.** `saveMetaItem`, which `PUT /api/v1/meta/view/:name` and the dispatcher's metadata save both call, accepted an aggregated view container (`list` / `form` / `listViews` / `formViews`) saved under one of the names its own expansion produces: for example `{ name: 'crm_lead.default', object: 'crm_lead', list: { … } }` saved as `crm_lead.default`, the name its bare `list` expands to. That row is the name's own stored row, and an expansion fills only names that have no row of their own (the object door adopts that rule in this same release), so the container's expansion never filled it. The object door (`GET /api/v1/meta/view?object=…`), which never lists a container, listed nothing under the name, and the by-name read answered the raw container. No door answered a view item for the name, and nothing said why.
+  
+  **What is refused now.** That save, with `VALIDATION_ERROR` / 400, before anything is stored or registered, in draft and in publish mode. Whether a name is one the container's own expansion produces is decided by the same expansion the read doors run, so every member kind (a bare or named `list`, `listViews`, `form`, `formViews`) and the expander's de-duplicated names (`…_2`) are judged where the readers place them. A container with no `name` is judged under the save name the door stamps on it. A container on another package's object expands under its own name, which is never the name it is saved under, so it is not refused.
+  
+  **What still saves.** A container under its object's name, which expands as before. A view item (a body carrying `viewKind`) under an expanded name, the sanctioned override for that name. The read doors are unchanged. A row stored in this shape before this change keeps its bytes and is served as before; `migrate meta --stored` and package duplication, which re-save stored rows through this door, now report such a row as failed with this refusal instead of re-saving it.
+  
+  **The fix.** Save the container under its object's name (`crm_lead`), or save a view item (`name`, `object`, `viewKind`, `config`) under the expanded name (`crm_lead.default`).
+- 7b07749: The runtime save door refuses a view container saved under a name another stored container of the same object expands to
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at one runtime write door over existing keys: no key of `ViewSchema` or of any other metadata schema is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Whether the refused container was meant as a member of the container that already expands that name, or as a view item of that name, is authoring intent no conversion entry can decide. New saves are refused with the remedy; a row stored before this change keeps its bytes and is served as before, and no stored row is re-saved. The census found no packaged container that can reach this door in this shape (the source registrars file a container under its object and refuse a `name` that disagrees with it; the thirteen `defineView` sites in this repository carry no top-level `name`), no seeded `sys_metadata` view rows in the example apps, and no Studio or in-repo AI writer that saves a container under a name another container expands unless its author types that name (Studio's generic metadata editor saves a body under the name it carries); hosted tenants and the cloud AI author were not measured. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what a runtime write door accepts, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing at the runtime save door, shipped as `minor` under the repo's launch-window convention for breaking changes, the grade the same door's earlier name refusals shipped with.
+  
+  **What was accepted before.** `saveMetaItem`, which `PUT /api/v1/meta/view/:name` and the dispatcher's metadata save both call, accepted an aggregated view container (`list` / `form` / `listViews` / `formViews`) saved under a name that another stored container of the same object expands to. For example, with `{ name: 'crm_lead', object: 'crm_lead', list: { … }, listViews: { pipeline: { … } } }` stored, a second container `{ object: 'crm_lead', list: { … } }` saved as `crm_lead.pipeline`. The second container became that name's own stored row, and an expansion fills only a name with no row of its own, so the first container's `crm_lead.pipeline` view was no longer served: the object door (`GET /api/v1/meta/view?object=…`), which never lists a container, listed nothing under the name, and the by-name read answered the raw second container. Nothing said why.
+  
+  **What is refused now.** That save, with `VALIDATION_ERROR` / 400, before anything is stored or registered, in draft and in publish mode. The other containers are the stored rows the read doors select for the same caller (environment-wide rows plus the caller's organization's), each expanded exactly as the read doors expand it, so every member kind (a bare or named `list`, `listViews`, `form`, `formViews`), the expander's de-duplicated names, and the names a container on another package's object expands under its own name are all judged where the readers place them. A container with no `name` is judged under the save name the door stamps on it.
+  
+  **What still saves.** A container under its object's name, which expands as before, and its own re-save. A container under any other name of its own that no other stored container of its object expands to: this door keeps a container saved under a name other than its object, and this change leaves that alone. A view item (a body carrying `viewKind`) under an expanded name, the sanctioned override for that name. The read doors are unchanged. A row stored in this shape before this change keeps its bytes and is served as before; `migrate meta --stored` and package duplication, which re-save stored rows through this door, report such a row as failed with this refusal instead of re-saving it.
+  
+  **The fix.** Add the view as a member of the stored container that already expands the name (in the example, the container `crm_lead`, whose `listViews.pipeline` is that view), or save a view item (`name`, `object`, `viewKind`, `config`) under the expanded name (`crm_lead.pipeline`).
+
+### Patch Changes
+
+- bdd3654: `computeViewReferenceDiagnostics` no longer walks a list view's own `tabs[].filter`
+  
+  Clause-②: no
+  
+  The list view's own `tabs` is a `retiredKey` tombstone on every list-view shape. The write door refuses it, and a stored or artifact-shipped body has it stripped by the conversion replay before it is served, so the read could never see it. A served body that still carries it is already badged by the spec diagnostics (`computeMetadataDiagnostics`), with the tombstone's prescription. The `userFilters.tabs[].filter`, `filterableFields` and `kanban` checks are unchanged.
+- 0e10be6: fix: on MySQL, `sys_packages` is now created and written, so installed and edited packages survive a restart. When a `sys_packages` write fails, a package install or edit now answers the failure instead of success (#21243)
+  
+  Clause-②: no
+  
+  **`@objectstack/service-package`.** The `sys_packages` DDL and the publish upsert are spelled for the dialect the default driver names (`SqlDriver.dialectName`). SQLite and PostgreSQL keep the exact statements they always ran, and so does any driver that names no SQL dialect. MySQL gets the same `(id, version)` key and columns in its own spelling. Its index is created only after `information_schema` reports it absent, and its upsert is `INSERT … AS incoming ON DUPLICATE KEY UPDATE`, which needs MySQL 8.0.19 or later. Before this, the table was never created on MySQL. That DDL failed with `ER_INVALID_DEFAULT`, `ER_BLOB_KEY_WITHOUT_LENGTH` and `ER_PARSE_ERROR`. The DDL refusal was logged only at `debug`, as "may already exist". The `ON CONFLICT` upsert also failed with `ER_PARSE_ERROR`, so `POST /api/v1/packages/publish` answered `500 DATABASE_ERROR`. A refused DDL statement now fails the plugin's `start()` and is logged at `error`.
+  
+  **`@objectstack/metadata-protocol`.** `installPackage` and `updatePackage` no longer answer success when the `package` service's `sys_packages` write fails. The registry write is undone first. A fresh install leaves no package and releases the namespace it registered. A re-install puts the prior row back, and an edit puts the prior manifest back. Then the failure is thrown. A store fault answers `500`, with `DATABASE_ERROR` from a live SQL driver and `INTERNAL_ERROR` otherwise. A declared 4xx refusal is passed through unchanged. Before this, `POST /api/v1/packages` answered `201` and `PATCH /api/v1/packages/:id` answered `200` over a write that never landed, and the package was gone after the next restart. A host with no `package` service still installs in memory only and says so with a warning. That degraded path is unchanged.
+- 1fd5664: fix: when the store refuses an uninstall's `sys_packages` delete, the uninstall now answers the failure and removes nothing else, instead of answering success and coming back after the next restart (#21276)
+  
+  Clause-②: no
+  
+  **`@objectstack/metadata-protocol`.** `deletePackage` now deletes the package's `sys_packages` row first, before its `sys_metadata` rows, its tables, its registry entry and the rows the uninstall cleanups own. When the `package` service refuses that delete, whether it returns `{ success: false }` or throws, `deletePackage` throws and nothing else is removed. A store fault answers `500`, with `DATABASE_ERROR` from a live SQL driver and `INTERNAL_ERROR` otherwise. A declared 4xx refusal is passed through unchanged. Before this, the refusal was logged as a warning, and `DELETE /api/v1/packages/:id` answered `200` after the package's metadata, tables and grants had been removed. The package then came back after the next restart.
+  
+  Before that store delete, `deletePackage` now also asks the registry whether the uninstall would be refused because another package extends an object this package owns (ADR-0029). If so, it throws the registry's own refusal with nothing removed. A registry without the new question is not asked, and the refusal then surfaces at the registry withdrawal, as before.
+  
+  **`@objectstack/objectql`.** New: `SchemaRegistry.assertPackageUninstallable(packageId)`. It throws the refusal `unregisterObjectsByPackage` and `uninstallPackage` raise for an object another package extends, with the same message, and it changes nothing. `unregisterObjectsByPackage` now calls it, so there is still one copy of that check.
+  
+  **`@objectstack/runtime`.** `DELETE /api/v1/packages/:id` now asks `deletePackage` before it touches anything. It checks that the package exists with a read, and it withdraws the package from the running registry and clears its saved disable record only after `deletePackage` has answered. So when the store refuses, the door answers `500`, the same process keeps serving the package, and a package that was disabled stays disabled after a restart. Before this, the door withdrew the package and cleared its disable record first. A refused delete then left the package missing until a restart, and brought a disabled package back enabled.
+  
+  An uninstall refused because another package extends an object this package owns still answers `500` with nothing changed: the stored rows, the registry entry and the disable record all stay as they were, in the same process and after a restart. That refusal is now decided before the store delete, instead of by the door withdrawing the package first. An ordinary uninstall, and a host with no `package` service, are unchanged.
+- 535d1d2: fix(metadata-protocol): a view container saved for an object another package ships no longer replaces that package's views or its default
+  
+  Clause-②: no
+  
+  - **What was wrong.** A runtime view container expands each member to `<object>.<key>`. A `list` that names no key becomes `<object>.default`, a `form` becomes `<object>.form`, and every member that names a key uses that key. Saved under another name, in another package or in none, for an object a code package ships, those expansions replaced that package's views of the same names on `GET /api/v1/meta/view?object=<object>`. The replacements were still stamped with the shipping package's `_packageId` and `_provenance: 'package'`.
+    - On an environment-scoped kernel, the by-name read `GET /api/v1/meta/view/<name>` kept the packaged view, so the two reads disagreed.
+    - On an unscoped kernel, the by-name read served the replacement too, for a container saved into a package or environment-wide.
+    - The container's own default kept `isDefault: true`. It either replaced the object's default view or stood beside it as a second list default.
+  - **What it does now.** For an object a code package ships, a container that belongs to another package, or to none, expands every member under its own name:
+    - a `list` that names no key becomes `<object>.<container name>`;
+    - every other member becomes `<object>.<container name>.<key>`. That covers a `list` that names its key, each `listViews` and `formViews` entry, and `form`.
+  
+    None of these views carries `isDefault`. Every name the shipping package serves answers its packaged view on both reads, unchanged, and the only `isDefault` views the object lists are the shipping package's.
+  - **One exception.** When the shipping package itself serves `<object>.<container name>` (a container named after one of that package's keys), the container's default list becomes `<object>.<container name>.<container name>` instead.
+  - **A container with no name of its own** expands nothing on such an object.
+  - **What these views carry.** The container's own package as `_packageId` (none for a package-less container), and no other package's `_provenance` or protection envelope.
+  - **What stays.** Three kinds of container expand exactly as before, `isDefault` included:
+    - a container bound to the package that ships the object;
+    - a package-less overlay of that package's own container, saved under that container's name;
+    - a container on an object no code package ships.
+  
+    A write to `<object>.default` by its own name still overrides it on both reads.
+  - **What changes for a caller.** Such a container's views are now served under new names:
+    - its default list as `<object>.<container name>`, instead of `<object>.default`;
+    - each keyed member as `<object>.<container name>.<key>`, instead of `<object>.<key>`.
+  
+    A navigation `viewName` or a form-action `target` that used an old name to reach one of these views now reaches the shipping package's view. Use the new name instead.
+- e9dec3d: fix(metadata-protocol): a view a stored view container expands answers by name what the object door lists, on every kernel and for every container scope
+  
+  Clause-②: no
+  
+  - **What changed.** `GET /api/v1/meta/view?object=…` lists the views a stored view container expands, and the by-name read now answers each of those names with the same item. Before, `getMetaItem` expanded no container: it answered such a name only on an unscoped kernel and only for an environment-wide container, where the registry held a hydrated copy. On an environment-scoped kernel, and for an organization-scoped container on any kernel, it answered nothing. Where the name is one a package also ships, such as `<object>.default` under a tenant's overlay of that package's container, it answered the packaged view while the list served the overlay's.
+  - **How.** The by-name read selects the stored containers in the caller's scope with the list read's own row selection, and expands them with the list read's own expansion. Nothing is persisted or registered, and a stored row of the name itself still answers first.
+  - **Layers, history and diff for such a name.** `getMetaItemLayered` reports the container's own stored row as `overlay`, with the scope it was read from as `overlayScope`, and the expanded view as `effective`. `historyMetaItem` and `diffMetaItem` answer exactly what they answer under the container's own name, and say so: every event's `ref.name` and the diff's `name` are the container's. No history is made up for a name that was never stored.
+  - **What does not change.** The container's own name still answers its stored row. The save door is unchanged, including a write by an expanded name. No response shape gains or loses a key.
+- ce53218: Withdrawing or publishing a public form on a walled tenancy posture (degraded or not) is now refused loudly at authoring, with `403 NOT_OVERRIDABLE`, when the save is organization-scoped and the anonymous form doors cannot honour it. The message names the remedy: save the change env-wide, which every anonymous door honours. Drafts and draft promotion are refused alike. Other organization-scoped edits, env-wide saves and single-posture deployments are unchanged.
+- 83b3d32: Public forms on a walled tenancy posture: saving or publishing a view whose public form cannot take anonymous intake now tells the author why, on the response.
+  
+  Clause-②: yes (widening)
+  
+  On a walled posture (`group` or `isolated` in force), an open public form whose object is walled by an organization column cannot take an anonymous submission: the submission carries no organization, and an insert without one into a walled object is refused. The two anonymous form endpoints already answer such a form as a withdrawn one (`404 FORM_NOT_FOUND`), and the administrator's read of the view (`GET /meta/view/:name`) already states why in `_diagnostics.warnings`.
+  
+  - **`@objectstack/metadata-protocol`**: saving the view (`PUT /meta/view/:name`) or publishing its draft (`POST /meta/view/:name/publish`, and a package's batch publish) now answers success with one `warning` advisory per such form, under `advisories`, with rule `public-form-intake-unavailable`. It is located at the form's `sharing` (for example `views[0].formViews.contact.sharing`), its `message` is the same text the administrator's read states, and its `hint` is the remedy: if the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it. The write is never refused. The advisory reads the posture in force from the `tenancy` service, which is what the anonymous endpoints read: a single-posture deployment, a deployment whose walled posture is degraded to `single`, a deployment with no tenancy service, and a form bound to a tenancy-disabled object get no advisory, and a draft save is not judged. The publish refusal for an unstamped platform schedule flow still reads the requested posture, as before.
+  - **`@objectstack/metadata-core`**: the intake-availability rule moved here from `@objectstack/rest` and is exported, so the anonymous endpoints, the administrator's read and the publish advisory read one answer: `anonymousFormIntakeUnavailability(object, posture, readObjectSchema)` (`null` when the form can take intake, otherwise the object, the posture and the wall column; it judges the object's effective schema, with the injected `organization_id`), `anonymousFormIntakePosture(tenancy)` (the posture in force, as a tenancy service reports it), `anonymousFormIntakeUnavailableMessage` and `anonymousFormIntakeUnavailableRemedy` (the reason and its remedy), `anonymousFormSharingPath` and `anonymousFormObjectName`, and the type `AnonymousFormIntakeUnavailable`.
+  - **`@objectstack/rest`**: the anonymous form endpoints and the administrator's read import that rule instead of holding their own copy. Their answers are unchanged.
+- 550f4cc: The metadata protocol registers its journal-backed migration plan, `metadata.recorded-by-sentinel-to-null`, with the kernel's `migration-plans` registry (#21498)
+  
+  Clause-②: no
+  
+  A migration journal records a run's plan hash, not the plan's code. To resume a run, the package that owns the plan has to register it. This package owns the `recorded_by` sentinel-to-NULL plan, and until now it never registered it. So any process that composed the registry still reported the run as unresumable.
+  
+  The protocol assembly (`assembleMetadataProtocol`, which `ObjectQLPlugin` and `MetadataProtocolPlugin` both run) now registers the plan at `kernel:ready`. It does so only when a `migration-plans` service is composed. That runs before `MigrationRecoveryPlugin`'s boot scan, so the scan reports the run as resumable. A kernel with no registry is unchanged. Registering a plan runs nothing: only `os migrate resume` acts on it.
+- 5dbcee8: fix(metadata-protocol): the object door lists a stored view row under its own name even where a stored view container expands that name, as the by-name read already answers
+  
+  Clause-②: no
+  
+  - **What changed.** `GET /api/v1/meta/view?object=…` (the object door) no longer lets a stored view container's expansion replace a stored row of the same name. A view item (a row carrying `viewKind`) saved under a name the container also expands, such as `<object>.default` beside a stored overlay of that object's container, is now what the object door lists under that name. Before, the object door listed the container's expansion there while the by-name read (`GET /api/v1/meta/view/NAME`) answered the stored row. Both doors now answer the row.
+  - **The rule.** A row stored under exactly a name is the override for that name (ADR-0005 keys an overlay by its own name). An expansion fills only the names that have no row of their own. The list read and the by-name read decide this with one test, over the rows each selects for the same caller, so a row stored for one organization does not hide the expansion from any other caller.
+  - **A container stored under one of its own expanded names.** That row is the name's own row as well, so its expansion no longer fills the name. The object door never lists a container, so it now lists nothing under that name. Before, it listed the container's expansion there. The by-name read answers the stored container, as before.
+  - **What does not change.** Every name a container expands that has no stored row of its own is still listed, and on both doors it still replaces a packaged view of the same name. The by-name read answers as before. The save door is unchanged. No response shape gains or loses a key.
+- ec390ec: An expanded view of a stored view container is reported as tenant-authored on an unscoped kernel, as it already was on an environment-scoped one: not resettable, and with no `code` layer
+  
+  Clause-②: no
+  
+  On an unscoped (control-plane) kernel, registry hydration registers each view a stored environment-wide container expands, under that view's own name. The container was registered with the tenant-authorship marker (`_provenance: 'org'`), and its expansions were not. An expansion of a container bound to a package therefore carried that package's id and no marker, and the registry's artifact lookup took it for a view the package ships. For such a name `getMetaItem` (`GET /api/v1/meta/view/NAME`) answered `resettable: true`, and `getMetaItemLayered` (`/layers`) answered the stored container's expansion as the `code` layer. The `code` layer was also wrong for an expansion of a package-less container. An environment-scoped kernel registers nothing, and answered `resettable: false` and `code: null`.
+  
+  Each registered expansion now carries its container's marker, applied before the expansion's own artifact envelope, in the same order the container gets it. Where the container's own package ships a view of that name, that artifact's envelope still wins (ADR-0010 §3.3). Both kernels now give the same answer for every expanded name. Studio's reset affordance and its code-versus-overlay diff are drawn from these two values.
+  
+  The save door is unchanged: it accepts a write by an expanded name on both kernels, as before, and the stored row then answers that name.
+- eb9ef79: The data door's object-existence gate builds its `OBJECT_NOT_FOUND` from the shared factory, and two best-effort readers treat the engine's refusal of their own object as the not-provisioned case
+  
+  Clause-②: no
+  
+  - `assertObjectRegistered` (the data door's object-existence gate) now throws `objectNotFoundError(object)` from `@objectstack/core`. The code, the status, the `object` field and the message are unchanged, byte for byte.
+  - `SeedLoaderService.resolveSoleOrganizationId` and the history counters `SysMetadataRepository` reads (`version`, `event_seq`) already answered a missing table of their own object as "nothing here yet". `@objectstack/objectql` now refuses an object name its registry does not hold with `OBJECT_NOT_FOUND` instead of reaching the driver, so each reader also answers that refusal as the same absence when the error's own `object` is the object it read. A refusal naming another object, and every other read failure, still propagate. With a registered object nothing changes.
+- 6dd99b8: Public forms: every declared means of withdrawing a form from anonymous intake is now honoured by every anonymous form door. Which forms a `view` opens to anonymous intake is now decided by one rule, `anonymousFormIntakeCandidates` (new in `@objectstack/metadata-core`, alongside `anonymousFormIntakeSlugs`, `anonymousFormIntakeSlug` and `publicFormSlug`), read by both the anonymous form endpoints in `@objectstack/rest` and the organization-scoped `view` write check in `@objectstack/metadata-protocol`, so the two can no longer disagree. A form is served anonymously only when its `sharing` config declares public sharing as `SharingConfigSchema` defines it: `sharing.enabled: true`, `sharing.allowAnonymous: true` and a `sharing.publicLink` slug. `enabled` defaults to `false`, so a form that set only `allowAnonymous` and `publicLink` is no longer served on the anonymous endpoints (`404 FORM_NOT_FOUND`). Migration: add `enabled: true` to the form's `sharing` block (and to any stored overlay of it) to keep it public; see the public forms guide.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [8598614]
+- Updated dependencies [7e7e64b]
+- Updated dependencies [15b29d3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [0fc8087]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [39a912e]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [7aab759]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1371dc9]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [d70353f]
+- Updated dependencies [6210f88]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/lint@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/metadata@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/sdui-parser@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

@@ -1,5 +1,113 @@
 # @objectstack/rest
 
+## 17.7.0
+
+### Patch Changes
+
+- 49524f6: Withdrawing a public form from anonymous intake now takes effect on every intake door
+  
+  Clause-②: no
+  
+  When an administrator withdraws a public form, both anonymous form routes (`GET /forms/:slug` and `POST /forms/:slug/submit`) now answer `404 FORM_NOT_FOUND` and no record is created. Republishing the form restores both routes. If a service the routes need to resolve the form is registered but cannot be reached, both routes refuse the request instead of serving the form.
+- 83b3d32: Public forms on a walled tenancy posture: saving or publishing a view whose public form cannot take anonymous intake now tells the author why, on the response.
+  
+  Clause-②: yes (widening)
+  
+  On a walled posture (`group` or `isolated` in force), an open public form whose object is walled by an organization column cannot take an anonymous submission: the submission carries no organization, and an insert without one into a walled object is refused. The two anonymous form endpoints already answer such a form as a withdrawn one (`404 FORM_NOT_FOUND`), and the administrator's read of the view (`GET /meta/view/:name`) already states why in `_diagnostics.warnings`.
+  
+  - **`@objectstack/metadata-protocol`**: saving the view (`PUT /meta/view/:name`) or publishing its draft (`POST /meta/view/:name/publish`, and a package's batch publish) now answers success with one `warning` advisory per such form, under `advisories`, with rule `public-form-intake-unavailable`. It is located at the form's `sharing` (for example `views[0].formViews.contact.sharing`), its `message` is the same text the administrator's read states, and its `hint` is the remedy: if the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it. The write is never refused. The advisory reads the posture in force from the `tenancy` service, which is what the anonymous endpoints read: a single-posture deployment, a deployment whose walled posture is degraded to `single`, a deployment with no tenancy service, and a form bound to a tenancy-disabled object get no advisory, and a draft save is not judged. The publish refusal for an unstamped platform schedule flow still reads the requested posture, as before.
+  - **`@objectstack/metadata-core`**: the intake-availability rule moved here from `@objectstack/rest` and is exported, so the anonymous endpoints, the administrator's read and the publish advisory read one answer: `anonymousFormIntakeUnavailability(object, posture, readObjectSchema)` (`null` when the form can take intake, otherwise the object, the posture and the wall column; it judges the object's effective schema, with the injected `organization_id`), `anonymousFormIntakePosture(tenancy)` (the posture in force, as a tenancy service reports it), `anonymousFormIntakeUnavailableMessage` and `anonymousFormIntakeUnavailableRemedy` (the reason and its remedy), `anonymousFormSharingPath` and `anonymousFormObjectName`, and the type `AnonymousFormIntakeUnavailable`.
+  - **`@objectstack/rest`**: the anonymous form endpoints and the administrator's read import that rule instead of holding their own copy. Their answers are unchanged.
+- a7ab047: Public forms on a walled tenancy posture: a form whose object is walled by an organization column is no longer offered to anonymous visitors. An anonymous submission carries no organization, and on a walled posture an insert into such an object without one is refused, so the form used to render and then answer `500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` on every submit. Both anonymous form endpoints (`GET /forms/:slug` and `POST /forms/:slug/submit`) now answer it exactly as they answer a withdrawn form (`404 FORM_NOT_FOUND`), so an anonymous caller learns nothing about the deployment's tenancy. The administrator's read of the form (`GET /meta/view/:name`) states why in `_diagnostics.warnings`, located at the form's `sharing`, with the remedy: if the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it. Forms bound to tenancy-disabled objects, and single-posture deployments, are unchanged.
+  
+  Clause-②: no
+- 6dd99b8: Public forms: every declared means of withdrawing a form from anonymous intake is now honoured by every anonymous form door. Which forms a `view` opens to anonymous intake is now decided by one rule, `anonymousFormIntakeCandidates` (new in `@objectstack/metadata-core`, alongside `anonymousFormIntakeSlugs`, `anonymousFormIntakeSlug` and `publicFormSlug`), read by both the anonymous form endpoints in `@objectstack/rest` and the organization-scoped `view` write check in `@objectstack/metadata-protocol`, so the two can no longer disagree. A form is served anonymously only when its `sharing` config declares public sharing as `SharingConfigSchema` defines it: `sharing.enabled: true`, `sharing.allowAnonymous: true` and a `sharing.publicLink` slug. `enabled` defaults to `false`, so a form that set only `allowAnonymous` and `publicLink` is no longer served on the anonymous endpoints (`404 FORM_NOT_FOUND`). Migration: add `enabled: true` to the form's `sharing` block (and to any stored overlay of it) to keep it public; see the public forms guide.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [c98a72d]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/service-package@17.7.0
+  - @objectstack/observability@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes
