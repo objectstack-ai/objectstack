@@ -26,6 +26,8 @@
  *     org-scoped read, save, delete, publish and rollback.
  *  3. Precedence: with both rows present the read serves the org-scoped row,
  *     and the door binds THAT row's `_lock`, whatever the env-wide row says.
+ *  4. The organization gate: on a type with no per-org channel the reads
+ *     never serve an org-scoped row, and neither does the door.
  *
  * It sits above PR #21693's and PR #21715's per-case pins and replaces neither.
  *
@@ -55,11 +57,11 @@ interface StoredRow {
     metadata: string;
 }
 
-/** A tenant-authored `view` row, as an author's save of a body declaring `_lock` leaves it at rest. */
-function viewRow(name: string, organizationId: string | null, lock: Lock): StoredRow {
+/** A tenant-authored row (a `view` unless named), as an author's save of a body declaring `_lock` leaves it at rest. */
+function viewRow(name: string, organizationId: string | null, lock: Lock, type = 'view'): StoredRow {
     return {
         id: `r_${name}_${organizationId ?? 'env'}`,
-        type: 'view',
+        type,
         name,
         organization_id: organizationId,
         package_id: null,
@@ -137,17 +139,18 @@ const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
  */
 async function door(
     protocol: ObjectStackProtocolImplementation, name: string, operation: 'save' | 'delete', organizationId?: string,
+    type = 'view',
 ): Promise<Verdict> {
     const gate = vi.spyOn(protocol as any, operation === 'save' ? 'assertLockAllowsWrite' : 'assertLockAllowsDelete');
     try {
         const scope = organizationId ? { organizationId } : {};
         const outcome: any = await settle(operation === 'save'
-            ? protocol.saveMetaItem({ type: 'view', name, item: { name, label: name, object: 'account' }, ...scope })
-            : protocol.deleteMetaItem({ type: 'view', name, ...scope }));
+            ? protocol.saveMetaItem({ type, name, item: { name, label: name, object: 'account' }, ...scope })
+            : protocol.deleteMetaItem({ type, name, ...scope }));
         if (outcome instanceof Error && (outcome as any).code === 'ITEM_LOCKED') {
             return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
         }
-        expect(gate, `view/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
+        expect(gate, `${type}/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
         expect(await gate.mock.results[0]?.value).toBeNull();
         return 'admitted';
     } finally {
@@ -156,12 +159,12 @@ async function door(
 }
 
 /** Both reads' envelopes for the same request; they must agree with each other first. */
-async function envelope(protocol: ObjectStackProtocolImplementation, name: string, organizationId?: string) {
+async function envelope(protocol: ObjectStackProtocolImplementation, name: string, organizationId?: string, type = 'view') {
     const scope = organizationId ? { organizationId } : {};
-    const byName: any = await protocol.getMetaItem({ type: 'view', name, ...scope });
-    const layered: any = await protocol.getMetaItemLayered({ type: 'view', name, ...scope });
+    const byName: any = await protocol.getMetaItem({ type, name, ...scope });
+    const layered: any = await protocol.getMetaItemLayered({ type, name, ...scope });
     const pick = (r: any) => ({ lock: r.lock, editable: r.editable, deletable: r.deletable });
-    expect(pick(layered), `view/${name}: the two reads disagree`).toEqual(pick(byName));
+    expect(pick(layered), `${type}/${name}: the two reads disagree`).toEqual(pick(byName));
     return { ...pick(byName), served: byName.item?.label as string | undefined, overlayScope: layered.overlayScope };
 }
 
@@ -283,6 +286,31 @@ describe('[#21716] pin 3 — both rows present: the door binds the lock of the r
                         .toEqual(read.deletable ? 'admitted' : ITEM_LOCKED);
                 });
             }
+        }
+    }
+});
+
+describe('[#21716] pin 4 — a type with no per-org channel: neither the read nor the door serves an org-scoped row', () => {
+    // `page` declares `allowOrgOverride: false`, so an org-scoped row of it is
+    // pre-#6190 residue boot hydration walks past. The reads gate the
+    // organization away (`organizationIdForMetaRead`) and serve the env-wide
+    // row; the door asks the same gate, so it binds that row's `_lock` too. A
+    // save is refused earlier, by the org-scope door (`NOT_OVERRIDABLE`), so
+    // the removal is the verb that reaches the `_lock` gate with an organization.
+    const cases: Array<{ env: Lock; org: Lock }> = [
+        { env: 'full', org: 'none' },
+        { env: 'none', org: 'full' },
+    ];
+    for (const { kernel, environmentId } of TOPOLOGIES) {
+        for (const c of cases) {
+            it(`${kernel} kernel · page: env-wide _lock=${c.env}, org-scoped residue _lock=${c.org} · delete for ${ORG}`, async () => {
+                const rows = [viewRow('p_both', null, c.env, 'page'), viewRow('p_both', ORG, c.org, 'page')];
+                const { protocol } = harness(environmentId, rows);
+                const read = await envelope(protocol, 'p_both', ORG, 'page');
+                expect(read).toMatchObject({ lock: c.env, served: 'env-wide row', overlayScope: 'env' });
+                expect(await door(protocol, 'p_both', 'delete', ORG, 'page'))
+                    .toEqual(read.deletable ? 'admitted' : ITEM_LOCKED);
+            });
         }
     }
 });
