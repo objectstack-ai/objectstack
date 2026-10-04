@@ -572,7 +572,7 @@ Sort field and direction pair
 | **readonly** | `boolean` | optional | Draw the value plainly, not editable |
 | **hidden** | `boolean` | optional | Do not draw the field (its value still submits) |
 | **placeholder** | `string` | optional | Placeholder text in the empty control |
-| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | The choices of a select / radio / checkboxes field — the form view's own option, `{ label, value, … }` |
+| **options** | `{ label: string; value: string \| number \| boolean; description?: string; visibleWhen?: string \| object }[]` | optional | The choices of a select / radio / checkboxes field (and a lookup's static options) — `{ label, value, description?, visibleWhen? }`, `value` a string, a number or a boolean |
 | **validation** | `{ required?: string; minLength?: object; maxLength?: object; min?: object; … }` | optional | Extra rules checked at submit — `{ required?, minLength?, maxLength?, min?, max? }`, each bound rule a `{ value, message }`, and `required` the message a required field shows |
 | **dependsOn** | `string \| (string \| { field: string; param?: string })[]` | optional | The field(s) this field's options depend on: the form gates the field until they are set and re-evaluates its options as they change — a field name, or the object field's list of names / `{ field, param }` entries |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the field is drawn only when TRUE |
