@@ -2,7 +2,7 @@
   "number": 21754,
   "kind": "pull_request",
   "title": "fix(plugin-security): explain credits read depth, not sharing, for a row only the depth admits",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-04T14:55:34Z",
-  "updated_at": "2026-10-04T15:19:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-04T15:57:00Z",
+  "closed_at": "2026-10-04T15:56:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-04T15:56:58Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21754",
