@@ -339,18 +339,18 @@ describe('the decider of a visible row: read depth or a share, through the real 
   // `visible` is unchanged from the cells above (each one still agrees with
   // the find); what is pinned here is WHICH layer the report credits.
   const layerRecord = (decision: any, layer: string) => decision.layers.find((l: any) => l.layer === layer).record;
-  const cells: Array<[string, RowKey, any, string]> = [
-    ['hr_reviewer (org depth), unshared row', 'unshared', HR_CTX, 'depth'],
-    ['hr_reviewer (org depth), a row shared to someone else', 'shared', HR_CTX, 'depth'],
-    ['team_lead (unit depth), owned inside the unit', 'owned', LEAD_CTX, 'depth'],
-    ['dept_reporter (own depth) via a manual share', 'shared', REPORTER_CTX, 'sharing'],
-    ['dept_reporter (own depth) via a criteria rule', 'ruled', REPORTER_CTX, 'sharing'],
-    ['dept_reporter (own depth) as owner', 'owned', REPORTER_CTX, 'owd_baseline'],
+  const cells: Array<[string, RowKey, string, any]> = [
+    ['hr_reviewer (org depth), unshared row', 'unshared', 'depth', HR_CTX],
+    ['hr_reviewer (org depth), a row shared to someone else', 'shared', 'depth', HR_CTX],
+    ['team_lead (unit depth), owned inside the unit', 'owned', 'depth', LEAD_CTX],
+    ['dept_reporter (own depth) via a manual share', 'shared', 'sharing', REPORTER_CTX],
+    ['dept_reporter (own depth) via a criteria rule', 'ruled', 'sharing', REPORTER_CTX],
+    ['dept_reporter (own depth) as owner', 'owned', 'owd_baseline', REPORTER_CTX],
     // Both admit: the last layer to admit, in pipeline order, decides.
-    ['team_lead (unit depth) holding a share on a row inside the unit', 'lead_shared', LEAD_CTX, 'sharing'],
-    ['hr_reviewer (org depth) holding a share', 'lead_shared', HR_CTX, 'sharing'],
+    ['team_lead (unit depth) holding a share on a row inside the unit', 'lead_shared', 'sharing', LEAD_CTX],
+    ['hr_reviewer (org depth) holding a share', 'lead_shared', 'sharing', HR_CTX],
   ];
-  it.each(cells)('%s → %s row → decidedBy %s', async (_label, rowKey, context, decider) => {
+  it.each(cells)('%s × %s row → decidedBy %s', async (_label, rowKey, decider, context) => {
     const decision = await expectCell(await makeStack(), rowKey, context, true);
     expect(decision.record.decidedBy).toBe(decider);
   });
