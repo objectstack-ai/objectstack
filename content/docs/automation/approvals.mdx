@@ -422,7 +422,7 @@ curl -b cookies.txt \
 to no users) — and takes several values (comma-separated or repeated) to cover
 a person's identities in one call. A position literal matches under
 `position:<name>`, the one spelling the service admits a holder of that
-position under as their own identity. The pre-rename `role:<name>` prefix is no
+position under as their own identity. The deprecated pre-rename prefix is no
 alias of it (ADR-0090 D3): it matches only a slot stored under that exact
 spelling, and no holder acts under it.
 Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
@@ -510,8 +510,9 @@ curl -b cookies.txt -X POST \
 their own account carries, or the `position:<name>` address of a position they
 hold (the literal left by a position nobody held when the request opened, once
 someone is staffed into it). A named `actorId` must be one of those identities,
-and a named `position:<name>` takes that position's slot; `role:<name>` is not
-one of them (ADR-0090 D3) and returns 403 (`FORBIDDEN: cannot act as '…'`). No
+and a named `position:<name>` takes that position's slot; the deprecated
+pre-rename prefix is not one of them (ADR-0090 D3) and returns 403
+(`FORBIDDEN: cannot act as '…'`). No
 such slot and no admin override returns 403 (`FORBIDDEN: actor '…' is
 not a pending approver`); a request that isn't pending returns 409
 (`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
@@ -661,11 +662,11 @@ and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
 
 The same override is the only way to decide a slot no position holder addresses
-since ADR-0090 D3 retired the `role` word: a request a 15.x-era release stored as
-`role:<name>`, and a request opened from a flow that still authors
-`{ type: 'role', value: '<a position name>' }` (its slot is
-`org_membership_level:<name>`). Approve or reject it as an admin, or reassign it to
-the position's holder, who then decides it normally; then change the flow to
+since ADR-0090 D3 retired the pre-rename word: a request a 15.x-era release stored
+under the pre-rename prefix, and a request opened from a flow that still authors
+the deprecated approver type (above) with a position name as its value (its slot
+is `org_membership_level:<name>`). Approve or reject it as an admin, or reassign it
+to the position's holder, who then decides it normally; then change the flow to
 `{ type: 'position', value: '<the position>' }`.
 
 Note the rule is **"the actor is an admin"**, not "the slate is unstaffed" — so
