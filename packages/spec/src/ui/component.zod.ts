@@ -41,10 +41,8 @@ import {
   // declaration judges the form view and the block.
   FormViewSchema,
   // [#21464] A form section's `{ field }` entry is the form view's own field
-  // entry, member by member, and an inline field's `options` the form view's own
-  // option — see `objectFormSectionFieldEntry()` and `objectFormRuntimeField()`.
+  // entry, member by member — see `objectFormSectionFieldEntry()`.
   FormFieldSchema,
-  FormSelectOptionSchema,
   type FormField,
   type FormFieldInput,
 } from './view.zod';
@@ -94,8 +92,10 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 // `subforms[].columns` take, referenced rather than copied: all three carriers
 // feed one objectui grid. [#21464] An inline `object-form` field's metadata
 // members a field widget reads off it (`rows`, `accept`, `reference`, …) take the
-// object field's own member schemas, by reference — see `objectFormRuntimeField()`.
-import { InlineGridColumnSchema, FieldSchema } from '../data/field.zod';
+// object field's own member schemas, by reference, and its option's `label`,
+// `description` and `visibleWhen` the object field's option's — see
+// `objectFormRuntimeField()` and `buildObjectFormRuntimeOption()`.
+import { InlineGridColumnSchema, FieldSchema, SelectOptionSchema } from '../data/field.zod';
 // [#21589] The child field names the renderer derives a detail's line-position
 // field from — the one list the retired detail-entry `sortField`'s
 // prescriptions print (reached by relative import only, never the barrel).
@@ -6023,6 +6023,79 @@ function objectFormRuntimeFieldValidation() {
 }
 
 /**
+ * [#21464] One option of an inline form field's `options` — CLOSED, holding the
+ * keys the form's option readers draw, measured at the `.objectui-sha` pin
+ * `2e818d0b51ec` (each cited file byte-identical at objectui `main` `fd060f076`):
+ *
+ * - `label` and `value`: every option control the form reaches — the built-in
+ *   select (`components/src/renderers/form/form.tsx:3975-3977`) and the four
+ *   option widgets `SelectField`, `MultiSelectField`, `RadioField` and
+ *   `CheckboxesField` — draws `label` (the widgets through
+ *   `optionDisplayLabel`, `core/src/evaluator/optionRules.ts:173`, which falls
+ *   back to the value for a blank label) and keys, compares and submits by
+ *   `value`;
+ * - `visibleWhen`: the cascade offers an option only while it holds
+ *   (`resolveCascadingOptions`, from `form.tsx:2940` and from each widget's
+ *   `useCascadingOptions`);
+ * - `description`: a lookup field's typeahead searches its static options'
+ *   description beside the label (`fields/src/widgets/LookupField.tsx:705-706`).
+ *
+ * ## `value` is a runtime value
+ *
+ * It is not the stored field's identifier (the object field's option takes a
+ * lowercase `SystemIdentifierSchema`): an inline form field binds no object
+ * column, and the readers treat the value opaquely — they compare it by
+ * identity, stringify it only at the control, and the built-in select maps the
+ * pick back to the authored value (`matchOptionValue`, `form.tsx:3955`). So it
+ * is `string | number | boolean`, as objectui's runtime option declares on
+ * purpose (`types/src/zod/form.zod.ts:142-145`: "standalone UI forms
+ * legitimately bind numeric/boolean values"). The shipped `object-manager`
+ * dialog writes `{ label: 'Box', value: 'Box' }`
+ * (`plugin-designer/src/ObjectManager.tsx:244`), which the stored field's
+ * identifier rule refused.
+ *
+ * `label` and `description` are the object field's option's own member
+ * schemas, by reference. `visibleWhen` is the evaluated predicate, declared
+ * here rather than taken from that option: the object field's option is also
+ * re-checked by the server on write, and an inline form field's option never
+ * is — it binds no object column. No form option control reads `color`,
+ * `default`, or objectui's `disabled` / `icon`, so each is refused with the
+ * spelling that works.
+ */
+function buildObjectFormRuntimeOption() {
+  const { label, description } = SelectOptionSchema.shape;
+  return strictObject({
+    surface: 'this inline form field\'s option',
+    history: OBJECT_FORM_RUNTIME_FIELD_HISTORY,
+    aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value', visible: 'visibleWhen', showWhen: 'visibleWhen' },
+    guidance: {
+      color:
+        'No form option control draws `color`: a select, radio or checkbox option is drawn as its `label`. A '
+        + 'colour belongs to the object field\'s own option, which list and grid cells draw as a badge. Delete it '
+        + 'here.',
+      default:
+        'An inline option\'s `default` seeds nothing: the form opens on the block\'s `initialValues` and on the '
+        + 'object\'s own field defaults. Write the pre-selected value in the block\'s `initialValues` '
+        + '(`initialValues: { FIELD: VALUE }`).',
+      disabled:
+        'No form option control reads an option\'s `disabled`: every option drawn can be picked. Offer the option '
+        + 'only while it applies with its `visibleWhen`, or freeze the whole field with the field\'s own '
+        + '`disabled` / `readonly`.',
+      icon:
+        'No form option control draws an option\'s `icon`: the option is drawn as its `label`. Put the cue in the '
+        + 'label, or delete it.',
+    },
+  }, {
+    label,
+    value: z.union([z.string(), z.number(), z.boolean()])
+      .describe('The value the field takes when the option is picked — a string, a number or a boolean, kept as written'),
+    description,
+    visibleWhen: EvaluatedExpressionInputSchema.optional()
+      .describe('Predicate (CEL) over the live `record` and `current_user` — the option is offered only while TRUE. UI gating only: nothing re-checks an inline option on write'),
+  });
+}
+
+/**
  * [#21464] The runtime form field — one entry of an `object-form`'s
  * `customFields`, and the inline arm of a form section's `fields` — CLOSED, in
  * camelCase, holding only the members the form draws (decision card #21704,
@@ -6062,8 +6135,9 @@ function objectFormRuntimeFieldValidation() {
  *
  * Where this package already declares the member, its value schema is taken
  * by reference — the object field's (`FieldSchema`) for the widget metadata
- * members, the form view's option for `options`, and the evaluated predicate
- * for the three `*When` rules. `label`, `description` and `placeholder` are
+ * members and the evaluated predicate for the three `*When` rules. `options`
+ * takes the runtime option ({@link buildObjectFormRuntimeOption}), whose
+ * `value` is any runtime value the form binds. `label`, `description` and `placeholder` are
  * plain strings: the renderer draws each as it is, so an inline locale map
  * would be a React child.
  *
@@ -6140,7 +6214,7 @@ function buildObjectFormRuntimeField() {
     readonly: z.boolean().optional().describe('Draw the value plainly, not editable'),
     hidden: z.boolean().optional().describe('Do not draw the field (its value still submits)'),
     placeholder: z.string().optional().describe('Placeholder text in the empty control'),
-    options: z.array(FormSelectOptionSchema).optional().describe('The choices of a select / radio / checkboxes field — the form view\'s own option, `{ label, value, … }`'),
+    options: z.array(buildObjectFormRuntimeOption()).optional().describe('The choices of a select / radio / checkboxes field (and a lookup\'s static options) — `{ label, value, description?, visibleWhen? }`, `value` a string, a number or a boolean'),
     validation: objectFormRuntimeFieldValidation().optional().describe('Extra rules checked at submit — `{ required?, minLength?, maxLength?, min?, max? }`, each bound rule a `{ value, message }`, and `required` the message a required field shows'),
     dependsOn: z.union([z.string(), FieldSchema.shape.dependsOn.unwrap()]).optional().describe('The field(s) this field\'s options depend on: the form gates the field until they are set and re-evaluates its options as they change — a field name, or the object field\'s list of names / `{ field, param }` entries'),
     visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the field is drawn only when TRUE'),

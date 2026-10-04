@@ -252,7 +252,10 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
   it('a bare CEL predicate parses to its envelope, as on every evaluated slot — and the envelope is kept', () => {
     const r = parse('object-form', {
       sections: [{ fields: ['a', { field: 'b', visibleWhen: 'record.x == 1' }], visibleWhen: 'record.y == 2' }],
-      customFields: [{ name: 'c', visibleWhen: { dialect: 'cel', source: 'record.z == 3' }, requiredWhen: 'record.y == 2' }],
+      customFields: [{
+        name: 'c', visibleWhen: { dialect: 'cel', source: 'record.z == 3' }, requiredWhen: 'record.y == 2',
+        options: [{ label: 'Shanghai', value: 'sh', visibleWhen: "record.country == 'cn'" }],
+      }],
     });
     expect(issues(r)).toEqual([]);
     const data = r.success ? (r.data as Record<string, any>) : {};
@@ -260,6 +263,7 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     expect(data.sections[0].fields[1].visibleWhen).toEqual({ dialect: 'cel', source: 'record.x == 1' });
     expect(data.customFields[0].visibleWhen).toEqual({ dialect: 'cel', source: 'record.z == 3' });
     expect(data.customFields[0].requiredWhen).toEqual({ dialect: 'cel', source: 'record.y == 2' });
+    expect(data.customFields[0].options[0].visibleWhen).toEqual({ dialect: 'cel', source: "record.country == 'cn'" });
   });
 
   it('absent members stay absent', () => {
@@ -389,10 +393,11 @@ describe('§3 the declared members, and one shape for both rows', () => {
     expect(Object.keys(option.shape).sort()).toEqual(['description', 'label', 'value', 'visibleWhen']);
     // Not the stored field's option: that one's `value` is a lowercase identifier.
     expect(option).not.toBe(objectOf(FormSelectOptionSchema));
-    // The three keys the object field's option already declares are its own, by reference.
+    // `label` and `description` are the object field's option's own, by reference. (`visibleWhen` is
+    // declared on the option itself: the object field's option is re-checked on write, this one never is.)
     const own = SelectOptionSchema.shape as unknown as Record<string, { _zod: { def: unknown } }>;
     const shape = option.shape as unknown as Record<string, { _zod: { def: unknown } }>;
-    for (const key of ['label', 'description', 'visibleWhen']) {
+    for (const key of ['label', 'description']) {
       expect(shape[key]!._zod.def, key).toBe(own[key]!._zod.def);
     }
     const value = option.shape.value as z.ZodType;
