@@ -12,6 +12,7 @@ import type {
   ReferenceResolutionError,
   SeedLoadResultParsed,
   Seed,
+  EngineQueryOptions,
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
@@ -348,6 +349,28 @@ function localeScopeLabel(dataset: Seed): string {
 }
 
 /**
+ * [#21665] The id a seed row authored as `authoredId` holds in `organizationId`
+ * when a per-organization replay cannot give it the authored id itself.
+ *
+ * A primary key is global, so an authored `id` names exactly ONE row in the
+ * whole database. A per-organization replay writes every seed row once per
+ * organization, so from the second organization on, the authored id is
+ * already taken. The replay then gives the row this id instead.
+ *
+ * It is DERIVED, not minted, and that is load-bearing. The replay keys each
+ * row by its `externalId` within the organization, and a dataset whose
+ * `externalId` is `id` (the showcase's `sys_business_unit` tree) has no
+ * other column to find its own row by. A random id would make every replay
+ * into the same organization insert the set again; a derived one is found
+ * again by the same lookup, so the replay stays idempotent. Deriving from the
+ * organization id itself rather than from a hash of it means two
+ * organizations can never be given the same id.
+ */
+function perOrganizationSeedRowId(authoredId: string, organizationId: string): string {
+  return `${authoredId}__${organizationId}`;
+}
+
+/**
  * SeedLoaderService — Runtime implementation of ISeedLoaderService
  *
  * Provides metadata-driven seed data loading with:
@@ -369,6 +392,11 @@ function localeScopeLabel(dataset: Seed): string {
  * - Idempotent replay: an upsert/update whose declared fields already match
  *   the existing row is skipped (no update_at churn, no re-validation) —
  *   seeds replay on every dev-server boot and package re-publish
+ * - Per-organization row identity (#21665): on a per-organization replay
+ *   (`config.organizationId`), a row whose authored `id` another organization
+ *   already holds gets an id of its own for this organization, and every
+ *   reference in the same replay that names the authored id follows it — see
+ *   {@link assignReplayRowIds}
  * - Actionable error reporting
  *
  * Replay safety invariant: a reference that cannot be resolved is NEVER
@@ -463,6 +491,29 @@ export class SeedLoaderService implements ISeedLoaderService {
    * nothing about `required` there and stays silent rather than guessing.
    */
   private requiredOnInsertByObject = new Map<string, Set<string>>();
+  /**
+   * [#21665] Per seeded object, authored seed `id` → the id that row LANDED
+   * with in this load, for every row a per-organization replay could not give
+   * its authored id (see {@link assignReplayRowIds}).
+   *
+   * This is what re-points the replay's own references. A sibling row that
+   * names `parent_business_unit_id: 'bu_acme'` means "the row this seed
+   * authored as `bu_acme`", and in the second organization that row is not
+   * called `bu_acme`. {@link resolveReferenceItem} reads this map first, so
+   * such a reference resolves to this organization's row, in pass 1 and in
+   * pass 2 alike, whatever shape the authored id has.
+   *
+   * Only rows the replay actually re-identified are entered, and only once
+   * they have landed. A replay that keeps every authored id (the first
+   * organization's) enters nothing and resolves exactly as it did before; a
+   * row whose write failed is never entered, so a reference to it is reported
+   * unresolved instead of pointing at a row that does not exist.
+   *
+   * An instance field for the same reason {@link pointerRefsByObject} is one:
+   * pass 2 reads it several parameters away from where pass 1 fills it.
+   * Reset per `load`.
+   */
+  private replayIdByAuthoredId = new Map<string, Map<string, string>>();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -560,6 +611,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     // [#9071] Same per-load lifetime, same reason: a publish between two loads
     // can add (or drop) the `name` column this memo answers about.
     this.declaresNameColumnCache.clear();
+    // [#21665] One replay's ids belong to one organization: a reused service
+    // instance must never re-point the next load's references with them.
+    this.replayIdByAuthoredId.clear();
 
     // When the caller pinned no target org (an in-process publish has no active
     // user session — the AI build agent's publish path), BUSINESS seed rows
@@ -865,6 +919,28 @@ export class SeedLoaderService implements ISeedLoaderService {
       );
     }
 
+    // [#21665] Per-organization row identity. On a per-organization replay,
+    // decide which id each row authored with an `id` holds in THIS
+    // organization before anything is written: the authored id while no other
+    // row holds it, else this organization's own derived id. Dry runs write
+    // nothing and never probe the database, so they keep the authored ids.
+    const replayIds = config.organizationId && !config.dryRun
+      ? await this.assignReplayRowIds(objectName, dataset.records, config.organizationId)
+      : undefined;
+    /** Record index → the authored id that row was re-identified FROM. */
+    const authoredIdByRecordIndex = new Map<number, string>();
+    if (replayIds) {
+      const reidentified = [...replayIds].filter(([authored, assigned]) => authored !== assigned).length;
+      if (reidentified > 0) {
+        this.logger.info(
+          `[SeedLoader] ${reidentified} ${objectName} seed row(s) carry an authored id a row outside organization ` +
+            `${config.organizationId} already holds; this organization gets ids of its own for them, and references ` +
+            `in this replay that name the authored ids follow them.`,
+          { object: objectName, organizationId: config.organizationId, reidentified },
+        );
+      }
+    }
+
     // Get reference resolutions for this object
     const objectRefs = refMap.get(objectName) || [];
 
@@ -901,6 +977,24 @@ export class SeedLoaderService implements ISeedLoaderService {
     // dropped the link ("empty externalId, so no internal id").
     const deferredStart = deferredUpdates.length;
     const internalIdByRecordIndex = new Map<number, string>();
+    /**
+     * Record the id row `recordIndex` landed with. Every write site below goes
+     * through here, so a re-identified row (#21665) enters
+     * {@link SeedLoaderService.replayIdByAuthoredId} exactly when it lands and
+     * never before: a later row of this dataset, a later dataset and pass 2
+     * then resolve its authored id to the row that is really there.
+     */
+    const noteLanded = (recordIndex: number, landedId: string): void => {
+      internalIdByRecordIndex.set(recordIndex, landedId); // [commit 9a884c6e4]
+      const authored = authoredIdByRecordIndex.get(recordIndex);
+      if (authored === undefined) return;
+      let byAuthored = this.replayIdByAuthoredId.get(objectName);
+      if (!byAuthored) {
+        byAuthored = new Map();
+        this.replayIdByAuthoredId.set(objectName, byAuthored);
+      }
+      byAuthored.set(authored, landedId);
+    };
     const extIdOf = (rec: Record<string, unknown>) => this.externalIdKey(rec, externalId);
     // bulkWrite is at-least-once: a retry (or a mismatch-driven degradation)
     // may re-run a write whose prior attempt already committed. Guard against
@@ -990,7 +1084,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (res.ok) {
           inserted++;
           const internalId = this.extractId(res.record);
-          if (internalId) internalIdByRecordIndex.set(recordIndex, internalId); // [commit 9a884c6e4]
+          if (internalId) noteLanded(recordIndex, internalId); // [commit 9a884c6e4]
           if (externalIdValue && internalId) {
             insertedRecords.get(objectName)!.set(externalIdValue, internalId);
           }
@@ -1120,6 +1214,17 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (tenantOrg && record['organization_id'] == null) {
         record['organization_id'] = tenantOrg;
         stampedTenantOrg = true;
+      }
+
+      // [#21665] Give the row the id it holds in THIS organization (decided
+      // above, before the loop). Written onto the record before the write
+      // decision, so a dataset keyed on `id` looks its own row up under that
+      // id: the next replay into this organization finds and skips it.
+      const authoredId = typeof record['id'] === 'string' ? (record['id'] as string) : undefined;
+      const replayId = authoredId !== undefined ? replayIds?.get(authoredId) : undefined;
+      if (authoredId !== undefined && replayId !== undefined && replayId !== authoredId) {
+        record['id'] = replayId;
+        authoredIdByRecordIndex.set(i, authoredId);
       }
 
       // Resolve references
@@ -1476,7 +1581,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
             const externalIdValue = this.externalIdKey(record, externalId);
             const internalId = result.id;
-            if (internalId) internalIdByRecordIndex.set(i, String(internalId)); // [commit 9a884c6e4]
+            if (internalId) noteLanded(i, String(internalId)); // [commit 9a884c6e4]
             if (externalIdValue && internalId) {
               insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
             }
@@ -1487,7 +1592,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // mapping alive for downstream reference resolution.
             const externalIdValue = this.externalIdKey(record, externalId);
             const existingId = this.extractId(existingRecords?.get(externalIdValue));
-            if (existingId) internalIdByRecordIndex.set(i, existingId); // [commit 9a884c6e4]
+            if (existingId) noteLanded(i, existingId); // [commit 9a884c6e4]
             if (externalIdValue && existingId) {
               insertedRecords.get(objectName)!.set(externalIdValue, existingId);
             }
@@ -1510,7 +1615,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
           if (decision.action === 'skip') {
             skipped++;
-            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [commit 9a884c6e4]
+            if (decision.id) noteLanded(i, decision.id); // [commit 9a884c6e4]
             if (decision.id && externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
@@ -1522,7 +1627,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // sever downstream natural-key resolution — that cascade is what
             // turned one legitimate validation error into NULLed-out child
             // references on every dev-server restart.
-            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [commit 9a884c6e4] same rationale
+            if (decision.id) noteLanded(i, decision.id); // [commit 9a884c6e4] same rationale
             if (externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
@@ -1701,6 +1806,15 @@ export class SeedLoaderService implements ISeedLoaderService {
             ? ` Pass the natural key directly: ${ref.field}: ${JSON.stringify(wrapped)}.`
             : ` Pass the target's ${ref.targetField} value as a plain string.`,
       };
+    }
+
+    // [#21665] An authored id of a row this replay re-identified names that
+    // row, in THIS organization. Asked BEFORE the internal-id short-circuit
+    // below on purpose: a UUID-shaped authored id would otherwise be kept
+    // verbatim and link this organization's row to another organization's.
+    if (typeof value === 'string') {
+      const replayed = this.replayIdByAuthoredId.get(ref.targetObject)?.get(value);
+      if (replayed !== undefined) return { status: 'resolved', value: replayed };
     }
 
     // Not a natural key (an internal id, or a non-string the engine will
@@ -2734,6 +2848,85 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
     }
     return map;
+  }
+
+  /**
+   * [#21665] Decide, for every row of a dataset authored with an `id`, which
+   * id that row holds in `organizationId`. Returns authored id → assigned id,
+   * or `undefined` when no row of the dataset authors an id.
+   *
+   * A seeded row on a tenant-scoped object belongs to the organization the
+   * replay writes it for (ADR-0131: a seeded business unit is the
+   * organization's business unit), and the seed contract keys rows by
+   * `externalId` within that organization. An authored `id` is therefore the
+   * row's identity INSIDE one organization, never across them. A primary key
+   * is global, though, so the replay assigns:
+   *
+   *   1. the id this organization's row already has — the authored id or the
+   *      derived one, whichever it finds — so a replay into the same
+   *      organization matches its own row instead of inserting another;
+   *   2. otherwise the authored id, while no row anywhere holds it. The first
+   *      organization a seed is replayed into keeps exactly the ids the seed
+   *      authored, byte for byte what it got before this rule existed;
+   *   3. otherwise {@link perOrganizationSeedRowId}: the authored id is
+   *      another organization's row (or an organization-less one), and is
+   *      never reused.
+   *
+   * Two reads, both under the system context like every other seed read: this
+   * organization's own ids (the same scoped read the upsert pre-load does),
+   * and an unscoped probe per authored id this organization does not hold yet.
+   * Rows without an authored `id` are untouched: the engine mints theirs.
+   */
+  private async assignReplayRowIds(
+    objectName: string,
+    records: ReadonlyArray<Record<string, unknown>>,
+    organizationId: string,
+  ): Promise<Map<string, string> | undefined> {
+    const authoredIds = new Set<string>();
+    for (const record of records) {
+      const id = record['id'];
+      if (typeof id === 'string' && id.length > 0) authoredIds.add(id);
+    }
+    if (authoredIds.size === 0) return undefined;
+
+    const heldHere = await this.loadExistingRecords(objectName, 'id', organizationId);
+    const assigned = new Map<string, string>();
+    for (const authoredId of authoredIds) {
+      const derivedId = perOrganizationSeedRowId(authoredId, organizationId);
+      if (heldHere.has(authoredId)) assigned.set(authoredId, authoredId);
+      else if (heldHere.has(derivedId)) assigned.set(authoredId, derivedId);
+      else assigned.set(authoredId, (await this.isRowIdHeld(objectName, authoredId)) ? derivedId : authoredId);
+    }
+    return assigned;
+  }
+
+  /**
+   * [#21665] Does ANY row of `objectName` hold `id`, in any organization or
+   * none? The question {@link assignReplayRowIds} must answer before it may
+   * hand a replayed row its authored id.
+   *
+   * A read that FAILED is not a "no": answering "free" would hand the replay
+   * an id that may well be taken, and the insert would collide, which is the
+   * defect this rule removes. So only the benign cause is absorbed — the
+   * object's table is not provisioned yet, which holds no row by definition —
+   * asked through the shared `isMissingTableError` predicate like
+   * {@link loadExistingRecords}; everything else propagates with its envelope
+   * intact.
+   */
+  private async isRowIdHeld(objectName: string, id: string): Promise<boolean> {
+    try {
+      const probe: EngineQueryOptions = {
+        where: { id },
+        fields: ['id'],
+        limit: 1,
+        context: { isSystem: true },
+      };
+      const rows = await this.engine.find(objectName, probe);
+      return Array.isArray(rows) && rows.length > 0;
+    } catch (error) {
+      if (!isMissingTableError(error, objectName)) throw error;
+      return false;
+    }
   }
 
   private async loadExistingRecords(
