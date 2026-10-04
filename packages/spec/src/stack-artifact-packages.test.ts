@@ -287,9 +287,9 @@ describe('ADR-0130 D4 — each `packages` entry is an OBJECT wrapping its manife
   });
 
   it('exports the entry schema so the load path judges the same shape', () => {
-    // #14162's iteration and any consumer that reads one entry must reuse this
-    // schema rather than re-derive the wrapper — a second declaration of one
-    // shape is the drift ADR-0116 exists about, in miniature.
+    // The artifact load path's iteration (commit c5a9a437d) and any consumer that
+    // reads one entry must reuse this schema rather than re-derive the wrapper —
+    // a second declaration of one shape is the drift ADR-0116 exists about, in miniature.
     expect(ArtifactPackageEntrySchema.safeParse({ manifest: crmManifest }).success).toBe(true);
     expect(ArtifactPackageEntrySchema.safeParse(crmManifest).success).toBe(false);
   });

@@ -87,7 +87,7 @@ describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declara
     //    by resolving nothing.
     const systemNames = exportNamesOf('./system');
     expect(systemNames.length, './system must export a non-trivial surface').toBeGreaterThan(100);
-    // `EnvironmentArtifactInput` was retired by ADR-0122 phase 2 (#6083) — the
+    // `EnvironmentArtifactInput` was retired by ADR-0122 phase 2 (commit 53068c130) — the
     // bare name IS the author state now, and the parsed state moved onto
     // `EnvironmentArtifactParsed`. The pin follows the surviving names: the
     // dual-source hazard is about WHICH DECLARATION a name resolves to, so it
@@ -298,7 +298,7 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
 
 // ─── grantedPermissions (#14865) ────────────────────────────────────────────
 //
-// The artifact-contract half of #11333 option A / the #13457 batch ruling: the
+// Commit e58ea8b38, the artifact-contract half of the #13457 batch ruling: the
 // consented four-class permission set `{ services, hooks, network, fs }` rides
 // the envelope — written by the cloud control plane at consent-compile time,
 // read by the loader at materialize time. Before this key was declared,

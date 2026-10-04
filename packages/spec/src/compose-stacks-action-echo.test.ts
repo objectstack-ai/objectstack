@@ -17,7 +17,7 @@
  * three stacks binding b1/b2/b3 to one object, override / merge
  *                                        : shared.actions=["emb3/EMB","b3/BOUND","b1/BOUND","b2/BOUND","b3/BOUND"]
  * defineStack(composeStacks([a, b]))     : REFUSED  'a_item:dup_x' is declared 3 times
- * defineStack(a)   (a lone built input)  : REFUSED  'a_item:dup_x' is declared twice   ← #14686's landed pin
+ * defineStack(a)   (a lone built input)  : REFUSED  'a_item:dup_x' is declared twice   ← commit 279431e7a's landed pin
  * ```
  *
  * The three-stack `merge` row above is a refusal since #14848: `'merge'` no
@@ -31,7 +31,7 @@
  * the very same object as an entry of `object.actions` is that a previous merge
  * put it there. A strict parse produces fresh objects, so a hand-written twin —
  * the same action authored in both positions — never shares identity, and
- * #14686's same-key refusal, which runs before the merge, still refuses it. A
+ * commit 279431e7a's same-key refusal, which runs before the merge, still refuses it. A
  * marker key cannot do this job: `ActionSchema` is a strict object, so the key
  * is refused before it could travel (measured below).
  *
@@ -197,7 +197,7 @@ describe('composeStacks - what the identity skip does NOT fold', () => {
 
   it('under strict: false, ONE action object placed in both positions is one declaration — carried once (before: twice)', () => {
     // No parse clones it, so it shares identity exactly as a build's echo does.
-    // #14686's walk does not run in this mode by the author's choice, and the
+    // Commit 279431e7a's walk does not run in this mode by the author's choice, and the
     // runtime dedupes a standalone against an embedded entry by key anyway.
     const shared = act('sh', { objectName: 'n_item' });
     const out = defineStack({ manifest: mf('com.example.n'), objects: [obj('n_item', [shared])], actions: [shared] }, { strict: false });

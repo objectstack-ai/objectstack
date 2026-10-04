@@ -6,8 +6,8 @@
  *
  * ## Why this file exists
  *
- * #14722 asserted that a `devPlugins[]` refusal reaches the author keyless.
- * Measured, it does not — `formatZodIssue` descends `invalid_union`, ranks the
+ * A card asserted that a `devPlugins[]` refusal reaches the author keyless. Measured
+ * in commit 23c72be3c, it does not — `formatZodIssue` descends `invalid_union`, ranks the
  * branches through `selectUnionBranches` (`./union-branch-policy.ts`, #8318),
  * drops the string arm as kind-mismatch-only and renders the object branch
  * verbatim. But **nothing pinned that**, so the rendered half was re-reported
@@ -412,8 +412,8 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
     it.each(SITES)('%s', (_name, site) => {
       const rendered = render(site, site.reject);
 
-      // The key the author actually mistyped. This is the assertion #14722
-      // believed would fail — the "keyless `Invalid input`" claim.
+      // The key the author actually mistyped. Commit 23c72be3c's card believed this
+      // assertion would fail — the "keyless `Invalid input`" claim.
       expect(rendered, `${site.site}: the undeclared key must reach the author`)
         .toContain(site.keyInMessage);
 

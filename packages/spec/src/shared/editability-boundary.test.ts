@@ -388,8 +388,8 @@ describe('#8201 — an option is offered or withheld, never shown-but-unselectab
     // prescription advertises are parsed back: a record-dependent predicate and
     // a `current_user` one (ADR-0068). ⚠️ The prescription no longer calls this
     // "the one `*When` surface that also binds `current_user`" — a form view's
-    // field and section predicates bind those roots too (objectui#6010 / #6110
-    // / #6111), client-side. What is still unique here, and what the
+    // field and section predicates bind those roots too (objectui#6010 / objectui#6110
+    // / objectui#6111), client-side. What is still unique here, and what the
     // prescription now rests on, is the clause below it: the rule validator
     // refuses the WRITE. Pinned so the retired exclusivity cannot return.
     const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });

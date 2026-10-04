@@ -5,9 +5,9 @@
 // ## What this file is
 //
 // ADR-0122 makes the bare name `X` the AUTHOR state and `XParsed` the PARSED
-// state. Phase 1 (#5551 / PR #6072) declared an `XParsed` for every alias whose
+// state. Phase 1 (#5551 / commit 7f713b662) declared an `XParsed` for every alias whose
 // schema actually HAS two shapes (`z.input` differs from `z.infer`); phase 2
-// (#6083, protocol 17) flipped all 1384 bare aliases to `z.input` and retired
+// (commit 53068c130, protocol 17) flipped all 1384 bare aliases to `z.input` and retired
 // the 102 `XInput` names the flip turned into synonyms. The complement —
 // schemas whose two shapes coincide, so the flip changed nothing observable —
 // deliberately gets no `XParsed`, because a permanent synonym is a name an
@@ -154,7 +154,7 @@ import type * as M82 from './kernel/dependency-resolution.zod.js';
 import type * as M83 from './kernel/events/core.zod.js';
 import type * as M84 from './kernel/events/handlers.zod.js';
 import type * as M85 from './kernel/manifest.zod.js';
-// (M86 was kernel/metadata-customization.zod.js, removed whole in #13135 —
+// (M86 was kernel/metadata-customization.zod.js, removed whole in commit 9e0ba21a1 —
 // ADR-0049 retirement of the paper customization protocol. The M number is
 // positional and stays vacant.)
 import type * as M87 from './kernel/metadata-loader.zod.js';
@@ -253,7 +253,7 @@ import type * as M162 from './ui/notification.zod.js';
 import type * as M163 from './ui/page.zod.js';
 import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
-// M166 was './ui/theme.zod.js' — retired whole at #10485 (ADR-0049); the
+// M166 was './ui/theme.zod.js' — retired whole at commit 35ad101bc (ADR-0049); the
 // M-indices are positional, so the slot stays vacant rather than renumbering.
 import type * as M167 from './ui/view.zod.js';
 // Appended out of alphabetical order deliberately: the M-indices are positional
@@ -279,7 +279,7 @@ import type * as M188 from './ai/build-progress.zod.js';
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
 // every sentence stating it — this header and that case's own title — agrees
-// (#6605). Before the check existed this line had been left at 717 while the
+// (commit c6b05c76a). Before the check existed this line had been left at 717 while the
 // list grew past 800, because the counting assertion reads the `export type
 // Iso...` declarations and never the prose sitting beside them.
 // ---------------------------------------------------------------------------
@@ -308,7 +308,7 @@ import type * as M188 from './ai/build-progress.zod.js';
 // Two cohorts used to head blocks of their own; their pins are now filed under
 // their modules like every other pin.
 //
-// Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
+// Phase 2 (commit 53068c130) additions. These 35 schemas were never in phase 1's
 // population: their bare alias already read `z.input` before the flip, so the
 // phase-1 gate — which only looked at bare `z.infer` aliases — never asked
 // whether their parsed state was named. The inverted gate does ask, and the
@@ -740,7 +740,7 @@ export type Iso_automation_nodeExecutor__WaitResumePayloadSchema = Assert<Eq< z.
 export type Iso_automation_nodeExecutor__WaitTimeoutBehaviorSchema = Assert<Eq< z.input< typeof M41.WaitTimeoutBehaviorSchema >, z.infer< typeof M41.WaitTimeoutBehaviorSchema > >>;
 
 // automation/schedule-organization.zod.ts
-// [#16659] A bare non-empty string: no transform, no default, no coercion — an
+// [commit ecdfc9411] A bare non-empty string: no transform, no default, no coercion — an
 // organization id is written exactly as it is stored. So input === infer, and an
 // `XParsed` here would be a permanent synonym. The day this schema learns to
 // normalize an id, this line goes red and the ADR's remedy applies.
@@ -971,7 +971,7 @@ export type Iso_kernel_manifest__PluginRuntimeSchema = Assert<Eq< z.input< typeo
 // kernel/metadata-customization.zod.ts
 // (Iso408 `CustomizationOriginSchema` / Iso409 `FieldChangeSchema` /
 // Iso410 `MergeConflictSchema` / Iso411 `MergeResultSchema` removed with
-// their module — #13135's ADR-0049 retirement of the paper
+// their module — commit 9e0ba21a1's ADR-0049 retirement of the paper
 // metadata-customization protocol.)
 
 // kernel/metadata-loader.zod.ts
@@ -1562,7 +1562,7 @@ export type Iso_ui_report__ReportType = Assert<Eq< z.input< typeof M164.ReportTy
 export type Iso_ui_responsive__ResponsiveStylesSchema = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
 export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
 
-// ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at #10485.
+// ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at commit 35ad101bc.
 
 // ui/view.zod.ts
 // `ViewItemSchema` and `ViewItemWireSchema` left the family on #19920: their
@@ -1660,8 +1660,8 @@ export type AFamilyParsedIsParseState = Assert<
 
 describe('ADR-0122 type-alias convention', () => {
   // The title states the count as well, and hand-tracking it did not hold: it
-  // was corrected once, from 751 to 754 (#6037), and had drifted again to sit
-  // 68 behind by the time #6605 looked. Both prose statements of the number —
+  // was corrected once, from 751 to 754 (commit 18189983d), and had drifted again to sit
+  // 68 behind when commit c6b05c76a counted. Both prose statements of the number —
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
@@ -1699,7 +1699,7 @@ describe('ADR-0122 type-alias convention', () => {
     // are in this number at once, which is exactly why it is recomputed from the
     // source rather than reasoned about: -4 retired, +0 of my own.
     //
-    // The fourth way is the one ADR-0122 phase 2 (#6083) added, and it is a
+    // The fourth way is the one ADR-0122 phase 2 (commit 53068c130) added, and it is a
     // BULK rise with no schema change behind it at all: 716 -> 751. Those
     // 35 schemas are not new and did not move. Their bare alias already read
     // `z.input` before the flip, so phase 1's gate — which only ever looked at
@@ -1708,12 +1708,12 @@ describe('ADR-0122 type-alias convention', () => {
     // answered "isomorphic". A jump this size is normally the shape of a
     // mistake; this one is a gate widening, and the pins are its receipt.
     //
-    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // 751 -> 754 is commit 18189983d's `ValidateDataIssue` / `ValidateDataRequest` /
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
     //
     //
-    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // 751 -> 754 is commit 18189983d's `ValidateDataIssue` / `ValidateDataRequest` /
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
     //
@@ -1722,7 +1722,7 @@ describe('ADR-0122 type-alias convention', () => {
     // has no default or transform, so its two shapes coincide and it gets a pin
     // rather than a `SpecifierValueDomainParsed` synonym.
     //
-    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
+    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486; commit f549a0d4a), the
     // first way again — a schema left the package, so its pin left with it.
     // Written out per member, because a MULTI-member sweep is exactly where a
     // count gets nudged to fit instead of recomputed:
@@ -1730,7 +1730,7 @@ describe('ADR-0122 type-alias convention', () => {
     //   #5295  -3  ServerEventType, ServerEventSchema, ServerStatusSchema
     //             (`ServerCapabilities` has a `Parsed` alias, so it was never
     //             pinned here — a retired schema does not always cost a line)
-    //   #6239  -4  DeleteViewResponseSchema, ListViewsRequestSchema,
+    //   views  -4  DeleteViewResponseSchema, ListViewsRequestSchema,
     //             GetViewRequestSchema, DeleteViewRequestSchema (four of the
     //             ten view schemas were isomorphic; the other six were paired)
     //   #6414   0  every ETL alias already had a `Parsed` counterpart
@@ -1739,9 +1739,9 @@ describe('ADR-0122 type-alias convention', () => {
     // because they are the ways a MINUS gets miscomputed here. (1) The member
     // count (3) and the pin count (7) have no relation to each other. (2) The
     // -7 was computed against 751 at the branch point and had to be rebased
-    // TWICE before landing — onto #6037's 754, then onto #5933's 755 — so the
+    // TWICE before landing — onto commit 18189983d's 754, then onto #5933's 755 — so the
     // subtrahend was the only stable operand. (3) A sibling retirement in the
-    // same window contributed ZERO: #6527 retired `array_agg` / `string_agg`
+    // same window contributed ZERO: commit 259459d8b retired `array_agg` / `string_agg`
     // from `AggregationFunction`, and an enum VALUE narrowing is invisible
     // here, exactly as it is to the four surface ratchets. Recompute from the
     // file; never from the changelog.
@@ -1809,7 +1809,7 @@ describe('ADR-0122 type-alias convention', () => {
     // renumbered, because the ids are claims about pins and not positions
     // (`Iso824` remains the highest, and the next author still takes 825).
     //
-    // 823 -> 824 is #6604 — the `-1` in #4593's arithmetic above, collected.
+    // 823 -> 824 is commit d127ff002 — the `-1` in #4593's arithmetic above, collected.
     // That subtraction was not a measurement but an OPEN QUESTION: the alias
     // for `system/ServiceStatus` was withheld because declaring it would have
     // minted the #4411 dual-source trap against `./api`'s discovery health
@@ -1838,7 +1838,7 @@ describe('ADR-0122 type-alias convention', () => {
     // two shapes coincide and ADR-0122 gives it a pin rather than an
     // `XParsed`. Its id is `Iso836`, the next free one, not a number near its
     // neighbours: the ids are claims about pins and not positions (the same
-    // rule the #4914 decrease and the #6604 entry above both record).
+    // rule the #4914 decrease and the commit d127ff002 entry above both record).
     //
     // 825 -> 826 is #4717's `RuntimeAuthoringIssueSchema` — the ONE element
     // shape the #4463 runtime authoring gate reports a finding in, on both
@@ -1933,12 +1933,12 @@ describe('ADR-0122 type-alias convention', () => {
     // input/output identity into the annotation itself, where both halves
     // spell the same type.
     //
-    // 839 -> 834 is #10485 — `Iso700`-`Iso704` DELETED with `ui/theme.zod.ts`
+    // 839 -> 834 is commit 35ad101bc — `Iso700`-`Iso704` DELETED with `ui/theme.zod.ts`
     // (ADR-0049 retirement of the whole theme authoring surface): the five
     // schemas they pinned no longer exist, so there is nothing left to exempt.
     // The Iso numbers are positional and stay vacant.
     //
-    // 836 -> 837 is #11006's `PublishMetaItemRequestSchema` — the request half
+    // 836 -> 837 is commit cccbe51bf's `PublishMetaItemRequestSchema` — the request half
     // of the door whose response half `Iso836` pinned (#7294), declared on the
     // 2026-08-22 maintainer ruling that also gave `MetadataProtocol` the
     // optional `publishMetaItem` member. Isomorphism MEASURED, not assumed:
@@ -1956,7 +1956,7 @@ describe('ADR-0122 type-alias convention', () => {
     // exempt. -4 retired, +0 of my own; the Iso numbers stay vacant.
     //
     // 833 -> 835 is #11678's `AuditMetaItemRequestSchema` /
-    // `AuditMetaItemResponseSchema` — the audit door declared on the #11006
+    // `AuditMetaItemResponseSchema` — the audit door declared on the commit cccbe51bf
     // pattern (PR #12003). Isomorphism MEASURED, not assumed: the request is
     // two required `z.string()`s, a `z.string().nullable().optional()` and an
     // optional `z.number()`; the response is one `z.array` of a plain object
@@ -1986,7 +1986,7 @@ describe('ADR-0122 type-alias convention', () => {
     // rather than an `XParsed`. Ids `Iso859`/`Iso860`/`Iso861`, the next
     // free ones — ids are claims about pins, not positions.
     //
-    // 837 -> 838 is #12194's `MetadataItemNameSchema` — the item-name grammar
+    // 837 -> 838 is commit 311433f6b's `MetadataItemNameSchema` — the item-name grammar
     // (shared/identifiers.zod.ts). A bare `z.string().regex()` with no
     // `.default()`, `.transform()`, `.catch()` or `.pipe()`, so `z.input` and
     // `z.infer` are both `string` and ADR-0122 gives it a pin rather than an
@@ -2002,7 +2002,7 @@ describe('ADR-0122 type-alias convention', () => {
     // removed; the Iso number stays vacant (ids are claims about pins, not
     // positions).
     //
-    // 837 -> 833 is #13135's ADR-0049 retirement of the paper
+    // 837 -> 833 is commit 9e0ba21a1's ADR-0049 retirement of the paper
     // metadata-customization protocol: `kernel/metadata-customization.zod.ts`
     // removed whole, so its four pins `Iso408`-`Iso411`
     // (`CustomizationOriginSchema` / `FieldChangeSchema` /
@@ -2012,7 +2012,7 @@ describe('ADR-0122 type-alias convention', () => {
     //
     // 833 -> 835 is #12005's `HistoryMetaItemRequestSchema` /
     // `HistoryMetaItemResponseSchema` — the history door declared on the
-    // #11006 pattern, exactly as #11678 (PR #12003) declared its audit twin.
+    // commit cccbe51bf pattern, exactly as #11678 (PR #12003) declared its audit twin.
     // Isomorphism MEASURED, not assumed: the request is two required
     // `z.string()`s, an optional `z.string()` and two optional
     // `z.number()`s; the response is one `z.array` of a plain object of
@@ -2071,7 +2071,7 @@ describe('ADR-0122 type-alias convention', () => {
     // absence of all six retired names on every public entry. -3 removed; the
     // Iso numbers stay vacant (ids are claims about pins, not positions).
     //
-    // 832 -> 831 is #14691's ADR-0049 retirement of `crud.patterns` on
+    // 832 -> 831 is commit b3a63d32c's ADR-0049 retirement of `crud.patterns` on
     // `CrudEndpointsConfigSchema` (api/rest-server.zod.ts): its value def
     // `CrudEndpointPatternSchema` had no other consumer and left the module
     // whole (RETIRED_DEFS_BY_MAJOR[18] `api/CrudEndpointPattern`), so its pin
@@ -2118,7 +2118,7 @@ describe('ADR-0122 type-alias convention', () => {
     // disjoint pins.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\w+ = Assert</gm) ?? [];
-    // 828 -> 826 is #14676's ADR-0049 retirement of `connector.errorMapping`:
+    // 828 -> 826 is commit 13c48c2a5's ADR-0049 retirement of `connector.errorMapping`:
     // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
     // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
     // two pins that named them (`Iso381` / `Iso382`) leave with the schemas.
@@ -2172,7 +2172,7 @@ describe('ADR-0122 type-alias convention', () => {
     // `Iso871`. The four package-format modules (M50–M53) moved to
     // `marketplace/` and kept their pins. -30 + 1.
     //
-    // 782 -> 783 is #16659's `ScheduleOrganizationSchema`
+    // 782 -> 783 is commit ecdfc9411's `ScheduleOrganizationSchema`
     // (automation/schedule-organization.zod.ts, new module slot M186): the
     // acting organization a time-triggered flow declares, a bare
     // `z.string().min(1)` — no coercion, no default, no transform, because an
@@ -2414,7 +2414,7 @@ describe('ADR-0122 type-alias convention', () => {
     expect(pins).toHaveLength(773);
 
     // The count is stated in PROSE twice as well — this case's title and the
-    // section header above the pin list — and until #6605 nothing read either
+    // section header above the pin list — and until commit c6b05c76a nothing read either
     // one. Both had drifted, by different amounts: the header sat 106 behind,
     // the title 68. Correcting them is not the fix, because correcting was
     // already tried on the title once (the receipt at the top of this case)

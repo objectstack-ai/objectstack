@@ -55,7 +55,7 @@ const RANGE_PATH = ['timeDimensions', 0, 'dateRange'];
 /** Arities the contract's own prose and #16322's shipped table already excluded. */
 const REFUSED_ARITIES: ReadonlyArray<readonly unknown[]> = [
   [],                                        // no window at all
-  ['2026-01-01'],                            // the shape #17124 measured three ways
+  ['2026-01-01'],                            // read three ways until commit 86c505286 refused it
   ['2026-01-01', '2026-01-31', '2026-02-28'], // three bounds
   ['{7_days_ago}'],                          // one macro token is a bound, not a window
 ];
