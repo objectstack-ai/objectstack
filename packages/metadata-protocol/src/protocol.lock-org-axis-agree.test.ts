@@ -17,11 +17,12 @@
  * Pins, each against the real doors and the real reads, both sides on ONE
  * protocol instance per row (a pin on one side only proves nothing here):
  *
- *  1. The family's enumeration pin. One table drives the read and the door
- *     over topology × row scope × request scope × every `MetadataLockSchema`
- *     level × operation. For every row the door admits exactly when the
- *     envelope says `editable` (save) / `deletable` (delete). A new axis value
- *     or limb that splits them turns its own row red, by name.
+ *  1. [#21738] MOVED: the family's 64-row enumeration pin (topology × row
+ *     scope × request scope × every `MetadataLockSchema` level × operation)
+ *     folded into the generated pin of `protocol.lock-one-resolution.test.ts`,
+ *     whose table holds every one of those rows (checked there, by name) and
+ *     generates its axes from the one item-lock resolution's inputs. Its lit
+ *     control moved with it.
  *  2. The measured defect, named: an env-wide `_lock: 'full'` row, an
  *     org-scoped read, save, delete, publish and rollback.
  *  3. Precedence: with both rows present the read serves the org-scoped row,
@@ -174,54 +175,11 @@ const TOPOLOGIES = [
     { kernel: 'environment', environmentId: ENV_ID },
     { kernel: 'host-config', environmentId: undefined },
 ] as const;
-const ROW_SCOPES = [
-    { rowScope: 'env-wide row', organizationId: null },
-    { rowScope: 'org-scoped row', organizationId: ORG },
-] as const;
 const REQUEST_SCOPES = [
     { requestScope: 'no organization', organizationId: undefined },
     { requestScope: `organization ${ORG}`, organizationId: ORG },
 ] as const;
 const OPERATIONS = ['save', 'delete'] as const;
-
-describe('[#21716] pin 1 — the family enumeration: the door admits exactly when the read envelope says it may', () => {
-    const table = TOPOLOGIES.flatMap((t) => ROW_SCOPES.flatMap((r) => REQUEST_SCOPES.flatMap((q) =>
-        MetadataLockSchema.options.flatMap((lock) => OPERATIONS.map((operation) => ({ ...t, ...r, ...q, lock, operation,
-            rowOrganizationId: r.organizationId, requestOrganizationId: q.organizationId }))))));
-
-    it('the table spans every axis value, and every lock level (read off MetadataLockSchema itself)', () => {
-        expect(MetadataLockSchema.options).toEqual(['none', 'no-overlay', 'no-delete', 'full']);
-        expect(table).toHaveLength(TOPOLOGIES.length * ROW_SCOPES.length * REQUEST_SCOPES.length
-            * MetadataLockSchema.options.length * OPERATIONS.length);
-    });
-
-    for (const row of table) {
-        const title = `${row.kernel} kernel · ${row.rowScope} · request: ${row.requestScope} · _lock=${row.lock} · ${row.operation}`;
-        it(title, async () => {
-            const name = 'v_enum';
-            const { protocol } = harness(row.environmentId, [viewRow(name, row.rowOrganizationId, row.lock)]);
-            const read = await envelope(protocol, name, row.requestOrganizationId);
-            const verdict = await door(protocol, name, row.operation, row.requestOrganizationId);
-            const allowed = row.operation === 'save' ? read.editable : read.deletable;
-            expect(verdict, `${title}: the door and the read envelope (${JSON.stringify(read)}) disagree`)
-                .toEqual(allowed ? 'admitted' : ITEM_LOCKED);
-        });
-    }
-
-    it('lit control: the table holds refusals and admissions on both verbs, and the org axis reaches the env-wide row', async () => {
-        // An org-scoped request over an env-wide `full` row is the cell this card
-        // was filed on: the read serves the env-wide row, so it must read locked.
-        const { protocol } = harness(undefined, [viewRow('v_lit', null, 'full')]);
-        expect(await envelope(protocol, 'v_lit', ORG)).toMatchObject({
-            lock: 'full', editable: false, deletable: false, served: 'env-wide row', overlayScope: 'env',
-        });
-        // …and an org-scoped row is never served to a request naming no organization.
-        const { protocol: other } = harness(undefined, [viewRow('v_lit', ORG, 'full')]);
-        expect(await envelope(other, 'v_lit')).toMatchObject({ lock: 'none', editable: true, deletable: true, overlayScope: null });
-        expect(await door(other, 'v_lit', 'save')).toBe('admitted');
-        expect(await door(other, 'v_lit', 'delete')).toBe('admitted');
-    });
-});
 
 describe('[#21716] pin 2 — an env-wide _lock: full row binds an organization with no row of its own', () => {
     for (const { kernel, environmentId } of TOPOLOGIES) {
