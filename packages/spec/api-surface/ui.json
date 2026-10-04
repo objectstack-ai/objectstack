@@ -279,6 +279,7 @@
     "ObjectCalendarPropsParsed (type)",
     "ObjectCalendarPropsSchema (const)",
     "ObjectFormProps (type)",
+    "ObjectFormPropsParsed (type)",
     "ObjectFormPropsSchema (const)",
     "ObjectGanttProps (type)",
     "ObjectGanttPropsParsed (type)",
