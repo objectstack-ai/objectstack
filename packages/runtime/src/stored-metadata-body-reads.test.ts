@@ -27,6 +27,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { STORED_METADATA_BODY_OBJECTS } from '@objectstack/spec/kernel';
 import {
   refuseStoredMetadataBodyReads,
@@ -40,6 +41,8 @@ import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 const FAMILY = [...STORED_METADATA_BODY_OBJECTS];
 const ORDINARY = 'boundary_note';
 const READ_VERBS = ['find', 'findOne', 'count', 'aggregate'];
+/** The query a control read is called with: `findOne` takes a predicate, as the engine requires. */
+const queryFor = (verb: string): Record<string, unknown> => (verb === 'findOne' ? { where: { id: 'n1' } } : {});
 const SENTINEL = 'body-read-unit-sentinel-5e02';
 
 /** A stored family row: the body carries a credential, the row a content hash. */
@@ -57,7 +60,8 @@ function storedRow(): Record<string, unknown> {
  * A scoped-API double that counts `<object>.<verb>` calls and answers the
  * stored form, so a read that reached it would carry the sentinel. Read verbs
  * and one write verb only: no `update` / `delete` member, so it carries no
- * write dispatch to hold to the engine's.
+ * write dispatch to hold to the engine's; `findOne` routes through the
+ * engine's own predicate (check:engine-double-contract).
  */
 function countingApi(calls: string[] = []): any {
     const repo = (name: string) => {
@@ -65,7 +69,11 @@ function countingApi(calls: string[] = []): any {
         const family = name.startsWith('sys_metadata');
         return {
             async find() { record('find'); return family ? [storedRow()] : [{ id: 'n1' }]; },
-            async findOne() { record('findOne'); return family ? storedRow() : { id: 'n1' }; },
+            async findOne(query?: any) {
+                assertEngineFindOnePredicate(name, query);
+                record('findOne');
+                return family ? storedRow() : { id: 'n1' };
+            },
             async count() { record('count'); return 1; },
             async aggregate() { record('aggregate'); return family ? [{ metadata: storedRow().metadata, count: 1 }] : []; },
             async insert() { record('insert'); return { id: 'n1' }; },
@@ -138,7 +146,7 @@ describe('[#21594] refuseStoredMetadataBodyReads — every family read is refuse
     it('an ordinary table reads as before (control)', async () => {
         const calls: string[] = [];
         const api = refuseStoredMetadataBodyReads(countingApi(calls));
-        for (const verb of READ_VERBS) await api.object(ORDINARY)[verb]({});
+        for (const verb of READ_VERBS) await api.object(ORDINARY)[verb](queryFor(verb));
         expect(calls).toEqual(READ_VERBS.map((verb) => `${ORDINARY}.${verb}`));
     });
 
@@ -182,7 +190,7 @@ describe('[#21594] the API a body holds — the write layer over the read layer'
     it('an ordinary table reads and writes as before (control)', async () => {
         const calls: string[] = [];
         const api = bodyApi(calls);
-        for (const verb of READ_VERBS) await api.object(ORDINARY)[verb]({});
+        for (const verb of READ_VERBS) await api.object(ORDINARY)[verb](queryFor(verb));
         await api.object(ORDINARY).insert({ label: 'x' });
         expect(calls).toEqual([...READ_VERBS, 'insert'].map((verb) => `${ORDINARY}.${verb}`));
     });
