@@ -187,6 +187,14 @@ describe('runFilesToReferencesMigration (#3617)', () => {
       sys_file: [{ id: 'f1', ref_object: 'product', ref_id: 'p1', ref_field: 'image', status: 'committed' }],
     });
     await run(engine, { apply: true });
+    // Dated in the past, so a rewrite by the narrowed run cannot land on the
+    // same millisecond and read as "unchanged".
+    const EARNED_AT = '2026-01-01T00:00:00.000Z';
+    Object.assign(engine.tables.sys_migration[0], {
+      last_run_at: EARNED_AT,
+      verified_at: EARNED_AT,
+      updated_at: EARNED_AT,
+    });
     const earned = { ...engine.tables.sys_migration[0] };
     expect(await isDataMigrationVerified(engine, MIGRATION)).toBe(true);
 
