@@ -780,6 +780,69 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * [#21658] The save door's refusal of a `hook` whose `handler` names a
+ * function and that carries no `body`: such a hook can never run once this
+ * door has stored it.
+ *
+ * Why it can never bind. A hook's `handler` name resolves inside the hook's
+ * own package only (the maintainer's ruling on #21604, letter B; the binder's
+ * `resolveHandler` in `@objectstack/objectql`'s `hook-binder.ts`). A hook this
+ * door stores ships with no code package: the runtime binds every stored hook
+ * under the synthetic owner `metadata-service` (`ObjectQLPlugin`'s authored
+ * hook re-sync), with no `functions` map, and no package of that name
+ * registers functions. So the name has nothing to resolve against, and the
+ * binder refuses the hook at registration (`INVALID_REFERENCE` / 400, logged
+ * at `error`) after this door has already answered success. Refusing it here
+ * says so to the author, before anything is stored.
+ *
+ * The predicate is the binder's own body-first test: a `body` object is bound
+ * through the body runner and the `handler` is never consulted, so a hook
+ * carrying BOTH a `body` and a `handler` saves (its body runs), as it installs
+ * on the install-local door. Asked after the type schema has accepted the
+ * body, so `body` here is either absent or a declared hook body, and a
+ * malformed `body` gets the schema's own located `422` instead of this
+ * refusal's "give it a body".
+ *
+ * ⛔ Not a `HookSchema` rule: a build artifact legitimately carries the string
+ * form (`objectstack build` lowers an inline function to the hook's name and
+ * ships the function in the artifact's runtime module), and the artifact and
+ * boot doors never reach `saveMetaItem`. This is the runtime-authoring door's
+ * rule only, the same shape install-local refuses on its own door (#21585).
+ *
+ * Every writer through this door is judged: the REST and dispatcher saves, in
+ * draft and in publish mode, and the two server-stated re-savers
+ * (`migrateStoredMetadata`, `duplicatePackage`), which record this refusal as
+ * the row's failure. A row stored before this rule keeps its bytes.
+ *
+ * `VALIDATION_ERROR` / 400, the envelope of the name check the door runs on
+ * every body (`savedItemNameRefusal`). The message names the hook and its
+ * `handler`, prescribes the `body` first (a 4xx message crosses the REST
+ * boundary with its TAIL truncated), and only then explains. Runtime words
+ * carry no tracker number.
+ */
+function runtimeHookWithoutBodyRefusal(
+    singularType: string,
+    item: unknown,
+    saveName: string,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined {
+    if (singularType !== 'hook') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const hook = item as { handler?: unknown; body?: unknown };
+    if (hook.body && typeof hook.body === 'object') return undefined;
+    if (typeof hook.handler !== 'string' || hook.handler === '') return undefined;
+    const err = new Error(
+        `Invalid hook: '${saveName}' names the function '${hook.handler}' in its \`handler\` and carries no \`body\`, `
+        + 'so it can never run. Give it a `body` (sandboxed JS, `{ language: \'js\', source }`, or an expression, '
+        + '`{ language: \'expression\', source }`), which is saved with the hook and runs wherever it is bound. '
+        + 'A hook saved through the metadata API ships with no code package, so it holds no functions: a `handler` '
+        + "name resolves only inside the hook's own package, and this hook has none to resolve it against.",
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    return err;
+}
+
+/**
  * One entry of the `422 INVALID_METADATA` envelope's `issues[]` — the shape
  * Studio's designer keys on to highlight the offending form control.
  *
@@ -18813,6 +18876,17 @@ export class ObjectStackProtocolImplementation implements
                 // fix. See {@link withDeclaredPageTypeDefault}.
                 request.item = withDeclaredPageTypeDefault(request.type, request.item);
             }
+        }
+
+        // [#21658] A hook whose `handler` names a function and that carries
+        // no `body` can never run once stored here: a stored hook ships with
+        // no code package, and a `handler` name resolves only inside the
+        // hook's own package. Refused in draft and in publish mode, after the
+        // schema (so `body` is absent or a declared body) and before the
+        // authoring gate and every write. See {@link runtimeHookWithoutBodyRefusal}.
+        {
+            const hookRefusal = runtimeHookWithoutBodyRefusal(singularType, request.item, request.name);
+            if (hookRefusal) throw hookRefusal;
         }
 
         // The #4463 runtime authoring gate — the shared author-time rule
