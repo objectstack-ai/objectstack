@@ -285,6 +285,92 @@ describe('buildSchemaMigrationPlugins', () => {
     // default on a cold, shared box.
   }, 60_000);
 
+  /** A config whose plugins carry the connectors' hard-dependency shape (#21732). */
+  function requiresConfig(opts: { requires: string[]; dependsOn: string; extraPlugin?: string }): string {
+    const dir = tempProject();
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        'class DependentPlugin {',
+        "  name = 'com.example.os21732.connector';",
+        `  dependencies = [${JSON.stringify(opts.dependsOn)}];`,
+        '  async init() {}',
+        '}',
+        opts.extraPlugin ?? '',
+        `export default { requires: ${JSON.stringify(opts.requires)}, plugins: [`,
+        `  new DependentPlugin(),${opts.extraPlugin ? ' new ExplicitProvider(),' : ''}`,
+        '] };',
+        '',
+      ].join('\n'),
+    );
+    return dir;
+  }
+
+  it('composes the requires-supplied provider a host plugin hard-depends on, inert (#21732)', async () => {
+    // The blank template's and the showcase's shape: a connector in `plugins`
+    // declaring `dependencies = ['com.objectstack.service-automation']`, and
+    // `automation` asked for only through `requires`. Without the provider the
+    // kernel refuses to order the boot at all.
+    const dir = requiresConfig({ requires: ['automation', 'triggers'], dependsOn: 'com.objectstack.service-automation' });
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+
+    expect(out.hostConfigLoaded).toBe(true);
+    expect(out.plugins.map((p: any) => p?.name)).toEqual([
+      WRITE_GUARD,
+      'com.example.os21732.connector',
+      'com.objectstack.platform-objects',
+      'com.objectstack.service-automation',
+    ]);
+    const automation = out.plugins.at(-1) as any;
+    // `serve`'s provider, not a stand-in: the same class the token resolves to.
+    expect(automation.constructor.name).toBe('AutomationServicePlugin');
+    // Inert — the engine comes up and nothing is armed — and anchored where
+    // `serve` anchors it.
+    expect(automation.options).toEqual({ armRuntime: false, packageRoot: dir });
+    // Only the provider the kernel cannot order without: `triggers` is
+    // declared too and arms record/schedule triggers, so it is not composed.
+    expect(out.plugins.some((p: any) => p?.constructor?.name === 'RecordChangeTriggerPlugin')).toBe(false);
+    expect(out.notes.join(' ')).toContain(
+      "Composed AutomationServicePlugin for `requires: ['automation']` — 'com.example.os21732.connector' depends on it",
+    );
+  }, 60_000);
+
+  it('control: a declared requires token NOTHING depends on composes nothing (#21732)', async () => {
+    const dir = tempProject();
+    writeFileSync(join(dir, 'objectstack.config.ts'), "export default { requires: ['automation'], plugins: [] };\n");
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(out.plugins.map((p: any) => p?.name)).toEqual([WRITE_GUARD, 'com.objectstack.platform-objects']);
+  }, 60_000);
+
+  it('an explicit provider in plugins wins, as under serve — never a second instance (#21732)', async () => {
+    const dir = requiresConfig({
+      requires: ['automation'],
+      dependsOn: 'com.objectstack.service-automation',
+      extraPlugin: "class ExplicitProvider { name = 'com.objectstack.service-automation'; async init() {} }",
+    });
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(out.plugins.filter((p: any) => p?.name === 'com.objectstack.service-automation')).toHaveLength(1);
+    expect(out.plugins.some((p: any) => p?.constructor?.name === 'AutomationServicePlugin')).toBe(false);
+  }, 60_000);
+
+  it('a dependency no requires token supplies is left to the kernel, as under serve (#21732)', async () => {
+    // Without `automation` in `requires`, `os serve` mounts no provider and
+    // refuses this config the same way; this boot does not invent one.
+    const dir = requiresConfig({ requires: [], dependsOn: 'com.objectstack.service-automation' });
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(out.plugins.some((p: any) => p?.name === 'com.objectstack.service-automation')).toBe(false);
+  }, 60_000);
+
+  it('refuses, by name, a provider the lookup resolves but no declaration posture covers (#21732)', async () => {
+    // `job` is on the always-on slate `serve` appends, so the lookup finds its
+    // provider — and its `start()` schedules work, which a dry run must not
+    // boot with a posture nobody measured.
+    const dir = requiresConfig({ requires: [], dependsOn: 'com.objectstack.service.job' });
+    await expect(buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir })).rejects.toThrow(
+      /'com\.example\.os21732\.connector' depends on 'com\.objectstack\.service\.job'.*no declaration posture for 'job'/,
+    );
+  }, 60_000);
+
   it('composes the config\'s app WITHOUT its onEnable, and the lifecycle names it (#21054)', async () => {
     // `examples/app-crm`'s shape: a stack with metadata, and a named
     // `onEnable` export beside it. The AppPlugin this composition builds is
