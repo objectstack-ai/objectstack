@@ -1,5 +1,120 @@
 # @objectstack/metadata
 
+## 17.7.0
+
+### Minor Changes
+
+- 5555047: One judge for a view container's own `name` at every door that files a container: the new `@objectstack/metadata/view-container-name` entry
+  
+  Clause-②: yes
+  
+  - New subpath `@objectstack/metadata/view-container-name`. It exports `viewContainerNameRefusal(container, sourceLabel, ownerId)`, the source registrars' entry, whose key is the object the container binds to (its own `object`, else `list.data.object` / `form.data.object`). It returns a `VALIDATION_ERROR` / 400 refusal for an aggregated view container whose own `name` is set and differs from that key, and `undefined` otherwise; a container with no `name`, and a standalone view record (`viewKind`), are not judged by it. The subpath also exports `savedItemNameRefusal(type, item, saveName, door)`, the runtime write doors' entry, which judges every metadata type against the name the row is written under, and the `ViewContainerNameRefusal` type both entries return.
+  - The artifact/HMR loader's container branch now refuses such a container through the judge, before it files anything. What it refuses and the envelope are unchanged (`VALIDATION_ERROR` / 400). The message is now the judge's, the words the ObjectQL boot loop and `os validate` print, where it was the generic `IMetadataService.register` contract's.
+- 44defd4: The runtime write doors' `name` judge covers every metadata type: `savedItemNameRefusal` replaces `savedViewContainerNameRefusal` on `@objectstack/metadata/view-container-name`
+  
+  Clause-②: yes
+  
+  - `savedItemNameRefusal(type, item, saveName, door)` is the one entry the runtime write doors of `@objectstack/metadata-protocol` call. It returns a `VALIDATION_ERROR` / 400 refusal when a body of any type carries its own `name` and that `name` differs from the name the row is written under, and `undefined` otherwise. `door` is `'save'`, `'restore'` or `'publish'`. A body with no `name` passes. A `name` the body does carry is judged whatever its value (`''`, `null` and non-strings included), with one exception: a `view` at the `'save'` door, which stamps a missing name there, is judged only on a non-empty string `name`.
+  - It replaces `savedViewContainerNameRefusal(container, saveName)`, which judged view containers only. That export was added to this subpath in this same release cycle and never shipped in a published version, so no published export is removed.
+  - The words name the type and give a remedy that works for it: "drop `name`, or set it to KEY" for a view, whose missing name the save door stamps; "drop `name`" for a `field`, whose row is named `object.field`, which its dot-free column `name` cannot spell; "set `name` to KEY, or save the item under NAME" for every other type; and at the restore and publish doors, whose caller cannot edit the stored body in place, the save that fixes it. For a view container at the save door the message is byte for byte the one `savedViewContainerNameRefusal` returned.
+  - `viewContainerNameRefusal` (the source registrars' entry), its words and the `ViewContainerNameRefusal` type are unchanged.
+
+### Patch Changes
+
+- 8598614: Provenance comments in `@objectstack/metadata` cite the commits that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each now cites the commit in this repository's history that made the decision it describes, except two
+  that meant an objectui issue and now spell `objectui#6111`. Some of these
+  docblocks sit on exported members, so the reworded text appears in the published `index.d.ts` /
+  `index.d.cts`, `node.d.ts` / `node.d.cts` and `view-container.d.ts` / `view-container.d.cts`, and
+  comments that esbuild keeps appear in the JavaScript output (`index.js` / `index.cjs`, `node.js` /
+  `node.cjs`).
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [c98a72d]
+- Updated dependencies [1e4ae08]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/metadata-fs@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

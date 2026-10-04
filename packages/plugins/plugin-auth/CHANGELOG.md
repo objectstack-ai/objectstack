@@ -1,5 +1,147 @@
 # Changelog
 
+## 17.7.0
+
+### Minor Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+
+### Patch Changes
+
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [49524f6]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [83b3d32]
+- Updated dependencies [a7ab047]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/rest@17.7.0
+  - @objectstack/service-messaging@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

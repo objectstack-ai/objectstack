@@ -1,5 +1,187 @@
 # @objectstack/cloud-connection
 
+## 17.7.0
+
+### Minor Changes
+
+- 6c5697d: fix(runtime,cloud-connection)!: a job's sandboxed `body` is scheduled on every door that brings an artifact in, and install-local refuses an enabled job with no `body` (#21489)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export or stored shape moves: `JobSchema` is unchanged by this release (its `body` landed earlier), so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and that job bodies now run. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a scheduled body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses a package that declares an **enabled job with no `body`**. Such a job names its code only through `handler` — a `defineStack({ functions })` entry, which travels in the artifact's runtime module and never in the package JSON this door installs — so it used to install with a 200 and never run, hot or after a restart, with nothing saying so.
+  
+  - **Job bodies run.** A job's sandboxed `body` (`JobSchema.body`, the hook body shape) is now scheduled on every door that brings an artifact in: the boot (`os start --artifact`, a `defineStack` config) and install-local, on install and on every rehydrate after a restart. One binder does it for all of them. With both `body` and `handler` declared, the `body` wins. The body runs in the QuickJS sandbox with `ctx.api` (as system: a job has no caller), `ctx.log` and `ctx.crypto` behind its declared `capabilities`. The job's `timeoutMs` is its one time limit; with none, a job body gets a 5000 ms CPU budget. A body may return `{ outcome: 'degraded', reason }` to report a run that did not do its work.
+  - **A package's jobs stop with it.** Re-scheduling a package's jobs replaces its set: a reinstall whose new version drops, disables or can no longer run a job cancels that job, and a version with no jobs cancels them all. Uninstalling a package cancels its scheduled jobs through a new uninstall cleanup, `runtime.package-jobs`, on the protocol's uninstall-cleanup registry, so install-local's `DELETE` and the protocol's package uninstall both stop them and report it in `cleanups`. Another package's jobs are never touched.
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, names each refused job and the function its `handler` declares, and installs nothing: nothing is registered, persisted or scheduled. A disabled job (`enabled: false`) is not judged. A package installed by an earlier version keeps rehydrating; its handler-only job is reported at `warn` and does not run.
+  - **CLI.** `os package install` prints a refusal's code beside its status (`Install failed (422 VALIDATION_ERROR): …`), for every refusal alike.
+  - **Spec.** The shipped liveness ledger records `job.body` (`language`, `source`, `capabilities`, `memoryMb`) as live, so `os validate` / `os build` no longer warn that a job's `body` is planned and not read yet. `body.timeoutMs` stays refused on a job. `JobSchema.body`'s description and the `defineJob` example no longer say to keep a `handler` until the runtime runs job bodies.
+  - **Unchanged:** a `handler` job on a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) still runs its `functions` entry; a package without jobs installs exactly as before.
+  
+  The route for a refused package: give each enabled job a `body` (sandboxed JS that reaches data through `ctx.api`), or boot the artifact with `os start --artifact`, which loads its runtime module. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- 045b946: fix(runtime,cloud-connection)!: install-local refuses a hook with no `body` and a job `body` that does not bind, and withholds such a hook on rehydrate (#21585)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export of a published release or stored shape moves: `HookSchema` and `JobSchema` are unchanged, so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and which hooks it binds on a rehydrate. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a withheld hook (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses two more kinds of package it used to install with a 200:
+  
+  - **A hook with no `body`.** A hook in the deprecated function-name `handler` form names code that travels only in an artifact's runtime module, never in the package JSON this door installs. Such a hook used to install and then either never fire or bind by name to a function the package does not ship. Every hook is judged, since a hook has no on/off switch. A hook that carries both a `body` and a `handler` installs as before: its `body` wins.
+  - **An enabled job whose `body` does not bind.** The door used to judge only that a job `body` was present. It now judges that the body binds, by the declaration's own parse of `JobSchema.body`, the same parse the scheduler binds by. So a job whose `body` is an expression (L1) body, or carries `body.timeoutMs`, is refused instead of installed and never scheduled.
+  
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, the answer the door already gives an enabled job with no `body`. One answer names everything the door cannot run: each hook and the function its `handler` names, each job and its handler, and each refused job `body` with the key the declaration refuses. Nothing is installed: nothing is registered, persisted, bound or scheduled. `os package install` exits non-zero and prints the code beside the status.
+  - **Rehydrate.** A package installed by an earlier version keeps rehydrating after a restart. Its body hooks bind as before. A hook of it with no `body` is reported at `warn` by name and is **not bound**: this door carries no runtime module, so the hook's `handler` can never name the package's own code. Its job with no runnable `body` is reported and not run, as before.
+  - **Runtime.** The binder exports the two judgements the door reads: `collectHooksWithoutBody`, and `collectJobsWithoutBody`, which also names a job whose `body` does not bind. `bindAppArtifactHandlers` takes `withholdHooksWithoutBody`, which a door that carries no runtime module sets, and reports the hooks it withheld as `withheldHooks`.
+  - **Unchanged:** a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) binds an app's handler hooks to its own functions exactly as before. Hooks authored through the metadata API are unchanged too. A package whose hooks carry a `body` and whose enabled jobs carry a valid `body` installs exactly as before.
+  
+  The route for a refused package: give each hook a `body` (sandboxed JS, the form actions and jobs use), and correct each job `body` to the declared shape. That shape is a sandboxed JS body whose time limit is the job's own `timeoutMs`, and `os validate` reports the same refusal. Alternatively, boot the artifact with `os start --artifact`, which loads its runtime module. This ships as `minor`, under the launch-window convention for narrowings of an accept set.
+
+### Patch Changes
+
+- 1d0600b: An app installed with `os package install <artifact>` now runs its `type: 'script'` action bodies and its body hooks, and MCP `list_actions` lists a script action only when `run_action` can run it (#21321).
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/runtime`.** New export `bindAppArtifactHandlers(ql, bundle, { appId, logger, source? })`. It binds every action `body` of an artifact through `ql.registerAction`, and every hook `body` and bundle function through `ql.bindHooks`, all under the owner `app:<appId>`. `appArtifactHandlerOwner(appId)` returns that owner key. Each call first removes the action handlers and hooks the same owner bound before. A reinstall therefore leaves one handler per action, and an action or hook that the new version dropped stops running. `AppPlugin.start` now binds through this function, with the same log lines and the same results for a boot artifact.
+  - **`@objectstack/runtime`, MCP `list_actions`.** A `script` action is listed only when the engine has a handler registered for it. The check reads `listRegisteredActions()` and uses the same object and key order as `run_action`. Before, a declared `target` or `body` was enough to be listed, so `list_actions` could list an action that `run_action` refused with "No handler registered". An engine without `listRegisteredActions` gets no script actions listed. Declarative update actions and `flow` actions are listed as before.
+  - **`@objectstack/cloud-connection`.** The install-local plugin calls `bindAppArtifactHandlers` on `POST /api/v1/marketplace/install-local` and when it rehydrates its ledger at `kernel:ready`. Before, an installed package's script actions answered REST `404 RESOURCE_NOT_FOUND` and MCP "No handler registered", before and after a restart, and its body hooks never ran. The same artifact booted with `os start --artifact` was not affected.
+- ab52182: fix(cloud-connection,plugin-security): a package installed into a running runtime fires its record-change flows and has its permission sets in `sys_permission_set` right away, not after a restart
+  
+  Clause-②: no
+  
+  **Before**, `os package install ./dist/objectstack.json` into a running `os start` (the install-local route) registered the package, bound its script actions and body hooks, and stopped there. Two things the boot does for a package happen at `kernel:ready`, and that moment had already passed. The automation engine binds flows at `kernel:ready`, so the package's record-change flows never fired: a task updated to `done` wrote no note. The security plugin seeds declared permission sets at `kernel:ready`, so the package's set had no `sys_permission_set` row. `/meta/permission` listed the set, but an admin could not grant it. A restart fixed both, because the restart re-registers the package before those two steps run. Nothing in the CLI output or the install response said a restart was needed.
+  
+  **Now** the install route announces `metadata:reloaded` once the package is registered, bound, persisted and seeded. That is the same event a Studio package publish, a per-item publish and an artifact reload already announce. The automation engine already re-syncs its flows on it. The security plugin now re-runs its declared-permission seeding on it: the same function and organization passes as the boot, with the same provenance rules (`managed_by: 'package'`, `package_id`). Right after the install, the flow fires and the set's row exists, with the same state a restart gives. The seeding is idempotent and writes nothing when no permission set changed. It runs only after the boot's own pass has finished. A failed re-sync does not fail the install. It is logged at `warn` with the restart that repairs it.
+  
+  **Unchanged.** The restart path (the ledger rehydrate) announces nothing and behaves as before. The install response and the CLI output keep their fields and text. A package's `defineStack({ jobs })` are still not scheduled by install-local, on install or after a restart, because a job's handler is code from the artifact's runtime module and an inline install carries only the JSON.
+- 74281a8: fix(cloud-connection): an install-local uninstall runs the protocol's registered uninstall cleanups, so the package's permission sets and their grants go with it
+  
+  Clause-②: yes
+  
+  `DELETE /api/v1/marketplace/install-local/:manifestId` removed the package's ledger entry and nothing else. After a restart the package's objects were gone, but its `managed_by: package` rows in `sys_permission_set`, and every grant of them, survived the uninstall. That broke ADR-0090's "No ghost grants" promise on this door.
+  
+  The door now runs the uninstall cleanups that domain plugins register with the protocol (`registerUninstallCleanup`) once the ledger entry is gone. It uses the same registry and the same runner as the protocol's own uninstall, so `plugin-security`'s `security.package-permissions` cleanup removes the package's sets with their position and user bindings, and any cleanup registered later fires here too. The cleanups run with the package's manifest id and no organization, because an install-local package is installed for the whole runtime.
+  
+  The response carries each outcome as `data.cleanups`, the way the protocol's uninstall reports them. A failed cleanup is reported there and named in the operator log with its remedy (install the package again, then uninstall it again). When the protocol cannot run the cleanups, the response says so as one failed `protocol.runUninstallCleanups` outcome. An uninstall that does not happen (a refused caller, an id this door never installed, a ledger write that fails) revokes nothing.
+  
+  `@objectstack/metadata-protocol`: `ObjectStackProtocolImplementation` gains `runUninstallCleanups({ packageId, organizationId?, actor? })`, the one runner of the uninstall-cleanup registry. It runs every registered cleanup for the package and answers one `UninstallCleanupOutcome` per cleanup. It never throws: a failed cleanup is an outcome, and a thrown fault's driver text goes to the operator log, not into the outcome. `deletePackage` now calls it as its last step in place of its own loop, and its `cleanups` are unchanged. The only visible difference there is the log tag of a failed cleanup's warning, now `[protocol.runUninstallCleanups]` instead of `[protocol.deletePackage]`.
+  
+  `@objectstack/cloud-connection` now declares its dependency on `@objectstack/metadata-protocol`, which it already received through `@objectstack/runtime`, for the cleanup outcome types.
+- 901e7cf: An install-local uninstall (`DELETE /api/v1/marketplace/install-local/:manifestId`) now withdraws the package from the running kernel
+  
+  Clause-②: no
+  
+  - The DELETE used to remove the ledger entry and run the uninstall cleanups, but it left the package registered in the running kernel until the next restart. So another package's hot install re-ran the declared-permission seeding over the uninstalled package too. Its permission set came back as a package-managed row, and that row survived the restart as an orphan that an administrator could grant.
+  - After the ledger entry is removed, the door now calls `SchemaRegistry.uninstallPackage`, the same verb the protocol's own uninstall uses, on the same registry. It does this before the cleanups run. The package's objects answer 404 straight away, not only after a restart, and no reader of the registered packages counts it again. A reinstall of the same package in the same process registers it again.
+  - If the registry refuses the withdrawal, for example because another package extends an object this package owns, the uninstall still succeeds and the cleanups still run. The refusal is reported as a failed `registry.uninstallPackage` entry in `cleanups`. The operator log carries the cause and the remedy.
+  - The response `note` no longer says the kernel cannot unregister a package in place. The request and response keys are unchanged.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [1d0600b]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [535d1d2]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [b206403]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [e9dec3d]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [ce53218]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [74281a8]
+- Updated dependencies [9a4182a]
+- Updated dependencies [550f4cc]
+- Updated dependencies [41b1333]
+- Updated dependencies [5dbcee8]
+- Updated dependencies [ec390ec]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [bd70706]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [aa0d4b9]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [e367002]
+- Updated dependencies [9e9d693]
+- Updated dependencies [045b946]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [6946f2f]
+- Updated dependencies [7b07749]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/metadata-protocol@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/runtime@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

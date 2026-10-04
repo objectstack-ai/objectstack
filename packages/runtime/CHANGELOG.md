@@ -1,5 +1,415 @@
 # @objectstack/runtime
 
+## 17.7.0
+
+### Minor Changes
+
+- 96a9719: feat(automation): a flow's credentials live in a write-only channel, not in its stored definition (#20790)
+  
+  Clause-②: yes (widening)
+  
+  A flow's two credentials, an inbound hook's `secret` on its start node and an `http` node's `signingSecret`, are no longer stored in the flow definition. The metadata save door moves each explicit value into a new platform object, `sys_flow_credential`, owned by `@objectstack/service-automation`. Its one field is `type: 'secret'`, so the engine encrypts it through the host crypto provider, masks it on every read, and dereferences it only through `resolveSecretField`. This is the same seam the webhook signing secret uses. The stored row, every new version-history row and the row's content hash carry no credential. The engine reads the value only when it verifies an inbound post or signs an outbound request. Authoring does not change: you still write the literal, a save that leaves the key out (the form every read serves) keeps the stored secret, `''` clears it, and only an explicit new value rotates it.
+  
+  **⚠️ Rotate every inbound and outbound flow secret that existed before this release.** On the first boot with a crypto provider, or when a provider registers after a boot without one, each stored flow that still carries a credential is moved into the channel once, and the log prints one notice per flow: `[Automation] flow '<name>' (<state>): … was stored in cleartext … ROTATE: …`. The move guarantees no new copy, but the version-history rows and audit snapshots written before it stay as they were (both are append-only), so an administrator could have read those values. To rotate, save the flow with a new `config.secret` / `config.signingSecret`, then give the new value to whoever signs posts to the hook or verifies its deliveries. The run is recorded in `sys_migration` as `flow-credential-channel` (flow names only, never values). Packaged flows are not moved: a packaged flow's literal stays its source of truth, and where the channel holds a row for it, the row wins at verification.
+  
+  What else changes:
+  
+  - **`@objectstack/spec`**: `PLATFORM_OBJECTS_BY_PACKAGE['service-automation']` lists `sys_flow_credential`.
+  - **`@objectstack/metadata-protocol`**: `registerCredentialChannel(type, channel)` registers a type's write-only credential channel (exported type `MetadataCredentialChannel`). `saveMetaItem` stores the body the channel returns, after the carry-forward and before the put. The runtime authoring gate reads the channel's held positions as present, on an active save and when a draft is published. `SysMetadataRepository.restoreVersion` takes `deriveRestoredBody`, shaped like `promoteDraft`'s `deriveActiveBody`. Rollback and revert pass the channel's strip, so restoring a version written before the move never puts its credential back at rest, and the channel keeps its current credential.
+  - **`@objectstack/service-automation`**: exports `SysFlowCredential`, `FlowCredentialChannel` and `migrateFlowCredentialsIntoChannel`. `AutomationEngine` gains `setFlowCredentialSource`, `holdsFlowCredential`, `resolveFlowCredential` and `flowCredentialHoldings`. An `api` binding carries `resolveSecret()`, which reads the secret at verification time, so a rotation applies to the next post. A draft save never rotates the live secret; publishing the draft promotes it. Deleting a flow's stored row drops its credentials.
+  - **`@objectstack/trigger-api`**: `FlowTriggerBinding.resolveSecret` arms a hook without a literal. A post whose secret cannot be read is answered `503 SERVICE_UNAVAILABLE` and is never verified against nothing.
+  - **Refused now, loudly**:
+    - With no crypto provider, a save that carries a flow credential is refused with `503 SERVICE_UNAVAILABLE` before anything is written. Register a provider (`setCryptoProvider`) and save again.
+    - The clone door (`POST /api/v1/automation/:name/clone`) refuses a source that holds a credential, as a literal or in the channel, with `409 RESOURCE_CONFLICT`, because a copy would share it. ⚠️ Accepted cost: a packaged inbound flow can no longer be cloned in one step. Author the copy as a new flow under a new name, with its own secret.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the one-time move rewrites stored flow rows through the metadata save door itself, at boot; no authorable key, spelling, export or stored shape is retired, so an author or an upgrading agent has nothing to rewrite. The operator's action is the rotation stated above, which is not a FROM to TO mapping. The gate reads this changeset as non-breaking; the disposition is stated for the migration the ruling named. -->
+- 1d0600b: An app installed with `os package install <artifact>` now runs its `type: 'script'` action bodies and its body hooks, and MCP `list_actions` lists a script action only when `run_action` can run it (#21321).
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/runtime`.** New export `bindAppArtifactHandlers(ql, bundle, { appId, logger, source? })`. It binds every action `body` of an artifact through `ql.registerAction`, and every hook `body` and bundle function through `ql.bindHooks`, all under the owner `app:<appId>`. `appArtifactHandlerOwner(appId)` returns that owner key. Each call first removes the action handlers and hooks the same owner bound before. A reinstall therefore leaves one handler per action, and an action or hook that the new version dropped stops running. `AppPlugin.start` now binds through this function, with the same log lines and the same results for a boot artifact.
+  - **`@objectstack/runtime`, MCP `list_actions`.** A `script` action is listed only when the engine has a handler registered for it. The check reads `listRegisteredActions()` and uses the same object and key order as `run_action`. Before, a declared `target` or `body` was enough to be listed, so `list_actions` could list an action that `run_action` refused with "No handler registered". An engine without `listRegisteredActions` gets no script actions listed. Declarative update actions and `flow` actions are listed as before.
+  - **`@objectstack/cloud-connection`.** The install-local plugin calls `bindAppArtifactHandlers` on `POST /api/v1/marketplace/install-local` and when it rehydrates its ledger at `kernel:ready`. Before, an installed package's script actions answered REST `404 RESOURCE_NOT_FOUND` and MCP "No handler registered", before and after a restart, and its body hooks never ran. The same artifact booted with `os start --artifact` was not affected.
+- b206403: The CLI's one-shot commands no longer write to the database as a side effect of booting. No `os migrate *`, `os meta resync`, `os secret orphans` or `os storage orphans` run loads the app's inline seed data, apply and delete modes included, and every mode that writes nothing now boots read-only.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a CLI command's verdict on one edge, not a declaration: a no-write mode of os migrate value-shapes, os migrate recorded-by, os migrate resume, os secret orphans or os storage orphans pointed at a database that lacks a table it reads now exits 1 instead of creating the table and reporting nothing. No authorable key, spelling, export or stored shape moves: every stack parses and loads exactly as before, the write modes write exactly what they wrote before minus the seed loader's rows, and no stored row is read differently or rewritten. What an operator does about the refusal is point --database-url at the deployment's database or boot the deployment once, so there is no rewrite a ledger entry could carry. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a command's verdict, and this diff adds none (not registered / already-registered); and the change is CLI behaviour plus one new optional runtime config key, not a TypeScript declaration change to an existing surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** — a no-write run of `os migrate value-shapes`, `os migrate recorded-by`, `os migrate resume`, `os secret orphans` or `os storage orphans` at a database that lacks a table it reads now exits 1, where it used to exit 0. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What was wrong.** Eight commands booted the full data stack in a mode their documentation says writes nothing: `os migrate value-shapes` (scan), `summary-nulls`, `files-to-references` and `recorded-by` (dry run), `os migrate resume` (list), `os secret orphans` and `os storage orphans` (report), and `os meta resync` without `--yes`. That boot ran schema sync and the app's inline seed loader. The seed loader upserts every seeded row, so each run bumped `updated_at`, stamped `organization_id` on seeded rows that had none, and put an operator's edit to a seeded row back to the seed's value. On `examples/app-crm` that was all 28 seeded rows on every run. On a database behind the app's schema, the boot also added columns and created tables. The apply and delete modes ran the same seed loader alongside the write the operator confirmed.
+  
+  **What changes for an operator.**
+  
+  - Every mode that writes nothing boots the way `os migrate plan` does: the schema sync is held back, no seed rows are written, and a SQLite file that does not exist is not created. The database is left byte-identical, and the report is the same as before.
+  - No one-shot CLI boot loads the app's inline seed data. `--apply`, `--delete`, `os migrate resume --run` and `os meta resync --yes` write what they report and nothing else. Seeding stays with `os dev` and `os serve`.
+  - The deferred schema sync now covers every SQL datasource the boot connects, not only the default one. `os migrate plan` lists a second datasource's pending tables, and `os migrate apply` creates them after you confirm.
+  - One edge changes: a no-write run pointed at a database that lacks a table it reads (a SQLite file that does not exist, a database that was never booted, or the wrong `--database-url`) refuses and exits 1 instead of creating the table and reporting nothing. Point `--database-url` at the deployment's database, or boot the deployment once first. `os secret orphans --json` answers that refusal with `"error": "scan_failed"`.
+  - `os migrate value-shapes --json` prints one JSON document when the scan fails its gate. It used to print a second one, `{"error":"EEXIT: 1"}`.
+  
+  **For embedders of `@objectstack/runtime`.** `createStandaloneStack` accepts `armLifecycleSweep` (default `true`). With `false`, the ADR-0057 lifecycle sweep (rotation, retention reaping, archiving and the dangling-reference audit that rides its clock) is never armed on that boot, and an explicit `sweep()` call on it returns an empty report. The CLI passes `false` on every one-shot boot.
+- 2f837a5: fix(runtime)!: the in-process reader contexts refuse the stored-metadata-body family's EVALUATE shapes and serve what a write returns, the way the generic data door does (#21454)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key, spelling, export or stored shape moves; what changes is which query shapes the in-process reader contexts accept over the two stored-metadata tables, and the form in which a write's returned row is served, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what an action or hook body's object API, an action handler's scoped API and an action handler's engine handle accept when they read the two stored-metadata tables. A read there that filters, sorts or groups on the stored body column or on a content-hash column, a read that names one of those columns in an explicit search-field list, and a `count` carrying such a filter, ran before this release and now answer the generic data door's `400 INVALID_FIELD` before the query runs. The route: filter, sort, group and search those tables by their scalar columns (the type, the name, the state and the like), and read the bodies with a plain list, which is served projected — the body as its type's read projection, the content hash in keyed form. A default search with no field list is not refused: it is narrowed to the columns the door serves. Every other column of the two tables, and every other object, is unchanged. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  - **`@objectstack/metadata-protocol`** now exports the generic data door's four evaluate-refusal predicates — `storedMetadataBodyGroupingRefusal`, `storedMetadataBodyPredicateRefusal`, `storedMetadataHashEvaluateRefusal` and `storedMetadataSearchRefusal` — so the `@objectstack/runtime` reader-context seam refuses the same shapes through the door's own predicates rather than a second copy. Additive: nothing that imported the package before is changed.
+  - **`@objectstack/runtime`** extends the stored-metadata reader-context seam (`ctx.api.object(...)` for action and hook bodies, a handler's `ctx.api`, and `ctx.engine.find`): a filter, sort, grouping or search that would evaluate the stored body or content hash of `sys_metadata` / `sys_metadata_history` is refused with the door's `INVALID_FIELD` / 400 before the query runs (a `count` with such a predicate included); a default `$search` is narrowed to the door's served field set rather than refused; and the row a write verb returns is served projected and keyed. The engine's own action verb (`ScopedRepo.execute`) is unreachable from a served body and is left untouched.
+- 6c5697d: fix(runtime,cloud-connection)!: a job's sandboxed `body` is scheduled on every door that brings an artifact in, and install-local refuses an enabled job with no `body` (#21489)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export or stored shape moves: `JobSchema` is unchanged by this release (its `body` landed earlier), so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and that job bodies now run. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a scheduled body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses a package that declares an **enabled job with no `body`**. Such a job names its code only through `handler` — a `defineStack({ functions })` entry, which travels in the artifact's runtime module and never in the package JSON this door installs — so it used to install with a 200 and never run, hot or after a restart, with nothing saying so.
+  
+  - **Job bodies run.** A job's sandboxed `body` (`JobSchema.body`, the hook body shape) is now scheduled on every door that brings an artifact in: the boot (`os start --artifact`, a `defineStack` config) and install-local, on install and on every rehydrate after a restart. One binder does it for all of them. With both `body` and `handler` declared, the `body` wins. The body runs in the QuickJS sandbox with `ctx.api` (as system: a job has no caller), `ctx.log` and `ctx.crypto` behind its declared `capabilities`. The job's `timeoutMs` is its one time limit; with none, a job body gets a 5000 ms CPU budget. A body may return `{ outcome: 'degraded', reason }` to report a run that did not do its work.
+  - **A package's jobs stop with it.** Re-scheduling a package's jobs replaces its set: a reinstall whose new version drops, disables or can no longer run a job cancels that job, and a version with no jobs cancels them all. Uninstalling a package cancels its scheduled jobs through a new uninstall cleanup, `runtime.package-jobs`, on the protocol's uninstall-cleanup registry, so install-local's `DELETE` and the protocol's package uninstall both stop them and report it in `cleanups`. Another package's jobs are never touched.
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, names each refused job and the function its `handler` declares, and installs nothing: nothing is registered, persisted or scheduled. A disabled job (`enabled: false`) is not judged. A package installed by an earlier version keeps rehydrating; its handler-only job is reported at `warn` and does not run.
+  - **CLI.** `os package install` prints a refusal's code beside its status (`Install failed (422 VALIDATION_ERROR): …`), for every refusal alike.
+  - **Spec.** The shipped liveness ledger records `job.body` (`language`, `source`, `capabilities`, `memoryMb`) as live, so `os validate` / `os build` no longer warn that a job's `body` is planned and not read yet. `body.timeoutMs` stays refused on a job. `JobSchema.body`'s description and the `defineJob` example no longer say to keep a `handler` until the runtime runs job bodies.
+  - **Unchanged:** a `handler` job on a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) still runs its `functions` entry; a package without jobs installs exactly as before.
+  
+  The route for a refused package: give each enabled job a `body` (sandboxed JS that reaches data through `ctx.api`), or boot the artifact with `os start --artifact`, which loads its runtime module. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- 9a4182a: fix(spec,runtime,cli)!: the in-memory (mingo) engine is no longer a boot store — every boot door refuses it and names SQLite instead (#21492, #21572)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key or stored shape moves: the driver table keeps `memory`, `mingo`, `in-memory` and `inmemory` on its config-contract face, so `resolveDriverId` answers them exactly as before and a stored `datasource.driver: memory` still parses against `MemoryConfigSchema`; what narrows is the boot selection (`--database-driver`, `OS_DATABASE_DRIVER`, `databaseDriver`, a `memory://` or `mingo://` database URL, and a project's default datasource declared on the engine), which is host configuration that `objectstack migrate meta` does not rewrite — and no rewrite would be truthful, since the only replacement is a different engine the operator has to choose. The other categories are closed on facts: all three packages publish (not `unpublished`); no ADR-0087 id covers a boot selection (not `registered` / `already-registered`); and the change is runtime behaviour plus exported constant values, not an interface or a type alone (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: the in-memory (mingo) engine can no longer be selected as the store a server, a migration or an embedded stack boots on. It refuses every tenant-scoped read by design, so a boot on it signed a user in and then answered `503` to every data request; there was nothing working to keep. The retirement is made at the declaration: `@objectstack/spec`'s driver table withdrew `memory`, `mingo` and `in-memory` from its selection face (they stay on the config-contract face beside `inmemory`), and every boot door refuses the engine with one sentence that names the replacement.
+  
+  - **`@objectstack/spec`** — `DATABASE_DRIVER_SELECTION_ALIASES` no longer lists `memory`, `mingo` or `in-memory`; `DATABASE_DRIVER_SELECTION_IDS` no longer lists `memory`; `resolveDatabaseDriverId` answers `undefined` for all four spellings. `resolveDriverId`, `DRIVER_ID_ALIASES`, `BUILTIN_DRIVER_IDS` and the `memory` config contract are unchanged.
+  - **`@objectstack/cli`** — `--database-driver memory` is refused while the flags parse (`os dev`, `os start`); `OS_DATABASE_DRIVER=memory` / `mingo` / `in-memory` is refused before `os dev` or `os start` prints its Database row; `os serve`'s legacy path refuses the spellings and the `memory://` / `mingo://` schemes as a fatal boot error. The help no longer offers `memory://`.
+  - **`@objectstack/runtime`** — `createStandaloneStack`, `createDefaultHostConfig` and `resolveStandaloneDatabase` (every ordinary `os dev` / `os start` / `os serve` boot and every `os migrate` subcommand) refuse the spellings, the `memory://` and `mingo://` schemes, and a project whose default datasource is declared with `driver: 'memory'`. `resolveProjectDatabaseUrl` refuses a retired driver selection ahead of every rung, and its `ProjectDatabaseUrlSource` type no longer has the `'memory-driver'` member. `ResolvedStandaloneDatabase.driver` never names `memory`. Two exports are added for hosts that refuse the engine themselves: `namesRetiredMemoryEngine` and `retiredMemoryEngineMessage`.
+  - **Unchanged:** the `@objectstack/driver-memory` package; a declared non-default datasource with `driver: 'memory'` and a directly constructed `InMemoryDriver`, both still built; SQLite's dev step-down, whose last rung is still this driver.
+  
+  Migration — one flag change:
+  
+  - FROM `os dev --database-driver memory` (or `OS_DATABASE_DRIVER=memory`) TO `os dev --fresh` for a throwaway database deleted on exit.
+  - FROM `OS_DATABASE_URL=memory://…` / `--database memory://…` / `databaseUrl: 'memory://…'` TO `:memory:` (SQLite's own in-memory database), e.g. `OS_DATABASE_URL=:memory:`.
+  - FROM a default datasource declared `{ driver: 'memory' }` TO a SQLite one, e.g. `{ driver: 'sqlite', config: { filename: ':memory:' } }`.
+  
+  No shipped example selects the engine. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- bd70706: fix(runtime)!: an app-authored body may not bind a hook to, or write, the stored-metadata tables (#21520)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key, spelling, export or stored shape moves; what changes is which tables a sandboxed hook or action body may be bound to and may write, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a refused binding or a refused write (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what an app-authored body may do with the two stored-metadata tables, `sys_metadata` and `sys_metadata_history`. For an app-authored body, the metadata protocol is now their only writer: a change to metadata goes through the metadata API, where it is validated and its provenance is recorded.
+  
+  - **Binding.** A hook with a sandboxed `body` whose `object` names either table, alone or in a list, is no longer bound. The refusal is made at registration, at the one point every body hook becomes a handler, so it holds on every door a hook binds by: a code bundle or boot artifact, an installed artifact, and a hook authored at runtime through the metadata door. It carries `PERMISSION_DENIED` / 403, names the metadata API, and is recorded against the hook in the bind log at `error` (thrown under strict binding). A wildcard (`'*'`) body hook still binds; its body is not run for either table's events, and the bind says so once at `info`.
+  - **Writing.** A sandboxed action or hook body's write of either table through `ctx.api` — every write verb, inside a transaction or not, with or without elevation — answers `PERMISSION_DENIED` / 403 before the write runs, so nothing lands and the answer does not depend on what the write names.
+  - **Unchanged:** a body's reads of the two tables (still served as the generic data door serves them); host code that registers its own action handlers or hooks; the platform's own hooks, which are code and still fire on the metadata door's save; and every other object.
+  
+  The route: change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`) rather than from a body, and bind hooks to the objects an app owns. No shipped example binds a body hook to either table or writes one from a body. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- 045b946: fix(runtime,cloud-connection)!: install-local refuses a hook with no `body` and a job `body` that does not bind, and withholds such a hook on rehydrate (#21585)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export of a published release or stored shape moves: `HookSchema` and `JobSchema` are unchanged, so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and which hooks it binds on a rehydrate. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a withheld hook (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses two more kinds of package it used to install with a 200:
+  
+  - **A hook with no `body`.** A hook in the deprecated function-name `handler` form names code that travels only in an artifact's runtime module, never in the package JSON this door installs. Such a hook used to install and then either never fire or bind by name to a function the package does not ship. Every hook is judged, since a hook has no on/off switch. A hook that carries both a `body` and a `handler` installs as before: its `body` wins.
+  - **An enabled job whose `body` does not bind.** The door used to judge only that a job `body` was present. It now judges that the body binds, by the declaration's own parse of `JobSchema.body`, the same parse the scheduler binds by. So a job whose `body` is an expression (L1) body, or carries `body.timeoutMs`, is refused instead of installed and never scheduled.
+  
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, the answer the door already gives an enabled job with no `body`. One answer names everything the door cannot run: each hook and the function its `handler` names, each job and its handler, and each refused job `body` with the key the declaration refuses. Nothing is installed: nothing is registered, persisted, bound or scheduled. `os package install` exits non-zero and prints the code beside the status.
+  - **Rehydrate.** A package installed by an earlier version keeps rehydrating after a restart. Its body hooks bind as before. A hook of it with no `body` is reported at `warn` by name and is **not bound**: this door carries no runtime module, so the hook's `handler` can never name the package's own code. Its job with no runnable `body` is reported and not run, as before.
+  - **Runtime.** The binder exports the two judgements the door reads: `collectHooksWithoutBody`, and `collectJobsWithoutBody`, which also names a job whose `body` does not bind. `bindAppArtifactHandlers` takes `withholdHooksWithoutBody`, which a door that carries no runtime module sets, and reports the hooks it withheld as `withheldHooks`.
+  - **Unchanged:** a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) binds an app's handler hooks to its own functions exactly as before. Hooks authored through the metadata API are unchanged too. A package whose hooks carry a `body` and whose enabled jobs carry a valid `body` installs exactly as before.
+  
+  The route for a refused package: give each hook a `body` (sandboxed JS, the form actions and jobs use), and correct each job `body` to the declared shape. That shape is a sandboxed JS body whose time limit is the job's own `timeoutMs`, and `os validate` reports the same refusal. Alternatively, boot the artifact with `os start --artifact`, which loads its runtime module. This ships as `minor`, under the launch-window convention for narrowings of an accept set.
+
+### Patch Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+- 1fd5664: fix: when the store refuses an uninstall's `sys_packages` delete, the uninstall now answers the failure and removes nothing else, instead of answering success and coming back after the next restart (#21276)
+  
+  Clause-②: no
+  
+  **`@objectstack/metadata-protocol`.** `deletePackage` now deletes the package's `sys_packages` row first, before its `sys_metadata` rows, its tables, its registry entry and the rows the uninstall cleanups own. When the `package` service refuses that delete, whether it returns `{ success: false }` or throws, `deletePackage` throws and nothing else is removed. A store fault answers `500`, with `DATABASE_ERROR` from a live SQL driver and `INTERNAL_ERROR` otherwise. A declared 4xx refusal is passed through unchanged. Before this, the refusal was logged as a warning, and `DELETE /api/v1/packages/:id` answered `200` after the package's metadata, tables and grants had been removed. The package then came back after the next restart.
+  
+  Before that store delete, `deletePackage` now also asks the registry whether the uninstall would be refused because another package extends an object this package owns (ADR-0029). If so, it throws the registry's own refusal with nothing removed. A registry without the new question is not asked, and the refusal then surfaces at the registry withdrawal, as before.
+  
+  **`@objectstack/objectql`.** New: `SchemaRegistry.assertPackageUninstallable(packageId)`. It throws the refusal `unregisterObjectsByPackage` and `uninstallPackage` raise for an object another package extends, with the same message, and it changes nothing. `unregisterObjectsByPackage` now calls it, so there is still one copy of that check.
+  
+  **`@objectstack/runtime`.** `DELETE /api/v1/packages/:id` now asks `deletePackage` before it touches anything. It checks that the package exists with a read, and it withdraws the package from the running registry and clears its saved disable record only after `deletePackage` has answered. So when the store refuses, the door answers `500`, the same process keeps serving the package, and a package that was disabled stays disabled after a restart. Before this, the door withdrew the package and cleared its disable record first. A refused delete then left the package missing until a restart, and brought a disabled package back enabled.
+  
+  An uninstall refused because another package extends an object this package owns still answers `500` with nothing changed: the stored rows, the registry entry and the disable record all stay as they were, in the same process and after a restart. That refusal is now decided before the store delete, instead of by the door withdrawing the package first. An ordinary uninstall, and a host with no `package` service, are unchanged.
+- abe8f28: fix(runtime): a sandboxed body or an action handler that reads the stored-metadata tables is served what the generic data door serves (#21454)
+  
+  Clause-②: yes
+  
+  The two stored-metadata tables (the current metadata bodies and their version history) hold each body as stored, credential material included, and a content hash computed over it. The generic data door serves such a row with the body as its type's read projection, with the stored credential material withheld, and the hash in keyed form. Three in-process reader contexts served the same rows as stored:
+  
+  - a sandboxed action or hook body that reads through `ctx.api.object(...)`, inside `ctx.api.transaction(...)` too;
+  - an action handler that reads through `ctx.engine.find(...)`;
+  - an action handler that reads through `ctx.api.object(...)`.
+  
+  An action body and an action handler run elevated, so the stored form reached whoever could invoke the action, a member included.
+  
+  **What changes.** A read of either table through any of these contexts now answers the data door's form: the projected body, and the content hash under the same key the data door uses. That key is the crypto provider's, or the process-scoped ephemeral key when no provider is registered. `find`, `findOne` and `aggregate` are served this way, and so is every context the scoped API derives: `sudo()`, `withRunAs(...)`, a `transaction(...)` callback's context, and the context `beginTransaction()` returns. A hook body that copies what it read into another record can now copy only the projected form. A projection that names the body column without the type column reads the type beside it and drops it again, as on the data door.
+  
+  **What does not change.** Every other object, every write and `count` behave as before. The platform's own readers of these tables still read the stored form, because the projection is applied at the reader contexts and not in the engine.
+  
+  `@objectstack/metadata-protocol` now exports the data door's stored-row serve, so these contexts consume it and keep no copy: `storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows`, `ephemeralStoredHashDigest` and the `StoredHashDigest` type. The exports are additive.
+  
+  The four functions `storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows` and `ephemeralStoredHashDigest`, and the type `StoredHashDigest`, are new public API of `@objectstack/metadata-protocol`, and `@objectstack/runtime` consumes them.
+- aa0d4b9: `os migrate resume`, `os migrate recorded-by` and `os migrate value-shapes` answer a project whose database does not exist yet with empty work and exit 0, instead of exiting 1 with "The database refused to run this query" (#21529)
+  
+  Clause-②: no
+  
+  Each of these commands boots read-only by default: the schema sync is held back, and a missing SQLite file is opened as an empty in-memory stand-in. That boot already measures which tables the database lacks, because the held-back sync lists each one as a table to create. Each command then read the very tables it had just found missing. On a never-booted database (or a `--database-url` that points at one), every default run failed:
+  
+  - `os migrate resume` exited 1, naming `sys_migration_journal`;
+  - `os migrate recorded-by` exited 1, naming `sys_metadata_history`;
+  - `os migrate value-shapes` reported every scanned object as unreadable, kept the gate closed and exited 1, over data that does not exist.
+  
+  Each command now reads only the tables its boot found present. A table that does not exist holds nothing, so:
+  
+  - `os migrate resume` lists no interrupted runs (`{"interrupted": [], "count": 0}`), exit 0;
+  - `os migrate recorded-by` reports `pending: 0`, nothing to convert, exit 0;
+  - `os migrate value-shapes` completes a clean scan of zero records, exit 0, and names the objects it did not read because they have no table yet (on stderr under `--json`).
+  
+  Human mode says the table is not there yet, instead of implying the command looked through one. `--json` documents have the same shape as on a booted database with nothing to do. The write modes (`--run`, `--apply`) are unchanged: they boot with the schema sync, so their tables exist before they read.
+  
+  `MigrationRecoveryPlugin` (`@objectstack/runtime`), which every one of these boots composes, scans the migration journal at boot. On such a database it logged "Migration journal scan failed; interrupted migrations (if any) were NOT detected" on every run. It now treats a missing journal table as "no runs" and says nothing. It recognises that case only with the shared `isMissingTableError` predicate, asked about `sys_migration_journal` itself. Any other failure of the scan still warns.
+  
+  There is nothing to migrate.
+- 5d0e4e2: fix(metadata-protocol)!: the generic data door refuses a stored-metadata filter that reads the body or a content hash through a cross-field comparand or below its depth backstop, and exports its one filter-field collector and one search narrowing for the reader-context seam (#21544)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key, spelling, export or stored shape moves; what changes is which read-query shapes the generic data door accepts over the two stored-metadata tables, and two module functions are added to the package surface, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour plus additive exports, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the generic data door (`GET /api/v1/data/:object`, `POST /api/v1/data/:object/query` and the in-process `findData`) accepts when it reads `sys_metadata` or `sys_metadata_history`. Two filter shapes read the stored body column or a content-hash column (`checksum`, `previous_checksum`, or the history table's `change_note`) without the family's refusal ever seeing them, and both ran before this release:
+  
+  - a cross-field comparand naming one of those columns — `{ "name": { "$ne": { "$field": "metadata" } } }`, in `where` or in an aggregation's `filter`, under `$not` included. The SQL drivers evaluate it row by row, so row presence disclosed the column's value;
+  - a filter on one of those columns nested more than 32 combinators deep, which the door's field collector stopped reading at. A body `$contains` of a stored credential answered the row and a wrong guess answered none.
+  
+  Both now answer the door's `400 INVALID_FIELD`, naming the column, before the query runs — the answer the same filter already gets when it names the column directly. The route: filter those tables by their scalar columns (the type, the name, the state and the like), compare scalar columns with each other, and read the bodies with a plain list, which is served projected. Every other column of the two tables, and every other object, is unchanged; a dotted key into one of those columns was, and stays, refused by the door's dotted-path rule. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  - **`@objectstack/metadata-protocol`** exports two module functions the generic data door now calls itself:
+    - `collectStoredMetadataFilterFields(object, query)` — the family's one filter-field collector: every column a read query's filters read (`where`, the engine's `filter` alias and each aggregation filter): each key's head and each cross-field `{ $field }` comparand, at any depth. `[]` outside the family.
+    - `narrowStoredMetadataSearch(object, query, schema, wireSpelling?)` — the family's one default-search narrowing: an explicit search-field list naming the body or a hash column is refused, a default search is narrowed to the searchable set without them (returned for the caller to run as `searchFields`), and a set that narrows to nothing is refused. The `StoredMetadataSearchSchema` type it reads is exported beside it.
+  - **`@objectstack/runtime`**: the stored-metadata reader-context seam (`ctx.api.object(...)` for action and hook bodies, a handler's `ctx.api`, and `ctx.engine.find`) calls those two functions instead of its own copy of the narrowing and `@objectstack/plugin-security`'s condition walk, so the seam and the door answer every family filter and search identically. A `count` through the seam now runs the query the guard returns. The seam's accept set is unchanged: every shape it refused before it still refuses, now through the door's collector.
+- 6946f2f: fix(runtime): when two packages declare a job with the same name, both jobs now run. Uninstalling one stops only its own job.
+  
+  Clause-②: no
+  
+  The metadata registry keys a packaged item by package and name (`<packageId>:<name>`), so two packages may each declare a job called, say, `nightly_sync`. The job service keys a job by one string and replaces any job with the same name. Before this fix, installing the second package (`os package install`, or a second app on one boot) silently replaced the first package's job. That job stopped running while both installs reported success.
+  
+  - **Both jobs run.** A job is scheduled under its authored name unless another package already holds that name on the job service. In that case it is scheduled under the registry's package-scoped identity, `<packageId>:<name>`, and an `info` line names the package that holds the name. A package's job body and its `handler`'s `jobId` still see the authored name.
+  - **What an operator sees.** The Background Jobs catalogue (`sys_job`) and run history (`sys_job_run`) list the job under the name it is scheduled under. That is the authored name, or `<packageId>:<name>` for a package whose job name another package already holds. A reinstall keeps the name the job already has.
+  - **Each package cancels only its own job.** When a reinstall drops a job, or the package is uninstalled (the `runtime.package-jobs` uninstall cleanup), the job is cancelled under the name it was scheduled under. Another package's job with the same name keeps running.
+  - **Unchanged:** a runtime in which no two packages declare the same job name schedules every job under its authored name, so its catalogue and run history read exactly as before. No schema, export, `IJobService` contract or accept-set change.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [db0cf22]
+- Updated dependencies [13a24ec]
+- Updated dependencies [fd5a1cd]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [8598614]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [f9bcd08]
+- Updated dependencies [e3ad492]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [7aab759]
+- Updated dependencies [7aab759]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [97239c3]
+- Updated dependencies [c2cd651]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [04f0cc4]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [ceb4a93]
+- Updated dependencies [16eefc6]
+- Updated dependencies [ee75aae]
+- Updated dependencies [6e33b67]
+- Updated dependencies [ab52182]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [49524f6]
+- Updated dependencies [9f13c94]
+- Updated dependencies [9f13c94]
+- Updated dependencies [535d1d2]
+- Updated dependencies [d956910]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [8b123c0]
+- Updated dependencies [45efcfa]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [520f66f]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [35dfb81]
+- Updated dependencies [e9dec3d]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [ce53218]
+- Updated dependencies [44defd4]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [a7ab047]
+- Updated dependencies [440cd32]
+- Updated dependencies [f9a8eb8]
+- Updated dependencies [6c5697d]
+- Updated dependencies [74281a8]
+- Updated dependencies [9a4182a]
+- Updated dependencies [550f4cc]
+- Updated dependencies [41b1333]
+- Updated dependencies [5dbcee8]
+- Updated dependencies [ec390ec]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [e367002]
+- Updated dependencies [9e9d693]
+- Updated dependencies [5c9138b]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [5d095a0]
+- Updated dependencies [a1ca156]
+- Updated dependencies [5b5e83f]
+- Updated dependencies [7b07749]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/metadata-protocol@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/driver-memory@17.7.0
+  - @objectstack/driver-sql@17.7.0
+  - @objectstack/driver-turso@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/metadata@17.7.0
+  - @objectstack/service-datasource@17.7.0
+  - @objectstack/plugin-security@17.7.0
+  - @objectstack/objectql@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/plugin-auth@17.7.0
+  - @objectstack/rest@17.7.0
+  - @objectstack/driver-sqlite-wasm@17.7.0
+  - @objectstack/observability@17.7.0
+  - @objectstack/service-cluster@17.7.0
+  - @objectstack/service-i18n@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

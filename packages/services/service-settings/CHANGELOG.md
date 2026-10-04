@@ -1,5 +1,215 @@
 # @objectstack/service-settings
 
+## 17.7.0
+
+### Minor Changes
+
+- 222ecc2: feat(spec): `ICryptoProvider` gains a required `keyedDigest(plain): Promise<string>` member, and `LocalCryptoProvider` implements it (#21263)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers: the new member is required, so a
+  provider that does not declare it stops compiling (`TS2420` on a class, `TS2741`
+  on an object literal), and the compiler names the missing member. Code that only
+  calls a provider is unaffected.
+  
+  `keyedDigest` is a digest of `plain` under the provider's server-held key, for a
+  value that is handed to a caller but must not let that caller check a guess about
+  the input offline. The contract requires three things of every implementation:
+  
+  - **Keyed.** The output cannot be computed without the provider's key. A provider
+    that holds no key material rejects; it never returns an unkeyed value.
+  - **Stable per key.** Under one key, equal input gives equal output in every
+    process and on every node that holds the key. Replacing the key changes every
+    output.
+  - **Not a substitute for `digest`.** `digest` keeps its contract and the stability
+    the audit trail relies on.
+  
+  The output is `hmac-sha256:` followed by the 64 lowercase hex characters of an
+  HMAC-SHA-256: 76 characters from `[0-9a-z:-]`, which travel unchanged in an HTTP
+  header, a query string and JSON, and never collide with the `sha256:` spelling of
+  an unkeyed content hash.
+  
+  `LocalCryptoProvider` computes it from the 32-byte data key it already resolves
+  (`OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY`, the persisted key file, or the ephemeral
+  test-mode key), through a MAC key derived from that data key, so the AES-GCM key
+  is never used as a MAC key. There is no new secret or environment variable to
+  configure. An instance constructed with an explicit key that is not 32 bytes holds
+  no usable key material, and its `keyedDigest` rejects with
+  `KeyedDigestKeyUnavailableError`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `ICryptoProvider` is a TypeScript contract with no metadata surface: no Zod schema, no authorable key, no export renamed or removed and no stored row changes shape, so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer, and the compiler names the missing member at their declaration. -->
+- 57cc695: feat(spec): `CryptoContext` gains a required `scope` discriminant, and `LocalCryptoProvider` binds it into a delimiter-safe, versioned AAD (ADR-0128 D1–D3, #21326 stage 1)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers and for every direct caller of
+  `encrypt`, `decrypt` or `rotateKey`: `CryptoContext.scope` is required, so a
+  context literal without it stops compiling (`TS2741`), and the compiler names the
+  missing member. `LocalCryptoProvider` also refuses such a context at runtime with
+  `CryptoContextScopeError`, for a caller the compiler never saw. Code that only
+  injects a provider is unaffected.
+  
+  `scope` is a member of the new closed set `CRYPTO_CONTEXT_SCOPES` (type
+  `CryptoContextScope`), one member per producer of `CryptoContext`:
+  `settings` (`SettingsService`), `object_secret_field` (the ObjectQL engine's
+  secret-field path) and `datasource_credential` (the datasource secret binder).
+  Each producer in this release passes its own member on every call. A new producer
+  adds its own member; it never borrows an existing one.
+  
+  What the contract now requires of every provider that binds AAD:
+  
+  - **Producer-discriminated (D1).** The AAD binds `(scope, namespace, key)`, so a
+    ciphertext sealed by one producer does not authenticate under another
+    producer's context, whatever the two `(namespace, key)` pairs are.
+  - **Delimiter-safe (D2).** Distinct triples produce distinct AAD bytes. An
+    unescaped join is not permitted.
+  - **Versioned.** A ciphertext records which AAD derivation sealed it, and is
+    opened only with that derivation. An unknown derivation fails closed. No second
+    derivation or scope is ever tried after a failure (D3).
+  
+  `LocalCryptoProvider` seals every new value under derivation version 2: a lead
+  byte that never occurs in UTF-8, a versioned label, then the scope, namespace and
+  key, each prefixed with its 4-byte length. The ciphertext carries a `v2:` marker.
+  A ciphertext with no marker is version 1, the bare base64 every earlier release
+  sealed, and it still opens with the older `(namespace, key)` binding. Existing
+  secrets therefore keep working with no action, and carry the older binding until
+  they are re-wrapped. Re-wrapping existing ciphertext at rest is stage 2 of
+  #21326. `rotateKey` already re-seals a version-1 handle under version 2. Any other
+  marker is refused with `UnknownCiphertextVersionError`.
+  
+  Operational note: a secret set or rotated by this release carries the `v2:`
+  marker, and an earlier release cannot open it. A rollback past this release needs
+  those values to be set again.
+  
+  `@objectstack/objectql` and `@objectstack/service-datasource` pass their own
+  scope on every seal and open. Their public surface is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `CryptoContext` and `ICryptoProvider` are TypeScript contracts with no metadata surface: no Zod schema, no authorable key, no export renamed or removed, and no stored row changes shape (`sys_secret.ciphertext` is provider-defined, and every existing ciphertext still opens), so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer or a direct caller, and the compiler names the missing member at their call site. -->
+- 0557c2f: feat(cli): `os secret rewrap` re-wraps version-1 `sys_secret` ciphertext under the current AAD derivation, each row under its holder's producer scope (ADR-0128 §4.2, #21326 stage 2)
+  
+  Clause-②: yes (widening)
+  
+  A ciphertext sealed before ADR-0128 D1–D3 carries the older binding over
+  `(namespace, key)` alone, and still opens in this release. `os secret rewrap` moves
+  the stored values to the current binding through `rotateKey`, the seam ADR-0128 §4
+  names. It is an operator command: a dry run by default, `--apply` to write, and
+  nothing on any boot or upgrade path invokes it. It has no HTTP surface.
+  
+  - **The scope comes from the holder.** `sys_secret` records no producer, and a
+    version-1 ciphertext binds no scope, so each row is re-sealed under the scope of
+    the producer whose holder references it: `settings` for a `sys_setting.value_enc`
+    handle, `object_secret_field` for a `secret:` ref on a business row,
+    `datasource_credential` for a `sys_secret:` `credentialsRef`. The holders come from
+    the same cross-producer reference union `os secret orphans` reads. A row nothing
+    references, a row whose holders belong to different producers, and every row while
+    a holder family could not be read are left as they are and counted, never re-sealed
+    under a guessed scope. `--apply` refuses an incomplete union and names the family.
+  - **Resumable.** A row already sealed under the current derivation is skipped as
+    done, so a stopped run finishes the rest when re-run and a finished run writes
+    nothing.
+  - **Safe against a live deployment.** Each row is written by one conditional update,
+    keyed on its id and the ciphertext the run read. A row a producer changed in
+    between is not overwritten, and a re-run picks it up. A driver with no
+    `updateMany` is refused before any row is opened.
+  - **Fails closed.** A row that does not open, or whose re-seal does not open to the
+    same plaintext under the same scope, is not written. The run finishes the rest and
+    exits 1. The check happens before the write.
+  - **Output is classes and counts only.** It never prints a plaintext, a ciphertext
+    or a row id.
+  
+  The command resolves its data key from `OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY` or the
+  persisted key file, in the strict posture: it never mints a key, and it hands the
+  settings service it boots the same provider so that service does not mint one
+  either. With no key it refuses before opening any row.
+  
+  `@objectstack/service-settings` publishes `ciphertextDerivationStatus` (and its
+  `CiphertextDerivationStatus` type). It is `LocalCryptoProvider`'s own reading of
+  which derivation sealed a stored ciphertext, read off its marker without opening it:
+  `current`, `superseded` or `unknown`. The re-wrap classifies rows with it rather than
+  restating the marker grammar.
+
+### Patch Changes
+
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [c205b6c]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [958cfe2]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [529d971]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes
