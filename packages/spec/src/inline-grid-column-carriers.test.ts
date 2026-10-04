@@ -425,7 +425,13 @@ describe('#20901 — the `field` → `name` respelling is a chain step on the fo
  */
 const MASTER_DETAIL_PROPS = ComponentPropsMap['object-master-detail-form'];
 
-/** Every key objectui's `MasterDetailForm` reads off a detail entry (the `.objectui-sha` pin `31971ff1e28f`). */
+/**
+ * Every key objectui's `MasterDetailForm` reads off a detail entry (the
+ * `.objectui-sha` pin `31971ff1e28f`, re-read at `89cad75d5570`). `sortField`
+ * is not one of them: the renderer derives the line-position field from the
+ * child object, and the key is a tombstone (#21589,
+ * `ui/master-detail-detail-sort-field-retirement.test.ts`).
+ */
 const FULL_DETAIL_ENTRY = {
   childObject: 'crm_invoice_line',
   relationshipField: 'invoice',
@@ -433,7 +439,6 @@ const FULL_DETAIL_ENTRY = {
   formFields: ['quantity', 'amount'],
   inlineMode: 'grid',
   amountField: 'amount',
-  sortField: 'position',
   totalField: 'total',
   title: 'Lines',
   minRows: 1,
@@ -543,7 +548,7 @@ describe('#20928 — the master-detail block\'s detail entry is strict, and its 
       expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
       expect((result.data as { details: unknown[] }).details).toEqual([entry]);
     }
-    expect(Object.keys(FULL_DETAIL_ENTRY)).toHaveLength(12);
+    expect(Object.keys(FULL_DETAIL_ENTRY)).toHaveLength(11);
   });
 });
 

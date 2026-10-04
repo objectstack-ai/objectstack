@@ -91,6 +91,32 @@ describe('validateComponentProps — undeclared keys', () => {
     }
   });
 
+  // #21589 — an `object-master-detail-form` detail entry's `sortField` is a
+  // retiredKey tombstone, one array level down. The same door, the same
+  // warning: the finding names the entry's key, and the page is never refused.
+  it('reports a retired detail-entry `sortField` as a warning carrying the prescription, at the entry\'s key', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'object-master-detail-form',
+          properties: {
+            objectName: 'invoice',
+            details: [
+              { title: 'Payments', childObject: 'invoice_payment' },
+              { title: 'Lines', childObject: 'invoice_line', sortField: 'line_no' },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('warning');
+    expect(f.rule).toBe(COMPONENT_PROPS_INVALID);
+    expect(f.path).toBe('pages[0].regions[0].components[0].properties.details.1.sortField');
+    expect(f.message).toContain('`object-master-detail-form` property `details[].sortField` was removed in @objectstack/spec 17');
+  });
+
   it('walks components nested inside `properties` (tabs items → children)', () => {
     const findings = validateComponentProps(
       stackWith([

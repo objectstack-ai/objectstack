@@ -323,6 +323,55 @@ function storedMetadataFilterRefusal(
     return undefined;
 }
 
+/** [#21624] What each write node would have done, in its refusal's own words. */
+const STORED_METADATA_WRITE_VERB = {
+    create_record: 'create a record in',
+    update_record: 'update',
+    delete_record: 'delete from',
+} as const;
+
+/**
+ * [#21624] Refuse a WRITE node aimed at the stored-metadata family
+ * (`sys_metadata` / `sys_metadata_history`, judged by the family's own
+ * predicate, {@link isStoredMetadataBodyObject}).
+ *
+ * The family has one writer for app-authored work: the metadata protocol,
+ * where a change is validated and its provenance recorded (the ruling that
+ * refuses a hook body bound to these tables, or a body's direct write to them,
+ * applied to its own reason: a flow is app-authored automation too). Under
+ * `runAs: 'system'` the engine writes elevated and cannot tell this write from
+ * the platform's own internal writers, so the rule is applied here, at the
+ * node. ⛔ Not routed through the protocol from inside the node: that would be
+ * a second write path into the family.
+ *
+ * Judged on the object name the engine would be handed, before the node
+ * resolves its `filter` or its `fields`, so a refused node answers the same
+ * whatever it names: its filter is never evaluated against a family table
+ * (the write nodes' evaluate exit) and nothing it would write is computed.
+ *
+ * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong, and
+ * re-running it unchanged never succeeds) carrying the standard catalog's
+ * `PERMISSION_DENIED`: the code the data door's in-process write path answers
+ * a non-platform principal's write to these tables with in a secured
+ * composition, and the code the body-write boundary for the same ruling
+ * carries. No code is minted. `undefined` for any other object.
+ */
+function storedMetadataWriteRefusal(
+    nodeType: keyof typeof STORED_METADATA_WRITE_VERB,
+    objectName: string,
+): (ReturnType<typeof refuseNode> & { code: string }) | undefined {
+    if (!isStoredMetadataBodyObject(objectName)) return undefined;
+    return {
+        ...refuseNode(
+            `${nodeType}: refusing to ${STORED_METADATA_WRITE_VERB[nodeType]} '${objectName}': it holds stored `
+            + 'metadata, and a flow may not write it directly, so the write was not run. Change metadata through the '
+            + 'metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), where it is validated and its '
+            + "provenance is recorded. Elevation (`runAs: 'system'`) does not change this.",
+        ),
+        code: StandardErrorCode.enum.PERMISSION_DENIED,
+    };
+}
+
 /**
  * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
  * `delete_record`, wired to the runtime data layer (ObjectQL / IDataEngine).
@@ -478,6 +527,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const cfg = parsed.config;
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('create_record: objectName required');
+                // [#21624] A stored-metadata family target is refused before
+                // anything is resolved or written, under either run identity.
+                const familyRefusal = storedMetadataWriteRefusal('create_record', objectName);
+                if (familyRefusal) return familyRefusal;
 
                 // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
                 // evaluated; every other value interpolates exactly as before.
@@ -627,6 +680,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const cfg = parsed.config;
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('update_record: objectName required');
+                // [#21624] Before the filter is resolved, so a family target's
+                // filter is never evaluated, under either run identity.
+                const familyRefusal = storedMetadataWriteRefusal('update_record', objectName);
+                if (familyRefusal) return familyRefusal;
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 const filterResult = resolveNodeFilter(
@@ -721,6 +778,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const cfg = parsed.config;
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('delete_record: objectName required');
+                // [#21624] Before the filter is resolved, so a family target's
+                // filter is never evaluated, under either run identity.
+                const familyRefusal = storedMetadataWriteRefusal('delete_record', objectName);
+                if (familyRefusal) return familyRefusal;
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 // The highest-stakes of the three: an erased condition here is the

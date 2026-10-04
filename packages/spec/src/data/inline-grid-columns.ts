@@ -86,6 +86,11 @@
  * no expand control.
  */
 
+// The sort-position names live in their own module, reached by relative
+// import only: the retired `object-master-detail-form` detail entry
+// `sortField`'s prescription prints the same list (`ui/component.zod.ts`).
+import { INLINE_GRID_SORT_FIELDS } from './inline-grid-sort-fields';
+
 /** Default-visible column budget of a derived inline grid; the rest are `defaultHidden`. */
 export const DEFAULT_MAX_INLINE_GRID_COLUMNS = 6;
 
@@ -105,11 +110,6 @@ const INLINE_GRID_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
   'created_at', 'updated_at', 'created_by', 'updated_by',
   'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
   'organization_id', 'tenant_id', 'space', 'owner',
-]);
-
-/** Field names that hold a line's sort position: the grid stamps them on drag-reorder. */
-const INLINE_GRID_SORT_FIELDS: ReadonlySet<string> = new Set([
-  'position', 'sort_order', 'sequence', 'line_no', 'line_number', 'sort',
 ]);
 
 /** Field types a line-item cell cannot edit. File-family types are absent: they render an upload cell. */

@@ -309,8 +309,11 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 
 1. **Mistaking `guardrails` for a gate.** `guardrails` is enforced per user turn
    by the AI runtime ☁️ — token and time limits, blocked tool names and categories
-   refused — but it is a limit, not an approval; `memory` is declared only — no
-   runtime reads it. For a gate that is **enforced**, use
+   refused — but it is a limit, not an approval; `memory` is enforced by the AI
+   runtime ☁️ too — long-term notes are recalled and reflected on, `maxEntries`
+   and `reflectionInterval` are required once `longTerm.enabled` is true, and
+   there is no storage backend to choose — and neither is a gate. For a gate
+   that is **enforced**, use
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
    the **action**, or `approval: 'always'` on an MCP tool binding. AI metadata
    edits are already gated: they land as drafts a human must publish (ADR-0033).

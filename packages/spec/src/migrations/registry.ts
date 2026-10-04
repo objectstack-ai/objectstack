@@ -5853,6 +5853,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`type`. Delete the key; `object-kanban` offers no quick-add control.',
   },
   {
+    id: 'object-master-detail-form-detail-sort-field-retired',
+    order: 70,
+    text:
+      'It also retires an `object-master-detail-form` detail entry\'s `sortField` (#21589, ADR-0049 '
+      + 'enforce-or-remove; the spec half of objectui#11070 round 9). The console stopped reading the '
+      + 'authored override: the field its line grid stamps with each line\'s position on '
+      + 'drag-reorder is derived from the child object — its first field named `position`, '
+      + '`sort_order`, `sequence`, `line_no`, `line_number` or `sort` — and the pinned console had '
+      + 'crossed that change while the spec still declared the key, so an authored value published '
+      + 'green and was dropped. A retiredKey tombstone on the strict detail entry with one D2 '
+      + 'conversion that is a pure lossless DELETE scoped by component `type` and by position '
+      + '(`properties.details[]`); its D3 entry `object-master-detail-form-detail-sort-field-retired` '
+      + 'carries the one judgment left, whether the child object declares the field the line order '
+      + 'is kept in.',
+  },
+  {
     id: 'object-tenancy-organization-field-retired',
     order: 34,
     text:
@@ -15251,6 +15267,39 @@ const step18: MigrationStep = {
         + 'the flag, the author has accepted creating records through the object\'s create action: '
         + '`object-kanban` offers no quick-add control.',
     },
+    // #21589 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `object-master-detail-form-detail-sort-field-removed` family (one D3 entry
+    // per retirement family, even when D2 is lossless). Registered key:
+    // `ui/ObjectMasterDetailFormProps:details.sortField`. The strip changes
+    // nothing a user sees, because the console already ignored the authored
+    // value; what it leaves is the one judgment a delete cannot make — whether the
+    // child object carries the field the line order is kept in.
+    {
+      id: 'object-master-detail-form-detail-sort-field-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'page.component.object-master-detail-form.details[].sortField — a detail entry\'s '
+        + 'authored line-position field',
+      replacement: 'Nothing on the entry: delete the key. The line grid stamps each line\'s position into '
+        + 'the child object\'s own field, derived from the child object: its first field named '
+        + '`position`, `sort_order`, `sequence`, `line_no`, `line_number` or `sort`. To keep the line '
+        + 'order a drag-reorder sets, give the child object one of those fields (under the name the '
+        + 'deleted key named, when it is one of them).',
+      reason: 'The D2 conversion `object-master-detail-form-detail-sort-field-removed` deletes '
+        + '`sortField` from every `object-master-detail-form` detail entry, and the delete is lossless: '
+        + 'the console stopped reading the authored override, and the line grid stamps the field it '
+        + 'derives from the child object whatever the entry says. What the conversion cannot decide is '
+        + 'where the line order lives. An entry whose key named a field the derivation does not pick — '
+        + 'a name outside that list, or a second sort-named field after the first — saves its line '
+        + 'order into the derived field instead, or nowhere when the child object has none. An entry '
+        + 'that names `relationshipField` and at least one column and gives every column a `type` is '
+        + 'kept exactly as authored: no child schema is loaded for it, so no line position is stamped '
+        + 'and a drag-reorder is not saved, before and after the upgrade alike.',
+      acceptanceCriteria: 'No `object-master-detail-form` detail entry carries `sortField`; the props '
+        + 'lint reports one with the prescription. For each entry that had set it, the child object '
+        + 'declares the field the line order is kept in under one of the derived names, and after a '
+        + 'drag-reorder and save the lines reload in the order they were dragged into.',
+    },
     // #19054 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18) — the D3
     // entry of the `object-tenancy-organization-field-removed` family (ruling B on
     // #17152: one D3 entry per retirement family, even when D2 is lossless). This
@@ -19925,7 +19974,7 @@ const step18: MigrationStep = {
         + 'grid columns), including `scale` on a column that declares no `type` and whose `name` is a '
         + '`currency` field of the entry\'s `childObject`',
       replacement: 'each entry is `{ childObject, relationshipField?, columns?, formFields?, '
-        + 'inlineMode?, amountField?, sortField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
+        + 'inlineMode?, amountField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
         + '— the keys the renderer reads — with `inlineMode` one of `grid` / `form`. Each column is the '
         + 'strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes — '
         + '`{ name, label?, type?, … }`, where `{ name }` alone hydrates the rest from the child '
@@ -20116,9 +20165,10 @@ const step18: MigrationStep = {
         + '`{ name, label?, type?, options?, … }`. Write `name` where a column said `field` (or '
         + '`fieldName`, `key`); declare `label`, `type` and `options` on the column, because this block '
         + 'draws a column exactly as declared and hydrates nothing from the child object\'s field; '
-        + 'delete `scale` from a column declaring `type: \'currency\'`; delete `addLabel`, `sortField`, '
-        + '`formFields` and `inlineMode`, which belong to an `object-master-detail-form` detail entry and '
-        + 'are not read here, and any other key the shape does not declare.',
+        + 'delete `scale` from a column declaring `type: \'currency\'`; delete `addLabel`, `formFields` '
+        + 'and `inlineMode`, which belong to an `object-master-detail-form` detail entry and are not read '
+        + 'here, `sortField`, which no block takes (the detail entry derives the line-position field from '
+        + 'the child object), and any other key the shape does not declare.',
       reason: 'The block draws one inline grid of the record\'s child rows, through the same objectui '
         + 'grid as the other three carriers of the inline grid column, but it had no `ComponentPropsMap` '
         + 'row: it was the one entry on the string-arm registration ledger, so the component-props gate '
@@ -24901,6 +24951,27 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // this shape; `ViewTabSchema` stays, reused by the page-only `userFilters.tabs`
     // preset bar. D2: `view-list-tabs-removed`.
     'ui/ObjectListView:tabs',
+    // #21589 — ADR-0049 enforce-or-remove through the ADR-0087 D2 route, the spec
+    // half of objectui#11070 round 9 (the direction recorded on #21220's landing
+    // and mirrored on objectui#11396 ③: tombstone plus ADR-0087). The console
+    // retired the authored override at objectui `0a3e5409f`, and the
+    // `.objectui-sha` pin `89cad75d5570` is past it: `MasterDetailDetailConfig`
+    // has no `sortField` member (`plugin-form/src/MasterDetailForm.tsx:83`), and
+    // the field the line grid stamps with each line's position is the one
+    // `deriveDetail` derives from the child object (`deriveMasterDetail.ts:540`),
+    // handed to the grid as `sort_field` (`:874`). Tombstoned with `retiredKey()`
+    // in the strict detail entry; a NESTED row (an array member, spelled without
+    // its `[]`), so it has no `authorable-surface/` line and checks (b2)/(b3)
+    // resolve it against the emitted schema. Stored and built pages are stripped
+    // by the D2 conversion `object-master-detail-form-detail-sort-field-removed`,
+    // a pure lossless delete scoped by component `type` and position; its D3
+    // record is `object-master-detail-form-detail-sort-field-retired`.
+    //
+    // Registered under 18, not 17: the removal ships on the 17.x line
+    // (launch-window convention: accept-set narrowings ride minor releases) and
+    // the prescription lives at the major boundary where `migrate meta` users
+    // look — the `ui/PageHeaderProps:breadcrumb` precedent.
+    'ui/ObjectMasterDetailFormProps:details.sortField',
     // ADR-0090 D2 (no Profile concept) + ADR-0049 enforce-or-remove; maintainer
     // ruling 2026-09-12, decision batch #121 item 2, verbatim 「同意」.
     // `Page.assignedProfiles` was an authorable key named for the concept ADR-0090 D2

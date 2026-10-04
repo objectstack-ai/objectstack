@@ -107,10 +107,6 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // door (`saveMetaItem`), the restore doors (`rollbackMetaItem`, `revertCommit`)
 // and the draft promotion (`promoteDraftForPublish`).
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
-// [#21620] The one spelling of "which object a view container binds to" — the
-// derivation the source registrars file a container under — so the save door's
-// sibling-expansion refusal judges "the same object" as every other door does.
-import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -1739,6 +1735,19 @@ function stripDerivedProvenance(item: unknown): unknown {
 function stateTenantAuthorship(data: unknown): unknown {
     if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
     return { ...(data as Record<string, unknown>), _provenance: 'org' };
+}
+
+/**
+ * [#21639, #21638] Is this artifact a view ITEM — a view a package ships under
+ * its own name, `viewKind` set (the spec's ViewItem) — rather than a container
+ * or anything else? The save door's "a view item a package ships" and the
+ * package attribution of a container row both ask exactly this, positively:
+ * a body that is neither a container nor a view item is not a view item.
+ */
+function isShippedViewItem(artifact: unknown): boolean {
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return false;
+    const viewKind = (artifact as { viewKind?: unknown }).viewKind;
+    return typeof viewKind === 'string' && viewKind !== '';
 }
 
 /**
@@ -17054,10 +17063,23 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#21334] The package a runtime view container row belongs to: the
      * package its row is bound to, else — for a package-less row that is the
-     * name-keyed overlay of a packaged item (ADR-0005), such as a tenant's
-     * overlay of a package's `<object>` container — the package of the
-     * artifact it overlays, which is the slot the package-aware merge seats
-     * it in. `undefined` for a package-less row that overlays nothing.
+     * name-keyed overlay of a packaged container (ADR-0005), such as a
+     * tenant's overlay of a package's `<object>` container — the package of
+     * the container it overlays, which is the slot the package-aware merge
+     * seats it in. `undefined` for a package-less row that overlays nothing.
+     *
+     * [#21638] A container row is not the overlay of a view ITEM. A
+     * package-less container row stored under the name of a view item a
+     * package ships (`viewKind` set, {@link isShippedViewItem}) is not that
+     * item's overlay — a container is not a view — so it belongs to no
+     * package, and its expansion is placed as any package-less container's
+     * is. The overlay of a shipped container keeps its package, as before. Read through the shipped item instead,
+     * such a row was judged a container of the shipping package: on that
+     * package's object its bare `list` took `<object>.default` and replaced
+     * the packaged default on both doors, wearing the package's `_packageId`,
+     * the override #21334's arm exists to rule out. The save door refuses the
+     * shape now ({@link viewContainerNameCollisionRefusal}); a row stored
+     * before that is read this way, with no re-save.
      */
     private runtimeViewContainerPackage(
         type: string,
@@ -17068,9 +17090,10 @@ export class ObjectStackProtocolImplementation implements
             if (typeof bound === 'string' && bound !== '' && bound !== 'sys_metadata') return bound;
         }
         if (typeof container.name !== 'string' || container.name === '') return undefined;
-        const overlaid = (this.lookupArtifactItem(type, container.name) as { _packageId?: unknown } | undefined)
-            ?._packageId;
-        return typeof overlaid === 'string' && overlaid !== '' ? overlaid : undefined;
+        const overlaid = this.lookupArtifactItem(type, container.name) as { _packageId?: unknown } | undefined;
+        if (isShippedViewItem(overlaid)) return undefined;
+        const overlaidPackage = overlaid?._packageId;
+        return typeof overlaidPackage === 'string' && overlaidPackage !== '' ? overlaidPackage : undefined;
     }
 
     /**
@@ -17889,148 +17912,83 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#21558] The save door's refusal of a view container saved under a name
-     * its OWN expansion produces — `{ name: 'crm_lead.default', object:
-     * 'crm_lead', list }` saved as `crm_lead.default`, whose bare `list`
-     * expands to exactly that name.
+     * [#21639] The save door's ONE collision predicate for a view container:
+     * a container is refused when its save name, or any name its expansion
+     * produces, is a name already served from elsewhere — the family's rule,
+     * which replaces its two one-shape checks (#21558's own expansion,
+     * #21620's sibling of the same object) and adds the shapes they left open.
      *
-     * Both read doors give a name with a stored row of its own that row, and
-     * let an expansion fill only a name with no row (#21510's one predicate,
-     * `namesWithOwnStoredRow`). Such a container IS the row of that name, so
-     * its own expansion never fills it: the object door, which never
-     * enumerates a container, lists nothing under the name, and the by-name
-     * read answers the raw container. No door answers a view item for it, and
-     * nothing told the author why. Triage's ruling refuses the shape here, at
-     * authoring (Prime Directive 12), and keeps the readers' one predicate
-     * whole: ⛔ no second own-row test in the readers.
+     * Both read doors give a name with a stored row of its own that row
+     * (#21510's one predicate, {@link namesWithOwnStoredRow}), and fill a
+     * row-less name with an expansion, the last one read winning
+     * ({@link expandStoredViewContainers}). So a container whose ROW name is
+     * served from elsewhere hides that view on both doors and, being no view
+     * itself, leaves no read answering a view under the name; a container
+     * whose EXPANSION takes such a name replaces that view on both doors with
+     * no word to anyone (ADR-0126: no silent override). Neither is ever what
+     * the author meant, so both are refused here, at authoring (Prime
+     * Directive 12), and the readers keep their one predicate: ⛔ no second
+     * own-row test and no precedence rule in the readers.
      *
-     * "A name its own expansion produces" is answered by the readers' own
-     * expansion, {@link expandRuntimeViewContainer}, never by a copy of its
-     * naming, so the save door and the read doors cannot disagree about it:
-     * every member kind and the expander's de-duplication are covered as the
-     * readers place them. A container on another package's object expands
-     * under its own name (#21334), as `<object>.<container name>…`, which is
-     * never the container name itself, so that arm is never refused. The
-     * package binding is the request's, as the registry write-through
-     * registers the expansion.
+     * "Elsewhere" is triage's two sources, judged by the readers' own pieces,
+     * never a copy of them:
+     *  - another stored container's expansion, in the caller's selection,
+     *    whatever that container's object: the rows
+     *    {@link readActiveOverlayRows} selects through the readers' gate
+     *    ({@link organizationIdForMetaRead}) with no package filter, parsed by
+     *    {@link storedOverlayEntries} and expanded by
+     *    {@link expandStoredViewContainers} with each row's own package
+     *    binding. The row stored under the save name is left out: it is the
+     *    row this save replaces, so a container's own re-save is never its
+     *    own sibling;
+     *  - a view item a package ships ({@link lookupArtifactItem}, the
+     *    registry's artifact read, which never answers a tenant-authored
+     *    row, holding a view item: {@link isShippedViewItem}), except the
+     *    views of the shipped container this row overlays
+     *    by its own name ({@link overlaidShippedContainerViewNames}): ADR-0005
+     *    keys an overlay by its own name, so an overlay of a package's
+     *    container stands in for that container and its views.
+     * A name the container's OWN expansion produces is a third source for its
+     * save name only: as the row of that name it would hide its own view.
      *
-     * The body judged is the one the author sent, with the door's own `name`
-     * stamp ({@link normalizeViewMetadata}: a missing or falsy `name` becomes
-     * the save name) applied first, since the expansion of an unnamed
-     * container is placed by that name. It is asked BEFORE that function's
-     * identity patch: a container whose only member is `form` is not one of
-     * the shapes the patch leaves alone, so under the name of a registered
-     * view item it would take that item's `viewKind`, stop being a container,
-     * and reach the schema as a malformed view item instead of this refusal.
+     * Every name the container would serve is its expansion as the readers
+     * place it, {@link expandRuntimeViewContainer} with the request's package
+     * binding (the binding the row is stored under), so every member kind,
+     * the expander's de-duplication and #21334's own-name arm on another
+     * package's object are judged where the readers put them. The body judged
+     * is the one the author sent, with the door's own `name` stamp applied
+     * first (a body with no `name` is judged under the save name), BEFORE
+     * {@link normalizeViewMetadata}'s identity patch: a `form`-only container
+     * under a registered view item's name would otherwise take that item's
+     * `viewKind` and reach the schema as a malformed view item.
      *
-     * A view item (`viewKind` set) is not a container, so a view item saved
-     * under an expanded name is untouched: it is the sanctioned override for
-     * that name. Rows already stored in this shape are untouched too: the
-     * read doors serve them as before, and only a new save is refused.
+     * What still saves: a view item (`viewKind` set), which is not a
+     * container and under any of these names is that name's sanctioned
+     * override; a container under its object's name, or under any name of
+     * its own, whose expansion collides with nothing; an overlay of a
+     * package's own container; #21334's own-name arm; a container whose would-be
+     * sibling is in another organization (the caller's selection decides, as
+     * it does for the readers). Rows already stored in a refused shape keep
+     * their bytes and are served as before; a new save of one, a re-save
+     * included, is refused until its body stops colliding, and the re-savers
+     * that write through this door (`migrateStoredMetadata`,
+     * `duplicatePackage`) record that refusal as the row's failure.
      *
      * `VALIDATION_ERROR` / 400, the envelope of the name check it sits beside
-     * (`savedItemNameRefusal`): an authoring refusal of the request's own
-     * name, decided from the body. The prescription is the ruling's: save the
-     * container under its object's name, or save a view item under the
-     * expanded name. Runtime words carry no tracker number.
+     * (`savedItemNameRefusal`). The message names the other owner (the stored
+     * container, the shipping package, or the container's own expansion) and
+     * gives the family's prescription: add the view as a member of the
+     * container that owns the name, or save a view item under the name. ⛔ It
+     * never prescribes a save under a name another stored row holds: an
+     * author (or an AI) following such an arm literally would replace that
+     * row and drop the very views this refusal keeps serving. Runtime words
+     * carry no tracker number.
      */
-    private containerOwnExpansionNameRefusal(
+    private async viewContainerNameCollisionRefusal(
         type: string,
         item: unknown,
         saveName: string,
         packageId: string | null | undefined,
-    ): (Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-        const body = item as Record<string, unknown>;
-        const stamped = body.name ? body : { ...body, name: saveName };
-        const own = this.expandRuntimeViewContainer(type, stamped, { packageId })
-            .find((expanded) => expanded.name === saveName);
-        if (!own) return undefined;
-        const object = String(own.object);
-        const err = new Error(
-            `Invalid view container: it is saved under '${saveName}', which is a name its own expansion `
-            + `produces (its ${String(own.viewKind)} view on '${object}'). An expanded view fills only a name `
-            + `that has no stored row of its own, and this container would be that row, so no read would answer `
-            + `a view under '${saveName}'. Save the container under its object's name, '${object}', or save a `
-            + `view item (name, object, viewKind and config) under '${saveName}'.`,
-        ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
-        err.code = 'VALIDATION_ERROR';
-        err.status = 400;
-        return err;
-    }
-
-    /**
-     * [#21620] The save door's refusal of a view container saved under a name
-     * that ANOTHER stored container of the same object expands to — with
-     * `{ name: 'crm_lead', object: 'crm_lead', listViews: { pipeline } }`
-     * stored, a second container `{ object: 'crm_lead', list }` saved as
-     * `crm_lead.pipeline`.
-     *
-     * The harm is #21558's, reached through a sibling: the second container
-     * becomes the stored row of `crm_lead.pipeline`, and both read doors give
-     * a name with a row of its own that row (#21510's one predicate,
-     * {@link namesWithOwnStoredRow}). So the first container's expansion no
-     * longer fills the name, the object door — which never enumerates a
-     * container — lists nothing under it, and the by-name read answers the raw
-     * second container: the sibling's view is gone from both doors and no door
-     * answers a view item for the name. #21558's check cannot see this: the
-     * second container's OWN expansion is `crm_lead.default`, never its save
-     * name.
-     *
-     * Triage's ruling on the card named a broader check — a container's name
-     * must be its object's name — and made it conditional on a census, with
-     * THIS narrower check as the fallback. The census hit: this door keeps a
-     * container saved under a name other than its object (#13407's live
-     * authoring path, which the platform checklist's live view-authoring item
-     * drives; #21412's P2 and P2b, ruled; #21334's arm expands one under its
-     * own name, ruled), and Studio's metadata editor re-saves such a container
-     * under its stored name. So the name is judged only against what the
-     * other stored containers of the same object expand to.
-     *
-     * The judgment is the readers' own, never a copy of it:
-     *  - the rows are the ones {@link readActiveOverlayRows} selects for this
-     *    caller, through the read gate the readers apply
-     *    ({@link organizationIdForMetaRead}) and with no package filter, so
-     *    every reader whose selection holds this container and a sibling is
-     *    covered for this caller's scope;
-     *  - each row is parsed by {@link storedOverlayEntries} and expanded by
-     *    {@link expandStoredViewContainers}, with the row's own package
-     *    binding, so every member kind, the expander's de-duplication and
-     *    #21334's arm are judged where the readers place them;
-     *  - the row stored under the save name itself is left out: it is the row
-     *    this save replaces, not a sibling;
-     *  - "the same object" is the expanded view's `object` against
-     *    {@link deriveViewContainerObject} of the body, the one derivation
-     *    every door files a container under.
-     *
-     * The body judged is the one the author sent, with the door's own `name`
-     * stamp applied first (a body with no `name` is judged under the save
-     * name), BEFORE {@link normalizeViewMetadata}'s identity patch — on an
-     * unscoped kernel the sibling's expansion is registered under the name,
-     * and a `form`-only container would take its `viewKind` there and reach
-     * the schema as a malformed view item instead of this refusal.
-     *
-     * A view item (`viewKind` set) is not a container and is untouched: under
-     * an expanded name it is that name's sanctioned override. Rows already
-     * stored in this shape keep their bytes and are served as before; only a
-     * new save of one is refused, and the re-savers that write through this
-     * door (`migrateStoredMetadata`, `duplicatePackage`) record that refusal
-     * as the row's failure instead of re-saving it.
-     *
-     * `VALIDATION_ERROR` / 400, the envelope of the two name checks it sits
-     * beside. The prescription names the stored container that expands the
-     * name, and gives two arms: add the view as a member of THAT container, or
-     * save a view item under the expanded name. ⛔ It never prescribes a save
-     * under a name another stored container holds — not even the object's own
-     * name, which in the card's pair IS the sibling: an author (or an AI)
-     * following such an arm literally would replace the sibling's row and drop
-     * the very view this refusal keeps serving. Runtime words carry no tracker
-     * number.
-     */
-    private async containerSiblingExpansionNameRefusal(
-        type: string,
-        item: unknown,
-        saveName: string,
         organizationId: string | undefined,
     ): Promise<(Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined> {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return undefined;
@@ -18038,8 +17996,8 @@ export class ObjectStackProtocolImplementation implements
         const body = item as Record<string, unknown>;
         const stamped = body.name ? body : { ...body, name: saveName };
         if (!isAggregatedViewContainer(stamped)) return undefined;
-        const object = deriveViewContainerObject(stamped);
-        if (!object) return undefined;
+        const served = this.expandRuntimeViewContainer(type, stamped, { packageId });
+
         let records: any[] = [];
         try {
             records = await this.readActiveOverlayRows({ type }, organizationIdForMetaRead(type, organizationId));
@@ -18048,22 +18006,120 @@ export class ObjectStackProtocolImplementation implements
             // rows". Any other failure is not answered as "no sibling".
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        const siblings = this.storedOverlayEntries({ type }, records)
-            .filter((entry) => entry.name !== saveName);
-        const hit = this.expandStoredViewContainers(type, siblings)
-            .find(({ item: expanded }) => expanded.name === saveName && expanded.object === object);
-        if (!hit) return undefined;
-        const err = new Error(
-            `Invalid view container: it is saved under '${saveName}', which is a name the stored container `
-            + `'${hit.container.name}' expands (its ${String(hit.item.viewKind)} view on '${object}'). An expanded `
-            + `view fills only a name that has no stored row of its own, and this container would be that row, so `
-            + `that view would no longer be served and no read would answer a view under '${saveName}'. Add the `
-            + `view as a member of the container '${hit.container.name}' (its list, listViews, form or formViews), `
-            + `or save a view item (name, object, viewKind and config) under '${saveName}'.`,
-        ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
-        err.code = 'VALIDATION_ERROR';
-        err.status = 400;
-        return err;
+        const siblings = this.expandStoredViewContainers(
+            type,
+            this.storedOverlayEntries({ type }, records).filter((entry) => entry.name !== saveName),
+        );
+        const siblingServing = (name: string) => siblings.find(({ item: expanded }) => expanded.name === name);
+        const overlaid = this.overlaidShippedContainerViewNames(type, stamped, packageId);
+        const shippedServing = (name: string): Record<string, unknown> | undefined => {
+            if (overlaid.has(name)) return undefined;
+            const artifact = this.lookupArtifactItem(type, name) as Record<string, unknown> | undefined;
+            if (!artifact || !isShippedViewItem(artifact)) return undefined;
+            return typeof artifact._packageId === 'string' && artifact._packageId !== '' ? artifact : undefined;
+        };
+        const refusal = (text: string) => {
+            const err = new Error(`Invalid view container: ${text}`) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+            err.code = 'VALIDATION_ERROR';
+            err.status = 400;
+            return err;
+        };
+        const kindOn = (view: Record<string, unknown>) => `${String(view.viewKind)} view on '${String(view.object)}'`;
+        const viewItem = (name: string) => `a view item (name, object, viewKind and config) under '${name}'`;
+        const asMemberOf = (container: string) =>
+            `Add the view as a member of the container '${container}' (its list, listViews, form or formViews)`;
+        const ofItsOwn = 'the container under a name of its own that no package ships and no stored container expands';
+
+        // ⛔ Every message names the owner, then gives the prescription, and
+        // only then explains: a 4xx message crosses the REST boundary bounded
+        // at 500 characters by truncating its TAIL (`CLIENT_MESSAGE_MAX`), so
+        // the explanation is the half an author can lose and still act.
+        //
+        // The save name: the row this container would be.
+        const rowHides = 'this container would be that row, so';
+        const sibling = siblingServing(saveName);
+        if (sibling) {
+            return refusal(
+                `it is saved under '${saveName}', which is a name the stored container '${sibling.container.name}' `
+                + `expands (its ${kindOn(sibling.item)}). ${asMemberOf(sibling.container.name)}, or save `
+                + `${viewItem(saveName)}. An expanded view fills only a name that has no stored row of its own, and `
+                + `${rowHides} that view would no longer be served and no read would answer a view under '${saveName}'.`,
+            );
+        }
+        const shipped = shippedServing(saveName);
+        if (shipped) {
+            return refusal(
+                `it is saved under '${saveName}', which is the name of the ${kindOn(shipped)} the package `
+                + `'${String(shipped._packageId)}' ships. Save ${viewItem(saveName)} to override the packaged view, or `
+                + `save ${ofItsOwn}. A stored row under a packaged view's name takes that view's place, and ${rowHides} `
+                + `the packaged view would no longer be served and no read would answer a view under '${saveName}'.`,
+            );
+        }
+        const own = served.find((expanded) => expanded.name === saveName);
+        if (own) {
+            const object = String(own.object);
+            const objectRow = records.find((record) => record?.name === object && record?.name !== saveName);
+            const firstArm = objectRow === undefined
+                ? `Save the container under its object's name, '${object}'`
+                : isAggregatedViewContainer(this.storedOverlayEntries({ type }, [objectRow])[0]?.data)
+                    ? asMemberOf(object)
+                    : `Save ${ofItsOwn}`;
+            return refusal(
+                `it is saved under '${saveName}', which is a name its own expansion produces (its ${kindOn(own)}). `
+                + `${firstArm}, or save ${viewItem(saveName)}. An expanded view fills only a name that has no stored `
+                + `row of its own, and ${rowHides} no read would answer a view under '${saveName}'.`,
+            );
+        }
+
+        // Every name its expansion produces: the views this container would serve.
+        for (const view of served) {
+            const name = String(view.name);
+            const taken = `its ${kindOn(view)} would be served as '${name}'`;
+            const other = siblingServing(name);
+            if (other) {
+                return refusal(
+                    `${taken}, a name the stored container '${other.container.name}' already expands. `
+                    + `${asMemberOf(other.container.name)}, or save ${viewItem(name)}. Saved under '${saveName}', this `
+                    + `container and that one would both serve '${name}': the one read last would replace the other's `
+                    + `view on both doors, and nothing would say why.`,
+                );
+            }
+            const packaged = shippedServing(name);
+            if (packaged) {
+                return refusal(
+                    `${taken}, the name of the ${String(packaged.viewKind)} view the package `
+                    + `'${String(packaged._packageId)}' ships. Save ${viewItem(name)} to override the packaged view, or `
+                    + `give the member a key of its own that no package ships and no stored container expands. Saved `
+                    + `under '${saveName}', this container's view would replace the packaged view on both doors, and `
+                    + `nothing would say why.`,
+                );
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * [#21639] The view names of the shipped container a container row
+     * overlays by its own name — the one source of "a view item a package
+     * ships" that row may replace. ADR-0005 keys an overlay by its own name,
+     * and the package-aware merge seats a row in its package's slot, so the
+     * overlaid container is the artifact of the row's own name in the row's
+     * own package ({@link runtimeViewContainerPackage}); a package-bound row
+     * overlays only its own package's artifact. Empty for a row that overlays
+     * no shipped container.
+     */
+    private overlaidShippedContainerViewNames(
+        type: string,
+        container: Record<string, unknown>,
+        packageId: string | null | undefined,
+    ): ReadonlySet<string> {
+        const ownPackageId = this.runtimeViewContainerPackage(type, container, { packageId });
+        if (ownPackageId === undefined || typeof container.name !== 'string') return new Set();
+        const shipped = this.lookupArtifactItem(type, container.name, ownPackageId) as Record<string, unknown> | undefined;
+        if (!isAggregatedViewContainer(shipped) || shipped?._packageId !== ownPackageId) return new Set();
+        return new Set(
+            this.expandRuntimeViewContainer(type, shipped, { packageId: ownPackageId }).map((view) => String(view.name)),
+        );
     }
 
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
@@ -18547,25 +18603,19 @@ export class ObjectStackProtocolImplementation implements
                 const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
             }
-            // [#21558] …and a view container saved under a name its OWN
-            // expansion produces, with the same envelope. Asked of the body as
-            // authored, before the stamp below can take a registry entry's
-            // `viewKind` onto it. See {@link containerOwnExpansionNameRefusal}.
+            // [#21639] …and a view container whose save name, or any name its
+            // expansion produces, is a name already served from elsewhere —
+            // its own expansion, another stored container's expansion in the
+            // caller's selection, or a view item a package ships — with the
+            // same envelope. One predicate for the family, judged by the
+            // readers' own row selection and expansion, and asked of the body
+            // as authored, before the stamp below can take a registry entry's
+            // `viewKind` onto it. See {@link viewContainerNameCollisionRefusal}.
             {
-                const ownExpansionRefusal = this.containerOwnExpansionNameRefusal(
-                    singularType, request.item, request.name, request.packageId,
+                const containerCollision = await this.viewContainerNameCollisionRefusal(
+                    singularType, request.item, request.name, request.packageId, request.organizationId,
                 );
-                if (ownExpansionRefusal) throw ownExpansionRefusal;
-            }
-            // [#21620] …and a view container saved under a name ANOTHER stored
-            // container of the same object expands to, with the same envelope,
-            // judged by the readers' own row selection and expansion. Also
-            // before the stamp. See {@link containerSiblingExpansionNameRefusal}.
-            {
-                const siblingExpansionRefusal = await this.containerSiblingExpansionNameRefusal(
-                    singularType, request.item, request.name, request.organizationId,
-                );
-                if (siblingExpansionRefusal) throw siblingExpansionRefusal;
+                if (containerCollision) throw containerCollision;
             }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
