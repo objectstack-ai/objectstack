@@ -28,9 +28,11 @@
 // accepted "either code" and stayed green. Booted org-bound, case (a) measures
 // the composition a real member meets: the floor, the alternate match
 // `service-storage` contributes beside its gate (delete limb only), and the gate.
-// ⛔ Do not "simplify" the boot back to org-less: the parent-editor 200 below
-// would still pass, and the edit-limb and non-editor cells would stop
-// measuring the floor at all.
+// ⛔ Do not "simplify" the boot back to org-less. The `assertArmed` probe in
+// `beforeAll` refuses such a boot outright; without it, the parent-editor 200
+// and the readable-non-editor `ATTACHMENT_DELETE_DENIED` would both pass with
+// neither the floor nor the alternate match ever in play — certifying the fix
+// in the one posture where there was nothing to fix.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync } from 'node:fs';
