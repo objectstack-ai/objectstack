@@ -617,7 +617,9 @@ describe('HttpDispatcher', () => {
             );
             expect(result.response?.status).toBe(404);
             expect(result.response?.body?.error?.message).toMatch(/no longer exists in flow/);
-            expect(result.response?.body?.error?.code).not.toBe('FLOW_FAILED');
+            // [#21724] The engine's own code, not the 404's generic
+            // `RESOURCE_NOT_FOUND` the builder derives when a row hands it none.
+            expect(result.response?.body?.error?.code).toBe('RUN_NOT_FOUND');
         });
 
         // [#8684] `INVALID_SIGNAL` / `INVALID_SCREEN_INPUT` are refusals the
@@ -626,7 +628,11 @@ describe('HttpDispatcher', () => {
         // keep their own codes: the console treats only `FLOW_FAILED` as terminal
         // (PR #4899), so folding a retryable refusal into it would close the
         // wizard on a submission the user could have fixed.
-        it('should keep INVALID_SCREEN_INPUT distinct from FLOW_FAILED', async () => {
+        //
+        // [#21724] This pin used to assert only what the code was NOT
+        // (`FLOW_FAILED`), and the wire carried the status-derived
+        // `VALIDATION_ERROR` the whole time. It names the code now.
+        it('should answer INVALID_SCREEN_INPUT as its own code', async () => {
             mockAutomationService.resume.mockResolvedValue({
                 success: false, code: 'INVALID_SCREEN_INPUT',
                 error: "Invalid screen input: Unknown screen field \"nickname\" — declared fields: 'full_name'",
@@ -635,7 +641,7 @@ describe('HttpDispatcher', () => {
                 'flow_a/runs/run_1/resume', 'POST', { inputs: { nickname: 'ada' } }, AUTHED_CALLER(),
             );
             expect(result.response?.status).toBe(400);
-            expect(result.response?.body?.error?.code).not.toBe('FLOW_FAILED');
+            expect(result.response?.body?.error?.code).toBe('INVALID_SCREEN_INPUT');
             expect(result.response?.body?.error?.message).toMatch(/Unknown screen field/);
         });
 
@@ -654,6 +660,9 @@ describe('HttpDispatcher', () => {
                 { output: { $mapItemDone: true } }, AUTHED_CALLER(),
             );
             expect(result.response?.status).toBe(400);
+            // [#21724] Its own code, so a caller can tell it from
+            // `INVALID_SCREEN_INPUT`; both used to answer `VALIDATION_ERROR`.
+            expect(result.response?.body?.error?.code).toBe('INVALID_SIGNAL');
             expect(result.response?.body?.error?.message).toMatch(/reserved by the flow engine/);
         });
 
