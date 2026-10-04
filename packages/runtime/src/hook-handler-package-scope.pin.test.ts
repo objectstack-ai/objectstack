@@ -227,7 +227,7 @@ describe('a hook handler name resolves inside its own package only — composed 
     expect(refusalsOf('scope_z_own')).toEqual([]);
   });
 
-  it('② the metadata door refuses a runtime-authored hook that names a function and carries no `body` — nothing stored, nothing bound', async () => {
+  it('② the metadata door refuses a runtime-authored hook that names a function and carries no `body`: VALIDATION_ERROR / 400, nothing stored', async () => {
     const crossHook = await asAdmin('PUT', '/meta/hook/scope_authored_cross', {
       name: 'scope_authored_cross',
       object: Y_NOTE,
@@ -246,7 +246,9 @@ describe('a hook handler name resolves inside its own package only — composed 
     // Nothing stored: the by-name read finds no row.
     const stored = await asAdmin('GET', '/meta/hook/scope_authored_cross');
     expect(stored.status, await stored.text()).toBe(404);
+  });
 
+  it('②b a body hook authored through the metadata door saves, binds and runs; so does one carrying both a `body` and a `handler`', async () => {
     const bodyHook = await asAdmin('PUT', '/meta/hook/scope_authored_body', {
       name: 'scope_authored_body',
       object: Y_NOTE,
@@ -272,11 +274,14 @@ describe('a hook handler name resolves inside its own package only — composed 
       return lastStatus.includes('authored-body') && lastStatus.includes('authored-both');
     });
     expect(bound, `the runtime-authored body hooks never both bound (last status: ${lastStatus})`).toBe(true);
-
-    // …and by then nothing named `x_stamp` ran, and the refused hook never
-    // reached the binder: there was no row for the re-sync to bind.
+    // …and nothing named `x_stamp` ran on the same insert.
     expect(lastStatus, "a runtime-authored hook ran app X's function").not.toContain('x-fn');
-    expect(refusalsOf('scope_authored_cross')).toEqual([]);
     expect(refusalsOf('scope_authored_both')).toEqual([]);
   }, 30_000);
+
+  it('② nothing bound: once the re-sync has run (②b), the refused hook never reached the binder', async () => {
+    // There was no row for the re-sync to bind, so the binder recorded no
+    // refusal of it either: the door refused it before anything was stored.
+    expect(refusalsOf('scope_authored_cross')).toEqual([]);
+  });
 });
