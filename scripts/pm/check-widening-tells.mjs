@@ -3090,10 +3090,8 @@ export function refusalOnlyReaders(source, name) {
  * T2's verdict on one MEMBER line — `fires`, `silent` or `narrowing` — with the
  * construct reading it rests on. `readSource` is a thunk answering the file's
  * head blob (or `null`); it is called only for the one reading that needs it.
- * `readers` caches {@link refusalOnlyReaders} per binding for one file, so a
- * set gaining many members reads its file once rather than once per member.
  */
-export function t2MemberVerdict(side, index, readSource = null, readers = null) {
+export function t2MemberVerdict(side, index, readSource = null) {
   const reading = enclosingConstruct(side, index);
   const verdict = reading.construct === null ? 'fires' : (T2_CONSTRUCT_VERDICTS[reading.construct] ?? 'fires');
   if (verdict !== 'fires') return { ...reading, verdict };
@@ -3103,13 +3101,10 @@ export function t2MemberVerdict(side, index, readSource = null, readers = null) 
     !reading.exported &&
     typeof readSource === 'function'
   ) {
-    let narrows = readers instanceof Map ? readers.get(reading.binding) : undefined;
-    if (narrows === undefined) {
-      const source = readSource();
-      narrows = typeof source === 'string' && refusalOnlyReaders(source, reading.binding).narrowing;
-      if (readers instanceof Map) readers.set(reading.binding, narrows);
+    const source = readSource();
+    if (typeof source === 'string' && refusalOnlyReaders(source, reading.binding).narrowing) {
+      return { ...reading, verdict: 'narrowing' };
     }
-    if (narrows) return { ...reading, verdict: 'narrowing' };
   }
   return { ...reading, verdict: 'fires' };
 }
@@ -4515,7 +4510,6 @@ export function tellsInFile(
     if (headSource === undefined) headSource = typeof readSource === 'function' ? readSource(file) : null;
     return headSource;
   };
-  const readersByBinding = new Map();
   // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
   // ledger table and nowhere else: the same string added to any other file on
   // any other surface still tells, with its own file:line.
@@ -4600,7 +4594,7 @@ export function tellsInFile(
     // #17955's reason: a line that is no member must neither FIRE nor SPEND a
     // unit a real member in the same block is owed. `narrowing` is decided at
     // the row, below — a member it is, of a set that loses a value.
-    const member = kind === 'T2' ? t2MemberVerdict(newFile, newAt.get(i), headSourceOnce, readersByBinding) : null;
+    const member = kind === 'T2' ? t2MemberVerdict(newFile, newAt.get(i), headSourceOnce) : null;
     if (member?.verdict === 'silent') continue;
     // #17955 — a `retiredKey()` tombstone DECLARES a key unwritable. It is read
     // BEFORE the budget, and that ordering is the whole repair rather than a
@@ -5654,7 +5648,7 @@ export function selfTest() {
     const rows = tellsInFile({ filename: CONSTRUCT_FILE, status: 'modified', patch: "@@ -1,2 +1,5 @@\n const SINGLE_SERIES_TYPES = [\n+  'pie',\n+  'donut',\n+  'sankey',\n ] as const satisfies readonly ChartType[];" }, { readSource: () => { reads += 1; return DENY_SET_SOURCE; }, narrowing });
     return reads === 1 && rows.length === 0 && narrowing.length === 3;
   })());
-  t('…and TWO sets in one file still read it ONCE — the per-file read, not the per-set memo, is what holds this', (() => {
+  t('…and TWO sets in one file still read it ONCE — the read is per FILE, never per member or per set', (() => {
     let reads = 0;
     const narrowing = [];
     const rows = tellsInFile({ filename: CONSTRUCT_FILE, status: 'modified', patch: "@@ -1,2 +1,6 @@\n const SINGLE_SERIES_TYPES = [\n+  'sankey',\n ] as const satisfies readonly ChartType[];\n+const OTHER_TYPES = [\n+  'other',\n+] as const;" }, { readSource: () => { reads += 1; return DENY_SET_SOURCE; }, narrowing });
