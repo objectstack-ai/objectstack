@@ -272,6 +272,16 @@ export class AuditPlugin implements Plugin {
             }
           },
           ctx.logger,
+          // [#21755] The deployment's i18n lookup for the not-visible refusal's
+          // sentence — resolved per refusal (ADR-0029 D8: i18n may register
+          // after this plugin), the override address plugin-security's own
+          // not-visible refusal renders through.
+          () => {
+            const i18n = ctx.getService<II18nService>('i18n');
+            const t = i18n?.t;
+            if (typeof t !== 'function') return undefined;
+            return (key: string, loc: string, params?: Record<string, unknown>) => t.call(i18n, key, loc, params);
+          },
         );
         if (typeof (engine as any).registerMiddleware === 'function') {
           installCommentReadVisibility(engine as any, ctx.logger);

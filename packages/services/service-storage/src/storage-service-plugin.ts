@@ -16,6 +16,7 @@ import {
 import type {
   IHttpServer,
   IDataEngine,
+  II18nService,
   IStorageService,
   IFileAccessDelegate,
 } from '@objectstack/spec/contracts';
@@ -373,6 +374,16 @@ export class StorageServicePlugin implements Plugin {
             }
           },
           ctx.logger,
+          // [#21755] The deployment's i18n lookup for the not-visible refusal's
+          // sentence — resolved per refusal (ADR-0029 D8: i18n may register
+          // after this plugin), the override address plugin-security's own
+          // not-visible refusal renders through.
+          () => {
+            const i18n = ctx.getService<II18nService>('i18n');
+            const t = i18n?.t;
+            if (typeof t !== 'function') return undefined;
+            return (key: string, loc: string, params?: Record<string, unknown>) => t.call(i18n, key, loc, params);
+          },
         );
         // [#21729] The gate's parent-editor DELETE limb, made reachable: the
         // alternate match that stops the platform's `created_by` delete floor
