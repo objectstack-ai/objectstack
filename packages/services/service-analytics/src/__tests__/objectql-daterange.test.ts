@@ -402,7 +402,16 @@ const DECLARED_DATETIME = {
 describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
   it('renders the window as a parameterised half-open pair', async () => {
     const seen: AggOpts[] = [];
-    const svc = makeService(seen, DECLARED_DATETIME);
+    // [#21647] The bucket in this statement used to be the representative
+    // `date_trunc('month', close_date)` a host with no `dateBucketSql` hook
+    // got. That host's dry run now refuses the bucket outright, which would
+    // take this case's subject, the window, with it. So the host wires the
+    // hook (a stub standing for the driver's answer), and the bucket is
+    // asserted as that answer.
+    const svc = makeService(seen, {
+      ...DECLARED_DATETIME,
+      dateBucketSql: (_object: string, field: string, granularity: string) => `driver_bucket('${granularity}', ${field})`,
+    });
 
     const { sql, params } = await svc.generateSql!({
       cube: 'sales',
@@ -420,7 +429,7 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
     // datetime column; a BETWEEN would hand a debugger SQL that drops the
     // final day's rows.
     expect(sql).toContain('(close_date >= $1 AND close_date < $2)');
-    expect(sql).toContain("date_trunc('month', close_date)");
+    expect(sql).toContain(`driver_bucket('month', close_date) AS "close_date"`);
     // Bounds bind as parameters — the echoed string travels to the browser.
     expect(params).toEqual(['2026-01-01', '2026-03-01']);
     expect(sql).not.toContain('2026-01-01');
