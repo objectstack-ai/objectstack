@@ -944,7 +944,7 @@ Sort field and direction pair
 | **grouping** | `{ fields: object[] }` | optional | View grouping config; its first field is the swimlane fallback |
 | **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key; `object-kanban` offers no quick-add control. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
-| **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Card conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to that card |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectKanbanProps.columns[number]`
@@ -973,6 +973,13 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+
+### Nested Shape: `ObjectKanbanProps.conditionalFormatting[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
+| **style** | `Record<string, string>` | ✅ | CSS styles to apply when condition is true |
 
 ### Nested Shape: `ObjectKanbanProps.navigation`
 
