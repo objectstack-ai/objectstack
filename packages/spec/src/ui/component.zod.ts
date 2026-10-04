@@ -4655,9 +4655,10 @@ const ObjectMetricTrendSchema = lazySchema(() => strictObject({
  * resolved `filter`.
  *
  * Those five are the chart drill-down's own members, by reference
- * ({@link ChartDrillDownSchema}`.shape` — the same defs; `title` carries a
- * describe of its own, because a metric tile has no click context for the
- * chart's `${event.*}` tokens to resolve against). The SHAPE is the tile's,
+ * ({@link ChartDrillDownSchema}`.shape` — the same defs; `enabled` and `title`
+ * carry describes of their own, because the chart's speak of a clicked segment
+ * and its `${event.*}` tokens, and a metric tile has no click context for them
+ * to resolve against). The SHAPE is the tile's,
  * not the chart's, in two places:
  *
  * - `filter` and `mode` are REFUSED BY NAME, with the prescriptions objectui's
@@ -4699,7 +4700,8 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
       + '`mode` applies on `object-data-table`, whose row click reads it.',
   },
 }, {
-  enabled: ChartDrillDownSchema.shape.enabled,
+  enabled: ChartDrillDownSchema.shape.enabled
+    .describe('Turn the tile\'s drill on or off; the block being present already means on, so this is only needed to force it off'),
   title: ChartDrillDownSchema.shape.title
     .describe('Drill drawer/dialog heading; defaults to the tile\'s own `title`, then its `label`. A metric tile has no click context, so an `${event.*}` token here resolves to nothing'),
   target: ChartDrillDownSchema.shape.target,
