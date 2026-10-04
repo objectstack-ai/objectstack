@@ -35,15 +35,6 @@ export default defineConfig({
         find: /^@objectstack\/objectql$/,
         replacement: path.resolve(__dirname, '../../objectql/src/index.ts'),
       },
-      {
-        // [#21647] `objectql-echo-bucket-enumeration.test.ts` serves a bucketed
-        // query through the REAL `driver-memory` under the engine above, so the
-        // driver is read from source for the same reason: its advertised
-        // capabilities decide where the engine buckets, and a stale `dist`
-        // would answer with old ones. Anchored, as above.
-        find: /^@objectstack\/driver-memory$/,
-        replacement: path.resolve(__dirname, '../../drivers/driver-memory/src/index.ts'),
-      },
     ],
   },
 });

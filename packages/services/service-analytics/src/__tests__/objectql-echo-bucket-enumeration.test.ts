@@ -58,10 +58,17 @@
  *
  * ## The rows
  *
- *   - `memory`, `sqlite` (better-sqlite3), `sqlite-wasm` (sql.js): real
- *     drivers. `postgres` and `mysql`: real `driver-sql` instances, never
- *     connected; their dialect and bucket expression answer from the client
- *     config alone, and the spied doors mean no statement is sent.
+ *   - `sqlite` (better-sqlite3), `sqlite-wasm` (sql.js): real drivers.
+ *     `postgres` and `mysql`: real `driver-sql` instances, never connected;
+ *     their dialect and bucket expression answer from the client config alone,
+ *     and the spied doors mean no statement is sent.
+ *   - `memory`, by code path: `InMemoryDriver` declares `supports = {}`, so
+ *     the engine buckets every granularity in memory, and it has neither
+ *     `dialectName` nor `dateBucketSql`. The stand-in carries exactly that
+ *     surface. The real driver is not imported: a new consumer of
+ *     `@objectstack/driver-memory` is a maintainer ruling
+ *     (`check:driver-memory-census`), not a test's choice. #21647's own
+ *     measurement ran on the real driver, before and after this change.
  *   - `mongodb`, by code path: `driver-mongodb` publishes
  *     `queryDateGranularity` for every granularity
  *     (`MONGODB_DATE_GRANULARITIES`), so the engine pushes the bucket into its
@@ -88,7 +95,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import { BUILTIN_DRIVER_IDS, TimeUpdateInterval, type BuiltinDriverId, type Cube } from '@objectstack/spec/data';
 import { declaredRefusalMessage } from '@objectstack/types';
 import type { AnalyticsService } from '../analytics-service.js';
@@ -160,22 +166,32 @@ const releaseKnex = async (driver: EnumeratedDriver) => {
 const sqliteDriver = () =>
   new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any) as unknown as EnumeratedDriver;
 
-/** `driver-mongodb`'s surface on this pin's read path, by code path (see the header). */
-const mongodbByCodePath = (): EnumeratedDriver => ({
-  name: 'os21647.mongodb-by-code-path',
+/**
+ * A driver that runs no SQL, by code path: its `supports`, and the two data
+ * doors, with no `dialectName` and no `dateBucketSql`. `find` answers `rows`.
+ */
+const noSqlDriverByCodePath = (name: string, supports: Record<string, unknown>, rows: unknown[] = []): EnumeratedDriver => ({
+  name,
   version: '0.0.0',
-  supports: {
-    batchSchemaSync: true,
-    queryDateGranularity: Object.fromEntries(GRANULARITIES.map((g) => [g, true])),
-  },
+  supports,
   async connect() {},
   async disconnect() {},
   async aggregate() { return []; },
-  async find() { return []; },
+  async find() { return rows.map((row) => ({ ...(row as object) })); },
 });
 
+/** `driver-memory`'s surface on this pin's read path, by code path (see the header). */
+const memoryByCodePath = (rows: unknown[] = []) => noSqlDriverByCodePath('os21647.memory-by-code-path', {}, rows);
+
+/** `driver-mongodb`'s surface on this pin's read path, by code path (see the header). */
+const mongodbByCodePath = () =>
+  noSqlDriverByCodePath('os21647.mongodb-by-code-path', {
+    batchSchemaSync: true,
+    queryDateGranularity: Object.fromEntries(GRANULARITIES.map((g) => [g, true])),
+  });
+
 const DRIVER_ROWS = {
-  memory: [{ face: 'driver-memory', build: () => new InMemoryDriver() as unknown as EnumeratedDriver }],
+  memory: [{ face: 'driver-memory, by code path', build: () => memoryByCodePath() }],
   sqlite: [{ face: 'driver-sql, better-sqlite3', build: sqliteDriver, release: releaseKnex }],
   'sqlite-wasm': [
     {
@@ -360,12 +376,13 @@ describe('[#21647] the echo of a date bucket: driver x timezone class x granular
 });
 
 /**
- * [#21647] The rows, on the real `driver-memory`: `/analytics/query` serves
- * them with no `sql`, and the dry run refuses. The driver is only asked for
- * rows; the engine buckets them in memory. d2 (20:00 UTC on 31 January) stays
- * in January at UTC.
+ * [#21647] The rows, on `driver-memory`'s surface (by code path, see the
+ * header): `/analytics/query` serves them with no `sql`, and the dry run
+ * refuses. The driver is only asked for rows, and the real engine buckets them
+ * in memory. d2 (20:00 UTC on 31 January) stays in January at UTC. These are
+ * the rows #21647 measured on the real driver.
  */
-describe('[#21647] driver-memory, live: the query serves its rows with no `sql`, and the dry run refuses', () => {
+describe('[#21647] driver-memory\'s surface: the query serves its rows with no `sql`, and the dry run refuses', () => {
   const DEALS = [
     { id: 'd1', closed_at: '2026-01-10T10:00:00.000Z', amount: 20 },
     { id: 'd2', closed_at: '2026-01-31T20:00:00.000Z', amount: 7 },
@@ -380,17 +397,15 @@ describe('[#21647] driver-memory, live: the query serves its rows with no `sql`,
   const doors: string[] = [];
 
   beforeAll(async () => {
-    const driver = new InMemoryDriver();
+    const driver = memoryByCodePath(DEALS);
     const aggregate = driver.aggregate.bind(driver);
     const find = driver.find.bind(driver);
-    (driver as any).aggregate = async (...args: any[]) => { doors.push('aggregate'); return (aggregate as any)(...args); };
-    (driver as any).find = async (...args: any[]) => { doors.push('find'); return (find as any)(...args); };
+    driver.aggregate = async (...args: unknown[]) => { doors.push('aggregate'); return aggregate(...args); };
+    driver.find = async (...args: unknown[]) => { doors.push('find'); return find(...args); };
     engine = new ObjectQL({ logger: quiet } as any);
     engine.registerDriver(driver as any, true);
     await engine.init();
     engine.registry.registerObject(DEAL_OBJECT as any);
-    await engine.syncSchemas();
-    for (const row of DEALS) await engine.insert(DEAL, { ...row } as any);
 
     const registered: Record<string, unknown> = {};
     await new AnalyticsServicePlugin({ cubes: CUBES, debugSql: true } as any).init({
