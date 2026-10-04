@@ -402,7 +402,10 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                 const result = await protocol.saveMetaItem({
                     type: 'hook',
                     name: 'rc3_probe_hook',
-                    item: { name: 'rc3_probe_hook', object: 'task', events: ['beforeUpdate'] },
+                    // [#21689] A body-carrying hook: the save door refuses a hook
+                    // with no `body` (it could never run), and this case measures
+                    // the code-only gate, not that refusal.
+                    item: { name: 'rc3_probe_hook', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
                 });
                 expect(result.success).toBe(true);
                 expect(metaRows(rows).length).toBe(1);
@@ -511,7 +514,9 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             },
             {
                 type: 'hook', // allowRuntimeCreate only
-                item: { name: 'rc3_receipt_view', object: 'task', events: ['beforeUpdate'] },
+                // [#21689] With a `body`: the door refuses a hook without one,
+                // and this matrix measures the receipt, not that refusal.
+                item: { name: 'rc3_receipt_view', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
             },
             {
                 type: 'webhook', // no static registry entry (plugin-registered)

@@ -17,6 +17,15 @@
  *     so the name could only ever be refused again at bind (the binder's
  *     `metadata-service` refusal, pinned in objectql's
  *     `hook-binder-package-scope.test.ts`).
+ *   ②c the same door, the other shape with no `body` (#21689): a hook with
+ *     neither a `body` nor a `handler`, which the binder would skip at every
+ *     re-sync, is refused by the same predicate with the same envelope. One
+ *     predicate judges both shapes: a hook with no `body` object.
+ *
+ * The enumeration this file holds on the real door: a `body` hook saves (②b),
+ * a `handler`-only hook is refused (②), a hook with neither is refused (②c),
+ * and a built artifact's `handler` hook through its own door is unchanged
+ * (the X and Z controls).
  *
  * Controls, the two shapes a package's own function takes: app X's hook naming
  * X's own `functions` entry binds and runs, and app Z's hook naming a function
@@ -145,6 +154,13 @@ function refusalsOf(hook: string): any[][] {
   return engineLogger.error.mock.calls.filter((call: any[]) => call[2]?.hook === hook);
 }
 
+/** The binder's skips of `hook` (a hook with nothing to bind), as the engine logged them. */
+function skipsOf(hook: string): any[][] {
+  return engineLogger.warn.mock.calls.filter(
+    (call: any[]) => String(call[0]).includes('skipping hook') && call[1]?.hook === hook,
+  );
+}
+
 async function waitFor(predicate: () => Promise<boolean>, ms = 15_000): Promise<boolean> {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -248,6 +264,23 @@ describe('a hook handler name resolves inside its own package only — composed 
     expect(stored.status, await stored.text()).toBe(404);
   });
 
+  it('②c the metadata door refuses a runtime-authored hook with neither a `body` nor a `handler`: VALIDATION_ERROR / 400, nothing stored', async () => {
+    // The measured `PUT`: before #21689 it answered 200, the row was served by
+    // name, and the binder skipped it at every re-sync.
+    const bareHook = await asAdmin('PUT', '/meta/hook/scope_authored_bare', {
+      name: 'scope_authored_bare',
+      object: Y_NOTE,
+      events: ['beforeInsert'],
+    });
+    const refusal: any = await bareHook.json();
+    expect({ status: bareHook.status, code: refusal?.code }, JSON.stringify(refusal))
+      .toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+    expect(refusal.error).toContain("'scope_authored_bare'");
+    expect(refusal.error).toContain('Give it a `body`');
+    const stored = await asAdmin('GET', '/meta/hook/scope_authored_bare');
+    expect(stored.status, await stored.text()).toBe(404);
+  });
+
   it('②b a body hook authored through the metadata door saves, binds and runs; so does one carrying both a `body` and a `handler`', async () => {
     const bodyHook = await asAdmin('PUT', '/meta/hook/scope_authored_body', {
       name: 'scope_authored_body',
@@ -279,9 +312,11 @@ describe('a hook handler name resolves inside its own package only — composed 
     expect(refusalsOf('scope_authored_both')).toEqual([]);
   }, 30_000);
 
-  it('② nothing bound: once the re-sync has run (②b), the refused hook never reached the binder', async () => {
+  it('② and ②c nothing bound: once the re-sync has run (②b), neither refused hook reached the binder', async () => {
     // There was no row for the re-sync to bind, so the binder recorded no
-    // refusal of it either: the door refused it before anything was stored.
+    // refusal or skip of either: the door refused both before anything was stored.
     expect(refusalsOf('scope_authored_cross')).toEqual([]);
+    expect(refusalsOf('scope_authored_bare')).toEqual([]);
+    expect(skipsOf('scope_authored_bare')).toEqual([]);
   });
 });

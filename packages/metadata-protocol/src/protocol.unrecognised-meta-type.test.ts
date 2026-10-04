@@ -215,7 +215,8 @@ describe('#8421 — the traffic that must keep working', () => {
         {
             type: 'hook',
             why: 'declared, runtime-create only',
-            item: { name: 'probe_item', object: 'task', events: ['beforeUpdate'] },
+            // [#21689] With a `body`: the door refuses a hook without one.
+            item: { name: 'probe_item', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
         },
         {
             // `theme` held this slot until commit 35ad101bc retired the themes surface

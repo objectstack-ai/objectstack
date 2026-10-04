@@ -1492,7 +1492,10 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 scoped.saveMetaItem({
                     type: 'hook',
                     name: 'shipped_hook',
-                    item: { name: 'shipped_hook', object: 'case', events: ['beforeInsert'] },
+                    // [#21689] A body-carrying hook, so the refusal measured is
+                    // the provenance gate's and no other gate's: the door also
+                    // refuses a hook with no `body`.
+                    item: { name: 'shipped_hook', object: 'case', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } },
                     organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
@@ -1507,7 +1510,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             const result = await scoped.saveMetaItem({
                 type: 'hook',
                 name: 'my_user_hook',
-                item: { name: 'my_user_hook', object: 'case', events: ['beforeUpdate'] },
+                // [#21689] With a `body`: the door refuses a hook without one.
+                item: { name: 'my_user_hook', object: 'case', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
             });
 
             expect(result.success).toBe(true);
@@ -1529,7 +1533,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             const result = await scoped.saveMetaItem({
                 type: 'hook',
                 name: 'my_user_hook',
-                item: { name: 'my_user_hook', object: 'case', events: ['beforeInsert', 'beforeUpdate'] },
+                // [#21689] With a `body`: the door refuses a hook without one.
+                item: { name: 'my_user_hook', object: 'case', events: ['beforeInsert', 'beforeUpdate'], body: { language: 'js', source: 'return;' } },
             });
 
             expect(result.success).toBe(true);
