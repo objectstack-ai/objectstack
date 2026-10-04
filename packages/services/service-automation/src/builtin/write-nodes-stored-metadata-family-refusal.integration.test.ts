@@ -54,6 +54,7 @@ import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
 import { AutomationServicePlugin } from '../plugin.js';
 import type { AutomationEngine, NodeExecutor } from '../engine.js';
 
@@ -77,6 +78,16 @@ const BODY_FRAGMENT = '"label":"Pin body"';
  * the family refusal its case asserts.
  */
 const STAND_IN_TARGET = 'pin_stand_in_target';
+
+/**
+ * The closing sentence of `text`, measured against the family's ONE
+ * prescription, which both the save-time and the run-time refusal end on. Read
+ * from the imported constant, never restated, so a later rewording of that one
+ * sentence moves these pins with it.
+ */
+function closingPrescriptionOf(text: string): string {
+  return text.slice(-STORED_METADATA_BODY_PRESCRIPTION.length);
+}
 
 /** One write node in a flow definition aimed at a family table, and where it sits. */
 interface FamilyTarget {
@@ -264,7 +275,10 @@ function harness(ql: ObjectQL, automation: AutomationEngine) {
       (thrown!.issues ?? []).map((i) => ({ code: i.code, path: i.path.join('.') })),
       `${def.name}: the save-time refusal's issues`,
     ).toEqual(targets.map((t) => ({ code: 'custom', path: t.path })));
-    for (const issue of thrown!.issues ?? []) expect(issue.message).toContain('the metadata protocol');
+    for (const issue of thrown!.issues ?? []) {
+      expect(closingPrescriptionOf(issue.message), `${def.name}: the save-time refusal ends on the family's prescription`)
+        .toBe(STORED_METADATA_BODY_PRESCRIPTION);
+    }
     expect(await automation.getFlow(def.name), `${def.name}: a refused flow was registered`).toBeNull();
     expect(await Promise.all(tables.map((object) => snapshot(object))), `${def.name}: the save-time refusal changed a table`)
       .toEqual(before);
@@ -342,7 +356,8 @@ async function expectRefused(h: Harness, object: FamilyTable, nodeType: WriteNod
   const where = `${nodeType} on ${object}, runAs '${runAs}'`;
   expect(run.res.success, `${where}: the run must fail`).toBe(false);
   expect(run.res.status, `${where}: the run's status`).toBe('failed');
-  expect(String(run.res.error), `${where}: the refusal names the metadata protocol`).toContain('the metadata protocol');
+  expect(closingPrescriptionOf(String(run.res.error)), `${where}: the run-time refusal ends on the family's prescription`)
+    .toBe(STORED_METADATA_BODY_PRESCRIPTION);
   expect(run.downstreamRan, `${where}: the node downstream of the refusal ran`).toBe(false);
   expect(run.familyWrites, `${where}: the engine's write verb was called on the family table`).toBe(0);
   expect(await h.snapshot(object), `${where}: the family table changed`).toBe(before);
