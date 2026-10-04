@@ -1608,7 +1608,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the local path composed: an unread diff is not a narrow diff': 7,
   'the surfaces, imported rather than restated': 11,
   'T1 — a new key on a Zod object schema': 14,
-  'T2 — a new member of a closed set': 63,
+  'T2 — a new member of a closed set': 64,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
@@ -3064,8 +3064,10 @@ export function refusalOnlyReaders(source, name) {
  * T2's verdict on one MEMBER line — `fires`, `silent` or `narrowing` — with the
  * construct reading it rests on. `readSource` is a thunk answering the file's
  * head blob (or `null`); it is called only for the one reading that needs it.
+ * `readers` caches {@link refusalOnlyReaders} per binding for one file, so a
+ * set gaining many members reads its file once rather than once per member.
  */
-export function t2MemberVerdict(side, index, readSource = null) {
+export function t2MemberVerdict(side, index, readSource = null, readers = null) {
   const reading = enclosingConstruct(side, index);
   const verdict = reading.construct === null ? 'fires' : (T2_CONSTRUCT_VERDICTS[reading.construct] ?? 'fires');
   if (verdict !== 'fires') return { ...reading, verdict };
@@ -3075,10 +3077,13 @@ export function t2MemberVerdict(side, index, readSource = null) {
     !reading.exported &&
     typeof readSource === 'function'
   ) {
-    const source = readSource();
-    if (typeof source === 'string' && refusalOnlyReaders(source, reading.binding).narrowing) {
-      return { ...reading, verdict: 'narrowing' };
+    let narrows = readers instanceof Map ? readers.get(reading.binding) : undefined;
+    if (narrows === undefined) {
+      const source = readSource();
+      narrows = typeof source === 'string' && refusalOnlyReaders(source, reading.binding).narrowing;
+      if (readers instanceof Map) readers.set(reading.binding, narrows);
     }
+    if (narrows) return { ...reading, verdict: 'narrowing' };
   }
   return { ...reading, verdict: 'fires' };
 }
@@ -4484,6 +4489,7 @@ export function tellsInFile(
     if (headSource === undefined) headSource = typeof readSource === 'function' ? readSource(file) : null;
     return headSource;
   };
+  const readersByBinding = new Map();
   // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
   // ledger table and nowhere else: the same string added to any other file on
   // any other surface still tells, with its own file:line.
@@ -4568,7 +4574,7 @@ export function tellsInFile(
     // #17955's reason: a line that is no member must neither FIRE nor SPEND a
     // unit a real member in the same block is owed. `narrowing` is decided at
     // the row, below — a member it is, of a set that loses a value.
-    const member = kind === 'T2' ? t2MemberVerdict(newFile, newAt.get(i), headSourceOnce) : null;
+    const member = kind === 'T2' ? t2MemberVerdict(newFile, newAt.get(i), headSourceOnce, readersByBinding) : null;
     if (member?.verdict === 'silent') continue;
     // #17955 — a `retiredKey()` tombstone DECLARES a key unwritable. It is read
     // BEFORE the budget, and that ordering is the whole repair rather than a
@@ -5614,6 +5620,12 @@ export function selfTest() {
     return v.state === 'clean' && exitForRefusal(v) === EXIT_OK && v.narrowing.length === 1 && v.narrowing[0]?.binding === 'SINGLE_SERIES_TYPES' && narrowingLines(v.narrowing).some((l) => l.includes(`${CONSTRUCT_FILE}:4`));
   })());
   t('⛔ …while an empty list prints NOTHING — a heading with no rows would read as a finding', narrowingLines([]).length === 0 && narrowingLines(null).length === 0);
+  t('a set gaining THREE members reads its head blob ONCE, and all three read as narrowing', (() => {
+    let reads = 0;
+    const narrowing = [];
+    const rows = tellsInFile({ filename: CONSTRUCT_FILE, status: 'modified', patch: "@@ -1,2 +1,5 @@\n const SINGLE_SERIES_TYPES = [\n+  'pie',\n+  'donut',\n+  'sankey',\n ] as const satisfies readonly ChartType[];" }, { readSource: () => { reads += 1; return DENY_SET_SOURCE; }, narrowing });
+    return reads === 1 && rows.length === 0 && narrowing.length === 3;
+  })());
 
   // -- #16822: the accidental variables ------------------------------------
   //
