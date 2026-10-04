@@ -5063,13 +5063,13 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 4,
     text:
       'Finally, it removes the `objects["*"].allowExport` grant from the shipped admin '
-      + 'permission sets (#8681) — `admin_full_access`, `organization_admin` and the derived '
+      + 'permission sets — `admin_full_access`, `organization_admin` and the derived '
       + '`organization_admin_no_bypass`. Measured on 17.0.0 GA, that wildcard made the '
       + 'export axis undeniable for an org admin: an application could declare an object '
       + 'exportable by nobody and the platform exported it anyway, with no supported opt-out, '
       + 'because a code-package set cannot be edited (`403 [not_overridable]`) and the admin '
       + 'held no app-authored set in which to write the per-object `false` that would have '
-      + 'won. It is #5491 (`member_default`\'s CRUD wildcard) applied to the export axis, '
+      + 'won. It is the earlier removal of `member_default`\'s CRUD wildcard applied to the export axis, '
       + 'which had kept its wildcard by omission rather than by decision. From 18 an admin '
       + 'exports exactly what an app-authored set grants — a posture the same run measured '
       + 'to be already precise. Unlike everything else in this step it changes no schema, so '
@@ -5123,7 +5123,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 31,
     text:
       'Finally, it removes `aria` from the chart config (ADR-0049 enforce-or-remove; maintainer '
-      + 'decision batch #118 item 2, 2026-09-12 — recommendation C, judge the protocol wrong for '
+      + 'decision of 2026-09-12 — judge the protocol wrong for '
       + 'this one key). It is the last member of the `aria` family retired for the same measured '
       + 'reason as `dashboard.aria` and `dashboard.widgets[].aria` before it: an ARIA block an '
       + 'author can declare and nothing lowers to the DOM. It survived those two sweeps by depth — '
@@ -5147,7 +5147,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 23,
     text:
       'It also retires the fourteen hour/minute/day-shaped deadline keys of the '
-      + 'incident-response, training and change-management families (#14477, ADR-0049 '
+      + 'incident-response, training and change-management families (ADR-0049 '
       + 'enforce-or-remove; maintainer ruling 2026-09-02): six on the incident-response '
       + 'schemas, five on the training schemas and three nested in the change-management '
       + 'schemas, every one on the published surface and read by nothing — the schemas are '
@@ -5156,7 +5156,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'fourteen are retiredKey tombstones (the schemas are not strict; a bare deletion '
       + 'would be a silent strip) with no D2 conversion, for the additionalTypes reason: '
       + 'none of these schemas is a stack collection member, so the chain has no seam. '
-      + 'It then retires those three compliance-shaped families WHOLE (#15513, ADR-0049 '
+      + 'It then retires those three compliance-shaped families WHOLE (ADR-0049 '
       + 'enforce-or-remove; maintainer ruling 2026-09-05, ruled A, not roadmapped): the nineteen '
       + 'defs of `system/incident-response.zod.ts`, `system/training.zod.ts` and '
       + '`system/change-management.zod.ts` — roughly a hundred declared keys, exported from '
@@ -5168,7 +5168,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'capability claims such as `notifyRegulators`, `requirePostIncidentReview`, '
       + '`trackCompletion` and `approval.required` were the sharpest declared-≠-enforced shape '
       + 'left: an author writing `notifyRegulators: true` held a compliance promise the platform '
-      + 'never kept. And it resolves the branch the #14477 ruling held open — no roadmapped '
+      + 'never kept. And it resolves the branch the deadline-key ruling held open — no roadmapped '
       + 'e-signature consumer — so `ESignatureConfig.expirationDays` / `reminderDays` '
       + '(`data/document.zod.ts`, defaults 30 / 7 days, read by nothing) are retiredKey '
       + 'tombstones with no D2 conversion (`document` is no stack collection member), '
@@ -5296,8 +5296,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'cron-positions-deleted',
     order: 26,
     text:
-      'It also retires the seven cron-typed positions nothing evaluated (#16320, the #15954 '
-      + 'ruling — option A per family, ADR-0049): the two export-schedule crons, '
+      'It also retires the seven cron-typed positions nothing evaluated (ADR-0049; the 2026-09-06 '
+      + 'ruling retired each family rather than marking it experimental): the two export-schedule crons, '
       + '`ScheduleState.cronExpression`, `DataSyncConfig.schedule`, `CacheWarmup.schedule` and '
       + 'the two disaster-recovery crons were parsed into the cron envelope and read by nothing '
       + '(the D7 ledger row `cron-declared-unwired`). All seven are DELETED OUTRIGHT — no '
@@ -5305,7 +5305,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'semantic entry — so this step replays nothing for them and `migrate meta` lists no '
       + 'edit: the keys simply stop existing. That the chain is silent does NOT make the '
       + 'deletion silent to an author: the PARSE strips (no schema here is `.strict()`), but '
-      + 'above it `lintUnknownAuthoringKeys` (#3786) names the dropped key for the one '
+      + 'above it `lintUnknownAuthoringKeys` names the dropped key for the one '
       + 'position a stack manifest reaches — `os validate` and `os build` both print '
       + '`connectors.<name>.syncConfig.schedule: \'schedule\' is not a declared connector '
       + 'key, so its value is dropped at load.`, and `os validate --strict` EXITS 1 on that '
@@ -5367,13 +5367,14 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'cube-metric-filters-retired',
     order: 10,
     text:
-      'It also retires `measures.<metric>.filters` on analytics cubes (#10414, ADR-0049 '
+      'It also retires `measures.<metric>.filters` on analytics cubes (ADR-0049 '
       + 'enforce-or-remove): a declared per-metric raw-SQL filter with zero consumers — both '
       + 'SQL strategies aggregate the metric\'s `sql` and never read `filters`, so a '
       + 'hand-authored `filters: [{ sql: "stage = \'closed_won\'" }]` parsed, registered, and '
       + 'silently returned the UNFILTERED aggregate under the author\'s metric name (the '
-      + '#10298 dataset shape for a hand-authored cube; the dataset half was repaired through '
-      + 'its own structured channel in #10411). The raw-SQL fragment also ran against the '
+      + 'same defect the dataset path had, on a hand-authored cube; the dataset half was repaired '
+      + 'through its own structured channel when the analytics strategy began compiling each '
+      + 'dataset measure\'s `filter`). The raw-SQL fragment also ran against the '
       + 'platform\'s structured-FilterCondition direction — it cannot be parameterized, '
       + 're-targeted per driver dialect, or walked by the lint filter rules. The mechanical '
       + 'conversion strips the key from old sources (pure lossless delete — it never had an '
@@ -5398,7 +5399,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'currency-config-precision-retired',
     order: 41,
     text:
-      'It also removes `currencyConfig.precision` (#19992, ADR-0049 enforce-or-remove): '
+      'It also removes `currencyConfig.precision` (ADR-0049 enforce-or-remove): '
       + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
       + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
       + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
@@ -5412,7 +5413,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 32,
     text:
       'It also states, and enforces, who owns a dataset-bound chart\'s STRUCTURE '
-      + '(ADR-0021; maintainer ruling 2026-09-12, decision batch #121 item 1): the dataset '
+      + '(ADR-0021; maintainer ruling 2026-09-12): the dataset '
       + 'decides which series exist and which column each one reads, `chartConfig` carries '
       + 'appearance, and `dashboard.widgets[].chartConfig`\'s `type`, `xAxis`, `yAxis` and '
       + '`series` are refused by name on that carrier — the widget\'s own `type` is the chart '
@@ -5448,13 +5449,13 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 24,
     text:
       'Finally, it moves the unit of every duration-shaped `z.number()` key whose unit lived '
-      + 'only in its description into the key name (#14478, maintainer ruling 2026-09-02, '
+      + 'only in its description into the key name (maintainer ruling 2026-09-02, '
       + 'no grandfathered baseline): `hook.timeout` and `job.timeout` become `timeoutMs` '
       + '(mechanical rename, retired from the load path), and the five keys with no stack '
       + 'seam — `MetadataManagerConfig.cache.ttl` / `cache.databaseLoader.ttl` (seconds and '
       + 'milliseconds fourteen lines apart under one name), `DriverOptions.timeout`, and the '
       + 'tenant `connectionPool.idleTimeout` / `accessControl.sessionTimeout` whose unit the '
-      + 'reference pages never published (#14519) — are retiredKey tombstones with a '
+      + 'reference pages never published — are retiredKey tombstones with a '
       + 'semantic entry each, naming the suffixed key. The `data`, `ui`, `ai` and '
       + '`integration` remainder closes the same sweep: `dashboard.refreshInterval` → '
       + '`refreshIntervalSeconds`, the connector pair `health.circuitBreaker.monitoringWindow` '
@@ -5476,8 +5477,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'element-filter-retired',
     order: 7,
     text:
-      'Finally, it retires the whole `element:filter` element (#9220, ADR-0049 '
-      + 'enforce-or-remove at ELEMENT grain — the wider finding #9198 recorded and left for '
+      'Finally, it retires the whole `element:filter` element (ADR-0049 '
+      + 'enforce-or-remove at ELEMENT grain — the wider finding that the `targetVariable` '
+      + 'retirement recorded and left for '
       + 'its own card): no renderer for the element ever shipped in any repo — objectui '
       + 'registers none, Studio\'s designer palette lists it as a no-renderer exclusion, and '
       + 'the 2026-06 page-liveness audit recorded it rendering "Unknown component type" — so '
@@ -5492,8 +5494,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'element-form-retired',
     order: 8,
     text:
-      'It also retires the whole `element:form` element (#9249, ADR-0049 enforce-or-remove '
-      + 'at ELEMENT grain — the #9220 shape one element over, recorded by that card\'s own '
+      'It also retires the whole `element:form` element (ADR-0049 enforce-or-remove '
+      + 'at ELEMENT grain — the `element:filter` shape one element over, recorded by that retirement\'s own '
       + 'verdict sweep): no renderer for the element ever shipped in any repo — objectui '
       + 'registers none, Studio\'s designer palette lists it as a no-renderer exclusion '
       + 'naming the live replacement, and the 2026-06 page-liveness audit recorded it '
@@ -5502,7 +5504,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'conversion strips them from old sources (pure lossless deletes) and leaves the bare '
       + 'node, which the parse then refuses by name — delete the component. '
       + 'Use the object-bound `object-form` block instead '
-      + '(#7751) — rendered, designer-publishable, and carrying the same intent '
+      + '— rendered, designer-publishable, its props declared for the component-props gate, and '
+      + 'carrying the same intent '
       + '(`objectName`, `fields`, `mode`, `submitText`).',
   },
   {
@@ -5510,7 +5513,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 6,
     text:
       'It also retires `targetVariable` on `element:text_input` and '
-      + '`element:record_picker` (#9198, ADR-0049 enforce-or-remove): a declarative hint '
+      + '`element:record_picker` (ADR-0049 enforce-or-remove): a declarative hint '
       + 'with zero readers in any repo — the live binding runs the other direction, '
       + 'resolved from the page variable whose `source` names the component\'s `id` '
       + '(PageVariableSchema) — so an author who wrote only `targetVariable` got an input '
@@ -5522,7 +5525,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'element-text-variant-heading-subheading-retired',
     order: 68,
     text:
-      'It also completes the `element:text` `variant` convergence (#21015, the second release of '
+      'It also completes the `element:text` `variant` convergence (the second release of '
       + 'the ruled two-release split): the enum is the nine values `ui:text` publishes — `h1`-`h6`, '
       + '`body`, `caption`, `overline` — and the pre-convergence spellings `heading` and `subheading`, '
       + 'which every release since the nine were added still accepted, are refused by name with a '
@@ -5535,9 +5538,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'field-inline-and-related-list-columns-closed',
     order: 9,
     text:
-      'It also closes the two explicit column lists on relationship fields (#9227): '
+      'It also closes the two explicit column lists on relationship fields: '
       + '`field.inlineColumns` entries are now the strict, name-keyed InlineGridColumnSchema '
-      + '(mirroring the objectui grid renderer\'s measured reads — objectui#3951 aligned the '
+      + '(mirroring the objectui grid renderer\'s measured reads — objectui aligned the '
       + 'widget to `name` and retired the `field` spelling with no tolerant alias), and '
       + '`field.relatedListColumns` entries are child field-name strings (the only form the '
       + 'related-list renderer hydrates fully). Both were z.array(z.any()) — a mis-keyed '
@@ -5551,11 +5554,12 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 21,
     text:
       'Finally, it canonicalizes the legacy objectql field-key dialect `reference_to` → '
-      + '`reference` on lookup/master_detail fields (#13700, ui#6837 half 1). `FieldSchema` '
+      + '`reference` on lookup/master_detail fields (the server half of the maintainer\'s 2026-08-31 '
+      + 'ruling that the server normalizes the protocol and the renderer only executes it). `FieldSchema` '
       + 'has always refused `reference_to` by name, but stored `sys_metadata` rows written by '
       + 'seams that bypass the parse still carry it, held up today only by objectui\'s '
-      + '`reference ?? reference_to` fallback arms — which ui#6837 half 2 deletes. The '
-      + 'mechanical conversion renames the key (house #4923 precedence: a canonical '
+      + '`reference ?? reference_to` fallback arms — which the ruling\'s objectui half deletes. The '
+      + 'mechanical conversion renames the key (the house precedence for a shadowed alias: a canonical '
       + '`reference` wins, a disagreeing pair is kept for the author), replays on every '
       + 'stored-row rehydration so the serve face only ever emits the canonical spelling, '
       + 'and `os migrate meta` rewrites old sources; the authoring-surface rejection with '
@@ -5566,9 +5570,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 3,
     text:
       'It also refuses malformed field `scale`/'
-      + '`precision` declarations (#8321): both are digit counts, so a non-integer or '
-      + 'negative value (`scale: 2.5`, `precision: -1`) has no defined meaning — #7501\'s '
-      + 'write-time enforcement deliberately left it unenforced rather than invent '
+      + '`precision` declarations: both are digit counts, so a non-integer or '
+      + 'negative value (`scale: 2.5`, `precision: -1`) has no defined meaning — the write-time '
+      + '`scale` check, which refuses an over-scale value rather than rounding it, deliberately '
+      + 'left it unenforced rather than invent '
       + 'floor/round semantics, which made the declaration silently inert. The schema now '
       + 'refuses both at parse (`z.number().int().min(0)`); the mechanical conversion '
       + 'deletes a malformed value from old sources and stored rows (behaviour-preserving), '
@@ -5578,7 +5583,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'flow-decision-edge-branching-first-match',
     order: 45,
     text:
-      'Finally it makes edge-branched `decision` nodes EXCLUSIVE (#15429, maintainer ruling '
+      'Finally it makes edge-branched `decision` nodes EXCLUSIVE (maintainer ruling 2026-09-23, '
       + '「跟主流对齐」): the first conditioned out-edge that holds, in declaration order, is the '
       + 'branch, and taking every true branch is the declared `mode: \'inclusive\'`. The D2 '
       + 'conversion `flow-decision-mode-inclusive-explicit` writes that key onto every decision '
@@ -5678,7 +5683,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'list-view-page-mount-retired',
     order: 27,
     text:
-      'It also retires the `type: \'page\'` LIST-VIEW mount and its `pageName` binding (#17063, '
+      'It also retires the `type: \'page\'` LIST-VIEW mount and its `pageName` binding ('
       + 'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09 「撤」). The member was added so a '
       + 'view could render nothing of its own and delegate to an already-published page, but only '
       + 'the spec half landed: no renderer ever routed it — objectui\'s list-view switch shares its '
@@ -5696,9 +5701,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'list-view-sort-string-clause-retired',
     order: 29,
     text:
-      'It also retires the bare STRING `sort` clause on the list-view doors (#17053; objectui#8221 '
-      + 'decision batch #77, 2026-09-07 — option B, one spelling, the array). This is the PRODUCER '
-      + 'half of the seam whose consumer half is objectui PR #8758: `convertSortToQueryParams` now '
+      'It also retires the bare STRING `sort` clause on the list-view doors (ruled 2026-09-07: the legacy '
+      + 'string clause is retired, one spelling, the array). This is the PRODUCER '
+      + 'half of the seam whose consumer half shipped in objectui first: `convertSortToQueryParams` now '
       + 'refuses a runtime string, so `ListViewSchema.sort` was minting documents its own consumer '
       + 'rejects — a document that validated upstream failed downstream, and the author was told off '
       + 'by the wrong layer. Like the `type` value above it is a VALUE narrowing with no tombstone to '
@@ -5784,8 +5789,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 25,
     text:
       'It also retires the three outer keys of `MetadataManagerConfig.cache` — `enabled`, '
-      + '`ttlSeconds` (the #14478 respelling of `ttl`, never shipped) and `maxSize` — that the '
-      + 'rename above surfaced (#15624, ADR-0049 enforce-or-remove): declared, defaulted and '
+      + '`ttlSeconds` (the duration rename\'s respelling of `ttl`, never shipped) and `maxSize` — that the '
+      + 'rename above surfaced (ADR-0049 enforce-or-remove): declared, defaulted and '
       + 'published, read by nothing — `MetadataManager` hands only `cache.databaseLoader` to the '
       + 'loader — so `cache: { enabled: false }` switched nothing off. All three are retiredKey '
       + 'tombstones registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry and no D2 '
@@ -5796,7 +5801,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'metadata-plugin-additional-types-retired',
     order: 2,
     text:
-      'It also retires `MetadataPluginConfig.additionalTypes` (#8586, '
+      'It also retires `MetadataPluginConfig.additionalTypes` ('
       + 'ADR-0049 enforce-or-remove): the key was documented as THE plugin '
       + 'kind-declaration channel and read by nothing — the manager\'s type registry is '
       + 'seeded once from `DEFAULT_METADATA_TYPE_REGISTRY` and never merged with it, so '
@@ -5807,9 +5812,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-grid-default-sort-retired',
     order: 17,
     text:
-      'Finally, it retires `object-grid`\'s `defaultSort` (#11805, ADR-0049 enforce-or-remove; '
+      'Finally, it retires `object-grid`\'s `defaultSort` (ADR-0049 enforce-or-remove; '
       + 'maintainer ruling 2026-08-25, decision-inbox batch 4 — the producer half of '
-      + 'objectui#5861, under the objectui#4869 「接受所有」 direction): the legacy second '
+      + 'objectui\'s `table.defaultSort` retirement, which the maintainer\'s 2026-08-22 「接受所有」 ruling '
+      + 'on objectui\'s sort sink ordered): the legacy second '
       + 'spelling of `sort`, a single `{ field, order }` pair the renderer read only when '
       + '`sort` was absent (measured at the `.objectui-sha` pin `190fbd01d`, '
       + '`plugin-grid/src/ObjectGrid.tsx:1244-1246` and `:2847`, which wraps it '
@@ -5824,8 +5830,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-grid-resizable-columns-retired',
     order: 62,
     text:
-      'It also retires `object-grid`\'s `resizableColumns` (#21445, ADR-0049 enforce-or-remove; '
-      + 'objectui#6152 ruling A, `resizable` is canonical, under the startup rule of immediate '
+      'It also retires `object-grid`\'s `resizableColumns` (ADR-0049 enforce-or-remove; '
+      + 'objectui\'s ruling that `resizable` is canonical, under the startup rule of immediate '
       + 'retirement): the legacy second spelling of `resizable`, read only as '
       + '`schema.resizable ?? schema.resizableColumns` (measured at the '
       + '`.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`). One switch, two '
@@ -5840,9 +5846,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-kanban-quick-add-retired',
     order: 28,
     text:
-      'It also retires `object-kanban`\'s `quickAdd` (#17260, ADR-0049 enforce-or-remove; the spec '
-      + 'half of the objectui#8285 director-seat ruling, decision batch #91, 2026-09-08 — ruled '
-      + 'option B). The board FORWARDED the key into the shared renderer but the affordance is gated '
+      'It also retires `object-kanban`\'s `quickAdd` (ADR-0049 enforce-or-remove; the spec '
+      + 'half of the director-seat ruling of 2026-09-08 that the board grows no inline record-creation '
+      + 'path and retires the key). The board FORWARDED the key into the shared renderer but the '
+      + 'affordance is gated '
       + 'on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied FUNCTION JSON '
       + 'cannot carry and no producer puts on an `object-kanban` node — so the gate was permanently '
       + 'false. The drop was NOT silent, and that is what made it worse than silence: objectui\'s '
@@ -5856,8 +5863,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-master-detail-form-detail-sort-field-retired',
     order: 70,
     text:
-      'It also retires an `object-master-detail-form` detail entry\'s `sortField` (#21589, ADR-0049 '
-      + 'enforce-or-remove; the spec half of objectui#11070 round 9). The console stopped reading the '
+      'It also retires an `object-master-detail-form` detail entry\'s `sortField` (ADR-0049 '
+      + 'enforce-or-remove; the spec half of objectui\'s own retirement of the override). The console '
+      + 'stopped reading the '
       + 'authored override: the field its line grid stamps with each line\'s position on '
       + 'drag-reorder is derived from the child object — its first field named `position`, '
       + '`sort_order`, `sequence`, `line_no`, `line_number` or `sort` — and the pinned console had '
@@ -5872,7 +5880,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-tenancy-organization-field-retired',
     order: 34,
     text:
-      'Finally it retires object `tenancy.organizationField` (#19054, ADR-0049 '
+      'Finally it retires object `tenancy.organizationField` (ADR-0049 '
       + 'enforce-or-remove). The key named the column a PLATFORM ROW is stamped from, as '
       + 'opposed to the column the object is WALLED by (`tenantField`); on an ordinary object '
       + 'those are the same column, and the entire protocol declared it exactly once — on '
@@ -5911,8 +5919,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'page-component-filter-record-to-rule-array',
     order: 36,
     text:
-      'Finally it gives the one-filter-orthography convergence (objectui#6206) its '
-      + 'mechanical half at rest (#17321, ruling B): the D2 conversion '
+      'Finally it gives the one-filter-orthography convergence (ruled 2026-08-25: one filter '
+      + 'spelling platform-wide, the rule array) its '
+      + 'mechanical half at rest (ruled 2026-09-12): the D2 conversion '
       + '`page-component-filter-record-to-rule-array` rewrites a record-form or single-level '
       + 'AST `filter` at the converged rule-array doors — `dataSource.filter`, the '
       + '`object-*` / `element:number` / `element:record_picker` `filter` props and '
@@ -5927,8 +5936,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 15,
     text:
       'Finally, it retires `page.components[].responsive` and the whole `ResponsiveConfig` '
-      + 'layout vocabulary it carried (#11027, ADR-0049 D2; maintainer ruling 2026-08-22): the '
-      + 'key was the destination the `dashboard.widgets[].responsive` tombstone (#4876) '
+      + 'layout vocabulary it carried (ADR-0049 D2; maintainer ruling 2026-08-22): the '
+      + 'key was the destination the `dashboard.widgets[].responsive` tombstone '
       + 'prescribed as the live alternative, and a two-repo measurement (tsc-probe methodology '
       + 'with positive and negative controls) found the claim false — objectui\'s two '
       + 'implementations of the contract (`useResponsiveConfig`, `ResponsiveProtocol`) had zero '
@@ -5975,10 +5984,11 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 18,
     text:
       'Finally, it retires the object-permission lifecycle bits `allowRestore` and '
-      + '`allowPurge` (#12497, ADR-0049 enforce-or-remove; maintainer ruling 2026-08-26, '
-      + 'decision-inbox batch 5, accepting #1883\'s recommendation B): the `restore` / '
+      + '`allowPurge` (ADR-0049 enforce-or-remove; maintainer ruling 2026-08-26, '
+      + 'decision-inbox batch 5, which chose retiring the two bits over gating operations that do '
+      + 'not exist): the `restore` / '
       + '`purge` ObjectQL operations the bits claimed to gate have never existed — no '
-      + 'destructive lifecycle verb is in the engine\'s dispatch vocabulary (#8106 pin) — '
+      + 'destructive lifecycle verb is in the engine\'s dispatch vocabulary, which a test pins — '
       + 'so granting the bits delivered nothing, and an author who declared '
       + '`allowPurge: false` believed a lock on GDPR hard-deletion existed when the '
       + 'operation itself did not. Both keys are retiredKey tombstones; the evaluator\'s '
@@ -5986,15 +5996,16 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there is no '
       + 'ungated window), and the mechanical conversion strips the keys from every object '
       + 'grant in `permissions[].objects` (pure lossless delete — they never had an '
-      + 'effect to lose). `allowTransfer` is ENFORCED (#3004) and stays. The keys return '
-      + 'with the M2 lifecycle initiative (feature + RBAC in one batch); #1883 stays '
-      + 'open as the anchor.',
+      + 'effect to lose). `allowTransfer` is ENFORCED — the server guards who may rewrite a record\'s '
+      + 'owner — and stays. The keys return '
+      + 'with the M2 lifecycle initiative (feature + RBAC in one batch), which stays open as their '
+      + 'anchor.',
   },
   {
     id: 'permission-rls-tags-retired',
     order: 42,
     text:
-      'It also retires the RLS policy\'s `tags` (#20321, ADR-0049 enforce-or-remove; graded '
+      'It also retires the RLS policy\'s `tags` (ADR-0049 enforce-or-remove; graded '
       + 'RETIRE by the maintainer\'s criterion — no mainstream platform tags a row-level policy): '
       + 'the key promised categorization and reporting for governance and compliance, and nothing '
       + 'ever read it — the RLS compiler never consulted it and no preview rendered it. It is a '
@@ -6040,7 +6051,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 5,
     text:
       'Finally, it converges `record:chatter` / `record:discussion` `position` on the '
-      + 'renderer\'s vocabulary (#8762, maintainer ruling 2026-08-15): the schema declared '
+      + 'renderer\'s vocabulary (maintainer ruling 2026-08-15): the schema declared '
       + '`sidebar`/`inline`/`drawer` — values no renderer branch ever compared, so the '
       + 'schema\'s own `sidebar` default silently rendered in flow while the value that '
       + 'actually docks the panel (`right`) was refused at publish. The row now speaks '
@@ -6053,17 +6064,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'record-highlights-field-icon-retired',
     order: 12,
     text:
-      'It also retires the `record:highlights` highlight-field `icon` (#10054, ADR-0049 '
+      'It also retires the `record:highlights` highlight-field `icon` (ADR-0049 '
       + 'enforce-or-remove; maintainer ruling 2026-08-21, executing the 2026-08-20 census '
       + 'verdict): a declared key with zero read points in any direction — objectui\'s renderer '
       + 'normalized the authored object and carried `icon` into a highlight chip with no icon '
       + 'slot, `useRegisterHighlightFields` registers field NAMES only (structurally unable to '
       + 'carry it), and the Studio designer publishes the field list as plain strings — while '
-      + 'six author-facing surfaces advertised the key (the #8691 reference-rail-`icon` shape, '
+      + 'six author-facing surfaces advertised the key (the shape that got the reference-rail `icon` refused, '
       + 'on the highlight chip). The mechanical conversion strips the key from the object '
       + 'entries of every `record:highlights` `fields[]` (pure lossless delete — the chip '
       + 'renders label and value only, so it never had an effect to lose); there is no '
-      + 'replacement, and the live neighbour `readonly` (#5176) is untouched.',
+      + 'replacement, and the live neighbour `readonly`, declared because the chip\'s read-only gate '
+      + 'reads it, is untouched.',
   },
   {
     id: 'stack-themes-carrier-retired',
@@ -6115,8 +6127,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'translation-per-app-settings-platform-only',
     order: 33,
     text:
-      'Finally, it splits the translation bundle type in two (#15178, ruling batch #132 item 2 '
-      + 'letter ②): the platform bundle keeps all eleven groups and the per-app bundle '
+      'Finally, it splits the translation bundle type in two (maintainer ruling 2026-09-13: settings '
+      + 'copy belongs to the platform): the platform bundle keeps all eleven groups and the per-app bundle '
       + '(`stack.translations`, `defineTranslationBundle`) no longer declares `settings`, which is '
       + 'keyed by `SettingsManifest.namespace` and only platform code declares a manifest. Both '
       + 'bundles load into ONE served tree, so an app-authored `settings` branch did not sit inert — '
@@ -6124,8 +6136,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '(Phase 2) and the platform’s at `kernel:ready` (Phase 3), and `deepMerge` gives the later '
       + 'source the leaf, so what an application had was a GAP FILLER on a namespace it does not own '
       + '— rendering only where the platform bundle carried no string for that key and locale. The '
-      + 'registered `translation` ITEM follows the file door (#19620, ruling batch #210 item 2 letter '
-      + 'B: one app metadata type, two authoring doors, one accepted shape) and no longer declares '
+      + 'registered `translation` ITEM follows the file door (maintainer ruling 2026-09-22: one app '
+      + 'metadata type, two authoring doors, one accepted shape) and no longer declares '
       + '`settings` either; there the group had been STRONGER, because the runtime-authored layer is '
       + 'read over the shipped bundles, so a stored item overrode the platform’s own copy. The D2 '
       + 'conversion strips the group from per-app bundle entries and from bare items alike — the '
@@ -6138,8 +6150,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'translation-widget-sub-caption-retired',
     order: 60,
     text:
-      'It also retires the metric sub-caption at both ends (#21257; ruling C on objectui#11389, '
-      + 'which reverses #5428 item 4; ADR-0049). The widget translation key '
+      'It also retires the metric sub-caption at both ends (maintainer ruling 2026-10-01, which reverses '
+      + 'the 2026-08-06 ruling that gave it a translation key of its own; ADR-0049). The widget '
+      + 'translation key '
       + '`dashboards.<name>.widgets.<id>.subCaption` overlaid a widget\'s `options.description`, a key '
       + 'the dashboard schema never declared and no authored widget wrote, so the overlay in '
       + '`translateDashboard` was its only writer. The overlay is removed, `subCaption` is a '
@@ -6156,7 +6169,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-ai-chat-window-retired',
     order: 65,
     text:
-      'It also retires the `ai:chat_window` page element (#21504, ADR-0049 enforce-or-remove), '
+      'It also retires the `ai:chat_window` page element (ADR-0049 enforce-or-remove), '
       + 'the `user:profile` shape one namespace over: no renderer for it ever shipped, and none is '
       + 'wanted — the console leaves it unregistered on purpose, because the floating chat overlay '
       + 'it mounts on every page is the supported AI chat entry point — so a page that placed one '
@@ -6173,11 +6186,12 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'It also narrows form `layout` to `vertical` | `horizontal` on both surfaces that '
       + 'declared the four-arm enum — the `object-form` page component and the form view '
-      + '(#20221, ADR-0049 enforce-or-remove). No renderer ever gave `inline` or `grid` a '
+      + '(ADR-0049 enforce-or-remove). No renderer ever gave `inline` or `grid` a '
       + 'behaviour of its own: every form presentation folded both to `vertical`, multi-column '
       + 'is `columns` (honoured under either layout), and `inline` is a toolbar / filter-row '
-      + 'pattern rather than a record-form layout — redundant vocabulary under the #18900 family '
-      + 'criterion, retired with no alias window. Both enums refuse the two values with a '
+      + 'pattern rather than a record-form layout — redundant vocabulary under the maintainer\'s family '
+      + 'criterion (a capability mainstream platforms have is served once, here by `columns`), retired '
+      + 'with no alias window. Both enums refuse the two values with a '
       + 'per-value prescription naming `columns`; the D2 conversion '
       + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
       + '`columns` untouched) on `object-form` page components, on every form payload a view '
@@ -6187,7 +6201,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-form-members-typed',
     order: 67,
     text:
-      'It also types four members of the `object-form` page block (#21464, the third stage of the '
+      'It also types four members of the `object-form` page block (the third stage of the '
       + '`ComponentPropsMap` `z.unknown()` close-out): `contentLayout`, `submitBehavior`, '
       + '`navigateOnSuccess` and `mobile` were `z.unknown()`, although the form reads each with one shape, '
       + 'so a `submitBehavior` `kind` the form does not know passed every door and fell through to the '
@@ -6203,7 +6217,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-grid-columns-typed',
     order: 73,
     text:
-      'It also types the `object-grid` page block\'s `columns` (#21464, the fifth stage of the '
+      'It also types the `object-grid` page block\'s `columns` (the fifth stage of the '
       + '`ComponentPropsMap` `z.unknown()` close-out), the list member the second stage held: the grid\'s '
       + 'group headers drew a column\'s `options`, which the list view\'s column entry does not declare, and '
       + 'objectui has since retired that read and takes the labels from the object field only. So the member '
@@ -6217,7 +6231,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-grid-export-options-closed',
     order: 59,
     text:
-      'It also closes the export options of an `object-grid` page block (#21229). `exportOptions` '
+      'It also closes the export options of an `object-grid` page block. `exportOptions` '
       + 'was `z.unknown()`, so a bare format array — the list view\'s legacy spelling, which the list '
       + 'view lifts to `{ formats }` — was accepted on the grid, whose renderer reads '
       + '`exportOptions.formats` and lifts nothing: the export menu offered its csv/json default and '
@@ -6235,7 +6249,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 66,
     text:
       'It also types eight list members of the `object-grid`, `object-kanban` and `object-calendar` page '
-      + 'blocks (#21464, the second stage of the `ComponentPropsMap` `z.unknown()` close-out): the grid\'s '
+      + 'blocks (the second stage of the `ComponentPropsMap` `z.unknown()` close-out): the grid\'s '
       + '`fields`, `selection`, `selectable`, `rowActions`, `bulkActions` and `batchActions`, the kanban\'s '
       + '`columns` and the calendar\'s `calendar` were `z.unknown()` (an array of it for the lists), although '
       + 'each renderer reads them with one shape, so a `{ name }` entry in `bulkActions` passed every door '
@@ -6251,7 +6265,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-grid-row-members-typed',
     order: 63,
     text:
-      'It also types seven members of an `object-grid` page block (#21445): `rowHeight`, '
+      'It also types seven members of an `object-grid` page block: `rowHeight`, '
       + '`rowColor`, `navigation`, `conditionalFormatting`, `bulkActionDefs`, `aggregations` and '
       + '`operations` were `z.unknown()` (an array of it for `bulkActionDefs`), although the grid '
       + 'reads each with one shape, so `rowHeight: 42` passed every door and rendered as `compact`. '
@@ -6267,7 +6281,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 64,
     text:
       'It also types `navigation` on the `object-map`, `object-gantt` and `object-tree` page blocks '
-      + '(#21464, the first stage of the `ComponentPropsMap` `z.unknown()` close-out): each renderer '
+      + '(the first stage of the `ComponentPropsMap` `z.unknown()` close-out): each renderer '
       + 'hands it to the shared navigation hook, which reads `navigation.mode` and falls back to `page`, '
       + 'so `navigation: 42` and a bare mode string passed every door and opened the record page. The '
       + 'three rows now take the list view\'s `NavigationConfigSchema` by reference, the carrier the grid, '
@@ -6283,7 +6297,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`object-master-detail-form` page block\'s `details` was `z.array(z.unknown())`, so a key '
       + 'its renderer does not read and `scale` on a currency column, which the other two carriers '
       + 'refuse under the maintainer\'s rulings of 2026-09-23 (option B) and 2026-09-24 (option 乙), '
-      + 'went through `objectstack validate` green (#20928). '
+      + 'went through `objectstack validate` green. '
       + 'Each detail entry is now a strict shape of the twelve keys the renderer reads, and its '
       + '`columns` references `InlineGridColumnSchema`. Page-component `properties` is read by the '
       + 'component-props gate, which reports a failing entry or column as an advisory finding, '
@@ -6298,7 +6312,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-metric-aggregate-trend-typed',
     order: 69,
     text:
-      'It also types two members of the `object-metric` page block (#21464, the fourth stage of the '
+      'It also types two members of the `object-metric` page block (the fourth stage of the '
       + '`ComponentPropsMap` `z.unknown()` close-out): `aggregate` and `trend` were `z.unknown()`, although '
       + 'the tile reads each with one shape, so `aggregate: \'count\'` and a trend with no `value` passed '
       + 'every door, and the tile asked the server for a measure it does not have, or painted a lone `%`. '
@@ -6314,7 +6328,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-metric-compare-to-typed',
     order: 71,
     text:
-      'It also types the `object-metric` page block\'s `compareTo` (#21464, the fifth stage of the '
+      'It also types the `object-metric` page block\'s `compareTo` (the fifth stage of the '
       + '`ComponentPropsMap` `z.unknown()` close-out) to the tile\'s read, per the ruling between the '
       + 'reference and the read: `{ kind }`, with `kind` the dashboard widget comparison\'s own vocabulary by '
       + 'reference, and `dimension` refused by name, because this inline tile shifts the date macros in its own '
@@ -6327,7 +6341,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-object-metric-drill-down-typed',
     order: 72,
     text:
-      'It also types the `object-metric` page block\'s `drillDown` to the tile\'s read (#21464, the same '
+      'It also types the `object-metric` page block\'s `drillDown` to the tile\'s read (the same '
       + 'stage and ruling): its five list members — `enabled`, `title`, `target`, `columns`, `maxRows` — are '
       + 'the chart drill-down\'s own by reference, and `filter` and `mode` are refused by name, because a '
       + 'metric tile has no click event for a drill filter to resolve against and no row for `mode` to open; '
@@ -6343,7 +6357,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       'It closes the fourth carrier the same way: `record:line_items` had no `ComponentPropsMap` '
       + 'row — it was the one entry on the string-arm registration ledger — so the component-props '
       + 'gate skipped its props, and the showcase project page\'s five `field`-keyed columns published '
-      + 'green over a grid of empty cells (#21142). The row declares the fifteen keys the renderer '
+      + 'green over a grid of empty cells. The row declares the fifteen keys the renderer '
       + 'reads, requires `relationshipField` and at least one column, and its `columns` references '
       + '`InlineGridColumnSchema`; the showcase columns are respelled `name` in the same change. The '
       + 'panel draws its columns as authored, with no hydration from the child object\'s field, so '
@@ -6354,7 +6368,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-report-joined-chart-retired',
     order: 38,
     text:
-      'It also retires a `joined` report\'s `chart` at both coordinates (#20161, ADR-0049 '
+      'It also retires a `joined` report\'s `chart` at both coordinates (ADR-0049 '
       + 'enforce-or-remove): the joined renderer draws each block as a table and returns before '
       + 'the one container `chart` read, and no renderer reads a block\'s `chart` at all, so a '
       + 'chart on a joined report parsed, passed the chart-bindings lint, and plotted nothing. '
@@ -6370,7 +6384,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'view-item-owner-hidden-retired',
     order: 37,
     text:
-      'It also retires the view item\'s `owner` and `hidden` (#20085, ADR-0049 '
+      'It also retires the view item\'s `owner` and `hidden` (ADR-0049 '
       + 'enforce-or-remove). Both sat on the view-item identity layer, were accepted by the '
       + 'strict authoring door and by the wire member the `view` write door validates, and were '
       + 'stored verbatim — and nothing read either: both switcher read paths filter on '
@@ -6391,8 +6405,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 39,
     text:
       'It retires the view item\'s `owner` / `hidden` pair on the flattened overlay door too '
-      + '(#20230, ADR-0049; triage '
-      + 'direction 「follow #20085\'s disposition for the same key pair」): the lean personalization '
+      + '(ADR-0049; the view item\'s disposition for the same key pair, followed here as triage '
+      + 'directed): the lean personalization '
       + 'PUT with no `config` declared its own `owner` / `hidden`, accepted and stored them, and '
       + 'nothing read either. Both are `retiredKey()` tombstones on the two overlay members with '
       + 'the view item\'s own prescription texts, and the D2 conversion '
