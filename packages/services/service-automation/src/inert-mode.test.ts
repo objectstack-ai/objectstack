@@ -37,8 +37,9 @@ function makeCtx() {
     return { ctx, services, hooks, triggered };
 }
 
-async function boot(options: Record<string, unknown>) {
+async function boot(options: Record<string, unknown>, protocol?: unknown) {
     const h = makeCtx();
+    if (protocol) h.services.set('protocol', protocol);
     const plugin = new AutomationServicePlugin(options as any);
     await plugin.init(h.ctx);
     await plugin.start(h.ctx);
@@ -62,6 +63,13 @@ describe('armRuntime: false — nothing is armed (#4454)', () => {
 
         expect(hooks).not.toContain('kernel:ready');
         expect(hooks).not.toContain('metadata:reloaded');
+    });
+
+    it('subscribes to no metadata mutation, which would register a flow on its next save (#21725)', async () => {
+        const onMetadataMutation = vi.fn(() => () => {});
+        await boot({ armRuntime: false, suspendedRunStore: 'memory' }, { onMetadataMutation });
+
+        expect(onMetadataMutation).not.toHaveBeenCalled();
     });
 
     it('still fires automation:ready — a partial registry would corrupt the guard', async () => {
@@ -115,5 +123,12 @@ describe('the default is unchanged (#4454)', () => {
     it('arms them when armRuntime is explicitly true', async () => {
         const { hooks } = await boot({ armRuntime: true, suspendedRunStore: 'memory' });
         expect(hooks).toContain('kernel:ready');
+    });
+
+    it('subscribes to the metadata mutation signal, once (#21725)', async () => {
+        const onMetadataMutation = vi.fn(() => () => {});
+        await boot({ suspendedRunStore: 'memory' }, { onMetadataMutation });
+
+        expect(onMetadataMutation).toHaveBeenCalledTimes(1);
     });
 });

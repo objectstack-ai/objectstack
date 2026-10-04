@@ -1845,6 +1845,15 @@ export default defineStack({
 });
 ```
 
+A flow authored at runtime through the metadata API follows its stored row
+on the running engine, with no restart. An active save
+(`PUT /api/v1/meta/flow/:name`) or a publish registers the flow, or
+re-registers it over the definition the engine held. A save
+whose `status` is `'obsolete'` or `'invalid'` keeps it registered and
+unbound, as a boot does. A delete unregisters it. A draft save changes
+nothing until it is published. The write answers first, and the
+registration follows it by one read of the stored metadata.
+
 Registration is not arming. A `record_change`, `schedule`, `time_relative` or
 `api` flow fires only when its trigger is installed, and that takes **both**
 capability tokens on the same stack: `requires: ['automation', 'triggers']`.

@@ -314,7 +314,9 @@ describe('MCP resumeRun — (a) a paused screen flow is completed', () => {
         const runId = await startPaused(h);
 
         const refused = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { dueDate: '2026-10-01' } }));
-        expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        // [#21724] The engine's own code. This pin used to name
+        // `VALIDATION_ERROR`, the member the builder derived from the 400.
+        expect(refused).toMatchObject({ code: 'INVALID_SCREEN_INPUT', status: 400 });
         expect(refused.message).toMatch(/required field 'subject'/);
         // Retry with the field: it completes.
         await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Now complete' } });
@@ -450,21 +452,25 @@ describe('MCP resumeRun — (c) an unknown runId', () => {
 });
 
 describe('MCP resumeRun — (d) the engine\'s answers match the REST resume door, door against door', () => {
-    const ROWS: Array<[string, any]> = [
-        ['PERMISSION_DENIED', { success: false, code: 'PERMISSION_DENIED', error: 'only its owning service may resume' }],
-        ['INVALID_SIGNAL', { success: false, code: 'INVALID_SIGNAL', error: 'reserved by the flow engine' }],
-        ['INVALID_SCREEN_INPUT', { success: false, code: 'INVALID_SCREEN_INPUT', error: 'Unknown screen field "nickname"' }],
-        ['RUN_NOT_FOUND', { success: false, code: 'RUN_NOT_FOUND', error: "Suspended node 'collect' no longer exists" }],
-        ['STORE_UNAVAILABLE', { success: false, code: 'STORE_UNAVAILABLE' }],
-        ['RESUME_IN_PROGRESS', { success: false, code: 'RESUME_IN_PROGRESS', error: 'Run is already being resumed' }],
+    // [#21724] The third column is the code BOTH doors must serve. Equality
+    // alone held while both doors served the status-derived member
+    // (`VALIDATION_ERROR` for the two 400s, `RESOURCE_NOT_FOUND` for the 404),
+    // so each row now names the code as well.
+    const ROWS: Array<[string, any, string]> = [
+        ['PERMISSION_DENIED', { success: false, code: 'PERMISSION_DENIED', error: 'only its owning service may resume' }, 'PERMISSION_DENIED'],
+        ['INVALID_SIGNAL', { success: false, code: 'INVALID_SIGNAL', error: 'reserved by the flow engine' }, 'INVALID_SIGNAL'],
+        ['INVALID_SCREEN_INPUT', { success: false, code: 'INVALID_SCREEN_INPUT', error: 'Unknown screen field "nickname"' }, 'INVALID_SCREEN_INPUT'],
+        ['RUN_NOT_FOUND', { success: false, code: 'RUN_NOT_FOUND', error: "Suspended node 'collect' no longer exists" }, 'RUN_NOT_FOUND'],
+        ['STORE_UNAVAILABLE', { success: false, code: 'STORE_UNAVAILABLE' }, 'STORE_UNAVAILABLE'],
+        ['RESUME_IN_PROGRESS', { success: false, code: 'RESUME_IN_PROGRESS', error: 'Run is already being resumed' }, 'RESUME_IN_PROGRESS'],
         ['FLOW_FAILED (stranded)', {
             success: false, error: 'tail blew up', status: 'stranded',
             errorMessage: 'Please contact support', summary: { nodes: [] },
-        }],
-        ['FLOW_FAILED (plain)', { success: false, error: 'node blew up' }],
+        }, 'FLOW_FAILED'],
+        ['FLOW_FAILED (plain)', { success: false, error: 'node blew up' }, 'FLOW_FAILED'],
     ];
 
-    for (const [label, engineResult] of ROWS) {
+    for (const [label, engineResult, code] of ROWS) {
         it(`${label}: same code, status, message and details on both doors`, async () => {
             const h = makeHarness();
             const runId = await startPaused(h);
@@ -475,6 +481,7 @@ describe('MCP resumeRun — (d) the engine\'s answers match the REST resume door
                 `schedule_followup/runs/${runId}/resume`, 'POST', { inputs: { subject: 'x' } }, h.ctxFor('u1'),
             );
             expect(rest.response?.status).toBeGreaterThanOrEqual(400);
+            expect(mcp.code).toBe(code);
             expect(mcp).toEqual({
                 code: rest.response?.body?.error?.code,
                 status: rest.response?.status,

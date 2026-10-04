@@ -2011,13 +2011,21 @@ async function consumedSuspensionSurvives(
 
 /**
  * [#15705] What a resume door serves for a REFUSED or FAILED engine result.
- * `details` is passed to the door's error builder as it is, so a `code` in it
- * is promoted. Without one, the builder derives the code from `status`.
+ * `details` is passed to the door's error builder as it is, so its `code` is
+ * promoted into `error.code`.
+ *
+ * [#21724] `details.code` is REQUIRED, on every exit. The builder derives a
+ * code from the status only when a call site supplies none, and on this door
+ * that derivation is wrong: `400` derives `VALIDATION_ERROR`, `404` derives
+ * `RESOURCE_NOT_FOUND`, so `INVALID_SIGNAL` and `INVALID_SCREEN_INPUT` reached
+ * the wire as one code and `RUN_NOT_FOUND` as the generic one, while the client
+ * JSDoc and the docs promise the engine's own. Requiring the member here makes
+ * an exit that forgets it a compile error instead of a status-derived code.
  */
 export interface ResumeRefusal {
     message: string;
     status: number;
-    details?: Record<string, unknown>;
+    details: { code: string } & Record<string, unknown>;
 }
 
 /**
@@ -2025,8 +2033,14 @@ export interface ResumeRefusal {
  * own `code`. Each row gives the status and the message used when the engine
  * sent none. A `Map`, not an object literal, so an engine code that happens to
  * be spelled like an `Object.prototype` member can never match a row.
+ *
+ * [#21724] The key IS the wire code: {@link classifyResumeResult} serves it in
+ * `details.code`, so it reaches `error.code` verbatim on both doors. A key is
+ * therefore a published code, and `automation-resume-refusal-codes.test.ts`
+ * enumerates this table and requires every key to parse as an `ErrorCode`
+ * (the standard catalog or the ADR-0112 ledger), naming the row that does not.
  */
-const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback: string }> = new Map([
+export const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback: string }> = new Map([
     ['PERMISSION_DENIED', { status: 403, fallback: 'Resume forbidden' }],
     ['INVALID_SIGNAL', { status: 400, fallback: 'Invalid resume signal' }],
     ['INVALID_SCREEN_INPUT', { status: 400, fallback: 'Invalid screen input' }],
@@ -2103,8 +2117,11 @@ export async function classifyResumeResult(
     result: AutomationResult | null | undefined,
 ): Promise<ResumeRefusal | undefined> {
     if (result?.success !== false) return undefined;
-    const row = typeof result.code === 'string' ? RESUME_REFUSAL_ROWS.get(result.code) : undefined;
-    if (row) return { message: result.error ?? row.fallback, status: row.status };
+    const code = typeof result.code === 'string' ? result.code : undefined;
+    const row = code !== undefined ? RESUME_REFUSAL_ROWS.get(code) : undefined;
+    // [#21724] The engine's code travels with its status: a row carries the
+    // code it matched, so the builder promotes it and never derives one.
+    if (code !== undefined && row) return { message: result.error ?? row.fallback, status: row.status, details: { code } };
     const verdict = await resumeFailureDetails(deps, automationService, runId, result);
     return {
         message: result.error ?? 'Flow run failed',
