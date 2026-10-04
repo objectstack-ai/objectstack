@@ -178,8 +178,10 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
       ],
     }],
     ['no sections', 'object-form', { sections: [] }],
-    // objectui `plugin-form/src/masterDetailFormTypeVocabulary.test.tsx` — the parent half's sections.
-    ['the parent half\'s sections', 'object-master-detail-form', { sections: [{ name: 'header', label: 'Header', fields: ['customer', 'date'] }] }],
+    // objectui `plugin-form/src/masterDetailFormTypeVocabulary.test.tsx:109` — the parent half's sections.
+    ['the parent half\'s sections', 'object-master-detail-form', {
+      sections: [{ name: 's1', label: 'Sec One', fields: ['ref'] }, { name: 's2', label: 'Sec Two', fields: ['memo'] }],
+    }],
   ];
   for (const [label, row, props] of IDENTICAL) {
     it(`${row}: parses ${label} byte-identical`, () => {
@@ -243,9 +245,14 @@ describe('§2 off-shape values are refused with the code and the path', () => {
     ['a locale-map section label', 'object-form', { sections: [{ fields: ['a'], label: { en: 'A' } }] }, [{ code: 'invalid_type', path: 'sections.0.label' }]],
     // objectui `__tests__/sectionStyleKeysRetired-13626.test.tsx` — the retired style keys reach nothing.
     ['a section style key', 'object-form', { sections: [{ fields: ['a'], className: 'p-4' }] }, [{ code: 'unrecognized_keys', path: 'sections.0' }]],
-    ['a section with neither `fields` nor `group`', 'object-form', { sections: [{ label: 'Empty' }] }, [{ code: 'custom', path: 'sections.0.fields' }]],
+    // objectui `plugin-form/src/__tests__/formSectionGroupReference-7051.test.tsx:270` and `:307` — the
+    // renderer's own probes of two shapes that test says this door refuses at parse.
+    ['a section with neither `fields` nor `group`', 'object-form', { sections: [{ label: 'Memberless' }] }, [{ code: 'custom', path: 'sections.0.fields' }]],
     ['`group` beside `fields`', 'object-form', { sections: [{ group: 'contact_info', fields: ['a'] }] }, [{ code: 'custom', path: 'sections.0.group' }]],
-    ['a group-owned key beside `group`', 'object-form', { sections: [{ group: 'contact_info', label: 'Contact' }] }, [{ code: 'custom', path: 'sections.0.label' }]],
+    ['group-owned keys beside `group`', 'object-form', { sections: [{ group: 'contact_info', label: 'My Own Label', collapsible: true }] }, [
+      { code: 'custom', path: 'sections.0.label' },
+      { code: 'custom', path: 'sections.0.collapsible' },
+    ]],
     ['an unknown pane', 'object-form', { sections: [{ fields: ['a'], pane: 'left' }] }, [{ code: 'invalid_value', path: 'sections.0.pane' }]],
     ['a numeric entry', 'object-form', { sections: [{ fields: [5] }] }, [{ code: 'invalid_union', path: 'sections.0.fields.0' }]],
     ['a `{ field }` entry\'s `visibleOn`', 'object-form', { sections: [{ fields: [{ field: 'a', visibleOn: 'record.b == 1' }] }] }, [{ code: 'invalid_union', path: 'sections.0.fields.0' }]],
