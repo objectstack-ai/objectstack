@@ -20,3 +20,5 @@ Two classes of pending request are now decided only by an admin override:
 **Author's one-line fix:** write `{ type: 'position', value: '<the position>' }`. `os lint` already reports the old form as `approval-approver-not-membership-tier` or `approval-approver-type-deprecated`.
 
 **Admin's one-line handling, both classes:** a platform admin (`admin_full_access`) or a tenant admin of the request's organization approves or rejects it (`POST /api/v1/approvals/requests/:id/approve` or `/reject`; recorded with `via_override: true`, and the flow run resumes), or reassigns it to the position's holder (`POST /api/v1/approvals/requests/:id/reassign` with `{ "to": "<user id>" }`), who then decides it normally.
+
+<!-- adr-0087: registered approval-position-address-role-retired -->
