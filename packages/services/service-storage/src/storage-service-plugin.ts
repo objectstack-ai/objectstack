@@ -992,10 +992,10 @@ export function composeStorageRoutes(
  * flattened shape as a fallback for hosts that hand back the session record
  * directly.
  *
- * ⛔ No membership fallback. `marketplace-install-local-plugin`'s
- * `resolveActiveOrgId` falls back to the user's first `sys_organization_member`
- * row; that is a SCOPING read for a seed, and its own doc warns it answers for
- * "which org do these rows land in" only. Here the answer becomes a WALL: a
+ * ⛔ No membership fallback. A session with no active organization is a
+ * declared state (ADR-0123 D1), never a gap to fill from the user's `sys_member`
+ * rows; `marketplace-install-local-plugin`'s `resolveActiveOrgId` keeps the same
+ * rule for the rows a seed lands in. Here the answer becomes a WALL: a
  * file stamped from a guessed membership is a file its uploader can no longer
  * see from the organization they were actually acting in. No active
  * organization therefore means no stamp — the pre-#12745 behaviour, reported
