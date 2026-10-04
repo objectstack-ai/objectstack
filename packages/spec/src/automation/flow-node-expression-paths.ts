@@ -546,6 +546,15 @@ export interface FlowSlotRefusalParams {
    * the node's `config`.
    */
   'node-config-key-required-by-rule': { readonly nodeType: string; readonly key: string };
+  /**
+   * (#21654) A `create_record` / `update_record` / `delete_record` node whose
+   * `config.objectName` is a static string naming a stored-metadata table
+   * (`isStoredMetadataBodyObject`) — a table a flow may not write directly.
+   */
+  'write-node-stored-metadata-target': {
+    readonly nodeType: 'create_record' | 'update_record' | 'delete_record';
+    readonly objectName: string;
+  };
 }
 
 /** Every refusal code the three flow slot refusal producers emit. */
@@ -563,7 +572,8 @@ export type FlowNodeConfigRefusalCode =
   | 'decision-branch-not-object'
   | 'decision-branch-label-missing'
   | 'node-config-key-missing'
-  | 'node-config-key-required-by-rule';
+  | 'node-config-key-required-by-rule'
+  | 'write-node-stored-metadata-target';
 
 /** One refusal's `code` and `params`, correlated: narrowing on `code` narrows `params`. */
 type FlowSlotRefusalOf<Codes extends FlowSlotRefusalCode> = { message: string; source: string } & {
@@ -607,6 +617,7 @@ const FLOW_SLOT_REFUSAL_CODE_TABLE = {
   'decision-branch-label-missing': true,
   'node-config-key-missing': true,
   'node-config-key-required-by-rule': true,
+  'write-node-stored-metadata-target': true,
 } as const satisfies Record<FlowSlotRefusalCode, true>;
 
 /**

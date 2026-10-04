@@ -55,3 +55,23 @@ export const STORED_METADATA_BODY_OBJECTS: ReadonlySet<string> = new Set([
 export function isStoredMetadataBodyObject(object: string): boolean {
   return STORED_METADATA_BODY_OBJECTS.has(object);
 }
+
+/**
+ * [#21654] The ONE prescription an author is shown when app-authored work
+ * reaches for a {@link STORED_METADATA_BODY_OBJECTS} table: where a change to
+ * metadata goes instead. The family has one writer for app-authored work, the
+ * metadata protocol, where a change is validated and its provenance recorded
+ * (#21520, ruling A), so every refusal of that reach ends on this sentence.
+ *
+ * Read by `HookSchema`'s refusal of a hook body bound to a family table
+ * (`data/hook.zod.ts`) and by `FlowSchema`'s refusal of a write node aimed at
+ * one (`automation/flow-node-config-refusals.ts`). Declared here, in the
+ * import-free leaf, so both schemas reach it without the redaction module's
+ * closure, and published from `@objectstack/spec/kernel` beside the set, so a
+ * runtime refusal can say the same sentence by importing it rather than by
+ * keeping a copy. ⛔ Never restate it in a refusal: import it.
+ */
+export const STORED_METADATA_BODY_PRESCRIPTION =
+  'Change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), '
+  + 'where it is validated and its provenance is recorded. Elevation (`runAs`, a system context) does not '
+  + 'change this.';

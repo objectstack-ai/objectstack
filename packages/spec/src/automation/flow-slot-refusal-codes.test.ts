@@ -39,6 +39,7 @@ import {
 import * as automation from './index.js';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
 import { NotifyConfigSchema } from './io-node-config.zod.js';
+import { STORED_METADATA_BODY_PRESCRIPTION } from '../kernel/stored-metadata-body-objects.js';
 
 /** What one refusal says, whichever producer said it. */
 interface Said {
@@ -90,6 +91,12 @@ const KEY_MISSING = (nodeType: string, key: string): string =>
   + 'parses the config against that contract before it does anything else and refuses the node without it — so the '
   + 'flow used to register, and then every run that reached this node failed there; the config is metadata, and '
   + `re-running changes nothing. Write \`${key}\` on the node's \`config\`.`;
+
+/** [#21654] A write node aimed at a stored-metadata table — the verb is the run-time refusal's. */
+const FAMILY_WRITE = (nodeType: string, verb: string, objectName: string): string =>
+  `This \`${nodeType}\` node's \`objectName\` is '${objectName}', so it would ${verb} a table that holds stored `
+  + 'metadata, and a flow may not write it directly: every run that reaches the node refuses it before anything is '
+  + `written, and re-running changes nothing. ${STORED_METADATA_BODY_PRESCRIPTION}`;
 
 /** The notify contract's own words for a node with no content source — read, never re-spelled. */
 const NOTIFY_TITLE_RULE = (() => {
@@ -293,6 +300,26 @@ const PINS: { readonly [C in FlowSlotRefusalCode]: readonly [Pin<C>, ...Pin<C>[]
       source: '',
     },
   ],
+  'write-node-stored-metadata-target': [
+    {
+      produce: nodeConfig('create_record', { objectName: 'sys_metadata', fields: { name: 'x' } }),
+      params: { nodeType: 'create_record', objectName: 'sys_metadata' },
+      message: FAMILY_WRITE('create_record', 'create a record in', 'sys_metadata'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('update_record', { objectName: 'sys_metadata_history', filter: { id: '1' } }),
+      params: { nodeType: 'update_record', objectName: 'sys_metadata_history' },
+      message: FAMILY_WRITE('update_record', 'update', 'sys_metadata_history'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('delete_record', { objectName: 'sys_metadata', filter: { id: '1' } }),
+      params: { nodeType: 'delete_record', objectName: 'sys_metadata' },
+      message: FAMILY_WRITE('delete_record', 'delete from', 'sys_metadata'),
+      source: '',
+    },
+  ],
 };
 
 describe('flow slot refusal codes — one pin per code (code, params, unchanged message)', () => {
@@ -362,6 +389,7 @@ const NODE_CONFIG_CODES: ReadonlySet<FlowNodeConfigRefusalCode> = new Set<FlowNo
   'decision-branch-label-missing',
   'node-config-key-missing',
   'node-config-key-required-by-rule',
+  'write-node-stored-metadata-target',
 ]);
 
 /** Node configs of every shape, per node type — the sweep judges whatever each one provokes. */
@@ -380,6 +408,9 @@ const CONFIG_SWEEP: ReadonlyArray<readonly [string, unknown]> = [
   ['loop', { body: { nodes: [{ id: 'b', type: 'assignment', label: 'B' }], edges: [] } }],
   ['screen', { fields: [{ label: 'x', options: [{}] }] }],
   ['assignment', {}],
+  ...SWEEP.map((value) => ['create_record', { objectName: value }] as const),
+  ['update_record', { objectName: 'sys_metadata_history' }],
+  ['delete_record', { objectName: 'sys_metadata' }],
 ];
 
 describe('flow slot refusal codes — the closed set', () => {
