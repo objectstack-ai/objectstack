@@ -57,7 +57,6 @@
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
 - 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
 - dev `pr_create` 同轮 `label-write.mjs --issue PR_NUMBER --assign LOGIN`;席位自有 PR 指派自己。
-- 释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
@@ -162,7 +161,6 @@
 - 停摆永不自愈:携带任务中途状态的完成通知本身就是停摆信号。
 - 报告末句是意图不是结果 = 停摆非完成:当刻 SendMessage 续派,⛔ 不读作交付、不判死。
 - 停摆 ⇒ 立刻 SendMessage 附前台执行姿态句,⛔ 不等任何静默阈值(阈值是给没有回答的)。
-- 复位走梯度,每次比上一次更具体;第三次停摆判 unreliable,按接手协议重派。
 - 通知重放先算身份再读内容:与已验收那份同身份 ⇒ 记重放即结束。
 - 直接验收兜底:(a) draft PR 在且 CI 全绿 + (b) 探活确认已死或 ≥2h 无推送 + (c) 报告未达。
 - 三条件全立 ⇒ 直接按 PR 验收,复核判据不减;先探活后翻 ready。
