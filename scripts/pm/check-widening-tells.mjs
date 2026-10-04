@@ -1608,7 +1608,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the local path composed: an unread diff is not a narrow diff': 7,
   'the surfaces, imported rather than restated': 11,
   'T1 — a new key on a Zod object schema': 14,
-  'T2 — a new member of a closed set': 64,
+  'T2 — a new member of a closed set': 66,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
@@ -2944,6 +2944,28 @@ export function enclosingConstruct(side, index) {
 const escapeForRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
+ * One line with its string literals' contents and any trailing `//` comment
+ * blanked — the CODE of it, for a keyword test — or `null` when a string never
+ * closes on the line. `'please do not throw'` refuses nothing.
+ */
+function codeOfLine(s) {
+  let out = '';
+  for (let k = 0; k < s.length; k += 1) {
+    const ch = s[k];
+    if (ch === '/' && s[k + 1] === '/') break;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringLiteral(s, k);
+      if (end === -1) return null;
+      out += `${ch}${' '.repeat(end - k - 1)}${ch}`;
+      k = end;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
  * Is EVERY reader of the module-private `as const` array `name` a REFUSAL
  * PREDICATE — so that a member added to it is a value the accept set LOSES?
  * `{ narrowing, reason, guards }`, read over one file's HEAD BLOB.
@@ -2972,7 +2994,9 @@ const escapeForRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  *     NEGATED membership test whose consequent is a bare early exit, so only
  *     MEMBERS reach the rest of the block — where the rest of that block (read
  *     with {@link closerAhead}, and refused when that walk is unreadable)
- *     calls `.addIssue(` or `throw`s;
+ *     calls `.addIssue(` or `throw`s, in CODE (a string saying "throw" refuses
+ *     nothing), and ⛔ RETURNS NO VALUE: a region that hands members something
+ *     non-members never get is an allow-list by another spelling;
  *   ④ every OTHER line naming `NAME` — ⛔ counted on every non-comment line,
  *     inside a string literal or not, so a name this reader mis-lexes is an
  *     unclassified reader and never an invisible one — is a PROSE render
@@ -3029,13 +3053,14 @@ export function refusalOnlyReaders(source, name) {
       '\\.includes\\([^()]*\\)[ \\t]*\\)[ \\t]*return[ \\t]*;?[ \\t]*(?:\\/\\/.*)?$',
   );
   const REFUSAL = /\.addIssue\(|\bthrow\b/;
+  const VALUE_RETURN = /\breturn\b[ \t]*[^;\s]/;
   const guards = [];
   for (const r of readers) {
     if (!GUARD.test(lines[r.line]) || guards.some((g) => g.line === r.line)) continue;
     const end = closerAhead(lines, r.line + 1, 0);
     if (end.unreadable || end.closer !== '}') continue;
-    const region = lines.slice(r.line + 1, end.line + 1);
-    if (!region.some((s) => !COMMENT_LINE.test(s) && REFUSAL.test(s))) continue;
+    const region = lines.slice(r.line + 1, end.line + 1).filter((s) => !COMMENT_LINE.test(s)).map(codeOfLine);
+    if (region.includes(null) || region.some((c) => VALUE_RETURN.test(c)) || !region.some((c) => REFUSAL.test(c))) continue;
     guards.push({ line: r.line, until: end.line });
   }
   if (guards.length === 0) return no(`no reader of \`${name}\` is a guard that leaves only its members to a refusal`);
@@ -5610,6 +5635,8 @@ export function selfTest() {
   t('⛔ an EXPORTED set fires — on its own declaration, or re-exported anywhere in the file', verdictOf(constructRun(ASC.patch.replace(' const SINGLE_SERIES_TYPES', ' export const SINGLE_SERIES_TYPES'), DENY_SET_SOURCE.replace('const SINGLE_SERIES_TYPES', 'export const SINGLE_SERIES_TYPES'))) === 'fires' && ascWith(`${DENY_SET_SOURCE}export { SINGLE_SERIES_TYPES };\n`) === 'fires');
   t('⛔ NO head blob, no reading — fires', ascWith(null) === 'fires');
   t('⛔ a members-only region that never refuses is no refusal — fires', ascWith(DENY_SET_SOURCE.replace("ctx.addIssue({ code: 'custom', message: 'one measure on ' + names });", 'console.log(names);')) === 'fires');
+  t('⛔ …and a STRING saying "throw" refuses nothing — fires', ascWith(DENY_SET_SOURCE.replace("ctx.addIssue({ code: 'custom', message: 'one measure on ' + names });", "console.log('we throw ' + names);")) === 'fires');
+  t('⛔ a members-only region that RETURNS a value hands members what non-members never get — an allow-list by another spelling — fires', ascWith(DENY_SET_SOURCE.replace('    return;\n  }\n}', '    return names;\n  }\n}')) === 'fires');
   t('⛔ a members-only region the walk cannot LEX is no reading — fires', ascWith(DENY_SET_SOURCE.replace('    return;\n  }', '    const re = /^x/;\n    return;\n  }')) === 'fires');
   t('⛔ the name inside a STRING still counts as a reader — a mis-lexed name is never an invisible one', ascWith(`${DENY_SET_SOURCE}const LABEL = 'SINGLE_SERIES_TYPES';\n`) === 'fires');
   t('⛔ two declarations of the name are ambiguous — fires', ascWith(`${DENY_SET_SOURCE}function shadow() {\n  const SINGLE_SERIES_TYPES = ['x'] as const;\n  return SINGLE_SERIES_TYPES;\n}\n`) === 'fires');
