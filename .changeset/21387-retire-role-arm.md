@@ -1,5 +1,6 @@
 ---
 "@objectstack/plugin-approvals": minor
+"@objectstack/spec": patch
 ---
 
 fix(plugin-approvals)!: `role:<name>` is no longer a position address, and the deprecated `role` approver type stops writing `role:` slots (ADR-0090 D3)
