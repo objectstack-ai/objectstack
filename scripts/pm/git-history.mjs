@@ -122,6 +122,33 @@
  * the shallow FILE, so it needs no common-dir resolution from a linked
  * worktree, and it catches a graft from any source.
  *
+ * ## The fourth trap, no graft at all: a bare date is read at NOW's time of day
+ *
+ * The coverage proof places `--since` with `Date.parse`, and ECMA-262 reads a
+ * date-only `YYYY-MM-DD` as that day's 00:00:00Z. git places the SAME string
+ * with its approxidate, which fills a missing time of day from the CURRENT
+ * WALL CLOCK. Passed through verbatim, `--since=2026-09-30` therefore proved
+ * one window, counted a narrower one that shrank as the day went on, and
+ * printed the wider one in its receipt — at exit 0, on exactly the spelling
+ * the usage text recommends (#21601). Measured on ref a7ab047cf6, the clock
+ * injected through git's own `GIT_TEST_DATE_NOW`:
+ *
+ *   | `count --since=…` on a7ab047cf6 | git's clock | answer |
+ *   |---------------------------------|-------------|--------|
+ *   | `2026-09-30` (bare)             | 00:30Z      | 472    |
+ *   | `2026-09-30` (bare)             | 12:45Z      | 410    |
+ *   | `2026-09-30` (bare)             | 15:17Z      | 393    |
+ *   | `2026-09-30T00:00:00Z`          | any         | 474    |
+ *
+ * The 410 and the 393 are the two answers the filing card recorded by hand at
+ * those hours; the receipt was identical on all four rows. Every other
+ * spelling git approxidates fails the same way (`Sep 30 2026`, `2026/09/30`:
+ * a midnight to `Date.parse`, now's time of day to git), and `--until` has the
+ * mirror image. So a window edge is normalised ONCE, by `windowInstant()`, to
+ * the complete UTC instant `Date.parse` already put it at; that instant is
+ * what git is handed and what the receipt prints, and a complete instant is
+ * parsed exactly and never consults the clock.
+ *
  * ## Cost, measured — because a tool nobody runs fixes nothing
  *
  *   | case                                            | wall  |
@@ -314,6 +341,27 @@ export function ensureWindowCovered({ cwd, ref, sinceMs, allowFetch = true, allo
 }
 
 // ── answering ────────────────────────────────────────────────────────────────
+
+/**
+ * A window edge as the ONE instant every reader of it uses — the coverage
+ * proof, git, and the receipt (the fourth trap in the header).
+ *
+ * `Date.parse` decides the instant, because the proof already reads it that
+ * way: a bare `2026-09-30` is that day's 00:00:00Z. It comes back as a COMPLETE
+ * UTC instant, the one spelling git parses exactly instead of approxidating
+ * against the current time of day. A complete instant comes back as the same
+ * instant — byte-identical when already in `Z` with whole seconds; an offset
+ * is restated in `Z`; whole seconds drop the `.000` — so the self-test's
+ * complete-instant windows reach git exactly as they did before.
+ *
+ * @param {string} raw the edge as given on the command line
+ * @returns {string|null} the complete instant, or null when `Date.parse` cannot place `raw`
+ */
+export function windowInstant(raw) {
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().replace(/\.000Z$/, 'Z');
+}
 
 function windowArgs({ since, until }) {
   const args = [`--since=${since}`];
@@ -669,12 +717,28 @@ function resolveSince(opts) {
     return new Date(Date.now() - opts.days * 24 * 60 * 60 * 1000).toISOString();
   }
   if (opts.since === undefined) usage('--since=<date> or --days=<n> is required');
-  const ms = Date.parse(opts.since);
+  const instant = windowInstant(opts.since);
   // Refuse what cannot be compared to a boundary rather than guessing: git
   // accepts "30 days ago", but a window this tool cannot place on a timeline is
   // a window whose coverage it cannot prove.
-  if (!Number.isFinite(ms)) usage(`--since=${opts.since} is not a date this tool can place (use YYYY-MM-DD, or --days=<n>)`);
-  return opts.since;
+  if (instant === null) usage(`--since=${opts.since} is not a date this tool can place (use YYYY-MM-DD, or --days=<n>)`);
+  // What is returned is the instant the proof reads, never the raw string: git
+  // reads a bare YYYY-MM-DD at the current time of day (the fourth trap).
+  return instant;
+}
+
+/**
+ * `--until`, normalised the way `--since` is: a bare `2026-10-01` reaches git
+ * as `2026-10-01T00:00:00Z` — "before that day began" at every hour, where the
+ * raw string meant "before now's time of day on it". No coverage proof reads
+ * `--until`, so a spelling `Date.parse` cannot place still reaches git exactly
+ * as given, the way it always has, and the receipt prints it as given: the
+ * ruling was to normalise the recommended input, not to add a refusal.
+ */
+function resolveUntil(opts) {
+  if (opts.until === undefined) return undefined;
+  const instant = windowInstant(opts.until);
+  return instant === null ? opts.until : instant;
 }
 
 function main(argv) {
@@ -696,6 +760,7 @@ function main(argv) {
   if (cmd === 'touch') return touchMain(opts);
 
   const since = resolveSince(opts);
+  const until = resolveUntil(opts);
   const sinceMs = Date.parse(since);
   const cwd = opts.cwd || process.cwd();
 
@@ -711,8 +776,8 @@ function main(argv) {
   if (!ensured.covered) {
     process.stderr.write(
       `⛔ git-history REFUSES to answer — ${ensured.reason}.\n` +
-        `   ref: ${opts.ref}   window: since ${String(since).slice(0, 10)}` +
-        `${opts.until ? ` until ${opts.until}` : ''}\n` +
+        `   ref: ${opts.ref}   window: since ${since}` +
+        `${until ? ` until ${until}` : ''}\n` +
         `   shallow floor: ${describeFloor(ensured.boundaries)} (the oldest commit this clone can see on that ref)\n` +
         `${ensured.steps.length ? `   tried: ${ensured.steps.join(' · ')}\n` : ''}` +
         `   Any number derived here would be real, plausible and WRONG — the missing\n` +
@@ -724,8 +789,8 @@ function main(argv) {
 
   const receipt =
     `method: ${cmd === 'log' ? 'git log' : 'git rev-list --count'}` +
-    `${opts.firstParent ? ' --first-parent' : ''} ${opts.ref} since ${String(since).slice(0, 10)}` +
-    `${opts.until ? ` until ${opts.until}` : ''}` +
+    `${opts.firstParent ? ' --first-parent' : ''} ${opts.ref} since ${since}` +
+    `${until ? ` until ${until}` : ''}` +
     `${opts.paths.length ? ` -- ${opts.paths.join(' ')}` : ''}` +
     ` · floor ${describeFloor(ensured.boundaries)} · tip ${refTip(cwd, opts.ref)} · ${ensured.steps.join(' · ')}`;
 
@@ -738,8 +803,8 @@ function main(argv) {
   const pathArgs = opts.paths.length ? ['--', ...opts.paths] : [];
   const out =
     cmd === 'count'
-      ? git(['rev-list', '--count', ...fp, ...windowArgs({ since, until: opts.until }), opts.ref, ...pathArgs], { cwd })
-      : git(['log', ...fp, `--format=${opts.format}`, ...windowArgs({ since, until: opts.until }), opts.ref, ...pathArgs], { cwd });
+      ? git(['rev-list', '--count', ...fp, ...windowArgs({ since, until }), opts.ref, ...pathArgs], { cwd })
+      : git(['log', ...fp, `--format=${opts.format}`, ...windowArgs({ since, until }), opts.ref, ...pathArgs], { cwd });
 
   process.stdout.write(out.endsWith('\n') ? out : `${out}\n`);
   process.stderr.write(`${receipt}\n`);
