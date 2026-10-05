@@ -47,7 +47,10 @@
  *            outright (#8976). Each entry's `withSampleData` says whether the
  *            caller's own scope — its active organization under a wall —
  *            holds any of the package's seed rows, read from the rows, never
- *            from the install-wide ledger record (#21775).
+ *            from the install-wide ledger record (#21775). An entry this boot's
+ *            rehydrate refused to load is still listed, with a `notLoaded`
+ *            marker in place of `withSampleData` carrying the refusal's code
+ *            and the declared range, and no seed row is read for it (#21822).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
  *          → removes the cached manifest, withdraws the package from the
@@ -66,7 +69,8 @@
  * cached manifest so installs survive process restarts without further
  * cloud round-trips. An entry whose `engines.protocol` excludes this runtime's
  * major is not loaded: it is reported at `error`, naming the replay command,
- * and the boot continues (ADR-0087 D1, #21762).
+ * and the boot continues (ADR-0087 D1, #21762). The GET listing marks it as
+ * not loaded for as long as that ledger entry stands (#21822).
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -314,6 +318,21 @@ function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
 }
 
 /**
+ * [#21822] The marker the GET listing puts on a ledger entry this boot's
+ * `kernel:ready` rehydrate refused to load: the refusal's `code` and the range
+ * the package declares.
+ *
+ * CLOSED: exactly these two members, named one by one from the handshake's own
+ * diagnostic, the way `protocolIncompatibleAnswer` names its `details`. ⛔ Not a
+ * spread of the diagnostic: a member added to it later does not reach the
+ * listing without a decision here.
+ */
+interface NotLoadedMarker {
+    code: ProtocolIncompatibleDiagnostic['code'];
+    requiredRange: ProtocolIncompatibleDiagnostic['requiredRange'];
+}
+
+/**
  * [ADR-0093 D4/D5, ADR-0105 D1 / #5262] Is an organization wall actually IN
  * FORCE for this boot? Both seeding decisions in this plugin key off it.
  *
@@ -417,6 +436,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * install whose ledger entry went missing.
      */
     private readonly bootUserCodeIds = new Set<string>();
+    /**
+     * [#21822] What this boot's `kernel:ready` rehydrate refused to load under
+     * ADR-0087 D1's handshake, keyed by manifest id: the refused entry's
+     * `installedAt` and the marker the GET listing serves for it.
+     *
+     * The record of what the rehydrate DID, written by it alone, never a second
+     * judgement of the ledger: the listing does not re-run the handshake.
+     *
+     * `installedAt` names WHICH entry was refused. Only the install door writes
+     * a new entry for a manifest id, always with a fresh `installedAt`, and only
+     * after the same handshake admitted it. So once a compatible version
+     * replaces the refused entry, the record no longer matches the ledger and
+     * the listing stops marking it — with no write to this record from the
+     * install door or from DELETE.
+     */
+    private readonly refusedAtRehydrate = new Map<string, { installedAt: string; marker: NotLoadedMarker }>();
 
     constructor(config: MarketplaceInstallLocalPluginConfig = {}) {
         this.cloudUrl = resolveCloudUrl(config.controlPlaneUrl);
@@ -495,6 +530,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * a marketplace package).
      */
     private rehydrate = async (ctx: PluginContext): Promise<void> => {
+        // [#21822] The record describes THIS rehydrate, and nothing older.
+        this.refusedAtRehydrate.clear();
         const { entries, skipped } = this.readAll();
 
         // #5413 — BEFORE the early return, not after. A ledger whose entries
@@ -530,6 +567,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // unrecognised range rehydrates exactly as it did before.
                 const compat = checkProtocolCompat(entry.manifest);
                 if (compat.status === 'incompatible') {
+                    // [#21822] Recorded where the GET listing reads it, so the
+                    // entry is listed as not loaded rather than as installed.
+                    this.refusedAtRehydrate.set(entry.manifestId, {
+                        installedAt: entry.installedAt,
+                        marker: { code: compat.diagnostic.code, requiredRange: compat.diagnostic.requiredRange },
+                    });
                     this.reportProtocolIncompatibleEntry(ctx, entry, compat.diagnostic);
                     continue;
                 }
@@ -1364,6 +1407,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Each entry's `withSampleData` answers "does MY scope hold this package's
      * sample data?" — derived per request by {@link sampleDataInScope}, never
      * read from the ledger's install-wide record of the same name.
+     *
+     * ## [#21822] An entry the rehydrate refused is listed, marked not loaded
+     *
+     * The `kernel:ready` rehydrate keeps an entry whose declared protocol range
+     * excludes this runtime in the ledger, and loads none of it. The listing
+     * served it like any installed package, so the console's Installed Apps
+     * said "installed" while only a boot log line said otherwise. It is listed
+     * still — DELETE and a compatible re-install act on it, and omitting it
+     * would leave the operator nothing to uninstall from — with a marker:
+     *
+     *   { …, "installedAt": "…", "notLoaded": { "code": "OS_PROTOCOL_INCOMPATIBLE", "requiredRange": "^16" } }
+     *
+     * read from what the rehydrate recorded ({@link refusedAtRehydrate}).
+     * `notLoaded` stands in place of `withSampleData`: none of the package's
+     * objects are registered, so no seed row is read for it and the listing
+     * makes no claim about its rows — omitted, not `false`, for the reason
+     * `installedBy` is omitted above. A loaded entry is served exactly as before,
+     * with no `notLoaded` key. The marker is served to every authenticated
+     * caller: it says what the runtime holds, not who installed it or where.
      */
     private handleList = async (c: any, ctx: PluginContext): Promise<Response> => {
         // Before the ledger is touched, exactly as the mutating doors refuse
@@ -1375,23 +1437,42 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         const { entries, skipped } = this.readAll();
         this.warnSkippedLedgerEntries(ctx, skipped, 'it is MISSING from the installed-apps list served to the console');
-        const withSampleData = await this.sampleDataInScope(c, ctx, entries);
+        const notLoaded = new Map<string, NotLoadedMarker>();
+        for (const e of entries) {
+            const marker = this.notLoadedMarker(e);
+            if (marker) notLoaded.set(e.manifestId, marker);
+        }
+        const withSampleData = await this.sampleDataInScope(c, ctx, entries.filter((e) => !notLoaded.has(e.manifestId)));
         return c.json({
             success: true,
             data: {
-                items: entries.map(e => ({
-                    packageId: e.packageId,
-                    versionId: e.versionId,
-                    manifestId: e.manifestId,
-                    version: e.version,
-                    installedAt: e.installedAt,
-                    withSampleData: withSampleData.has(e.manifestId),
-                    ...(operator ? { installedBy: e.installedBy } : {}),
-                })),
+                items: entries.map(e => {
+                    const marker = notLoaded.get(e.manifestId);
+                    return {
+                        packageId: e.packageId,
+                        versionId: e.versionId,
+                        manifestId: e.manifestId,
+                        version: e.version,
+                        installedAt: e.installedAt,
+                        ...(marker ? { notLoaded: marker } : { withSampleData: withSampleData.has(e.manifestId) }),
+                        ...(operator ? { installedBy: e.installedBy } : {}),
+                    };
+                }),
                 total: entries.length,
                 ...(operator ? { storageDir: this.storageDir } : {}),
             },
         }, 200);
+    };
+
+    /**
+     * [#21822] The not-loaded marker for a listed ledger entry, or `undefined`
+     * for one this boot loaded. Marked only when the rehydrate refused THIS
+     * entry: same manifest id, same `installedAt` (see {@link refusedAtRehydrate}).
+     */
+    private notLoadedMarker = (entry: InstalledEntry): NotLoadedMarker | undefined => {
+        const refused = this.refusedAtRehydrate.get(entry.manifestId);
+        if (!refused || refused.installedAt !== entry.installedAt) return undefined;
+        return { ...refused.marker };
     };
 
     /**
@@ -2740,11 +2821,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * [#21762] The one line a rehydrate prints for a ledger entry it refuses to
      * load under ADR-0087 D1's handshake.
      *
-     * `error`, not `warn`: the ledger says the package is installed (the GET
-     * listing still serves it) while the running kernel holds none of it, so
-     * persisted and runtime state disagree with nothing else saying so. The
-     * line owes the consequence and the fix, and carries the handshake's own
-     * message, which names the replay command (`objectstack migrate meta`).
+     * `error`, not `warn`: the ledger says the package is installed while the
+     * running kernel holds none of it, so persisted and runtime state disagree.
+     * The GET listing still serves the entry, marked not loaded (#21822), to
+     * whoever reads it; this line is what the boot itself says. The line owes
+     * the consequence and the fix, and carries the handshake's own message,
+     * which names the replay command (`objectstack migrate meta`).
      */
     private reportProtocolIncompatibleEntry = (
         ctx: PluginContext,
