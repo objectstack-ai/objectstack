@@ -105,6 +105,7 @@ export {
   mapTemplateToRow,
   EMAIL_TEMPLATE_OBJECT,
   type BootstrapDeclaredEmailTemplatesResult,
+  type EffectiveEmailTemplateSources,
 } from './bootstrap-declared-email-templates.js';
 export {
   sweepStrandedOutbox,
