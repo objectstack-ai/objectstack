@@ -1,0 +1,288 @@
+---
+title: "The Ontology Is the Software"
+description: "Enterprise software has changed its interface three times and its user never. Agents are the first new user in forty years, and what they need is not an API but an ontology — one the runtime can run, AI can write, agents can operate, and the enterprise owns."
+author: ObjectStack Team
+date: 2026-10-05
+tags: [ai, ontology, architecture, positioning, agents]
+---
+
+Enterprise software has changed its interface three times. Terminals and forms,
+where people adapted to the software. Web and mobile, where the software adapted
+to people. And now a conversation box, where the software seems to disappear
+into language. Through all three, one thing never changed: the user was a
+person. The API was written for a programmer, the documentation for a reader,
+the audit log for an auditor.
+
+That is the part that changes now, and it changes more than the interface ever
+did. The first user of the next generation of enterprise software is an agent.
+Objects are tools. Actions are tools. Permissions decide what an agent may call,
+and audit records what it did. A conversation box is only the place where a
+person talks to *their* agent; what the agent then talks to is the enterprise.
+
+So the question is not what the next interface looks like. It is what an
+enterprise has to be, so that an agent can read it, run it, and be stopped by
+it. Our answer is a single sentence that now opens this project's README:
+
+> **The ontology is the software.** One executable business ontology. AI writes
+> it, the runtime runs it, agents operate it, you own it.
+
+This post is the long form of that sentence: what we mean by the word, why code
+recedes, why this is possible now and was not five years ago, which mechanisms
+back each of the four promises, what the ontology is *not*, and what we have not
+figured out.
+
+## What an enterprise actually wants to say
+
+Strip any business application down to what the business meant by it, and you
+get one sentence with five parts: *what we have, how it relates, what can be
+done to it, who may do it, and what happens when.*
+
+- **What we have** — the objects and their fields. A ticket has a subject, a
+  priority, a status, a due date.
+- **How it relates** — lookups and master-detail links. A ticket belongs to an
+  account; a line item belongs to an order.
+- **What can be done** — actions. *Resolve* a ticket; *convert* a lead.
+- **Who may do it** — permissions. Role-based access, row-level and field-level
+  security, sharing rules.
+- **What happens when** — flows. A record trigger, a scheduled job, an approval
+  chain, a workflow state machine.
+
+That sentence is the enterprise's **business ontology**. For forty years it has
+been translated into code: the same "phone number is required" intent restated as
+a database constraint, an ORM annotation, a form validator, and a line in the
+API documentation, four places that drift independently. The codebase is not the
+business; it is the business's translation into the only form a computer could
+run.
+
+Here is the same sentence written once, as ObjectStack reads it:
+
+```ts
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Ticket = ObjectSchema.create({
+  name: 'support_desk_ticket',
+  label: 'Ticket',
+  sharingModel: 'private',
+  fields: {
+    subject: Field.text({ label: 'Subject', required: true, searchable: true }),
+    status: Field.select({
+      label: 'Status',
+      required: true,
+      options: [
+        { label: 'Open', value: 'open', default: true },
+        { label: 'Resolved', value: 'resolved' },
+      ],
+    }),
+    due_date: Field.date({ label: 'Due Date' }),
+  },
+});
+```
+
+The moment that object exists, its table exists, its REST endpoint exists, its
+list and form views exist, and its MCP tool exists. Nobody writes the
+controller. The ontology is not a design document that a codebase then
+implements. It is the thing that runs.
+
+Two boundaries keep the word honest, and we state them every time we use it.
+First, the ontology core is those five things plus the agent and tool
+definitions an app ships with. Views, dashboards, apps, and translations are
+authored in metadata too, but they are **projections** of the core, not part of
+it: change the core and the projections follow; delete a projection and the
+business it showed is unchanged. Second, this is an **executable** ontology, not
+a knowledge-representation one. There is no class inheritance, no axioms, no
+reasoner. The definition is validated, then run.
+
+## Why code recedes
+
+Code is the ontology's translation. For as long as translation had to be done by
+hand, the translation *was* the product: the thing you hired for, the thing you
+maintained, the thing that rotted. Three things follow once the translation can
+be skipped.
+
+**The ontology becomes the asset and the code becomes a derivative.** A runtime
+that executes the definition directly, or a toolchain that generates the
+derivatives on demand, turns the codebase into something you no longer hand-
+write, the way nobody hand-writes assembly. Code does not disappear. It moves
+*into the runtime*: the driver that maps an object to a Postgres table, the
+server that mounts the endpoint, the enforcement of a permission on every call.
+What remains in the application itself is small and declared: hooks and action
+bodies, CEL expressions in formulas and predicates, constrained JSX for custom
+pages that is parsed into a UI tree and never executed as code.
+
+**The whole system becomes small enough to be held.** The bundled example CRM in
+this repository — accounts, contacts, leads, opportunities, activities, views, a
+dashboard, a lead-conversion flow, permission sets, actions, translations — is
+31 files and roughly sixteen thousand tokens. That is the whole application, not
+a module of it. An agent can load it end to end, answer *what breaks if I change
+this*, and refactor across data, API, UI, and permissions in a single change.
+We wrote about why that number is the one that matters in
+[The Constraint Isn't Typing Speed. It's the Context Window.](/blog/context-window-is-the-constraint)
+This post is its successor: once the system fits, the question becomes what the
+system *is*.
+
+**The definition becomes checkable in a way code never was.** A codebase can
+only be run. A definition can be validated: `os validate` parses every CEL
+predicate, checks that each `record.field` resolves, verifies every widget
+binding, and refuses a missing security posture, with a located, corrective
+message an agent can read and fix. Most AI mistakes in metadata type-check and
+then fail silently at runtime; a gate that rejects them at authoring time is
+what makes "AI writes it" survivable.
+
+## Why now
+
+None of this was possible five years ago, and three conditions had to mature at
+the same time.
+
+1. **Models read and write structured definitions.** A language model that can
+   author a typed, validated schema from a sentence of business language, and
+   fix its own located errors, turns "AI writes it" from a demo into a loop.
+2. **The context window holds an enterprise's ontology.** When the definition
+   of a whole business system fits in one window, the agent is no longer
+   grepping and hoping. It reasons about the whole.
+3. **Agents can operate the definition directly.** The Model Context Protocol
+   gave agents a standard way to call tools. An ontology whose objects and
+   actions *are* tools is what makes that call mean something.
+
+Andrej Karpathy's framing of the third generation of software is that the
+context window is the program. For enterprise software, we think the program is
+the ontology, and the context window is where it is read.
+
+## Four promises, four mechanisms
+
+The slogan is a stance. The descriptor under it is a set of promises, and each
+promise is a mechanism you can inspect in this repository.
+
+### The runtime runs it
+
+From the compiled artifact the runtime **derives** the database schema on an
+interchangeable driver, a generated REST and realtime API, server-driven UI for
+the Console, and an MCP server. And it **enforces** the definition on every
+call: RBAC, row-level and field-level security, sharing, and audit apply to a
+REST request, a Console click, and an agent's tool call alike. Nothing is
+reasoned over at runtime. What runs is what was validated.
+
+### AI writes it
+
+The scaffolder installs the AI skills bundle and writes an `AGENTS.md`, so a
+coding agent starts with the protocol's rules loaded rather than with generic
+"write me some TypeScript" priors. The agent writes the definition. Four gates
+stand between it and production: strict TypeScript and Zod catch shape errors
+in the editor; `os validate` catches the mistakes that type-check and would fail
+silently; a human approves a small, readable diff in the Console; and the
+runtime's governance means that even a wrong app stays inside the fence. The
+division of labor is deliberate: the agent handles the mechanical, error-prone
+surface, and the person handles the one question no schema can check, *did it
+build the thing I meant?*
+
+### Agents operate it
+
+Because the app is typed metadata, the runtime serves it as an MCP server, on by
+default. Point any MCP client at it and an agent can inspect and operate the
+app, under the same permissions and row-level security as a human. Objects are
+exposed automatically; actions opt in with `ai: { exposed: true }`. An agent's
+reach is exactly what the ontology says it is, which is the only kind of agent
+an enterprise can afford to let loose. An agent needs an ontology; a tool
+surface that is not one is a liability, and a chat box bolted onto a REST API
+is the most common way to build one.
+
+### You own it
+
+The ontology lives in your repository as ordinary TypeScript, versioned in your
+VCS, reviewable as a diff, compiled into a checksummed artifact, specified and
+licensed Apache-2.0. Change the runtime, change the model, change the vendor,
+and the definition comes with you. The conversation boxes will converge; the
+agents will multiply; the one thing an enterprise truly owns, and only needs to
+own, is this definition. The more specific your business is, the less of it any
+model has seen, and the more the ontology is worth. That is also the strongest
+reason not to let anyone else hold it.
+
+## What it is not
+
+The word "ontology" carries two thousand years of philosophy and thirty years of
+knowledge engineering, and most of what the enterprise-AI market means by it
+today is something else. Being precise is what keeps the claim defensible.
+
+**Not a knowledge ontology.** In Gruber's 1993 definition an ontology is "an
+explicit specification of a conceptualization"; in OWL and RDF it carries class
+hierarchies and axioms and is reasoned over by an inference engine. Guarino's
+1998 program of *ontology-driven information systems* put ontologies at the
+center of system design, but as a description to design against, not a thing to
+run. ObjectStack's ontology describes nothing in general. It is one business's
+application, defined precisely enough to execute, and the `abstract` key was
+removed from the spec for exactly that reason.
+
+**Not the industry's semantic layer.** Palantir's Ontology, and the semantic
+layers now being built into Databricks, Snowflake, and their peers, map
+existing systems onto business concepts so that an agent can reason about them.
+They are read-mostly, and the systems they describe live elsewhere. Our ontology
+*is* the system; federating an external datasource into it is possible,
+read-only by default, and early.
+
+**Not Salesforce's metadata, either, though that is the closest ancestor.**
+Weissman and Bobrowski's 2009 paper on the Force.com multitenant architecture
+described a compiled runtime kernel executing per-tenant metadata, and it worked
+at scale. What it was not: an open format, a thing you could take with you, or a
+thing written for an agent to read. Each of the four lineages above holds one or
+two of the four promises. Holding all four in one definition is the position
+this project occupies.
+
+## What we have not figured out
+
+A positioning statement that admits no open problems is marketing. These are
+ours.
+
+**The size ceiling.** "Small enough to hold whole" is a measured fact for a
+CRM and an argument for an enterprise. Context windows grow, and the core versus
+projection split bounds what an agent must load, but an ontology with hundreds
+of objects will test the claim. We would rather state the limit than hide it.
+
+**Responsibility.** When an agent acts inside the fence and the outcome is still
+wrong, the fence did its job and someone is still accountable. Our working rule
+is that reversible actions go to agents and irreversible ones stay with people,
+and that the boundary is written into the definition, not left to judgment at
+runtime. It is a rule, not a solution.
+
+**Interoperability.** One enterprise, one ontology is the easy case. Two
+enterprises whose agents need to transact is where an open protocol stops being
+a principle and becomes infrastructure. The format is open; the shared
+vocabulary is not yet there.
+
+**Classification is power.** Who gets to define what a "customer" is was a
+philosophical question for two millennia and is a departmental one in every
+company. Making the ontology explicit does not settle that argument. It moves it
+into a diff, where at least it can be seen.
+
+## Where this leaves the stack
+
+Everything in this repository is the open stack: protocol, microkernel, SDK,
+CLI, and the production runtime, Apache-2.0 with no open-core asterisks. You
+build and ask with Claude Code or any coding agent; the agent writes the
+ontology in your repo and operates the running app over MCP. The same loop,
+hosted, is [ObjectOS](https://www.objectos.ai).
+
+Start with one object:
+
+```bash
+npm create objectstack@latest my-app && cd my-app
+```
+
+Describe the business in plain language, let the agent write the definition, run
+`npm run validate`, open the Console, and then connect an agent:
+
+```bash
+claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
+```
+
+What you will have is not an app that AI happened to write. It is an ontology
+the runtime runs, AI can write, agents can operate, and you own. The ontology is
+the software.
+
+---
+
+*Further reading.* Thomas R. Gruber, "A Translation Approach to Portable
+Ontology Specifications" (1993). Nicola Guarino, "Formal Ontology and
+Information Systems" (FOIS 1998). Craig D. Weissman and Steve Bobrowski, "The
+Design of the Force.com Multitenant Internet Application Development Platform"
+(SIGMOD 2009). In this documentation: [Business Ontology](/docs/concepts/ontology),
+[How AI Development Works](/docs/getting-started/how-ai-development-works),
+[Connect an MCP Client](/docs/ai/connect-mcp).
