@@ -39,7 +39,7 @@
  * composition with no metadata plugin) is the dogfood pin's.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import type {
   IntrospectedSchema,
@@ -88,9 +88,17 @@ const ORDER = {
   fields: { amount: { type: 'number' } },
 };
 
+type Register = (type: string, name: string, data: unknown) => Promise<void>;
+
 interface MetadataFake {
-  service: Record<string, unknown>;
-  register: ReturnType<typeof vi.fn>;
+  service: {
+    get: (type: string, name: string) => Promise<unknown>;
+    list: (type: string) => Promise<unknown[]>;
+    getObject: (name: string) => Promise<unknown>;
+    listObjects: () => Promise<unknown[]>;
+    register: Register;
+  };
+  register: Mock<Register>;
 }
 
 /**
@@ -110,7 +118,7 @@ function metadataFake(
     if (!map) store.set(type, (map = new Map()));
     return map;
   };
-  const register = vi.fn(async (type: string, name: string, data: unknown) => {
+  const register = vi.fn<Register>(async (type, name, data) => {
     typeMap(type).set(name, data);
   });
   const service = {
@@ -252,7 +260,7 @@ describe('the federation service reads a metadata service registered after init 
     expect(objectsOf(await service.validateAll())).toEqual(['wh_customer', 'wh_order']);
 
     const replacement = metadataFake();
-    await replacement.service.register('object', 'wh_extra', {
+    await replacement.register('object', 'wh_extra', {
       name: 'wh_extra',
       datasource: 'warehouse',
       external: { remoteName: 'orders' },
