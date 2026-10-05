@@ -66,7 +66,7 @@ describe('TimeUpdateInterval', () => {
     expect(TimeUpdateInterval.options).toEqual(DateGranularity.options);
   });
 
-  it('refuses each retired sub-day interval with the retirement prescription (#17296)', () => {
+  it('refuses each retired sub-day interval with the retirement prescription', () => {
     // COST DIRECTION. The cheap narrowing is the enum alone: delete three
     // members and let zod answer its stock "invalid option". That parses
     // identically and tells an upgrading author nothing, so what is pinned
@@ -147,7 +147,7 @@ describe('MetricSchema', () => {
   // `expect(metric.filters).toHaveLength(1)`). The pin flips: the refusal must
   // carry the prescription — the fully-qualified key, the removal, and the
   // migration channel — not merely throw.
-  it('rejects the removed `filters` key with the retirement prescription (#10414)', () => {
+  it('rejects the removed `filters` key with the retirement prescription', () => {
     expect(() => MetricSchema.parse({
       label: 'Average Order Value',
       type: 'avg',
@@ -163,7 +163,7 @@ describe('MetricSchema', () => {
   // refused, the key-equal one included, and the refusal carries the
   // prescription. The full door-by-door pin lives in
   // `cube-member-inner-name-retirement.test.ts`.
-  it('refuses the retired inner `name` with the prescription, whatever its value (#20300)', () => {
+  it('refuses the retired inner `name` with the prescription, whatever its value', () => {
     for (const name of ['total_revenue', 'TotalRevenue', '']) {
       expect(() => MetricSchema.parse({ name, label: 'Total Revenue', type: 'sum', sql: 'amount' }), name)
         .toThrow(/`measures\.<metric>\.name` was removed in @objectstack\/spec 17\.5\.0.*the record key is the metric's name.*os migrate meta --from 17/s);
@@ -237,7 +237,7 @@ describe('DimensionSchema', () => {
 
   // #20300 — the same flip as the metric's (see that block): the snake_case
   // check on the inner `name` pinned a value nothing read.
-  it('refuses the retired inner `name` with the prescription, whatever its value (#20300)', () => {
+  it('refuses the retired inner `name` with the prescription, whatever its value', () => {
     for (const name of ['product_category', 'ProductCategory']) {
       expect(() => DimensionSchema.parse({ name, label: 'Product Category', type: 'string', sql: 'category' }), name)
         .toThrow(/`dimensions\.<dimension>\.name` was removed in @objectstack\/spec 17\.5\.0.*the record key is the dimension's name.*os migrate meta --from 17/s);
@@ -311,7 +311,7 @@ describe('CubeJoinSchema', () => {
  * shape). The conversion is `retiredFromLoadPath`, so the AUTHORING funnel still
  * teaches the tombstone; the data-at-rest seams pin `includeRetired: true`.
  */
-describe('a persisted cube heals at the door (#18612, ADR-0087 D2)', () => {
+describe('a persisted cube heals at the door — the retired join `sql` / `relationship` are stripped (ADR-0087 D2)', () => {
   /** What `CubeSchema.parse` itself emitted before this retirement. */
   const persisted = () => ({
     analyticsCubes: [{
@@ -532,7 +532,7 @@ describe('AnalyticsQuerySchema', () => {
     }
   });
 
-  it('should NOT default timezone -- absence means the engine resolves it (#4538)', () => {
+  it('should NOT default timezone -- absence means the engine resolves it', () => {
     const query = AnalyticsQuerySchema.parse({
       measures: ['orders.count'],
     });

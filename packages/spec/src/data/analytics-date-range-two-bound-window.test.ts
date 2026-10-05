@@ -60,7 +60,7 @@ const REFUSED_ARITIES: ReadonlyArray<readonly unknown[]> = [
   ['{7_days_ago}'],                          // one macro token is a bound, not a window
 ];
 
-describe('AnalyticsDateRangeSchema — the array arm is exactly two string bounds (#17598 ①)', () => {
+describe('AnalyticsDateRangeSchema — the array arm is exactly two string bounds', () => {
   it('accepts the two-bound windows the contract has always prescribed', () => {
     // The control. Without it a narrowing that refused EVERY array would pass
     // every refusal assertion below.
@@ -127,7 +127,7 @@ describe('AnalyticsDateRangeSchema — the array arm is exactly two string bound
   });
 });
 
-describe('analyticsDateRangeRefusalMessage — each ORIGIN gets a true sentence (#17598 ②)', () => {
+describe('analyticsDateRangeRefusalMessage — each ORIGIN gets a true sentence', () => {
   it('states the schema origin only when the schema is where it was refused', () => {
     for (const input of [...REFUSED_ARITIES, 'Last 7 days', 42, null]) {
       const atSchema = analyticsDateRangeRefusalMessage(input, 'schema');
@@ -170,7 +170,7 @@ describe('analyticsDateRangeRefusalMessage — each ORIGIN gets a true sentence 
     expect(analyticsDateRangeRefusalMessage({ start: '2026-01-01' }, 'schema')).toContain('received object');
   });
 
-  it('⭐ names the EMPTY bound the arm cannot refuse, at the bound that is empty (#18278)', () => {
+  it('⭐ names the EMPTY bound the arm cannot refuse, at the bound that is empty', () => {
     // The premise, asserted rather than assumed: the tuple arm judges arity and
     // bound TYPE, never a bound's VALUE, so this window is ACCEPTED at the
     // schema door and refused PAST it — the residue

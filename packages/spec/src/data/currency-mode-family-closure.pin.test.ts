@@ -345,7 +345,7 @@ const SITES: { site: string; file: string; legs: Leg[] }[] = [
 ];
 const RUNTIME_PIN = 'packages/services/service-analytics/src/__tests__/currency-mode-relay.test.ts';
 
-describe('[#20126] currency-mode family — the enumerating closure pin', () => {
+describe('currency-mode family — the enumerating closure pin: `defaultCurrency` holds only under `fixed`', () => {
   it('the corpus reaches every family site, and the released entries sit outside it', () => {
     for (const { site, file, legs } of SITES) {
       expect(fs.existsSync(path.join(REPO_ROOT, file)), `site ${site}: ${file} must exist`).toBe(true);
@@ -400,7 +400,7 @@ describe('[#20126] currency-mode family — the enumerating closure pin', () => 
   });
 });
 
-describe('[#20126] controls — each rule can fail, and passes what it must', () => {
+describe('currency-mode closure controls — each rule can fail, and passes what it must', () => {
   const ruleA = (text: string): boolean[] => judgeRuleA(text).map((j) => j.ok);
   const ruleB = (text: string): number[] => judgeRuleB(text).hits;
   const DATE = ['ADR', '0053'].join('-');

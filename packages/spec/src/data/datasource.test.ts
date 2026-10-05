@@ -16,7 +16,7 @@ describe('DriverType', () => {
   });
 });
 
-describe('datasource.capabilities — RETIRED (#4583)', () => {
+describe('datasource.capabilities — RETIRED', () => {
   // These used to be five tests asserting the eleven flags parsed and defaulted.
   // They did, faithfully, for a block no runtime ever read — the shape #4001
   // named: a schema that is loose (or here, merely unread) eventually grows a
@@ -332,7 +332,7 @@ describe('DatasourceSchema', () => {
   });
 
 
-  it('refuses datasource with environment variables in config — placeholders are not resolved here (#8336)', () => {
+  it('refuses datasource with environment variables in config — placeholders are not resolved here', () => {
     // INVERTED acceptance pin. This test used to pin (#7990 census) that
     // `${…}` placeholders in NON-credential connection keys parse — recording
     // the measured fact that nothing resolves them and the strings reach the
@@ -550,7 +550,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
   // (issue #8153 comment, 2026-08-13): allow `external.credentialsRef` — and
   // only it — on managed; keep refusing every federation key.
 
-  it('accepts the exact shape createDatasource writes on a managed row (#8153 happy path)', () => {
+  it('accepts the exact shape createDatasource writes on a managed row (the happy path)', () => {
     // The measured persisted shape from #8153 — no `schemaMode`, so it
     // defaults to 'managed'; `external` carries only the secrets-store ref.
     const wizardRow = {
@@ -568,7 +568,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('round-trips the wizard row: the parsed output (defaults applied) re-parses valid (#8153)', () => {
+  it('round-trips the wizard row: the parsed output (defaults applied) re-parses valid', () => {
     // `PUT /meta` re-parses what `GET` served — the parsed shape, with every
     // `external` default key materialized. The allowance judges VALUES, not
     // key presence, precisely so this round-trip stays valid.
@@ -589,7 +589,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('still refuses `external.allowWrites` on a managed row, with the existing guidance (#8153)', () => {
+  it('still refuses `external.allowWrites` on a managed row, with the existing guidance', () => {
     const result = DatasourceSchema.safeParse({
       name: 'default',
       driver: 'postgres',
@@ -605,7 +605,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('still refuses `external.allowedSchemas` on a managed row (#8153)', () => {
+  it('still refuses `external.allowedSchemas` on a managed row', () => {
     const result = DatasourceSchema.safeParse({
       name: 'default',
       driver: 'postgres',
@@ -620,7 +620,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('still refuses non-default `validation` and `queryTimeoutMs` on a managed row (#8153)', () => {
+  it('still refuses non-default `validation` and `queryTimeoutMs` on a managed row', () => {
     const result = DatasourceSchema.safeParse({
       name: 'default',
       driver: 'postgres',
@@ -635,7 +635,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('refuses credentialsRef + a federation key together — the allowance does not smuggle (#8153)', () => {
+  it('refuses credentialsRef + a federation key together — the allowance does not smuggle', () => {
     const result = DatasourceSchema.safeParse({
       name: 'default',
       driver: 'postgres',
@@ -651,7 +651,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('accepts explicitly-written DEFAULT federation values on a managed row — inert content (#8153)', () => {
+  it('accepts explicitly-written DEFAULT federation values on a managed row — inert content', () => {
     // Deliberate: the check judges effective federation content. An explicit
     // `allowWrites: false` is byte-equal to the applied default and gates
     // nothing — refusing it would 422 re-parses of served output, which
@@ -670,7 +670,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('keeps full external acceptance on schemaMode="external" — unchanged by #8153', () => {
+  it('keeps full external acceptance on schemaMode="external" — unchanged by the managed-row credentialsRef allowance', () => {
     const result = DatasourceSchema.safeParse({
       name: 'warehouse',
       driver: 'postgres',

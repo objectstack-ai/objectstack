@@ -48,8 +48,8 @@ function driverSqlUnanchoredReading(value: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-describe('the unanchored readback boundary (#7287 ruling: mixed content is out of contract)', () => {
-  it('the declared default format {0000} (#6555, PR #7265) really does render an UNANCHORED pair', () => {
+describe('the unanchored readback boundary (ruled: mixed content is out of contract)', () => {
+  it('the declared default format {0000} really does render an UNANCHORED pair', () => {
     // The premise the boundary hangs on: the default authoring shape is the one
     // that lands in this slot, which is why the boundary is worth declaring.
     const r = renderAutonumber({ tokens: parseAutonumberFormat('{0000}'), seq: 7, now: NOW });
@@ -69,7 +69,7 @@ describe('the unanchored readback boundary (#7287 ruling: mixed content is out o
       ['v2.1', 'digits inside an unrelated version-shaped identifier'],
       ['DRAFT', 'no digits at all — still out of contract, and still undefined'],
     ])(
-      'out of contract: %s reads as undefined — the declared boundary, not a gap (#7287)',
+      'out of contract: %s reads as undefined — the declared boundary, not a gap',
       (value) => {
         expect(readAutonumberCounter(value, '', '')).toBeUndefined();
       },

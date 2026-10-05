@@ -41,7 +41,7 @@ function firstIssue(result: { success: boolean; error?: { issues: Array<{ code: 
 const RETIREMENT_LEAD =
   '`currencyConfig.precision` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove)';
 
-describe('#19992 — `currencyConfig.precision` is removed: refused with the prescription, whatever its value', () => {
+describe('`currencyConfig.precision` is removed: refused with the prescription, whatever its value', () => {
   it('refuses the key with the full envelope — code, path, offending key, and the prescription\'s clauses', () => {
     const result = CurrencyConfigSchema.safeParse({
       precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD',
@@ -160,7 +160,7 @@ describe('#19992 — `currencyConfig.precision` is removed: refused with the pre
   });
 });
 
-describe('#19992 — data at rest: a stored row carrying the baked `precision: 2` is served canonical', () => {
+describe('the removed `currencyConfig.precision` at rest: a stored row carrying the baked `precision: 2` is served canonical', () => {
   // The ADR-0087 conversion `currency-config-precision-removed` is retired from
   // the load path (authors are refused, above) and replayed by the stored-row
   // seam, which is what keeps rows written under the old `.overwrite()`
@@ -198,7 +198,7 @@ describe('#19992 — data at rest: a stored row carrying the baked `precision: 2
   });
 });
 
-describe('#20011 — field-level `precision` is total digits, never judged against the currency (FieldSchema)', () => {
+describe('field-level `precision` is total digits, never judged against the currency (FieldSchema)', () => {
   // Ruling 5805782503 (letter 乙): a currency's decimal places are the
   // currency's, not a setting — and the key's own describe is "Total digits".
   // The #7918 check that compared this key with the fixed currency's fraction
@@ -221,7 +221,7 @@ describe('#20011 — field-level `precision` is total digits, never judged again
     expect(result.data!.precision).toBe(2);
   });
 
-  it('flipped: `precision: 2` on a fixed-JPY field parses — a DECIMAL(2,0) amount — where #7918 refused it', () => {
+  it('flipped: `precision: 2` on a fixed-JPY field parses — a DECIMAL(2,0) amount — where the ISO 4217 width check used to refuse it', () => {
     const result = FieldSchema.safeParse({ ...base, precision: 2, currencyConfig: fixed('JPY') });
     expect(result.success).toBe(true);
     expect(result.data!.precision).toBe(2);
@@ -277,7 +277,7 @@ describe('#20011 — field-level `precision` is total digits, never judged again
     expect(reparsed.data!.fields.amount.precision).toBe(18);
   });
 
-  it('flipped (#19992): the currencyConfig twin no longer judges a width — it refuses the key itself, at the FieldSchema door', () => {
+  it('flipped: the currencyConfig twin no longer judges a width — it refuses the key itself, at the FieldSchema door', () => {
     // Was: a `custom` issue at ['currencyConfig', 'precision'] naming both
     // fraction-digit counts. The twin key is gone, so the refusal is the
     // closed shape's, located at the config object, carrying the prescription.
@@ -293,7 +293,7 @@ describe('#20011 — field-level `precision` is total digits, never judged again
     expect(issue.message).not.toContain('fraction digits;');
   });
 
-  it('flipped (#19992): with both keys authored, only the removed twin is refused — the field-level key still raises nothing', () => {
+  it('flipped: with both keys authored, only the removed twin is refused — the field-level key still raises nothing', () => {
     const result = FieldSchema.safeParse({
       ...base, precision: 2,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY' },
@@ -308,7 +308,7 @@ describe('#20011 — field-level `precision` is total digits, never judged again
 });
 
 describe('the CLDR digit table — kept for the `iso_4217_currency` value domain, which reads its key set', () => {
-  it("carries the #7918 card's measured anchors", () => {
+  it('carries the measured anchors — 0 digits for JPY, 2 for USD, 3 for KWD', () => {
     // 0: JPY/KRW/CLP/ISK/VND — 2: USD/EUR/CNY/GBP — 3: KWD/BHD/OMR/TND
     for (const c of ['JPY', 'KRW', 'CLP', 'ISK', 'VND']) expect(CURRENCY_FRACTION_DIGITS[c]).toBe(0);
     for (const c of ['USD', 'EUR', 'CNY', 'GBP']) expect(CURRENCY_FRACTION_DIGITS[c]).toBe(2);

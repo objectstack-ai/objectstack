@@ -78,12 +78,12 @@ describe('AGGREGATE_FIELD_TYPE_COMPATIBILITY — the ruled rows, resolved agains
     expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.count)).toEqual(sorted(FieldType.options));
   });
 
-  it('[#20808] `count_distinct`: every FieldType EXCEPT the JSON-stored ones', () => {
+  it('`count_distinct`: every FieldType EXCEPT the JSON-stored ones', () => {
     expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct))
       .toEqual(sorted(FieldType.options.filter((t) => !JSON_STORED.includes(t))));
   });
 
-  it('[#20808] the JSON-stored bucket IS the field-value structured-JSON class plus the multi-option types', () => {
+  it('the JSON-stored bucket IS the field-value structured-JSON class plus the multi-option types', () => {
     // A type joining either class elsewhere is stored in a JSON column by every
     // SQL driver, and no two backends compare such values alike — so it reds
     // here until the count_distinct row records a decision.
@@ -147,7 +147,7 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     }
   });
 
-  it('accepts `sum` / `avg` / `min` / `max` over booleans — #11152 (numbers on every backend), upheld by decision batch #80', () => {
+  it('accepts `sum` / `avg` / `min` / `max` over booleans — numbers on every backend, a ruling that outranks the refused-by-default rule', () => {
     for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
       expect(isAggregateCompatibleWithFieldType(fn, 'boolean')).toBe(true);
       expect(isAggregateCompatibleWithFieldType(fn, 'toggle')).toBe(true);
@@ -181,7 +181,7 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     }
   });
 
-  it('[#20808] accepts `count_distinct` over every scalar-stored type — `formula`, `percent`, `select`, `lookup`, `file` included — and refuses the JSON-stored ones', () => {
+  it('accepts `count_distinct` over every scalar-stored type — `formula`, `percent`, `select`, `lookup`, `file` included — and refuses the JSON-stored ones', () => {
     for (const t of FieldType.options) {
       expect(isAggregateCompatibleWithFieldType('count_distinct', t), t).toBe(!JSON_STORED.includes(t));
     }

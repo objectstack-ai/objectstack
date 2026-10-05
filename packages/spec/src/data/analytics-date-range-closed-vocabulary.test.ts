@@ -57,7 +57,7 @@ const RETIRED_SPELLINGS = [
   '',
 ];
 
-describe('AnalyticsQuerySchema.timeDimensions[].dateRange — closed vocabulary (#16041)', () => {
+describe('AnalyticsQuerySchema.timeDimensions[].dateRange — closed vocabulary', () => {
   it('derives the string arm from date-range-presets.ts — no fourth copy of the list', () => {
     // The module header records the vocabulary once existed in three drifting
     // copies. The enum's options ARE the module's tuple, in its order.

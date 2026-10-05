@@ -80,7 +80,7 @@ const QUERY = { cube: 'batchd_probe', measures: ['count'] } as const;
 // ===========================================================================
 // 1. The doors — a parse must exist, or none of the rest means anything
 // ===========================================================================
-describe('#4001 batch D — the doors the cube family is reachable through', () => {
+describe('batch D, unknown keys refused — the doors the cube family is reachable through', () => {
   it('`defineCube()` is a real parse door — it throws on a malformed config', () => {
     expect(() => defineCube({ ...CUBE, notACubeKey: 1 } as never)).toThrow(/notACubeKey/);
   });
@@ -90,7 +90,7 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
     expect(reject(ObjectStackDefinitionSchema, stack)).toContain('publik');
   });
 
-  it('[#10194] `analytics_cube` now resolves the SAME schema at the saveMetaItem door', () => {
+  it('`analytics_cube` now resolves the SAME schema at the saveMetaItem door', () => {
     // This pin used to assert the opposite — `getMetadataTypeSchema` answering
     // `undefined` — and its comment demanded that the ADR-0010 envelope
     // question be re-asked before the line was "fixed". It was: commit 2306a765c bound
@@ -128,7 +128,7 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
 // ===========================================================================
 // 2. Every closed site, at its own path, through its real carrier
 // ===========================================================================
-describe('#4001 batch D — closed sites reject unknown keys where they live', () => {
+describe('batch D — closed sites reject unknown keys where they live', () => {
   it('`Cube` — the top-level cube shape', () => {
     expect(reject(CubeSchema, { ...CUBE, publik: true })).toContain('publik');
   });
@@ -245,7 +245,7 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
 // ===========================================================================
 // 3. The curation — each alias anchored to the declaration that makes it true
 // ===========================================================================
-describe('#4001 batch D — alias claims are true of the surfaces they point at', () => {
+describe('batch D, unknown keys refused — alias claims are true of the surfaces they point at', () => {
   it('`title` → `label` on Metric/Dimension, and `label` → `title` on Cube: each spelling is CORRECT on the other surface', () => {
     // The claims are structural: CubeSchema declares `title`, Metric/Dimension
     // declare `label`. If either declaration changes, this pins the alias table
@@ -267,7 +267,7 @@ describe('#4001 batch D — alias claims are true of the surfaces they point at'
     expect(reject(AnalyticsQuerySchema, { ...QUERY, orderBy: { stage: 'asc' } })).toContain('order');
   });
 
-  it('`filters` gets the wrong-layer prescription (`where`), matching the dispatcher\'s #3878 bespoke hint', () => {
+  it('`filters` gets the wrong-layer prescription (`where`), matching the dispatcher\'s bespoke hint at the /analytics entry', () => {
     const issues = reject(AnalyticsQuerySchema, { ...QUERY, filters: { is_active: true } });
     expect(issues).toContain('where');
   });
@@ -285,7 +285,7 @@ describe('#4001 batch D — alias claims are true of the surfaces they point at'
 // ===========================================================================
 // 4. The REST wrapper still composes — strictness rides `.extend()` correctly
 // ===========================================================================
-describe('#4001 batch D — the strict base does not break the request wrapper', () => {
+describe('batch D — the strict base does not break the request wrapper', () => {
   it('a valid request body still parses through `AnalyticsQueryRequestSchema`', () => {
     accept(AnalyticsQueryRequestSchema, {
       ...QUERY,
@@ -294,7 +294,7 @@ describe('#4001 batch D — the strict base does not break the request wrapper',
     });
   });
 
-  it('the #3878 tombstones still fire — `query` and `format` carry their migration text', () => {
+  it('the retired-envelope tombstones still fire — `query` and `format` carry their migration text', () => {
     expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, query: { measures: ['count'] } })).toContain('was removed from AnalyticsQueryRequest');
     expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, format: 'csv' })).toContain('was removed from AnalyticsQueryRequest');
   });
@@ -303,8 +303,8 @@ describe('#4001 batch D — the strict base does not break the request wrapper',
 // ===========================================================================
 // 5. The shapes this batch deliberately did NOT close, with the reason
 // ===========================================================================
-describe('#4001 batch D — deliberate non-closures (re-verdicts, not omissions)', () => {
-  it('`LocationValueSchema` / `AddressSchema` are CLOSED since #13802 — the batch-D `open` verdict was overruled', () => {
+describe('batch D, unknown keys refused — deliberate non-closures (re-verdicts, not omissions)', () => {
+  it('`LocationValueSchema` / `AddressSchema` are CLOSED now — the batch-D `open` verdict was overruled', () => {
     // Batch D pinned these two as tolerant ("a phone's geolocation payload
     // carries `heading`/`speed`; a geocoder's address carries `district`") and
     // said the day the line went red, the decision would have been made

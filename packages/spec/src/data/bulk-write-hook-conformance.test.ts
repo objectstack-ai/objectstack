@@ -111,12 +111,12 @@ describe('bulk-write hook dispatch contract — the table', () => {
 });
 
 describe('bulk-write hook dispatch contract — delivery status', () => {
-    it('records the after half as DELIVERED by #5038', () => {
+    it('records the after half as DELIVERED — the engine fires it once per row', () => {
         expect(byEvent('afterUpdate')).toMatchObject({ delivered: true, engineDeliveryIssue: 5038 });
         expect(byEvent('afterDelete')).toMatchObject({ delivered: true, engineDeliveryIssue: 5038 });
     });
 
-    it('records the before half as DELIVERED by #5574\'s engine half', () => {
+    it('records the before half as DELIVERED — the engine dispatches it per row too', () => {
         // ⚠️ This case was written to go red exactly once, and it did. Until
         // #5574's engine half it read "CONTRACTED but not yet delivered" and
         // asserted `delivered: false` on both `before*` entries — the honest
