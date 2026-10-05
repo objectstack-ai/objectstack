@@ -46,11 +46,12 @@ import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js'
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
+    resolveArtifactLockLayer,
     resolveItemLock,
     resolveItemLockLazily,
     resolveOverlayLockLayer,
     storedRowDocument,
-    withOverlayLockFamily,
+    withItemLockFamily,
     type ItemAddress,
     type ItemLock,
     type StoredOverlayRow,
@@ -1720,6 +1721,16 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
 }
 
 /**
+ * [#21803] The packages that can ship an item of one type, read once from the
+ * registry's listings: per name, and the ones probed for every name. See
+ * `ObjectStackProtocolImplementation.shippingPackagesOf`.
+ */
+type ShippingPackages = {
+    readonly byName: ReadonlyMap<string, ReadonlySet<string>>;
+    readonly anyName: ReadonlySet<string>;
+};
+
+/**
  * ADR-0010 §3.3 — Overlay the artifact's metadata-protection envelope
  * onto a returned item so artifact-level lock/packageId/provenance
  * always wins over whatever was persisted in the `sys_metadata` overlay
@@ -1740,27 +1751,30 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
  * stored row's `'full'` from the served body and from the read envelope while
  * the write door, which skips `'none'`, still refused the save.
  *
- * [#21761] A caller that resolved the item's `overlay` layer from its address
- * ({@link resolveOverlayLockLayer}) passes it as `lockLayers.overlay`. When that
- * layer binds, the body carries ITS lock family: the family of the strictest
- * row in scope, which need not be the row the body was served from (content
- * stays prefer-local, ADR-0048). Without `lockLayers` the item's own body
- * stands in for the overlay layer, as before.
+ * [#21761, #21803] A read that resolved the item's lock from its address
+ * ({@link resolveArtifactLockLayer} and {@link resolveOverlayLockLayer} into
+ * {@link resolveItemLock}) passes that answer as `itemLock`, and the body
+ * carries ITS lock family ({@link withItemLockFamily}): the binding row's or
+ * the binding package's, which need not be the document the body was served
+ * from, and no `_lock*` key at all when nothing binds. `artifactItem` then
+ * contributes the provenance fields only: content, and with it provenance,
+ * stays prefer-local (ADR-0048). Without `itemLock` the item's own body
+ * stands in for the overlay layer over `artifactItem` alone, as before: the
+ * registry's hydration and a previewed draft, neither of which is a read's
+ * lock answer.
  */
 function mergeArtifactProtection(
     item: unknown,
     artifactItem: unknown,
-    lockLayers?: { readonly overlay: unknown },
+    itemLock?: ItemLock,
 ): unknown {
     if (item === undefined || item === null) return item;
-    if (lockLayers !== undefined) {
-        item = withOverlayLockFamily(item, { artifact: artifactItem, overlay: lockLayers.overlay });
-    }
+    if (itemLock !== undefined) item = withItemLockFamily(item, itemLock);
     if (artifactItem === undefined || artifactItem === null) return item;
     const a = artifactItem as Record<string, unknown>;
     if (typeof a !== 'object') return item;
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
-    if (resolveItemLock({ artifact: a, overlay: item }).layer === 'artifact') {
+    if (itemLock === undefined && resolveItemLock({ artifact: [a], overlay: item }).layer === 'artifact') {
         if (a._lock !== undefined) out._lock = a._lock;
         if (a._lockReason !== undefined) out._lockReason = a._lockReason;
         if (a._lockDocsUrl !== undefined) out._lockDocsUrl = a._lockDocsUrl;
@@ -7945,6 +7959,7 @@ export class ObjectStackProtocolImplementation implements
                     : [];
             const pkgSet = new Set<string>();
             let lockedCount = 0;
+            let shipping: ShippingPackages | undefined;
             for (const item of items) {
                 scannedItems += 1;
                 const pkg = (item?._packageId ?? null) as string | null;
@@ -7955,14 +7970,19 @@ export class ObjectStackProtocolImplementation implements
                 // its item envelope, so the per-type tile counts it too. The
                 // derivation reads the registry only — no store read per item.
                 // [#21738] Its lock is the one item-lock resolution
-                // ({@link resolveItemLock}) over the item's artifact — the
-                // lookup the list's own merge made (ADR-0048 package scope) —
-                // and the document the list serves for it.
+                // ({@link resolveItemLock}) over the item's artifact layer —
+                // [#21803] every installed package that ships the name, from
+                // the address the list's own merge used (ADR-0048 package
+                // scope) — and the document the list serves for it.
                 const itemName = typeof item?.name === 'string' ? item.name : '';
+                shipping ??= this.shippingPackagesOf(t);
                 const itemLock = resolveItemLock({
-                    artifact: this.lookupArtifactItem(
-                        t, itemName, request.packageId ?? (item?._packageId as string | undefined),
-                    ),
+                    artifact: this.artifactLockLayerAt({
+                        type: t,
+                        name: itemName,
+                        organizationId: request.organizationId,
+                        packageId: request.packageId ?? (item?._packageId as string | undefined),
+                    }, shipping),
                     overlay: item,
                 });
                 const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName), itemLock);
@@ -9220,7 +9240,9 @@ export class ObjectStackProtocolImplementation implements
         // layer, so the body and the directory tile ({@link getMetaDiagnostics}
         // counts these bodies) state the lock the item's envelope reports. A
         // previewed draft keeps its own family: it is the pending edit, not
-        // the item the doors gate.
+        // the item the doors gate. [#21803] The artifact layer likewise: every
+        // installed package that ships the item's name
+        // ({@link artifactLockLayerAt}), the packages read once for the type.
         const otherType = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
         const lockRowsByName = new Map<string, any[]>();
         for (const row of lockRows) {
@@ -9229,33 +9251,39 @@ export class ObjectStackProtocolImplementation implements
             if (list) list.push(row);
             else lockRowsByName.set(name, [row]);
         }
+        let shipping: ShippingPackages | undefined;
         const governed: any[] = [];
         for (const it of items as any[]) {
             const itemName = (it as any)?.name;
             const itemPackageId = packageId ?? ((it as any)?._packageId as string | undefined);
             // ADR-0048 — scope the artifact lookup to THIS item's owning
             // package so a same-name collision grafts each item's own
-            // protection envelope, not the first-registered package's.
+            // provenance envelope, not the first-registered package's.
             // (`requested` packageId, when the whole list is scoped,
             // takes priority; else the item's own `_packageId`.)
             const a = this.lookupArtifactItem(request.type, itemName, itemPackageId);
-            const lockLayers = typeof itemName === 'string' && (it as any)?._draft !== true
-                ? {
-                    overlay: await resolveOverlayLockLayer({
-                        type: request.type,
-                        name: itemName,
-                        organizationId: orgId,
-                        packageId: itemPackageId,
-                    }, (organizationId, spelling) => (lockRowsByName.get(itemName) ?? []).filter((row) =>
-                        (row.organization_id ?? null) === organizationId
-                        && row.type === (spelling === 'canonical' ? request.type : otherType)), { otherSpelling: true }),
-                }
-                : undefined;
+            let itemLock: ItemLock | undefined;
+            if (typeof itemName === 'string' && (it as any)?._draft !== true) {
+                const address: ItemAddress = {
+                    type: request.type,
+                    name: itemName,
+                    organizationId: orgId,
+                    packageId: itemPackageId,
+                };
+                shipping ??= this.shippingPackagesOf(request.type);
+                itemLock = resolveItemLock({
+                    artifact: this.artifactLockLayerAt(address, shipping),
+                    overlay: await resolveOverlayLockLayer(address, (organizationId, spelling) =>
+                        (lockRowsByName.get(itemName) ?? []).filter((row) =>
+                            (row.organization_id ?? null) === organizationId
+                            && row.type === (spelling === 'canonical' ? request.type : otherType)), { otherSpelling: true }),
+                });
+            }
             // [#4513] Same governance as the single-item read — the list
             // is the other exit a client reads field metadata from, and
             // an overlay row wins over the (already-governed) registry
             // entry in the merge above, so it carries the same lie.
-            governed.push(this.governServedObject(request.type, mergeArtifactProtection(it, a, lockLayers)));
+            governed.push(this.governServedObject(request.type, mergeArtifactProtection(it, a, itemLock)));
         }
         return {
             type: request.type,
@@ -10051,17 +10079,30 @@ export class ObjectStackProtocolImplementation implements
         // declaration; we must consult the in-memory artifact registry
         // directly and let its protection envelope override.
         // ADR-0048 — scope the artifact lookup to the requested package so a
-        // same-name collision grafts the OWNING package's protection envelope
-        // (`_packageId`/`_lock`), not whichever package registered first.
+        // same-name collision grafts the OWNING package's provenance envelope
+        // (`_packageId`), not whichever package registered first.
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
-        // [#21761] …and the body carries the binding layer's lock family,
-        // the `overlay` layer's included, so it states the lock the envelope
-        // below reports.
+        // [#21738] The lock is the one item-lock resolution's, over the layers
+        // this read resolved from its address: [#21803] every installed
+        // package that ships the name ({@link artifactLockLayerAt}), never the
+        // one artifact the content above came from, and [#21761] the rows in
+        // scope.
+        const itemLock = resolveItemLock({
+            artifact: this.artifactLockLayerAt({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                packageId: request.packageId,
+            }),
+            overlay: overlayLockLayer,
+        });
+        // [#21761, #21803] …and the body carries that answer's lock family, so
+        // it states the lock the envelope below reports.
         let decorated = decorateMetadataItem(
             request.type,
             this.governServedObject(
                 request.type,
-                mergeArtifactProtection(item, artifactItem, { overlay: overlayLockLayer }),
+                mergeArtifactProtection(item, artifactItem, itemLock),
             ),
         );
         // ADR-0047 — list views additionally get reference-integrity
@@ -10101,9 +10142,8 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0010 — surface lock/provenance flags so Studio can render
         // the correct affordances without a second round trip. [#21670] They
         // report the write doors' verdicts — see {@link servedLockState}.
-        // [#21738] The lock is the one item-lock resolution's, over the layers
-        // this read resolved — never the served document's `_lock`.
-        const itemLock = resolveItemLock({ artifact: artifactItem, overlay: overlayLockLayer });
+        // [#21738] The lock is the one item-lock resolution's (above), over the
+        // layers this read resolved — never the served document's `_lock`.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
         const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked, itemLock);
         return {
@@ -10533,15 +10573,32 @@ export class ObjectStackProtocolImplementation implements
             : overlay !== null && !this.isShippedFlowName(request.type, request.name)
                 ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
                 : code;
-        // [#21761] `effective` is what {@link getMetaItem} would return, and
-        // that read's body carries the `overlay` layer's lock family when that
-        // layer binds (the strictest row in scope, which need not be the row
-        // `overlay` reports). So this one does too. `code` and `overlay` stay
-        // the layers as shipped and as stored.
-        const lockArtifact = this.lookupArtifactItem(request.type, request.name, request.packageId);
-        const effective: unknown | null = withOverlayLockFamily(
+        // [#21738] The lock is the one item-lock resolution's — the
+        // `getMetaItem` call over [#21803] every installed package that ships
+        // the name ({@link artifactLockLayerAt}) and [#21761] the rows in
+        // scope for its address — never `code ?? overlay`, which took the code
+        // layer's (absent) lock over a stored row's `_lock`. A row-less name a
+        // stored container expands contributes no `overlay` layer: the
+        // container's row is not this name's row, and the `_lock` gate does not
+        // read it. The provenance fields still come from the layer the
+        // response reports first.
+        const itemLock = resolveItemLock({
+            artifact: this.artifactLockLayerAt({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                packageId: request.packageId,
+            }),
+            overlay: overlayLockLayer,
+        });
+        // [#21761, #21803] `effective` is what {@link getMetaItem} would
+        // return, and that read's body carries the resolution's lock family
+        // (the binding row's or the binding package's, which need not be the
+        // layer `effective` was taken from). So this one does too. `code` and
+        // `overlay` stay the layers as shipped and as stored.
+        const effective: unknown | null = withItemLockFamily(
             this.governServedObject(request.type, effectiveBase),
-            { artifact: lockArtifact, overlay: overlayLockLayer },
+            itemLock,
         );
 
         const _diagnostics =
@@ -10552,18 +10609,6 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0010 — surface lock/provenance flags so the Studio editor
         // can render the correct affordances without a second round trip.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        // [#21738] The lock is the one item-lock resolution's — the
-        // `getMetaItem` call over this read's artifact lookup and [#21761] the
-        // rows in scope for its address — never `code ?? overlay`, which took the code
-        // layer's (absent) lock over a stored row's `_lock`. A row-less name a
-        // stored container expands contributes no `overlay` layer: the
-        // container's row is not this name's row, and the `_lock` gate does not
-        // read it. The provenance fields still come from the layer the
-        // response reports first.
-        const itemLock = resolveItemLock({
-            artifact: lockArtifact,
-            overlay: overlayLockLayer,
-        });
         // [#21670] …joined with the locked-packaged-base verdict the write
         // doors answer — the same derivation `getMetaItem` publishes.
         const lockState = this.servedLockState(
@@ -16439,6 +16484,122 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21803, ADR-0010 §3.3, ADR-0048 §3.4] The item-lock resolution's
+     * `artifact` layer ({@link resolveItemLock}) for the item at `address`:
+     * {@link resolveArtifactLockLayer}, the one selection, over
+     * {@link shippedArtifactsOf}. The `_lock` gate ({@link getEffectiveLock}),
+     * {@link getMetaItem}, {@link getMetaItemLayered}, the list
+     * ({@link readFlattenedMetaItems}) and the diagnostics tile
+     * ({@link getMetaDiagnostics}) all take the artifact layer here, so no
+     * caller picks the artifact its lock comes from. Content does not come from
+     * here: each of them still serves the address's own package's artifact
+     * ({@link lookupArtifactItem} with the request's package).
+     *
+     * `shipping` is {@link shippingPackagesOf} for the type, read once by a
+     * caller that asks about many items of one type.
+     */
+    private artifactLockLayerAt(address: ItemAddress, shipping?: ShippingPackages): readonly unknown[] {
+        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, shipping));
+    }
+
+    /**
+     * [#21803] Every artifact an installed code package registered under
+     * `(type, name)`: what the registry's artifact-only lookup
+     * ({@link lookupArtifactItem}) answers for each package that can ship the
+     * name ({@link shippingPackagesOf}), kept when it is that package's own
+     * (`_packageId` equal to the package asked for, the prefer-local hit), plus
+     * what it answers with no package at all.
+     *
+     * The registry has no enumeration of its own for this, so the reader asks
+     * its existing lookups per package. The package-less lookup is always in
+     * the set. It is the one the `_lock` gate made before #21803 (the first
+     * package registered), so the resolution over this set never answers
+     * looser than the gate did under any registration order; with no composite
+     * entry at all it is also the only way to reach an artifact registered
+     * under the plain key.
+     *
+     * An `object` has one owner (`SchemaRegistry.registerObject` refuses a
+     * second code package's claim on the name, ADR-0029 D3), and its artifact
+     * lookup reads the owner's layer whatever package is asked for, so the
+     * owner is the whole set.
+     */
+    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
+        const shipped: unknown[] = [];
+        const add = (artifact: unknown): void => {
+            if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
+        };
+        add(this.lookupArtifactItem(type, name));
+        if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
+        const packages = shipping ?? this.shippingPackagesOf(type);
+        for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
+            const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
+            if (own?._packageId === packageId) add(own);
+        }
+        return shipped;
+    }
+
+    /**
+     * [#21803] The packages that can ship an item of `type`, read off the
+     * registry's own listings:
+     *
+     *  - `byName`: per name, the package of every entry the registry lists for
+     *    the type under that name (both spellings);
+     *  - `anyName`: the packages the listing cannot attribute to a name, probed
+     *    for every name. The listing hides a DISABLED package's entries and the
+     *    artifact lookup does not (the `_lock` gate bound a disabled package's
+     *    artifact before #21803 when it was registered first), so every
+     *    installed package the registry reports disabled is here (every
+     *    installed package, when the registry cannot say which are disabled); so
+     *    is the package of a listed entry that carries no `name`.
+     *
+     * A registry without either listing, or whose listing throws (a
+     * metadata-only host's partial registry: listing there is best-effort
+     * context, never the reason a write fails), contributes nothing here, and
+     * {@link shippedArtifactsOf} then answers with the package-less lookup and
+     * whatever could be listed: never looser than the `_lock` gate before
+     * #21803, which asked that lookup alone.
+     */
+    private shippingPackagesOf(type: string): ShippingPackages {
+        const registry = (this.engine as any)?.registry;
+        const byName = new Map<string, Set<string>>();
+        const anyName = new Set<string>();
+        if (!registry) return { byName, anyName };
+        const isPackage = (id: unknown): id is string => typeof id === 'string' && id !== '' && id !== 'sys_metadata';
+        const listing = (read: () => unknown): readonly unknown[] => {
+            try {
+                const listed = read();
+                return Array.isArray(listed) ? listed : [];
+            } catch {
+                return []; // See this method's header: the package-less lookup still answers.
+            }
+        };
+        if (typeof registry.listItems === 'function') {
+            for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
+                for (const entry of listing(() => registry.listItems(spelling))) {
+                    const { _packageId: id, name } = (entry ?? {}) as { _packageId?: unknown; name?: unknown };
+                    if (!isPackage(id)) continue;
+                    if (typeof name !== 'string') {
+                        anyName.add(id);
+                        continue;
+                    }
+                    const ids = byName.get(name);
+                    if (ids) ids.add(id);
+                    else byName.set(name, new Set([id]));
+                }
+            }
+        }
+        if (typeof registry.getAllPackages === 'function') {
+            const canTell = typeof registry.isPackageDisabled === 'function';
+            for (const record of listing(() => registry.getAllPackages())) {
+                const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
+                const id = r?.manifest?.id ?? r?.id;
+                if (isPackage(id) && (!canTell || registry.isPackageDisabled(id))) anyName.add(id);
+            }
+        }
+        return { byName, anyName };
+    }
+
+    /**
      * True when `packageId` is a **writable base** — a DB-backed package an
      * org or the AI may author *new* metadata into (ADR-0070 D2).
      *
@@ -16511,6 +16672,20 @@ export class ObjectStackProtocolImplementation implements
      * row order is refused under every one, and the reads report that lock.
      * Canonical spelling only (#4432, the one declared difference, stated on
      * {@link overlayLockLayerAt}).
+     *
+     * ## [#21803] The artifact limb and the reads take every shipping package
+     *
+     * The artifact limb used to look the artifact up with no package, so with
+     * two installed packages shipping one name (ADR-0048 §3.4) it bound the
+     * first package registered, while a read naming a package reported that
+     * package's artifact. Now the limb hands {@link artifactLockLayerAt} the
+     * write's address and the reads hand it theirs; the resolution reads the
+     * layers once per shipping package and binds the strictest answer
+     * ({@link resolveItemLock}). The package-less artifact this limb bound
+     * before is always one of them, so no write it refused under some
+     * registration order is admitted under any. The overlay rows are read only
+     * when a shipping package's own artifact declares no lock, or none ships
+     * the name ({@link resolveItemLockLazily}).
      *
      * `'none'` is a VERDICT, not a default: both callers turn it into
      * "allow". So it is returned only when the absence of a lock was
@@ -16591,12 +16766,20 @@ export class ObjectStackProtocolImplementation implements
         // [#9009] ONE key for BOTH limbs — see this method's header.
         const canonicalType = canonicalMetaType(type);
         // [#21738] The one item-lock resolution decides; the two readers below
-        // only gather its layers, the second only when the first does not bind.
+        // only gather its layers, the second only when it can bind.
         const resolved = await resolveItemLockLazily({
             // 1. Artifact. `lookupArtifactItem` is shadow-immune: a
             //    sys_metadata overlay row hydrated into the registry's plain
             //    key cannot mask the packaged artifact's `_lock` envelope.
-            artifact: () => this.lookupArtifactItem(canonicalType, name),
+            //    [#21803] Every installed package that ships the name, through
+            //    the reads' own selection, from the same address — see this
+            //    method's header.
+            artifact: () => this.artifactLockLayerAt({
+                type: canonicalType,
+                name,
+                organizationId: organizationId ?? undefined,
+                packageId,
+            }),
             overlay: () => this.readLockGateOverlayLayer(canonicalType, name, organizationId, packageId),
         });
         return { lock: resolved.lock, lockReason: resolved.lockReason, lockSource: resolved.layer };
