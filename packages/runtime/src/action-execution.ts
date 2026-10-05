@@ -48,7 +48,7 @@ import type { FlowRunSummary } from '@objectstack/spec/automation';
 // A pure factory — no service resolution — so importing it costs the fallback
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
-import { recordNotFoundError } from '@objectstack/metadata-protocol';
+import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
@@ -170,6 +170,17 @@ export async function callData(deps: ActionExecutionDeps,
         const base = qlOpts ? { ...qlOpts } : {};
         return extra ? { ...base, ...extra } : (qlOpts ? base : undefined);
     };
+    /** The object schema the fallback write arms apply the write-response rules from. */
+    const writeResponseSchema = async (): Promise<unknown> => {
+        const fromEngine = ql?.registry?.getObject?.(params.object);
+        if (fromEngine) return fromEngine;
+        try {
+            const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
+            return await (meta as any)?.getObject?.(params.object);
+        } catch {
+            return undefined;
+        }
+    };
 
     if (action === 'create') {
         // Prefer the protocol service (validations + RLS + audit), mirroring
@@ -184,6 +195,10 @@ export async function callData(deps: ActionExecutionDeps,
         if (ql && typeof ql.insert === 'function') {
             const res = await ql.insert(params.object, params.data, qlOpts);
             const record = { ...params.data, ...res };
+            // The engine's write result keeps the stored row whole, so this
+            // fallback mouth owes the same write-response rules the protocol
+            // ingress applies (credential-class mask, `internal` omit).
+            omitInternalFieldsFromWriteResponse(await writeResponseSchema(), record);
             return { object: params.object, id: record.id, record };
         }
         throw { statusCode: 503, message: 'Data service not available' };
@@ -229,7 +244,11 @@ export async function callData(deps: ActionExecutionDeps,
             // with it.
             if (!existing) throw recordNotFoundError(params.object, params.id);
             await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }));
-            return { object: params.object, id: params.id, record: { ...existing, ...params.data } };
+            const record = { ...existing, ...params.data };
+            // The echo carries the caller's own patch: a credential-class value
+            // in it is masked like a read of the stored row would be.
+            omitInternalFieldsFromWriteResponse(await writeResponseSchema(), record);
+            return { object: params.object, id: params.id, record };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
