@@ -4313,7 +4313,9 @@ export class AuthManager {
    *    signup, admin create-user, bulk import, SSO JIT);
    *  - `session.create.before`, which settles the membership before resolving
    *    the session's active organization so a user's FIRST session is not
-   *    minted tenant-less (#8247 rule 2 / #8245).
+   *    minted tenant-less (#8247 rule 2 / #8245) — and ONLY for a session
+   *    minted in the request that created the user (ADR-0093 D7: membership is
+   *    decided at creation; see {@link isCreatingInThisRequest}).
    *
    * Assembling the deps at each call site instead would let the two drift on
    * the axis that matters most: the POLICY. `getMembershipPolicy()` reads a
@@ -4352,6 +4354,57 @@ export class AuthManager {
       // reconcileMembership never throws, but guard regardless — membership
       // bookkeeping must never break user creation or session creation.
       return undefined;
+    }
+  }
+
+  /**
+   * [ADR-0093 D7] The users being created in each in-flight better-auth
+   * request, keyed by that request's endpoint context — the object better-auth
+   * hands every database hook of one endpoint call. Values are lowercased
+   * addresses (better-auth lowercases on `createUser`).
+   *
+   * Why the session seam needs it: `user.create.after` is deferred past the
+   * creation's transaction, so the session a sign-up mints is created BEFORE
+   * the reconciler has bound anyone. The session seam therefore settles the
+   * membership itself — but only for the user this same request is creating.
+   * Any other member-less user signing in is not mid-creation: it is a user
+   * the policy left unbound, or one whose membership was REMOVED, and
+   * membership is decided at creation, never re-decided at sign-in.
+   *
+   * A `WeakMap` because the scope IS the request: the entry dies with the
+   * endpoint context, so nothing staged here can outlive the call that staged
+   * it and be read by a later sign-in.
+   */
+  private creationsInRequest = new WeakMap<object, Set<string>>();
+
+  /** Record that the current request is creating the user with `email`. */
+  private stageCreationInRequest(ctx: unknown, email: string): void {
+    if (!ctx || typeof ctx !== 'object' || !email) return;
+    let staged = this.creationsInRequest.get(ctx);
+    if (!staged) {
+      staged = new Set();
+      this.creationsInRequest.set(ctx, staged);
+    }
+    staged.add(email.toLowerCase());
+  }
+
+  /**
+   * Is `userId` the user the current request is creating? Answers `false`
+   * without touching the store when the request created nobody — the common
+   * sign-in — and otherwise compares the user's stored address with the staged
+   * ones. Never throws (a failed read answers `false`: no settle, which is the
+   * pre-existing behaviour of every sign-in that is not a creation).
+   */
+  private async isCreatingInThisRequest(ctx: unknown, reader: any, userId: string): Promise<boolean> {
+    if (!ctx || typeof ctx !== 'object') return false;
+    const staged = this.creationsInRequest.get(ctx);
+    if (!staged || staged.size === 0) return false;
+    try {
+      const user = await reader.findOne('sys_user', { where: { id: userId } });
+      const email = typeof user?.email === 'string' ? user.email.toLowerCase() : '';
+      return email !== '' && staged.has(email);
+    } catch {
+      return false;
     }
   }
 
@@ -7355,7 +7408,7 @@ export class AuthManager {
       return row?.organization_id;
     };
 
-    const defaultActiveOrg = async (session: any) => {
+    const defaultActiveOrg = async (session: any, ctx: any) => {
       try {
         if (!session || session.activeOrganizationId) return;
         const userId = session.userId;
@@ -7397,13 +7450,23 @@ export class AuthManager {
         // sessions with no active organization, which is the LEGAL state the
         // #8247 ruling declares — this removes a race, never a policy.
         //
+        // ⛔ AND IT RUNS ONLY FOR A USER WHOSE CREATION IS IN THIS REQUEST.
+        // ADR-0093 D7: membership is decided at creation. A member-less user
+        // signing in later is not a race to close — it is, among others, a
+        // user whose membership an administrator REMOVED, and settling here
+        // put them straight back on their next sign-in. The creation seam
+        // (`user.create.before`, below) stages the address in the request's
+        // endpoint context; only a session minted in that same request for
+        // that same user settles here (`isCreatingInThisRequest`).
+        //
         // Cost is paid only where there is something to fix: a caller who
-        // already holds a membership never reaches this branch, and a
-        // deployment that binds nobody stops at the reconciler's own policy /
-        // target-org check without touching the store. The re-read is gated on
-        // an outcome that means a membership now EXISTS, so the common
-        // no-bind login costs no extra query at all.
-        if (!orgId) {
+        // already holds a membership never reaches this branch, a sign-in that
+        // created nobody stops at an in-memory lookup, and a deployment that
+        // binds nobody stops at the reconciler's own policy / target-org check
+        // without touching the store. The re-read is gated on an outcome that
+        // means a membership now EXISTS, so the common no-bind login costs no
+        // extra query at all.
+        if (!orgId && (await this.isCreatingInThisRequest(ctx, reader, userId))) {
           const outcome = await this.settleMembership(userId);
           if (outcome === 'bound' || outcome === 'yielded') {
             orgId = await selectActiveOrg(reader, userId);
@@ -7428,7 +7491,7 @@ export class AuthManager {
               // The host hook fully handled it → keep its result shape.
               if (draft?.activeOrganizationId) return { data: draft };
             }
-            return (await defaultActiveOrg(draft)) ?? (draft === session ? undefined : { data: draft });
+            return (await defaultActiveOrg(draft, ctx)) ?? (draft === session ? undefined : { data: draft });
           }
         : hostSessionBefore;
 
@@ -7511,6 +7574,10 @@ export class AuthManager {
         }
       }
       const email = typeof draft?.email === 'string' ? draft.email : '';
+      // ADR-0093 D7 — mark this request as the one creating `email`, so the
+      // session it mints settles the membership the deferred
+      // `user.create.after` would (see `defaultActiveOrg`).
+      this.stageCreationInRequest(ctx, email);
       if (email && this.takeOwnerVerifiedStamp(email)) {
         return { data: { ...draft, emailVerified: true } };
       }

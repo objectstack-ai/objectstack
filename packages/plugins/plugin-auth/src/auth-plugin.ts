@@ -50,11 +50,11 @@ import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
-  backfillMemberships,
   isMembershipPolicy,
   MEMBERSHIP_POLICIES,
   type MembershipPolicy,
 } from './reconcile-membership.js';
+import { runOneTimeMembershipBackfill } from './membership-backfill-ledger.js';
 import {
   registerIdentityWriteGuard,
   registerManagedUpdateWhitelist,
@@ -1142,6 +1142,11 @@ export class AuthPlugin implements Plugin {
     // seed-ownership step injected. One crisp owner per posture, and the open
     // package never bootstraps an organization for a deployment whose
     // multi-organization runtime it does not provide.
+    // The one-time ADR-0093 D6 backfill (below) is handed to the bootstrap so
+    // the moment the default organization first EXISTS is a moment it runs:
+    // until then the pass has no target and records nothing, and leaving it to
+    // the next boot would let it sweep in members removed during this uptime.
+    let runBackfillOnDefaultOrg: ((source: string) => Promise<void>) | undefined;
     if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
       const runEnsure = async () => {
         try {
@@ -1152,6 +1157,10 @@ export class AuthPlugin implements Plugin {
             ctx.logger.info(
               `[auth] created Default Organization ${res.defaultOrgId} for the platform admin (single-org)`,
             );
+            // Not awaited: this can run inside the `sys_user` insert that
+            // created the platform admin, and the pass is serialized on its
+            // own chain, which never rejects.
+            void runBackfillOnDefaultOrg?.('default-org-created');
           }
         } catch (e) {
           ctx.logger.warn?.('[auth] ensureDefaultOrganization failed', {
@@ -1184,7 +1193,8 @@ export class AuthPlugin implements Plugin {
     }
 
     // ADR-0093 D6 — backfill memberships for pre-existing member-less users
-    // (historical create-user / import rows from before the reconciler existed).
+    // (historical create-user / import rows from before the reconciler existed),
+    // ONCE per deployment (`membership-backfill-ledger.ts`, ADR-0093 D7).
     // Registered AFTER the default-org bootstrap hook so a target org exists by
     // the time it runs. `backfillMemberships` self-guards: it no-ops under
     // `invite-only` policy and in multi-org (tenancy.defaultOrgId() → null),
@@ -1218,12 +1228,22 @@ export class AuthPlugin implements Plugin {
             // guard is a precondition, not a degraded mode.
             const manager = this.authManager;
             if (!ql || !tenancy || !manager) return;
-            const res = await backfillMemberships(ql, {
-              policy: manager.getMembershipPolicy(),
-              resolveTargetOrg: () => tenancy.defaultOrgId(),
-              logger: ctx.logger,
-            });
-            if (res.bound > 0) {
+            // ADR-0093 D7 — membership is decided at creation, so this pass is
+            // ONE-TIME per deployment: it runs until it reaches a verdict, the
+            // verdict is recorded in the `sys_migration` ledger, and every later
+            // trigger reads the record and binds nobody. Re-run on every boot,
+            // it re-added members an administrator had removed.
+            const outcome = await runOneTimeMembershipBackfill(
+              ql,
+              {
+                policy: manager.getMembershipPolicy(),
+                resolveTargetOrg: () => tenancy.defaultOrgId(),
+                logger: ctx.logger,
+              },
+              ctx.logger,
+            );
+            const res = outcome.backfill;
+            if (res && res.bound > 0) {
               ctx.logger.info(
                 `[auth] membership backfill (${source}) bound ${res.bound} member-less user(s) to the default organization (ADR-0093 D6)`,
                 res,
@@ -1238,12 +1258,14 @@ export class AuthPlugin implements Plugin {
         });
         return backfillChain;
       };
+      runBackfillOnDefaultOrg = runBackfill;
       ctx.hook('kernel:ready', () => runBackfill('kernel:ready'));
       // #2996: app seeds insert `sys_user` via raw engine.insert, bypassing
       // better-auth's `user.create.after` reconciler. A seed that overruns
       // OS_INLINE_SEED_BUDGET_MS finishes in the background AFTER kernel:ready,
-      // so its users miss the one-shot backfill above. Re-run the (idempotent)
-      // backfill when the app plugin signals seed settle.
+      // so its users would miss a kernel:ready pass that had no target yet.
+      // The trigger stays; the ledger makes it a no-op once the one-time pass
+      // has been recorded.
       ctx.hook('app:seeded', () => runBackfill('app:seeded'));
     }
 
