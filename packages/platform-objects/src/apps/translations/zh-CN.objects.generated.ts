@@ -490,7 +490,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "解除关联",
-        description: "确定要解除此身份关联吗？在用户从账户设置中重新关联之前，将无法再使用此提供方登录。",
+        description: "确定要解除此身份关联吗？在用户重新关联之前，将无法再使用此提供方登录。",
         successMessage: "已解除身份关联"
       }
     }

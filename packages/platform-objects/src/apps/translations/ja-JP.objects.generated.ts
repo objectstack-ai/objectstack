@@ -490,7 +490,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "連携解除",
-        description: "このID連携を解除しますか？ユーザーがアカウント設定から再度連携するまで、このプロバイダーでサインインできなくなります。",
+        description: "このID連携を解除しますか？ユーザーが再度連携するまで、このプロバイダーでサインインできなくなります。",
         successMessage: "アイデンティティ連携を解除しました"
       }
     }

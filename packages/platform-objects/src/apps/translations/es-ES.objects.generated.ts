@@ -490,7 +490,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "Desvincular cuenta",
-        description: "¿Desvincular este vínculo de identidad? El usuario ya no podrá iniciar sesión con este proveedor hasta que lo vuelva a vincular desde la configuración de su cuenta.",
+        description: "¿Desvincular este vínculo de identidad? El usuario ya no podrá iniciar sesión con este proveedor hasta que lo vuelva a vincular.",
         successMessage: "Vínculo de identidad eliminado"
       }
     }
