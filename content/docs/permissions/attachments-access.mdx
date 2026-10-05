@@ -71,11 +71,12 @@ editable by design). A multi-delete requires *every* matched row to pass.
 | Code | Status | When |
 | --- | --- | --- |
 | `ATTACHMENT_DELETE_DENIED` | 403 | The caller can read the attachment, but is neither the uploader nor able to edit the parent record |
-| `PERMISSION_DENIED` | 403 | The caller cannot read the parent record, so the attachment is not visible to them. This is the platform's not-visible refusal whichever layer gives it — the row-level write check that runs before the gate, or the gate itself for a caller that check does not cover — and it names neither the parent nor the attachment's link to it |
+| `RECORD_NOT_FOUND` | 404 | A delete or update **by id** of an attachment the caller cannot read — its parent record is not readable to them. On the write doors a row the caller cannot read is a row that does not exist: the answer is exactly what an id that names no attachment gets, for every caller, so a hidden attachment and a missing one cannot be told apart. It applies even to the uploader once the parent is out of their sight, because the read door no longer returns the attachment to them either |
+| `PERMISSION_DENIED` | 403 | The gate's own not-visible refusal, where the gate answers before that check. It names neither the parent nor the attachment's link to it |
 
 An update of another user's attachment follows the same rule — the uploader or
-a parent editor — and a caller who cannot read the parent gets the same
-not-visible refusal.
+a parent editor — and a by-id update of an attachment the caller cannot read
+gets the same not-found answer.
 
 The platform baseline also ships a parent-blind row-level delete floor
 (`owner_only_deletes`: you may delete only the rows you created, for members

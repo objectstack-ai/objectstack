@@ -365,6 +365,16 @@ describe('object-master-detail-form detail-entry sortField retirement — the AD
 // are outside what this walk sees. A future schema that declares a `sortField`
 // of its own would trip this walk: narrow the matcher to detail entries then,
 // never exclude the new file.
+//
+// [#21768] The first such schema: the `object-form` runtime form field declares
+// the `grid` widget's camelCase `sortField` (the row field the grid stamps with
+// each row's index), so an inline `grid` field authors `sortField: 'position'`
+// legitimately. The matcher is narrowed accordingly, by the object literal the
+// key sits in: one whose own level names `type` (or `widget`) `grid` /
+// `field:grid` is that inline field, not a detail entry. Nested literals — a
+// column's own `type` — never decide it, every match in a file is judged (an
+// inline grid field earlier in a file hides no detail entry after it), and a
+// key outside any literal (YAML) is still judged an authoring.
 describe('tree-scoped absence: nothing inside the declared radius still authors a detail-entry sortField', () => {
   const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
@@ -380,9 +390,50 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
 
   const AUTHORING = /(^|[^\w.$])["']?sortField["']?[ \t]*:[ \t]*(["']?)[a-z_][a-z0-9_]*\2(?=[ \t]*([,}\]#]|$))/m;
 
+  const AUTHORING_ALL = new RegExp(AUTHORING.source, 'gm');
+  /** An inline `grid` form field's own-level marker: the one literal that declares a `sortField` of its own. */
+  const INLINE_GRID_FIELD = /(^|[^\w.$])["']?(?:type|widget)["']?[ \t]*:[ \t]*["'](?:field:)?grid["']/m;
+
   /** Inline code spans are prose; newline-bounded, so a fenced example is still judged. */
   const stripInlineCode = (text: string): string => text.replace(/`[^`\n]*`/g, '');
-  const judge = (text: string): RegExpExecArray | null => AUTHORING.exec(stripInlineCode(text));
+
+  /**
+   * The own level of the object literal enclosing `at` — its text with every
+   * nested `{…}` / `[…]` group removed — or `undefined` when `at` sits in no
+   * literal (YAML, a bare key).
+   */
+  const enclosingLiteralOwnLevel = (text: string, at: number): string | undefined => {
+    let start = -1;
+    for (let i = at - 1, depth = 0; i >= 0; i -= 1) {
+      const c = text[i];
+      if (c === '}' || c === ']') depth += 1;
+      else if (c === '{' || c === '[') {
+        if (depth === 0) { if (c === '{') start = i; break; }
+        depth -= 1;
+      }
+    }
+    if (start < 0) return undefined;
+    let own = '';
+    for (let i = start + 1, depth = 0; i < text.length; i += 1) {
+      const c = text[i]!;
+      if (c === '{' || c === '[') depth += 1;
+      else if (c === '}' || c === ']') {
+        if (depth === 0) break;
+        depth -= 1;
+      } else if (depth === 0) own += c;
+    }
+    return own;
+  };
+
+  const judge = (text: string): RegExpMatchArray | null => {
+    const stripped = stripInlineCode(text);
+    for (const m of stripped.matchAll(AUTHORING_ALL)) {
+      const own = enclosingLiteralOwnLevel(stripped, m.index! + m[1]!.length);
+      if (own !== undefined && INLINE_GRID_FIELD.test(own)) continue; // an inline grid field's own key
+      return m;
+    }
+    return null;
+  };
 
   /**
    * Structural exclusions — the retirement kit, each with its reason. ⛔ NOT an
@@ -433,6 +484,18 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     expect(judge('sortField: derived.sortField,')).toBeNull();
     expect(judge("sort_field: entry.sortField,\n  sortFields: ['name'],")).toBeNull();
     expect(judge('"ui/ObjectMasterDetailFormProps:details.sortField",')).toBeNull();
+  });
+
+  it('the narrowing exempts only an inline grid field\'s own `sortField` (#21768)', () => {
+    // The inline `grid` form field declares the key: exempt, in each spelling of its widget.
+    expect(judge("customFields: [{ name: 'lines', type: 'grid', columns: [{ name: 'qty', type: 'number' }], sortField: 'position' }]")).toBeNull();
+    expect(judge('{ "name": "lines", "type": "grid", "sortField": "position" }')).toBeNull();
+    expect(judge("{ name: 'lines', widget: 'field:grid', sortField: 'line_no' }")).toBeNull();
+    // CONTROLS — still offenders: a nested column's `grid` type decides nothing; an inline grid field
+    // earlier in the text hides no detail entry after it; and a literal with no grid marker at its level.
+    expect(judge("details: [{ childObject: 'crm_invoice_line', columns: [{ name: 'g', type: 'grid' }], sortField: 'line_no' }]")).not.toBeNull();
+    expect(judge("[{ name: 'g', type: 'grid', sortField: 'position' }, { childObject: 'crm_invoice_line', sortField: 'line_no' }]")).not.toBeNull();
+    expect(judge("{ childObject: 'crm_invoice_line', type: 'grids', sortField: 'line_no' }")).not.toBeNull();
   });
 
   it('no detail-entry sortField authoring survives inside the declared radius outside the retirement kit', () => {

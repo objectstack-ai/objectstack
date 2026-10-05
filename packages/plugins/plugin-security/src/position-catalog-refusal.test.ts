@@ -619,9 +619,14 @@ describe("walled posture, two organizations — the predicate reads the WRITER's
       ));
       const foreign = envelopeOf(foreignErr);
       const nowhere = envelopeOf(nowhereErr);
-      expect([foreign.code, foreign.status], position).toEqual(['PERMISSION_DENIED', 403]);
-      expect([nowhere.code, nowhere.status], position).toEqual(['PERMISSION_DENIED', 403]);
-      expect(resolveThrownHttpError(foreignErr).message, position).toBe(resolveThrownHttpError(nowhereErr).message);
+      // [#21771] Ruling A: a row the writer cannot read answers what a
+      // nonexistent id answers — the read door's not-found, for both ids.
+      expect([foreign.code, foreign.status], position).toEqual(['RECORD_NOT_FOUND', 404]);
+      expect([nowhere.code, nowhere.status], position).toEqual(['RECORD_NOT_FOUND', 404]);
+      // The one difference the not-found sentence carries is the id the
+      // writer itself supplied.
+      expect(resolveThrownHttpError(foreignErr).message.replace('upb_foreign', 'ID'), position)
+        .toBe(resolveThrownHttpError(nowhereErr).message.replace('up_nowhere', 'ID'));
     }
     const [row] = await h.engine.find('sys_user_position', { where: { id: 'upb_foreign' }, context: SYS });
     expect(row?.position).toBe('qa_b_only');

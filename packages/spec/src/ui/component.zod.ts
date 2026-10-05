@@ -2248,15 +2248,20 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
   guidance: {
     // The four detail-entry keys this panel does not read — the spellings an
     // author moving a child collection over from `object-master-detail-form`
-    // carries along. Measured at the pin: the panel hands the grid no
-    // `add_label` / `sort_field` and no `onRowExpand` (`:694-710`, `:806-817`).
+    // carries along. Measured at the `.objectui-sha` pin `9dfaca654311`: the
+    // panel hands the grid no `addLabel` / `sortField` and no `onRowExpand`
+    // (`plugin-form/src/LineItemsPanel.tsx:696-720`, `:816-827`). The grid's
+    // own keys are camelCase there (objectstack-ai/objectui#11610); earlier
+    // pins measured the same absence under `add_label` / `sort_field`.
     // `sortField` has since left the detail entry too (#21589, a tombstone
     // there): the line-position field is derived from the child object and
-    // never authored, so its answer names no block that takes it.
+    // never authored, so its answer names no child-record block that takes it.
+    // [#21768] An inline `grid` form field does take one, for the rows of its
+    // own value rather than child records — hence "for child records" below.
     addLabel: '`record:line_items` does not read `addLabel`: its grid draws the built-in, localized '
       + 'Add button. `addLabel` belongs to an `object-master-detail-form` detail entry.',
     sortField: '`record:line_items` does not read `sortField`: its grid stamps no line position, so a '
-      + 'drag-reorder is not saved. No block takes an authored `sortField`: an '
+      + 'drag-reorder is not saved. No block takes an authored `sortField` for child records: an '
       + '`object-master-detail-form` detail entry derives the line-position field from the child '
       + `object's ${INLINE_GRID_SORT_FIELD_LIST} field.`,
     formFields: '`record:line_items` draws an editable grid only, with no per-row expand form, so it '
@@ -6233,17 +6238,103 @@ const formFieldNameList = () => z.array(z.string({
 // ---------------------------------------------------------------------------
 
 /**
- * The `grid` widget's eight field-level keys, spelled snake_case.
+ * [#21768] The `grid` widget's eight field-level keys, as the runtime form
+ * field declares them — camelCase, each value type the widget's own
+ * (`GridFieldMetadata`, `types/src/field-types.ts:1031-1088` at the
+ * `.objectui-sha` pin `9dfaca654311`, which `FormField` carries by reference at
+ * `types/src/form.ts:2079-2094`; objectui's zod mirror states the same types at
+ * `types/src/zod/form.zod.ts:1102-1117`).
  *
- * The widget reads them off a `type: 'grid'` field (`GridFieldMetadata`,
- * `fields/src/widgets/GridField.tsx:588`), so the form does draw them; they are
- * left out of {@link objectFormRuntimeField} by the ruling itself, because this
- * package spells configuration keys in camelCase. They come in once the widget
- * reads a camelCase spelling (objectstack-ai/objectui#11610 carries the rename).
+ * The widget reads them off the field it is handed (`const cfg = field`,
+ * `fields/src/widgets/GridField.tsx:669`): `allowAdd` / `allowDelete` (`:749-750`,
+ * each `!== false` and off on a read-only or disabled grid), `minRows` /
+ * `maxRows` (`:762-763`; Remove stops at `minRows`, `:882`, and Add, Duplicate
+ * and the blank entry row stop at `maxRows`, `:808`, `:850`, `:892`, `:1077`),
+ * `totalField` (`:771`, summed into the footer at `:919-923`), `sortField`
+ * (`:778`, stamped on every row by `emit`, `:785-790`), `allowReorder` (`:783`)
+ * and `addLabel` (`:1322`, `:1491`). That is the whole read set: a key no line
+ * above reads is not declared.
+ *
+ * Their spelling is objectstack-ai/objectui#11610's (merge `2abec3a96c`, an
+ * ancestor of the pin): until it, the widget read these keys in snake_case
+ * only, and ruling B on #21704 fork 2 (record 5978663135) kept them out of this
+ * camelCase contract. {@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS} keeps the
+ * snake_case spellings refused by name.
+ *
+ * ⚠️ `totalField` here names the CHILD column the grid sums. On the
+ * `record:line_items` block and an `object-master-detail-form` detail entry the
+ * same spelling names the PARENT field the sum is saved to, and their
+ * `amountField` is the child column — which the line-items panel and the
+ * master-detail form hand the grid AS its `totalField`
+ * (`plugin-form/src/LineItemsPanel.tsx:710`, `MasterDetailForm.tsx:876`). The
+ * grid writes no parent field. The describe says so, and
+ * `component-form-custom-fields-sections-typed.pin.test.ts` §5 pins the
+ * opposite meanings side by side.
  */
-const OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS = [
-  'min_rows', 'max_rows', 'allow_add', 'allow_delete', 'allow_reorder', 'total_field', 'add_label', 'sort_field',
-] as const;
+function objectFormRuntimeFieldGridMembers() {
+  return {
+    minRows: z.number().optional()
+      .describe('A `grid` field\'s minimum row count: its Remove action is disabled at this many rows (no minimum when unset). Read only by the `grid` widget'),
+    maxRows: z.number().optional()
+      .describe('A `grid` field\'s maximum row count: its Add and Duplicate actions are disabled, and no blank entry row is drawn, at this many rows (no maximum when unset). Read only by the `grid` widget'),
+    allowAdd: z.boolean().optional()
+      .describe('Whether a `grid` field offers Add, and each row\'s Duplicate (a duplicate is an add): on unless `false`. A read-only or disabled grid offers neither. Read only by the `grid` widget'),
+    allowDelete: z.boolean().optional()
+      .describe('Whether a `grid` field offers each row\'s Delete: on unless `false`. A read-only or disabled grid never offers it. Read only by the `grid` widget'),
+    allowReorder: z.boolean().optional()
+      .describe('Whether a `grid` field\'s rows can be reordered by dragging: on unless `false`. A read-only or disabled grid never offers it. Read only by the `grid` widget'),
+    totalField: z.string().optional()
+      .describe('The CHILD column a `grid` field sums into its footer total — the `name` of one of its `columns`; no total shows when unset. Not the PARENT field a master-detail or `record:line_items` sum is saved to: those blocks spell that `totalField` and the child column `amountField`, and the grid writes no parent field. Read only by the `grid` widget'),
+    addLabel: z.string().optional()
+      .describe('Label of a `grid` field\'s Add button, also named in its empty state (the locale\'s own wording when unset). A plain string. Read only by the `grid` widget'),
+    sortField: z.string().optional()
+      .describe('A field on each row that a `grid` field stamps with the row\'s index (0, 1, 2, …) on every change, so the order a drag-reorder leaves is saved with the rows (rows carry no position when unset). A row field, not one of `columns`: a column of that name has its typed value overwritten. Read only by the `grid` widget'),
+  };
+}
+/** One of the `grid` widget's camelCase field-level keys ({@link objectFormRuntimeFieldGridMembers}). */
+type ObjectFormRuntimeFieldGridKey = keyof ReturnType<typeof objectFormRuntimeFieldGridMembers>;
+
+/**
+ * The `grid` widget's retired snake_case field-level keys, each mapped to the
+ * camelCase key the runtime form field declares in its place — the pairing
+ * objectui's `GRID_FIELD_RETIRED_KEYS` holds (`types/src/field-types.ts:1159`
+ * at the `.objectui-sha` pin `9dfaca654311`).
+ *
+ * objectstack-ai/objectui#11610 retired the eight with no dual read: at the
+ * pin nothing reads a snake_case spelling, and every objectui face refuses
+ * each by name — the widget draws a refusal instead of the grid
+ * (`fields/src/widgets/GridField.tsx:643-650`), both TS faces tombstone it
+ * (`types/src/field-types.ts:1106-1141`, `types/src/form.ts:2108-2143`) and the
+ * zod mirror names the camelCase key (`types/src/zod/form.zod.ts:1122-1129`).
+ * So this contract refuses each too, and each refusal names its own camelCase
+ * key: the map feeds one guidance set per entry, because a set
+ * answers once per message and an author who wrote two of them is owed both
+ * renames.
+ *
+ * [#21768] Until then this was a plain list whose one prescription said the
+ * keys "come in once the widget reads a camelCase spelling" — the condition
+ * the pin `9dfaca654311` made true.
+ */
+const OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS = {
+  min_rows: 'minRows',
+  max_rows: 'maxRows',
+  allow_add: 'allowAdd',
+  allow_delete: 'allowDelete',
+  allow_reorder: 'allowReorder',
+  total_field: 'totalField',
+  add_label: 'addLabel',
+  sort_field: 'sortField',
+} as const satisfies Readonly<Record<string, ObjectFormRuntimeFieldGridKey>>;
+
+/** The prescription a retired snake_case `grid` key meets: the camelCase key to write, and what stays the same. */
+function objectFormGridWidgetSnakeKeyPrescription(snake: string, camel: ObjectFormRuntimeFieldGridKey): string {
+  const meaning = camel === 'totalField'
+    ? ' It still names the CHILD column summed into the grid\'s footer, not a parent field.'
+    : '';
+  return `\`${snake}\` is the \`grid\` widget's retired snake_case spelling of \`${camel}\`: the widget reads `
+    + 'only the camelCase key, and refuses a field that carries the snake_case one instead of drawing the '
+    + `grid. Rename the key to \`${camel}\`; its value stays the same.${meaning}`;
+}
 
 /** What an inline form field's undeclared keys used to cost. */
 const OBJECT_FORM_RUNTIME_FIELD_HISTORY =
@@ -6409,7 +6500,11 @@ function buildObjectFormRuntimeOption() {
  *   (`NumberField.tsx:88-89`), `minLength` / `maxLength` (`form.tsx:4080`,
  *   `:4146`), `pattern` (the built-in input's attribute), `returnType`
  *   (`FormulaField.tsx:22`), `summaryOperations` (`SummaryField.tsx:15`) and
- *   `columns` (`GridField.tsx:589`).
+ *   `columns` (`GridField.tsx:589`);
+ * - **the `grid` widget's field-level keys** ([#21768], read at the
+ *   `.objectui-sha` pin `9dfaca654311`): `minRows`, `maxRows`, `allowAdd`,
+ *   `allowDelete`, `allowReorder`, `totalField`, `addLabel` and `sortField` —
+ *   read points and value types on {@link objectFormRuntimeFieldGridMembers}.
  *
  * Where this package already declares the member, its value schema is taken
  * by reference — the object field's (`FieldSchema`) for the widget metadata
@@ -6421,8 +6516,6 @@ function buildObjectFormRuntimeOption() {
  *
  * ## Read, and refused anyway
  *
- * - the `grid` widget's snake_case keys ({@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS}),
- *   by the ruling;
  * - `visibleOn` (`form.tsx:2767`) and the legacy `condition` (`:2717`): two
  *   more spellings of the conditional-visibility predicate, which this package
  *   spells `visibleWhen` (ADR-0089);
@@ -6431,6 +6524,14 @@ function buildObjectFormRuntimeOption() {
  *   name), so it adds nothing;
  * - `fields`: the member claim of the section-divider row the form builds from
  *   a section, not a member of a field.
+ *
+ * ## Read by nothing, and refused by name
+ *
+ * The `grid` widget's retired snake_case spellings
+ * ({@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS}), each answered with the camelCase
+ * key to write. Until #21768 these were the keys the widget read, held out of
+ * this camelCase contract by the ruling; objectstack-ai/objectui#11610 renamed
+ * them, and the widget now refuses the snake_case spellings itself.
  *
  * Measured outside objectui's 45 members: `group` (above) is declared, and
  * `defaultValue` is refused — an inline field's default seeds nothing (the
@@ -6471,15 +6572,13 @@ function buildObjectFormRuntimeField() {
         '`field` is the identity key of the form view\'s section entry (`{ field: \'email\', … }`, which only '
         + 'a section\'s `fields` takes); an inline form field is keyed by `name`. Write one or the other.',
     },
-    guidanceSets: [{
+    // One set per retired spelling, all under the map's name: a set answers once
+    // per message, and each written key is owed its own camelCase replacement.
+    guidanceSets: Object.entries(OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS).map(([snake, camel]) => ({
       name: 'OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS',
-      keys: OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS,
-      prescription:
-        'This is one of the `grid` widget\'s snake_case field-level keys (`min_rows`, `max_rows`, `allow_add`, '
-        + '`allow_delete`, `allow_reorder`, `total_field`, `add_label`, `sort_field`). This contract spells '
-        + 'configuration keys in camelCase, and these come in once the widget reads a camelCase spelling; until '
-        + 'then a `grid` field takes its `columns` and the widget\'s own defaults.',
-    }],
+      keys: [snake],
+      prescription: objectFormGridWidgetSnakeKeyPrescription(snake, camel),
+    })),
   }, {
     name: z.string().min(1).describe('The field\'s name: its identity, and the key its value is submitted under. A member naming a field the object declares replaces that field\'s whole definition'),
     label: z.string().optional().describe('The label drawn beside the control (a plain string)'),
@@ -6514,6 +6613,9 @@ function buildObjectFormRuntimeField() {
     returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
+    // [#21768] The `grid` widget's eight field-level keys, camelCase since
+    // objectstack-ai/objectui#11610 — read points and types on the builder.
+    ...objectFormRuntimeFieldGridMembers(),
   });
 }
 let objectFormRuntimeFieldOnce: ReturnType<typeof buildObjectFormRuntimeField> | undefined;
@@ -6744,7 +6846,11 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
    * in camelCase, keyed by `name` — merged over the generated fields
    * (`plugin-form/src/customFieldsMerge.ts:78-108`). Until then it was
    * `z.unknown()`: objectui's own field is open (an index signature beside
-   * forty-five members) and spells eight of them in snake_case.
+   * forty-five members), and at the `.objectui-sha` pin `2e818d0b51ec` it spelled
+   * eight of them, the `grid` widget's field-level keys, in snake_case.
+   * [#21768] objectstack-ai/objectui#11610 camelCased those eight (the pin
+   * `9dfaca654311` carries it), and the runtime field now declares them under
+   * the camelCase names, the snake_case spellings refused by name.
    */
   customFields: z.array(objectFormRuntimeField()).optional()
     .describe('Field definitions merged over the set generated from the object\'s metadata — each a closed inline field `{ name, label?, type?, required?, … }`: a member naming a field the object declares replaces that field\'s whole definition, any other is added after the generated fields. With no object behind the form, the members are its only fields'),
@@ -6936,7 +7042,13 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  * `deriveMasterDetail.ts:540`), carried on the resolved entry and handed to
  * the grid as `sort_field` (`:874`). The pin crossed that change without the
  * spec half, so an authored `sortField` published green, and a drag-reorder
- * stamped the derived field, or none.
+ * stamped the derived field, or none. [#21768] At the pin `9dfaca654311` the
+ * grid's own key is camelCase (objectstack-ai/objectui#11610), so the derived
+ * field is handed over as `sortField` (`:877`, from `deriveDetail` at
+ * `deriveMasterDetail.ts:475-498`); `MasterDetailDetailConfig` still has no
+ * such member (`:83`), and the entry key stays a tombstone. The grid key is
+ * the one an inline `grid` form field declares
+ * ({@link objectFormRuntimeFieldGridMembers}), for the rows of its own value.
  *
  * The live mechanism is the child object's own field: its first field named
  * one of {@link INLINE_GRID_SORT_FIELD_LIST}, on an entry the renderer

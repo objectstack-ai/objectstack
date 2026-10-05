@@ -364,6 +364,14 @@ export interface ExplainEngineDeps {
    * explanation for a `delete` must consult this rather than the update gate.
    */
   canDeleteRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
+  /**
+   * [#21771] Enforcement's own read question for an addressed by-id write:
+   * would the read door, asked by this principal, NOT return the record?
+   * `true` only for absence; a read-time policy refusal answers `false`, and a
+   * store fault propagates — exactly as the write path asks it, so the
+   * explanation cannot drift from the answer the write gets.
+   */
+  recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
 
 export interface ExplainInput {
@@ -2048,6 +2056,25 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     });
     recordVerdict = out.record;
     posture = out.posture;
+    // [#21771] Ruling A on the write doors: a row the principal cannot READ is
+    // a row that does not exist, so an update or delete of it answers what a
+    // nonexistent id answers. The record verdict says so in its own vocabulary
+    // — the missing-record shape, `visible: false` with no decider — wherever
+    // enforcement reaches that question: past the capability and object CRUD
+    // gates (which answer first, as they do here), for a principal with an
+    // identity, on a record that exists. (A system principal reads every row,
+    // so the question cannot change its verdict.)
+    if (
+      (operation === 'update' || operation === 'delete') &&
+      deps.recordAbsentToCaller &&
+      context?.userId &&
+      recordVerdict.decidedBy !== 'required_permissions' &&
+      recordVerdict.decidedBy !== 'object_crud' &&
+      !(recordVerdict.visible === false && recordVerdict.decidedBy === undefined) &&
+      (await deps.recordAbsentToCaller(object, input.recordId, context))
+    ) {
+      recordVerdict = { recordId: input.recordId, visible: false };
+    }
   }
 
   const decision: ExplainDecision = {
