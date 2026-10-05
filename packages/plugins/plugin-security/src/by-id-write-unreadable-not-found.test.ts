@@ -45,13 +45,22 @@ const ME = 'usr_nf_member';
 const OTHER = 'usr_nf_other';
 const CALLER = { userId: ME, positions: ['qa_pos'], permissions: ['qa_nf_guard'], posture: 'MEMBER' };
 
-type Rig = Awaited<ReturnType<typeof boot>>;
+interface Refusal { code?: string; status?: number; message: string; name?: string }
+type Outcome = { kind: 'landed' } | ({ kind: 'refused' } & Refusal);
+
+interface Rig {
+  engine: ObjectQL;
+  update: (object: string, id: string, data?: Record<string, unknown>) => Promise<Outcome>;
+  remove: (object: string, id: string) => Promise<Outcome>;
+  stored: (object: string, id: string) => Promise<Record<string, unknown> | null>;
+  teardown: () => Promise<void>;
+}
 const rigs: Rig[] = [];
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.teardown();
 });
 
-async function boot() {
+async function boot(): Promise<Rig> {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
@@ -134,7 +143,7 @@ async function boot() {
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
 
-  const rig = {
+  const rig: Rig = {
     engine,
     update: (object: string, id: string, data: Record<string, unknown> = { name: 'renamed' }) =>
       outcome(engine.update(object, data, { where: { id }, context: { ...CALLER } } as never)),
@@ -147,9 +156,6 @@ async function boot() {
   rigs.push(rig);
   return rig;
 }
-
-interface Refusal { code?: string; status?: number; message: string; name?: string }
-type Outcome = { kind: 'landed' } | ({ kind: 'refused' } & Refusal);
 
 function outcome(p: Promise<unknown>): Promise<Outcome> {
   return p.then(
