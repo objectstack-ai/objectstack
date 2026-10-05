@@ -13708,7 +13708,11 @@ export class ObjectStackProtocolImplementation implements
      * exactly as one naming an object that does not exist. A `false` is a
      * narrowing only; the engine still enforces everything on the objects
      * that ARE queried, row scope included. If `canReadObject` itself throws,
-     * the search fails rather than answering without that object.
+     * the search fails rather than answering without that object. Note that
+     * plugin-security's `canReadObject` catches a permission-resolution
+     * failure itself and answers `false` (its documented fail-closed
+     * contract), so during a permission outage the sweep SKIPS objects rather
+     * than failing: nothing is disclosed, but `totalObjects` shrinks.
      *
      * ## [#8896] A swept object that could not be READ fails the search
      *
@@ -13955,8 +13959,12 @@ export class ObjectStackProtocolImplementation implements
             // every member's unscoped search hit it. `searchFields` only ever
             // NARROWS the server-resolved set (ADR-0061), so handing the engine
             // the queryable subset searches what the caller could have filtered
-            // on themselves and nothing more. An object left with no queryable
-            // search field is skipped like an unreadable one.
+            // on themselves through `searchFields`. An object left with no
+            // queryable search field is skipped like an unreadable one.
+            // An `undefined` answer narrows nothing here: unlike the contract's
+            // fallback for consumers without an answer (treat every field with a
+            // `maskingRule` as not queryable), this sweep leaves that judgement to
+            // the engine's predicate guard on `find`, which can only refuse.
             let searchableFields = declaredSearchFields;
             if (getQueryableFields) {
                 const queryable = await getQueryableFields(obj.name);
