@@ -1843,6 +1843,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   • A purge was undone
      *   • The user wants a clean baseline back after editing demo rows
      *
+     * A success answers the loader's four counts — `inserted`, `updated`,
+     * `skipped`, `errors` — so the caller sees why nothing changed. A run over
+     * an intact baseline (every declared record already present, so all of
+     * them `skipped`) is a success with `inserted: 0`: being idempotent, the
+     * reseed has reached the state it exists to reach. `422 RESEED_NO_ROWS` is
+     * kept for a run that wrote nothing because records failed (`errors`), or
+     * because the loader had no record to process for this runtime.
+     *
      * Multi-tenant: requires an active organization on the session (same
      * rule as install seed path). A walled session with none is refused with
      * ADR-0123 D2 / D4's answer ({@link noActiveOrganizationRefusal}); the
@@ -1888,16 +1896,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         const inserted = summary.seeded.inserted ?? 0;
         const updated = summary.seeded.updated ?? 0;
+        const skipped = summary.seeded.skipped ?? 0;
         const errors = summary.seeded.errors ?? 0;
         const wrote = inserted + updated > 0;
+        // The loader reconciles `inserted + updated + skipped + errored`
+        // against the records it processes for this runtime (`SeedLoadResult`
+        // in `@objectstack/spec/data`), so a clean run with nothing written and
+        // `skipped > 0` found every one of them already present: the intact
+        // baseline, which is a success. With `skipped` at 0 as well, it
+        // processed no record at all.
+        const intactBaseline = !wrote && errors === 0 && skipped > 0;
 
         // HONEST RESULT: the loader runs row-by-row and counts write failures
         // (locked DB, missing table, validation reject) into `errors` rather
         // than throwing. Previously this handler returned success — and flipped
         // `withSampleData` to true — even when every row failed, so the UI said
         // "done" while the database stayed empty. Treat a run that landed no
-        // rows as a failure and report why.
-        if (!wrote) {
+        // rows as a failure and report why — unless every row it would have
+        // written is already there.
+        if (!wrote && !intactBaseline) {
             return c.json({
                 success: false,
                 error: {
@@ -1910,7 +1927,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 422);
         }
 
-        // Only mark the install as carrying sample data once rows actually landed.
+        // Only mark the install as carrying sample data once its rows are
+        // there: landed by this run, or found already present by it.
         try {
             entry.withSampleData = true;
             entry.sampleDataPurged = false;
@@ -1923,6 +1941,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 manifestId,
                 inserted,
                 updated,
+                skipped,
                 errors,
                 withSampleData: true,
             },
