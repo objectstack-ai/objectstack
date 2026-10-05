@@ -1100,29 +1100,36 @@
     },
     {
       "id": "identity-auth.linked-accounts-social",
-      "title": "Linked accounts: the caller's social/OIDC links appear in mine-view; unlink removes one; the surface offers no link affordance, so a provider-less boot degrades honestly",
+      "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["a signed-in user holding a second (social/OIDC) identity link", "the same user after unlinking"],
+      "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "at least one social/OIDC provider configured (socialProviders or oidcProviders) and the caller holding a link to it, made OUTSIDE the console — sys_account declares no link action (link_social retired under ADR-0049); a social sign-in, or the signed-in POST /api/v1/auth/link-social (SDK auth.accounts.linkSocial), makes one. Stock showcase ships no provider, so this item is blocked(fixture) until one is configured",
+          "at least one social/OIDC provider configured (socialProviders or oidcProviders) so link_social has a provider to dance with — stock showcase ships none, so this item is blocked(fixture) until a provider is configured",
           "the Account 'Identity Links' surface (nav_accounts → sys_account) reachable"
         ]
       },
-      "blocked": { "by": "fixture", "ref": "no stock showcase social/OIDC IdP — the identity link this item unlinks needs a configured provider, same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop" },
+      "blocked": { "by": "fixture", "ref": "no stock showcase social/OIDC IdP — link_social needs a configured provider, same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop" },
       "steps": [
         "as a signed-in user, open Account → Identity Links (sys_account `mine` view, filter user_id={current_user_id}); screenshot the initial link set",
-        "confirm the fixture's link is a sys_account row in the caller's mine-view (provider_id = the provider, user_id = the caller) — (provider_id, account_id) is the whole account identity; there is no issuer to check, sys_account.issuer retired with better-auth 1.7.3 (packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts)",
+        "invoke link_social for a configured provider: the action is type:'url' — GET /api/v1/auth/sign-in/social?provider=<p>&callbackURL=<origin>/_console/apps/account/sys_account (full-page navigation, NOT XHR, so the OAuth 302 dance and link cookie work); complete the provider round-trip and land back on the Identity Links view",
+        "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller) — (provider_id, account_id) is the whole account identity; there is no issuer to check, sys_account.issuer retired with better-auth 1.7.3 (packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts)",
         "unlink it: the unlink_account action → POST /api/v1/auth/unlink-account with accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
-        "both-sides / degradation: on a boot with NO provider configured, confirm the surface offers no link affordance — sys_account declares only unlink_account since link_social retired, so nothing offers a link that dead-ends (open-edition honest-degradation posture)",
+        "both-sides / degradation: on a boot with NO provider configured, confirm link_social degrades honestly — the affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
         "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'], writes 405)"
       ],
       "acceptance": [
+        {
+          "clause": "linking a social identity creates a sys_account row in the caller's mine-view after the redirect round-trip completes",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_account (mine view) after the link shows a new row with provider_id = the provider and user_id = the caller; a row with no issuer is the healthy shape, never a FAIL — the column is retired",
+          "evidence": "the post-link mine-view read"
+        },
         {
           "clause": "the link surface renders the caller's own links only (mine-view scoped) — screenshot-confirmed",
           "oracle": "screenshot",
@@ -1136,9 +1143,9 @@
           "evidence": "the unlink response + the follow-up read"
         },
         {
-          "clause": "a provider-less boot degrades honestly: the surface offers no link affordance — never one that dead-ends",
+          "clause": "a provider-less boot degrades honestly: link_social is absent or names the missing provider — never a link affordance that dead-ends",
           "oracle": "screenshot",
-          "verify": "with no provider configured, the Identity Links surface shows no link action at all (sys_account declares none; its one action, unlink_account, is a row action)",
+          "verify": "with no provider configured, the Identity Links surface shows no dead link action (or an explicit unavailable state)",
           "evidence": "the provider-less screenshot"
         },
         {
@@ -1149,20 +1156,20 @@
         }
       ],
       "negative": [
+        "a link that appears in the UI but does not create a sys_account row (client-only) is a FAIL — the row is the durable identity link",
         "unlink that hides the row from the list but leaves the sys_account (so the provider still signs the user in) is a FAIL",
         "one user's identity links appearing in another's mine-view is an RLS FAIL",
-        "a link affordance on the Identity Links surface that navigates to a dead endpoint is a dishonest-degradation FAIL — sys_account declares none"
+        "a provider-less boot offering a link_social action that navigates to a dead endpoint is a dishonest-degradation FAIL"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
-        "packages/platform-objects/src/identity/sys-account.object.ts#user_id (unlink_account → /api/v1/auth/unlink-account accountId=row id; no link action, link_social retired under ADR-0049; mine view user_id={current_user_id} vs all_links; apiMethods ['get','list'])",
+        "packages/platform-objects/src/identity/sys-account.object.ts#user_id (link_social type:'url' → /api/v1/auth/sign-in/social?provider=&callbackURL=; unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; provider options; apiMethods ['get','list'])",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink — re-pointed #18104: linkSocial is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_accounts (nav_accounts → 'Identity Links', objectName sys_account)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: social/OIDC account linking round-trip → sys_account mine-view row, unlink removal, provider-less honest degradation; blocked(fixture) pending a configured IdP (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-09-23", "change": "the 'issuer stamped' requirement is withdrawn from both the step and the first acceptance clause's verify: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so nothing stamps it and the old verify failed a healthy system. The reason is kept — the step now says (provider_id, account_id) is the whole identity and names the retirement's migration entry in packages/spec — and the verify states that an issuer-less row is the expected shape", "ref": "#19217" },
-        { "revision": 3, "date": "2026-10-05", "change": "the link half retires with the sys_account link_social action (ADR-0049 enforce-or-remove, the maintainer-ratified ruling on #21849): it navigated to a GET of the POST-only social sign-in route with a fixed provider list, dead on every boot. Removed the link step, the first acceptance clause (linking creates a row) and the client-only-link negative; the social/OIDC link the unlink half needs moves into the fixture, made outside the console (a social sign-in, or the signed-in POST /api/v1/auth/link-social = auth.accounts.linkSocial). The unlink, mine-view and read-only clauses stay; the provider-less degradation clause now reads against 'no link affordance', since sys_account declares none", "ref": "#21849" }
+        { "revision": 2, "date": "2026-09-23", "change": "the 'issuer stamped' requirement is withdrawn from both the step and the first acceptance clause's verify: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so nothing stamps it and the old verify failed a healthy system. The reason is kept — the step now says (provider_id, account_id) is the whole identity and names the retirement's migration entry in packages/spec — and the verify states that an issuer-less row is the expected shape", "ref": "#19217" }
       ]
     },
     {
