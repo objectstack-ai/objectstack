@@ -336,10 +336,13 @@ describe('[#7505] getCallerPreImage — the owner-anchor echo under a store faul
     // must stay indistinguishable: the pre-image is read under the CALLER's
     // context precisely so a non-reader learns nothing about ownership. A row
     // that is not there denies exactly like a row the caller cannot see.
+    //
+    // [#21771] …and since ruling A the addressed by-id write asks that read
+    // FIRST, so both now answer the read door's not-found, one answer still.
     const h = await boot({ rows: rows() });
     const denied = await refusalOf(h.write(setOwner('tsk_missing', USER)));
-    expect(denied.code).toBe('PERMISSION_DENIED');
-    expect(denied.message).toContain('requires the transfer grant');
+    expect(denied.code).toBe('RECORD_NOT_FOUND');
+    expect(denied.message).toContain('Record tsk_missing not found in crm_task');
   });
 
   it('FAULT: the outage propagates instead of being read as "you are not the owner"', async () => {
@@ -373,23 +376,27 @@ describe('[#7505] getCallerPreImage — the owner-anchor echo under a store faul
 });
 
 describe('[#7505] readRowById itself', () => {
-  it('a write that touches none of the probes is unaffected by a faulting store', async () => {
-    // The blast radius, asserted rather than assumed: an ordinary field-only
-    // update on an object with no provenance registry entry and no ownership
-    // write never reaches `readRowById`, so a store fault does not reach it
-    // either. Without this, "propagate the fault" could be satisfied by a
-    // change that refuses every write during an outage.
+  it('an addressed by-id write now asks the read question, so a faulting store reaches it — and propagates', async () => {
+    // The blast radius, asserted rather than assumed. Before ruling A
+    // (#21771) an ordinary field-only update on an object with no provenance
+    // registry entry and no ownership write never reached `readRowById`. Every
+    // addressed by-id write now asks the read door whether the caller can read
+    // its row, so a store fault reaches it — and the fault PROPAGATES as the
+    // engine raised it: never a 404 that tells an SDK to drop the id, never a
+    // 403 that relabels an outage as an authorization event.
     const h = await boot({
       rows: { crm_task: [{ id: 'tsk_1', subject: 'Call back', owner_id: USER }] },
       faultOn: 'crm_task',
     });
-    await expect(
-      h.write({
-        object: 'crm_task',
-        operation: 'update',
-        data: { id: 'tsk_1', subject: 'Renamed' },
-        options: { where: { id: 'tsk_1' } },
-      }),
-    ).resolves.toBe('admitted');
+    expectPropagatedOutage(
+      await refusalOf(
+        h.write({
+          object: 'crm_task',
+          operation: 'update',
+          data: { id: 'tsk_1', subject: 'Renamed' },
+          options: { where: { id: 'tsk_1' } },
+        }),
+      ),
+    );
   });
 });

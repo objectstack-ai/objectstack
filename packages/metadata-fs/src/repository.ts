@@ -258,7 +258,9 @@ export class FileSystemRepository implements MetadataRepository {
     if (!existsSync(file)) return null;
     const body = await readJson(file);
     if (!body) return null;
-    const hash = hashSpec(body);
+    // [#21790] Every hash here is taken AS THE ITEM'S TYPE, so a reorder of a
+    // declared ordered map (an object's `fields`) is a content change.
+    const hash = hashSpec(body, ref.type);
     if (ref.version && ref.version !== hash) return null;
     // Walk back through the log to populate parent/authoredBy/seq.
     const meta = await this.findMetaForHash(ref, hash);
@@ -358,7 +360,7 @@ export class FileSystemRepository implements MetadataRepository {
       if ((opts.parentVersion ?? null) !== currentHead) {
         throw new ConflictError(ref, opts.parentVersion ?? null, currentHead);
       }
-      const hash = hashSpec(spec);
+      const hash = hashSpec(spec, ref.type);
       if (currentHead === hash) {
         // No-op write — same content.
         const meta = await this.findMetaForHash(ref, hash);
@@ -514,7 +516,7 @@ export class FileSystemRepository implements MetadataRepository {
         };
         const body = await readJson(path.join(dir, file));
         if (!body) continue;
-        this.heads.set(refKey(ref), hashSpec(body));
+        this.heads.set(refKey(ref), hashSpec(body, ref.type));
       }
     }
   }
@@ -1001,7 +1003,7 @@ export class FileSystemRepository implements MetadataRepository {
       }
       const body = await readJson(absPath);
       if (!body) return;
-      const hash = hashSpec(body);
+      const hash = hashSpec(body, ref.type);
       const currentHead = this.heads.get(key) ?? null;
       if (currentHead === hash) return; // No content change.
       this.heads.set(key, hash);

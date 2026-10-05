@@ -205,7 +205,14 @@ async function readFilter(cell: any, roleCtx: any): Promise<unknown> {
  */
 async function writeFilter(cell: any, roleCtx: any): Promise<unknown> {
   const plugin = new SecurityPlugin();
-  const h = makeHarness({ ...cell, orgScoping: cell.orgScoping ?? true, findOneImpl: () => null });
+  // The write-class re-read finds nothing; [#21771] the addressed write's
+  // read question (a plain by-id read) finds the row, so the matrix keeps
+  // measuring the WRITE filter alone.
+  const h = makeHarness({
+    ...cell,
+    orgScoping: cell.orgScoping ?? true,
+    findOneImpl: (q: any) => (q?.where?.$and ? null : { id: 'r1' }),
+  });
   await plugin.init(h.ctx); await plugin.start(h.ctx);
   const opCtx: any = {
     object: cell.objectName, operation: 'update',
@@ -213,10 +220,11 @@ async function writeFilter(cell: any, roleCtx: any): Promise<unknown> {
   };
   let threw: any = null;
   try { await h.run(opCtx); } catch (e: any) { threw = e; }
-  if (h.findOne.mock.calls.length === 0) {
+  const reRead = h.findOne.mock.calls.find((call: any[]) => call[1]?.where?.$and);
+  if (!reRead) {
     return threw ? `CRUD_DENY:${threw?.name ?? 'err'}` : 'BYPASS(no-write-filter)';
   }
-  return h.findOne.mock.calls[0][1].where.$and.slice(1);
+  return reRead[1].where.$and.slice(1);
 }
 
 /**

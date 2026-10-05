@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { canonicalize, hashSpec } from '../src/canonicalize.js';
+import { canonicalize, hashSpec, orderedMapKeys } from '../src/canonicalize.js';
 
 describe('canonicalize', () => {
   it('orders object keys lexicographically', () => {
@@ -227,6 +227,183 @@ describe('hashSpec', () => {
         ),
         { numRuns: 200 },
       );
+    });
+  });
+});
+
+/**
+ * Guarantee 8 (#21790): a map the spec declares ordered keeps its order, so a
+ * pure reorder of it is a change — and NOTHING else in the body moved.
+ *
+ * Both halves are pinned on purpose. The defect was a hash blind to the order
+ * of `ObjectSchema.fields`, so an object-designer reorder published as "no
+ * change" and was dropped; a fix that stopped sorting EVERY map would close it
+ * too, and turn every incidental key swap into a new version. So each order
+ * case below sits beside the unordered case it must not disturb.
+ */
+describe('declared map order (#21790)', () => {
+  const field = (type: string, label: string) => ({ type, label, required: false });
+  const object = (fields: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'invoice',
+    label: 'Invoice',
+    fields,
+    ...extra,
+  });
+  // Declared order — deliberately NOT sorted (`amount` < `due` < `title`).
+  const declared = () => object({
+    title: field('text', 'Title'),
+    amount: field('currency', 'Amount'),
+    due: field('date', 'Due'),
+  });
+  const reordered = () => object({
+    due: field('date', 'Due'),
+    title: field('text', 'Title'),
+    amount: field('currency', 'Amount'),
+  });
+
+  it('names exactly `object.fields`, and nothing for an unnamed or unknown type', () => {
+    expect(orderedMapKeys('object')).toEqual(['fields']);
+    expect(orderedMapKeys()).toEqual([]);
+    expect(orderedMapKeys('view')).toEqual([]);
+    // A `Map` lookup: an Object.prototype member is not an inherited row.
+    expect(orderedMapKeys('constructor')).toEqual([]);
+    expect(orderedMapKeys('toString')).toEqual([]);
+  });
+
+  describe('the order half — a reorder of `fields` is a change', () => {
+    it('hashes a reordered `fields` map differently, as an object', () => {
+      expect(hashSpec(reordered(), 'object')).not.toBe(hashSpec(declared(), 'object'));
+    });
+
+    it('keeps the declared field order in the canonical form', () => {
+      expect(canonicalize(declared(), 'object')).toBe(
+        '{"fields":{'
+          + '"title":{"label":"Title","required":false,"type":"text"},'
+          + '"amount":{"label":"Amount","required":false,"type":"currency"},'
+          + '"due":{"label":"Due","required":false,"type":"date"}'
+          + '},"label":"Invoice","name":"invoice"}',
+      );
+    });
+
+    it('a reorder INTO sorted order is still a change', () => {
+      // The sorted form is exactly what the order-blind rule hashed every
+      // object to, so this is the reorder a stale comparison would miss.
+      const sorted = object({
+        amount: field('currency', 'Amount'),
+        due: field('date', 'Due'),
+        title: field('text', 'Title'),
+      });
+      expect(hashSpec(sorted, 'object')).not.toBe(hashSpec(declared(), 'object'));
+    });
+  });
+
+  describe('the unordered half — every other map stays key-order independent (H5)', () => {
+    it('top level: swapping the keys AROUND `fields` hashes equal', () => {
+      const swapped = { fields: declared().fields, name: 'invoice', label: 'Invoice' };
+      expect(Object.keys(swapped)).not.toEqual(Object.keys(declared()));
+      expect(hashSpec(swapped, 'object')).toBe(hashSpec(declared(), 'object'));
+    });
+
+    it('nested: swapping the keys INSIDE a field definition hashes equal', () => {
+      const inner = object({
+        title: { required: false, label: 'Title', type: 'text' },
+        amount: field('currency', 'Amount'),
+        due: field('date', 'Due'),
+      });
+      expect(hashSpec(inner, 'object')).toBe(hashSpec(declared(), 'object'));
+    });
+
+    it('nested deeper: a map inside a field definition is not an ordered map', () => {
+      const withOptions = (options: Record<string, unknown>) =>
+        object({ status: { type: 'select', label: 'Status', meta: options } });
+      expect(hashSpec(withOptions({ b: 2, a: 1 }), 'object')).toBe(
+        hashSpec(withOptions({ a: 1, b: 2 }), 'object'),
+      );
+    });
+
+    it('a `fields` map on a type with no declared order hashes equal under a reorder', () => {
+      // Guarantee 8 follows the spec's declaration, not the key's name.
+      expect(hashSpec(reordered(), 'view')).toBe(hashSpec(declared(), 'view'));
+    });
+
+    it('with no type, a reorder of `fields` hashes equal — the type-blind form is unchanged', () => {
+      expect(hashSpec(reordered())).toBe(hashSpec(declared()));
+    });
+
+    it('property: under the object type, reordering any key but `fields` hashes equal', () => {
+      fc.assert(
+        fc.property(
+          fc.dictionary(
+            fc.string({ minLength: 1, maxLength: 8 }).filter((k) => k !== 'fields'),
+            fc.jsonValue(),
+          ),
+          (rest) => {
+            const body = { ...rest, fields: declared().fields };
+            const reversed = Object.fromEntries(Object.entries(body).reverse());
+            return hashSpec(body, 'object') === hashSpec(reversed, 'object');
+          },
+        ),
+        { numRuns: 200 },
+      );
+    });
+  });
+
+  describe('what stays byte-identical', () => {
+    it('an object whose `fields` are already in sorted order hashes exactly as before', () => {
+      // So a row stored before #21790 with sorted fields keeps a valid stamp.
+      const sorted = object({ amount: field('currency', 'Amount'), due: field('date', 'Due') });
+      expect(canonicalize(sorted, 'object')).toBe(canonicalize(sorted));
+      expect(hashSpec(sorted, 'object')).toBe(hashSpec(sorted));
+    });
+
+    it('the empty-spec fixture is unchanged under the object type', () => {
+      expect(hashSpec({}, 'object')).toBe(
+        'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
+      );
+    });
+  });
+
+  describe('guarantees 5 and 7 hold with an ordered map', () => {
+    const roundTrip = (x: unknown): unknown => JSON.parse(JSON.stringify(x));
+    // Field names are snake_case identifiers, never integer-like, so their
+    // insertion order is their enumeration order.
+    const fieldName = fc.stringMatching(/^[a-z_][a-z0-9_]{0,7}$/);
+    const objectBody = fc.record({
+      name: fc.string(),
+      fields: fc.dictionary(fieldName, fc.jsonValue(), { maxKeys: 6 }),
+      extra: fc.jsonValue(),
+    });
+
+    it('guarantee 5 — property: idempotent under the object type', () => {
+      fc.assert(
+        fc.property(objectBody, (body) => {
+          const once = canonicalize(body, 'object');
+          return canonicalize(JSON.parse(once), 'object') === once;
+        }),
+        { numRuns: 200 },
+      );
+    });
+
+    it('guarantee 7 — property: invariant under a JSON round trip, under the object type', () => {
+      fc.assert(
+        fc.property(objectBody, (body) => hashSpec(body, 'object') === hashSpec(roundTrip(body), 'object')),
+        { numRuns: 200 },
+      );
+    });
+
+    it('guarantee 7 — a toJSON inside `fields`, and on `fields` itself, hashes as its bytes', () => {
+      const withDate = object({
+        title: field('text', 'Title'),
+        due: { type: 'date', label: 'Due', defaultValue: new Date('2024-01-01T00:00:00.000Z') },
+      });
+      expect(hashSpec(withDate, 'object')).toBe(hashSpec(roundTrip(withDate), 'object'));
+
+      const viaToJson = {
+        name: 'invoice',
+        fields: { toJSON: () => ({ title: field('text', 'Title'), amount: field('currency', 'Amount') }) },
+      };
+      expect(hashSpec(viaToJson, 'object')).toBe(hashSpec(roundTrip(viaToJson), 'object'));
+      expect(canonicalize(viaToJson, 'object')).toContain('"fields":{"title":');
     });
   });
 });

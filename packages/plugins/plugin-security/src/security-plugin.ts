@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, POSTURE_LADDER, isRowActive, buildEffectiveObjectPermissions } from '@objectstack/core';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { declaredHttpStatus } from '@objectstack/types';
+import { Plugin, PluginContext, POSTURE_LADDER, isRowActive, buildEffectiveObjectPermissions, recordNotFoundError } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
@@ -15,7 +17,7 @@ import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 import { renderOperationMessage } from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
-import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
+import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch, type EngineDeleteDispatchInput, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import {
   localWriteEpochSource,
   resolveWriteEpochSource,
@@ -581,6 +583,37 @@ function callerHasOrganizationScope(context: any, posture: TenancyPosture): bool
  * (`organization_id = …` / `organization_id $in […]`) or `null`, so no legitimate
  * wall can collide with this test.
  */
+/**
+ * [#21771] Ruling A's read question, judged on the answer of a caller-context
+ * by-id read: is the row ABSENT to this caller?
+ *
+ * Three outcomes of the read, and only one is absence (the #7505 rule):
+ *
+ *  - no row — absent: the row does not exist, or the read door hides it from
+ *    this caller (row-level security, record sharing, a data middleware's
+ *    visibility). Those two are the same answer by ruling, so they are one
+ *    `true` here;
+ *  - a declared 4xx refusal — the read itself was REFUSED (the object's read
+ *    grant withheld, a predicate the driver will not compile). Not a hidden
+ *    row, so `false`: the write keeps the answer it has today;
+ *  - anything else — a store fault, which propagates as raised: an outage is
+ *    neither absence nor a refusal, and reporting it as either would relabel it.
+ *
+ * Shared by the write path (step 2.7) and `security/explain`, so the two ask
+ * one question one way.
+ */
+async function absentUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
+  let row: unknown;
+  try {
+    row = await read();
+  } catch (e) {
+    const status = declaredHttpStatus(e);
+    if (status !== undefined && status < 500) return false;
+    throw e;
+  }
+  return row == null;
+}
+
 function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
   if (!filter) return false;
   const keys = Object.keys(filter);
@@ -1224,6 +1257,27 @@ export class SecurityPlugin implements Plugin {
    * that fallback, so the memo is never keyed on `undefined`.
    */
   private epoch: WriteEpochSource = localWriteEpochSource();
+  /**
+   * [#21771] The engine operations in flight through this plugin's middleware,
+   * as an async scope: the middleware runs the rest of the chain (the engine's
+   * hooks and driver call included) inside it, so an operation that starts
+   * while another is still in that chain reads `true` here.
+   *
+   * That is the line ruling A draws between the by-id write a caller ADDRESSED
+   * at a door and the by-id writes the platform issues on the caller's behalf
+   * under the caller's context: the engine's cascade delete of each dependent
+   * row, and a hook's `ctx.api` write. Only the addressed write is asked the
+   * read question ({@link addressedByIdWriteId}). A nested one keeps today's
+   * behaviour exactly: its target is a row the caller never named, so a
+   * not-found answer would carry an id the caller never supplied and misstate
+   * what happened to the write they did address.
+   *
+   * Owned here rather than stamped on the context: a context is shared by
+   * reference and copied by spread across those very sub-writes (the cascade's
+   * transaction context is a spread), so a stamp would leak in both directions.
+   * An async scope cannot outlive the chain it wraps.
+   */
+  private readonly engineOperationScope = new AsyncLocalStorage<true>();
   /**
    * This plugin's report sink. Console-backed until a host injects one — see
    * {@link SecurityReportSink} and {@link CONSOLE_SECURITY_SINK} for the ruling
@@ -2150,7 +2204,14 @@ export class SecurityPlugin implements Plugin {
     const writesExecutedByDataDoor = new WeakSet<object>();
 
     // Register security middleware
-    ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+    ql.registerMiddleware(async (opCtx: any, chainNext: () => Promise<void>) => {
+      // [#21771] Whether THIS operation was issued from inside another engine
+      // operation's pipeline (a cascade, a hook's `ctx.api` write), read before
+      // this operation opens a scope of its own; and the scoped `next` every
+      // exit below calls, so whatever the rest of the chain issues reads as
+      // nested. See {@link engineOperationScope}.
+      const nestedInOperation = this.engineOperationScope.getStore() === true;
+      const next = (): Promise<void> => this.engineOperationScope.run(true, chainNext);
       // [insert-check commit a016f08b8a] (the original card no longer resolves)
       // The write `check` step 3.6 installs on the operation context
       // for the engine to run: on an insert, after `beforeInsert`; [#19950] on
@@ -2953,8 +3014,23 @@ export class SecurityPlugin implements Plugin {
             ? await this.computeRlsFilter(delegatorSets, opCtx.object, rlsOperation, delegatorContext)
             : null;
           const writeParts = [writeFilter, delWriteFilter].filter(Boolean) as Record<string, unknown>[];
+          // [#21771] Ruling A on the write doors: a row the caller cannot READ
+          // is a row that does not exist. For the by-id write the caller
+          // addressed (see {@link addressedByIdWriteId}), "can you read it?" is
+          // asked before "may you write it?", and a row the read door would not
+          // return answers exactly what a nonexistent id answers — the read
+          // door's own producer, `recordNotFoundError`. Asked for EVERY
+          // principal class: before this the question was only implicit, inside
+          // the write-class re-read below, so a principal no write-class row
+          // filter binds was never asked it and got the gates' 403 for a hidden
+          // row and a 404 for a missing one. A caller who can read the row but
+          // may not write it keeps the 403 below; nothing is disclosed to them.
+          const addressedId = this.addressedByIdWriteId(opCtx, nestedInOperation, referentialFieldClearWrite);
           if (writeParts.length > 0) {
             let visible: unknown = null;
+            // A re-read that THREW is not an absent row: a store fault or a
+            // read-time policy refusal keeps today's denial below (#7505).
+            let reReadThrew = false;
             try {
               visible = await this.ql.findOne(opCtx.object, {
                 where: { $and: [{ id: targetId }, ...writeParts] },
@@ -2964,6 +3040,15 @@ export class SecurityPlugin implements Plugin {
               // A read denial (e.g. no read permission) is itself a "cannot
               // touch this row" signal — fall through to the deny below.
               visible = null;
+              reReadThrew = true;
+            }
+            if (
+              !visible &&
+              !reReadThrew &&
+              addressedId !== undefined &&
+              (await this.callerCannotReadAddressedRow(opCtx, addressedId))
+            ) {
+              throw recordNotFoundError(opCtx.object, addressedId as string | number);
             }
             if (!visible) {
               // [#7451] The refusal an ordinary business user is most likely to
@@ -3002,6 +3087,16 @@ export class SecurityPlugin implements Plugin {
                 developerMessage,
               );
             }
+          } else if (
+            addressedId !== undefined &&
+            (await this.callerCannotReadAddressedRow(opCtx, addressedId))
+          ) {
+            // [#21771] The principal no write-class row filter binds: the read
+            // question is the only row-level question asked here, so a row the
+            // read door hides (a data middleware's parent-derived visibility
+            // included) answers not-found before any later gate can tell it
+            // apart from a missing one.
+            throw recordNotFoundError(opCtx.object, addressedId as string | number);
           }
         }
       }
@@ -5071,6 +5166,10 @@ export class SecurityPlugin implements Plugin {
         ...(sharing && typeof sharing.canDelete === 'function'
           ? { canDeleteRecord: async (o: string, rid: string, c: any) => sharing.canDelete(o, rid, await withWriteScope(o, c)) }
           : {}),
+        // [#21771] The by-id write path's read question, asked the same way:
+        // the caller-context by-id read, every data middleware included.
+        recordAbsentToCaller: (o: string, rid: string, c: any) =>
+          absentUnderCallerRead(() => this.readRowById(o, rid, c)),
       },
       { object, operation, context: targetContext, recordId },
     );
@@ -7155,6 +7254,59 @@ export class SecurityPlugin implements Plugin {
   private declaresControlledByParent(object: string): boolean {
     const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
     return masterGovernsRowWrites(schema);
+  }
+
+  /**
+   * [#21771] The id of the row a by-id UPDATE or DELETE writes, when that write
+   * is the one the caller addressed — else `undefined`, and ruling A's read
+   * question is not asked.
+   *
+   * Three exclusions, each a measured constraint of the ruling's execution:
+   *
+   *  - **a nested write** ({@link engineOperationScope}): a cascade or a hook
+   *    issued it under the caller's context, so the caller addressed nothing;
+   *  - **the referential FK clear** (`__referentialFieldClear`, server-derived,
+   *    update only): the engine's own integrity write on a row the caller never
+   *    named — the same carve-out step 2 makes for it;
+   *  - **anything the engine does not route by id.** By-id versus predicate is
+   *    the ENGINE's decision, read from its own dispatch predicates
+   *    (`resolveEngineUpdateDispatch` / `resolveEngineDeleteDispatch`) and never
+   *    re-derived: a falsy payload id is no row address to the engine, which
+   *    then writes the row `where.id` names — or, with no `where.id`, takes the
+   *    predicate path, where there is no single row to answer about at all.
+   *
+   * Update and delete only — the two verbs the ruling names. The lifecycle
+   * verbs keep the pre-image check exactly as it was.
+   */
+  private addressedByIdWriteId(opCtx: any, nested: boolean, referentialFieldClear: boolean): unknown {
+    if (nested || referentialFieldClear) return undefined;
+    if (opCtx.operation === 'update') {
+      const data = opCtx.data;
+      if (data == null || typeof data !== 'object') return undefined;
+      const route = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options);
+      return route.kind === 'by-id' ? route.id : undefined;
+    }
+    if (opCtx.operation === 'delete') {
+      const route = resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined);
+      return route.kind === 'by-id' ? route.id : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * [#21771] Ruling A's read question for the addressed row: would the read
+   * door, asked by this caller, return it? Asked through the caller-context
+   * pre-image read the later gates already share ({@link getCallerPreImage}),
+   * so it is the read door's own question — every data middleware's read
+   * visibility included — and never a second visibility evaluator.
+   *
+   * Only ABSENCE is "cannot read". A read-time policy refusal (a declared 4xx
+   * envelope: the object's read grant withheld, a predicate the driver will not
+   * compile) is not a hidden row, so it answers `false` and the write keeps
+   * today's answer; a store fault is neither and propagates as raised (#7505).
+   */
+  private async callerCannotReadAddressedRow(opCtx: any, id: unknown): Promise<boolean> {
+    return absentUnderCallerRead(() => this.getCallerPreImage(opCtx, id));
   }
 
   private extractSingleId(opCtx: any): string | number | bigint | null {

@@ -146,7 +146,7 @@ The switches are operator-only where one install serves several organizations. T
 
 Every `put()` requires a `parentVersion` (or `null` for fresh creates). If the head has moved since the caller read it, the repository throws `ConflictError(ref, expectedParent, actualHead)` with code `METADATA_CONFLICT`. `protocol.ts` catches it at every write entry point (save, publish, rollback, overlay-delete) and re-throws an API error with code `metadata_conflict`, **HTTP 409 Conflict**, and the `expectedParent` / `actualHead` pair attached. Clients are expected to re-read the item and retry; the console does not yet surface a dedicated conflict-resolution UI.
 
-The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON serialization of the body. Identical bodies produce identical hashes — `put()` short-circuits on no-op writes.
+The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, with `undefined` values dropped. The canonical form sorts object keys, except in the maps the spec declares ordered. Today that is one map: an `object`'s `fields`, which keeps its declared order, so a pure reorder of fields is a new version. `put()` still short-circuits on a write whose body is unchanged. A row written before this release keeps its stored hash as its version token until its content next changes.
 
 ---
 
