@@ -14,8 +14,8 @@
 // `package_id` column onto its body as `_packageId`. So a set saved into a
 // writable runtime package read as package-declared after the first list read:
 // the action answered 200 and deleted the set's only `sys_metadata` row. Its
-// declared contract, repeated in `content/docs/permissions/permission-sets.mdx`,
-// is that it refuses any set that is not package-declared, so it can never
+// declared contract, repeated on the permission-sets page of the docs, is that
+// it refuses any set that is not package-declared, so it can never
 // destroy an environment-authored set. The drift report read the package id the
 // same way, and its `overlay_shadow` detail names this action as the remedy.
 //
