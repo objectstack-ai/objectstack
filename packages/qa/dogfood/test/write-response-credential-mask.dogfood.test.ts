@@ -114,7 +114,7 @@ describe('write responses mask credential-class fields as reads do', () => {
     expect(res.json.record[TOKEN]).toBe(SECRET_MASK);
   });
 
-  it('single update of an unrelated field', async () => {
+  it('single update', async () => {
     const id = await seed('wrcm-update');
     const res = await write('PATCH', `/data/${OBJ}/${id}`, { name: 'wrcm-update-2' });
     expect(res.status).toBe(200);
