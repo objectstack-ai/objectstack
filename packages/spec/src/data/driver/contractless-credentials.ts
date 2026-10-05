@@ -17,7 +17,7 @@
  * measured client reads.
  */
 
-import { CREDENTIAL_KEY_SPELLINGS, urlUserinfoPassword } from './common.zod';
+import { CREDENTIAL_KEY_SPELLINGS } from './common.zod';
 
 // ---------------------------------------------------------------------------
 // The key-name judgment
@@ -222,9 +222,28 @@ const PLURALIZABLE_STEMS: ReadonlySet<string> = new Set([
   'signature',
 ]);
 
+/** A trailing `s` is a plural only after a stem that does not itself end in `s` (`sass` is not `sas`s). */
+const pluralOf = (word: string): boolean => word.endsWith('s') && !word.endsWith('ss');
+
 function singular(word: string): string {
-  return word.endsWith('s') && PLURALIZABLE_STEMS.has(word.slice(0, -1)) ? word.slice(0, -1) : word;
+  return pluralOf(word) && PLURALIZABLE_STEMS.has(word.slice(0, -1)) ? word.slice(0, -1) : word;
 }
+
+/**
+ * What may FOLLOW a {@link CREDENTIAL_WORDS_ANYWHERE} word inside a one-word
+ * key (`dbpassword`, `secretkey`, `secretaccesskey`, `passwordhash`) — so the
+ * word counts only as a whole word of the folded key, never as a substring of
+ * a longer one (`secretary`, `credentialing`).
+ */
+const FOLDED_ANYWHERE_FOLLOWERS: readonly string[] = ['', 'key', 'accesskey', 'hash', 'string'];
+
+const holdsAnywhereWord = (folded: string): boolean =>
+  [...CREDENTIAL_WORDS_ANYWHERE].some((word) => {
+    for (let at = folded.indexOf(word); at !== -1; at = folded.indexOf(word, at + 1)) {
+      if (FOLDED_ANYWHERE_FOLLOWERS.includes(folded.slice(at + word.length))) return true;
+    }
+    return false;
+  });
 
 /** The ONE-word judgment, on a key with no surviving word boundary. */
 function isCredentialShapedWord(word: string): boolean {
@@ -244,10 +263,10 @@ function isCredentialShapedWord(word: string): boolean {
       }
     }
   }
-  const candidates = stem.endsWith('s') ? [stem, stem.slice(0, -1)] : [stem];
+  const candidates = pluralOf(stem) ? [stem, stem.slice(0, -1)] : [stem];
   return candidates.some((candidate) =>
     PLURALIZABLE_STEMS.has(candidate)
-    || [...CREDENTIAL_WORDS_ANYWHERE].some((fragment) => candidate.includes(fragment))
+    || holdsAnywhereWord(candidate)
     || FOLDED_CREDENTIAL_ENDINGS.some((ending) => candidate.endsWith(ending)),
   ) || word.endsWith('serviceaccountjson') || word.endsWith('serviceaccountpem');
 }
@@ -272,8 +291,18 @@ function isCredentialShapedWord(word: string): boolean {
  *  - it names service-account key material (`serviceAccountKey`,
  *    `serviceAccountJson`).
  *
- * A key with one word only (`APIKEY`, `accesstoken`) is judged on its folded
- * spelling against the same stems and {@link FOLDED_CREDENTIAL_ENDINGS}.
+ * A key with one word only (`APIKEY`, `accesstoken`, `dbpassword`) has no
+ * boundary left to split at, so it is judged on its folded spelling: one of
+ * {@link CREDENTIAL_KEY_SPELLINGS} is credential-shaped; otherwise ending in
+ * `less`, starting with `max` / `min` / `num` / `total` / `count`, or ending in
+ * a descriptor longer than nothing (`tokentype`, `secretid`) is not. After
+ * dropping trailing qualifiers and a plural `s` (never the `s` of a stem
+ * already ending in `s`: `sass` is not `sas`), it is credential-shaped when it
+ * IS one of the stems above (`pass`, `pw`, `key`, `signature`, `auth`, …),
+ * when it holds a {@link CREDENTIAL_WORDS_ANYWHERE} word followed by nothing,
+ * `key`, `accesskey`, `hash` or `string` (`dbpassword`, `secretaccesskey` —
+ * not `secretary`), or when it ends in one of
+ * {@link FOLDED_CREDENTIAL_ENDINGS} (`accesstoken`, `apikey`).
  */
 export function isCredentialShapedConfigKey(key: string): boolean {
   if (typeof key !== 'string') return false;
@@ -344,8 +373,10 @@ function isDescriptorLeafKey(key: string): boolean {
 // Credential material embedded in a string value
 // ---------------------------------------------------------------------------
 
-/** `scheme://…`. */
-const URL_SCHEME_RE = /^[a-z][a-z0-9+.\-]*:\/\//i;
+/**
+ * A URL-ish prefix: `scheme://`, a stacked `jdbc:mysql://`, or a scheme-relative `//`.
+ */
+const URL_PREFIX_RE = /^(?:[a-z][a-z0-9+.\-]*:)*\/\//i;
 
 /**
  * Connection-string keywords that are NOT part of a credential: after a dropped
@@ -533,43 +564,123 @@ function libpqPairs(value: string): LibpqPair[] | undefined {
  */
 const SCHEMELESS_USERINFO_RE = /^([^\s/?#@:;=]+):([^\s/?#]+)@(?=[^\s/?#@]*[A-Za-z0-9])/;
 
-/** The query-string credential pairs of a URL-ish string, judged by the key-name predicate. */
-function credentialQueryPairs(value: string): string[] {
-  const hashIdx = value.indexOf('#');
-  const head = hashIdx === -1 ? value : value.slice(0, hashIdx);
-  const queryIdx = head.indexOf('?');
-  if (queryIdx === -1) return [];
-  return head
-    .slice(queryIdx + 1)
-    .split('&')
-    .filter((pair) => {
-      const eq = pair.indexOf('=');
-      if (eq <= 0 || eq === pair.length - 1) return false;
-      let key = pair.slice(0, eq);
-      try {
-        key = decodeURIComponent(key.replace(/\+/g, ' '));
-      } catch {
-        /* keep the raw key */
-      }
-      return isCredentialShapedConfigKey(key);
-    });
+/**
+ * `jdbc:oracle:thin:user/password@…` — the Oracle thin-driver form, whose
+ * userinfo splits user from password with `/` and carries no `//`.
+ */
+const ORACLE_THIN_USERINFO_RE = /^(jdbc:oracle:[a-z]+:)([^\s/@:]*)\/([^\s@]+)@/i;
+
+/**
+ * The byte layout of a URL-ish string (see {@link URL_PREFIX_RE}), or
+ * `undefined` when it has none. Boundaries are RFC 3986's, as in
+ * `urlUserinfo` (`driver/common.zod.ts`): the authority runs from after `//`
+ * to the first `/`, `?` or `#`, and userinfo ends at its LAST `@`.
+ */
+interface UrlLayout {
+  /** Index of the authority's first byte (just past `//`). */
+  authorityStart: number;
+  /** Index of the userinfo's `@`, or `-1`. */
+  at: number;
+  /** The userinfo password (after the userinfo's first `:`), or `undefined` when there is none or it is empty. */
+  password: string | undefined;
+  /** Index of the `;` that starts a `;key=value` property tail, or `-1`. */
+  tail: number;
+  /** Index of the `?` or `#` that ends the part a property tail can occupy (the string's length when none). */
+  queryStart: number;
 }
 
-/** Where a URL's `;key=value` tail starts (`sqlserver://h;user=u;password=p`), or `-1`. */
-function urlSegmentTailIndex(value: string): number {
-  if (!URL_SCHEME_RE.test(value)) return -1;
-  const authorityStart = value.indexOf('://') + 3;
-  return value.indexOf(';', authorityStart);
+function urlLayout(value: string): UrlLayout | undefined {
+  const prefix = URL_PREFIX_RE.exec(value);
+  if (!prefix) return undefined;
+  const authorityStart = prefix[0].length;
+  const authorityRel = value.slice(authorityStart).search(/[/?#]/);
+  const authorityEnd = authorityRel === -1 ? value.length : authorityStart + authorityRel;
+  const atIdx = value.lastIndexOf('@', authorityEnd - 1);
+  const at = atIdx >= authorityStart ? atIdx : -1;
+  let password: string | undefined;
+  if (at !== -1) {
+    const userinfo = value.slice(authorityStart, at);
+    const colon = userinfo.indexOf(':');
+    // A `;` before the `:` makes it no userinfo at all but a property tail
+    // whose value holds a `:` and an `@` (`sqlserver://h;password=a:b@c`).
+    if (colon !== -1 && colon < userinfo.length - 1 && !userinfo.slice(0, colon).includes(';')) {
+      password = userinfo.slice(colon + 1);
+    }
+  }
+  // A property tail starts at the first `;` after the userinfo when a
+  // password ended it (`sqlserver://u:a;b@h;db=d` — that `;` is the
+  // password's), and otherwise at the first `;` after `//` — so a credential
+  // property whose value carries an `@` (`sqlserver://h;password=a@b`) is
+  // still read as a property, not as userinfo.
+  const tailFrom = password !== undefined ? at + 1 : authorityStart;
+  const queryRel = value.slice(tailFrom).search(/[?#]/);
+  const queryStart = queryRel === -1 ? value.length : tailFrom + queryRel;
+  const semi = value.indexOf(';', tailFrom);
+  return { authorityStart, at, password, tail: semi !== -1 && semi < queryStart ? semi : -1, queryStart };
+}
+
+/** Is one `&`-separated query pair credential material — a credential-shaped name, or a `;key=value` run carrying one? */
+function isCredentialQueryPair(pair: string): boolean {
+  const eq = pair.indexOf('=');
+  if (eq <= 0 || eq === pair.length - 1) return false;
+  let key = pair.slice(0, eq);
+  try {
+    key = decodeURIComponent(key.replace(/\+/g, ' '));
+  } catch {
+    /* keep the raw key */
+  }
+  // `token=a;b` is ONE pair (the `;` is the value's); `mode=ro;password=p`
+  // carries a credential in its `;` run — both are credential material.
+  return isCredentialShapedConfigKey(key) || semicolonSegments(pair).some(isCredentialSegment);
+}
+
+/** The query (`?…`, up to `#`) of a URL, split into its `&` pairs; `[]` when there is none. */
+function queryPairs(value: string, queryStart: number): string[] {
+  if (value[queryStart] !== '?') return [];
+  const hash = value.indexOf('#', queryStart);
+  return value.slice(queryStart + 1, hash === -1 ? value.length : hash).split('&');
+}
+
+/** Does a key/value connection string (libpq, or `;`-delimited) carry a credential, and in which form? */
+function keyValueCredentialOf(value: string): string | undefined {
+  if (!value.includes('=')) return undefined;
+  // Both readings are judged: a libpq value may hold an unquoted `;`
+  // (`host=h password=a;b`), and a `;` string reads as one libpq pair whose
+  // value runs to the next space. Either finding is a finding.
+  const pairs = libpqPairs(value);
+  if (pairs?.some((pair) => pair.value !== '' && isCredentialShapedConfigKey(pair.key))) {
+    return 'a credential keyword inside a keyword/value connection string';
+  }
+  return semicolonSegments(value).some(isCredentialSegment)
+    ? 'a credential segment inside a connection string'
+    : undefined;
+}
+
+/** {@link keyValueCredentialOf}'s inverse: both readings' credentials removed, the semicolon reading first. */
+function redactKeyValueCredentials(value: string): string {
+  let out = redactSemicolonSegments(value);
+  const pairs = libpqPairs(out);
+  if (pairs?.some((pair) => pair.value !== '' && isCredentialShapedConfigKey(pair.key))) {
+    const source = out;
+    out = pairs
+      .filter((p) => !(p.value !== '' && isCredentialShapedConfigKey(p.key)))
+      .map((p) => source.slice(p.start, p.end))
+      .join(' ');
+  }
+  return out;
 }
 
 /**
  * The credential a string value carries EMBEDDED, named for the author, or
  * `undefined` when it carries none. Judged shapes:
  *
- *  - a URL userinfo password (`scheme://user:pass@host`), or a credential-named
- *    query parameter (`?password=`, `?api_key=`, `?access_token=`);
+ *  - a URL userinfo password (`scheme://user:pass@host`, `//user:pass@host`,
+ *    `jdbc:mysql://user:pass@host`), or a URL query pair whose name is
+ *    credential-shaped (`?password=`, `?api_key=`, `?access_token=`) or whose
+ *    `;key=value` run carries one;
  *  - a `;key=value` property tail after a URL's authority
  *    (`sqlserver://h;user=u;password=p`);
+ *  - the Oracle thin-driver userinfo (`jdbc:oracle:thin:user/pass@host`);
  *  - a semicolon-delimited connection string (`Server=h;Password=p`);
  *  - a libpq keyword/value string (`host=h password=p`);
  *  - a scheme-less userinfo password (`user:pass@host/db`).
@@ -579,88 +690,79 @@ function urlSegmentTailIndex(value: string): number {
  */
 export function embeddedCredentialOf(value: string): string | undefined {
   if (typeof value !== 'string' || value === '') return undefined;
-  if (URL_SCHEME_RE.test(value)) {
-    if (urlUserinfoPassword(value) !== undefined) return 'a userinfo password inside a URL';
-    const tail = urlSegmentTailIndex(value);
-    const head = tail === -1 ? value : value.slice(0, tail);
-    if (credentialQueryPairs(head).length > 0) return 'a credential query parameter inside a URL';
-    if (tail !== -1 && semicolonSegments(value.slice(tail + 1)).some(isCredentialSegment)) {
+  const url = urlLayout(value);
+  if (url) {
+    if (url.password !== undefined) return 'a userinfo password inside a URL';
+    if (queryPairs(value, url.queryStart).some(isCredentialQueryPair)) return 'a credential query parameter inside a URL';
+    if (url.tail !== -1 && semicolonSegments(value.slice(url.tail + 1, url.queryStart)).some(isCredentialSegment)) {
       return "a credential property in a URL's `;key=value` tail";
     }
     return undefined;
   }
+  if (ORACLE_THIN_USERINFO_RE.test(value)) return 'a userinfo password (`user/password@host`)';
   if (SCHEMELESS_USERINFO_RE.test(value)) return 'a userinfo password (`user:password@host`)';
-  if (!value.includes('=')) return undefined;
-  if (!value.includes(';')) {
-    const pairs = libpqPairs(value);
-    if (pairs) {
-      return pairs.some((pair) => pair.value !== '' && isCredentialShapedConfigKey(pair.key))
-        ? 'a credential keyword inside a keyword/value connection string'
-        : undefined;
-    }
-  }
-  return semicolonSegments(value).some(isCredentialSegment)
-    ? 'a credential segment inside a connection string'
-    : undefined;
+  return keyValueCredentialOf(value);
 }
 
 /**
  * The credential-shaped segment keys of a connection string — semicolon,
- * libpq, or a URL's `;key=value` tail — with a non-empty value, in order
- * (`Server=h;Password=p` → `['Password']`).
+ * libpq, or a URL's `;key=value` tail — with a non-empty value, in order and
+ * without repeats (`Server=h;Password=p` → `['Password']`).
  */
 export function connectionStringCredentialKeys(value: string): string[] {
   if (typeof value !== 'string' || !value.includes('=')) return [];
-  if (URL_SCHEME_RE.test(value)) {
-    const tail = urlSegmentTailIndex(value);
-    if (tail === -1) return [];
-    return semicolonSegments(value.slice(tail + 1)).filter(isCredentialSegment).map((s) => (s.key as string).trim());
+  const url = urlLayout(value);
+  const keys: string[] = [];
+  const add = (key: string) => {
+    if (!keys.includes(key)) keys.push(key);
+  };
+  const fromSegments = (text: string) => {
+    for (const segment of semicolonSegments(text)) if (isCredentialSegment(segment)) add((segment.key as string).trim());
+  };
+  if (url) {
+    if (url.tail !== -1) fromSegments(value.slice(url.tail + 1, url.queryStart));
+    return keys;
   }
-  if (!value.includes(';')) {
-    const pairs = libpqPairs(value);
-    if (pairs) return pairs.filter((p) => p.value !== '' && isCredentialShapedConfigKey(p.key)).map((p) => p.key);
-  }
-  return semicolonSegments(value).filter(isCredentialSegment).map((s) => (s.key as string).trim());
+  for (const pair of libpqPairs(value) ?? []) if (pair.value !== '' && isCredentialShapedConfigKey(pair.key)) add(pair.key);
+  fromSegments(value);
+  return keys;
 }
 
 /**
  * {@link embeddedCredentialOf}'s inverse for the read path: the string with
  * every embedded credential removed and everything else kept — the URL's
- * username and host (`user@host`), the non-credential segments and pairs.
- * Dropped, not masked: a mask would round-trip back as a literal new
- * credential. Returns the input unchanged when it carries none.
+ * username and host (`user@host`), the non-credential segments, pairs and
+ * query parameters. Dropped, not masked: a mask would round-trip back as a
+ * literal new credential. Returns the input unchanged when it carries none;
+ * what it returns never carries one ({@link embeddedCredentialOf} answers
+ * `undefined` for it).
  */
 export function redactEmbeddedCredentials(value: string): string {
   if (embeddedCredentialOf(value) === undefined) return value;
-  if (URL_SCHEME_RE.test(value)) {
-    const tail = urlSegmentTailIndex(value);
-    let head = tail === -1 ? value : value.slice(0, tail);
-    head = head.replace(/^([a-z][a-z0-9+.\-]*:\/\/)([^/?#@:]*)(:[^/?#]*)@/i, (_m, scheme: string, user: string) => `${scheme}${user}@`);
-    const hashIdx = head.indexOf('#');
-    const beforeHash = hashIdx === -1 ? head : head.slice(0, hashIdx);
-    const fragment = hashIdx === -1 ? '' : head.slice(hashIdx);
-    const queryIdx = beforeHash.indexOf('?');
-    if (queryIdx !== -1) {
-      const credential = new Set(credentialQueryPairs(beforeHash));
-      const kept = beforeHash.slice(queryIdx + 1).split('&').filter((pair) => !credential.has(pair));
-      const base = beforeHash.slice(0, queryIdx);
-      head = `${kept.length > 0 ? `${base}?${kept.join('&')}` : base}${fragment}`;
+  const url = urlLayout(value);
+  if (url) {
+    const headEnd = url.tail === -1 ? url.queryStart : url.tail;
+    let out =
+      url.password !== undefined
+        ? `${value.slice(0, url.authorityStart + value.slice(url.authorityStart, url.at).indexOf(':'))}@${value.slice(url.at + 1, headEnd)}`
+        : value.slice(0, headEnd);
+    if (url.tail !== -1) {
+      const rest = redactSemicolonSegments(value.slice(url.tail + 1, url.queryStart));
+      if (rest !== '') out += `;${rest}`;
     }
-    if (tail === -1) return head;
-    const rest = redactSemicolonSegments(value.slice(tail + 1));
-    return rest === '' ? head : `${head};${rest}`;
+    if (value[url.queryStart] === '?') {
+      const hash = value.indexOf('#', url.queryStart);
+      const kept = queryPairs(value, url.queryStart).filter((pair) => !isCredentialQueryPair(pair));
+      if (kept.length > 0) out += `?${kept.join('&')}`;
+      if (hash !== -1) out += value.slice(hash);
+    } else {
+      out += value.slice(url.queryStart);
+    }
+    return out;
   }
+  if (ORACLE_THIN_USERINFO_RE.test(value)) return value.replace(ORACLE_THIN_USERINFO_RE, '$1$2@');
   if (SCHEMELESS_USERINFO_RE.test(value)) return value.replace(SCHEMELESS_USERINFO_RE, '$1@');
-  if (!value.includes(';')) {
-    const pairs = libpqPairs(value);
-    if (pairs) {
-      return pairs
-        .filter((p) => !(p.value !== '' && isCredentialShapedConfigKey(p.key)))
-        .map((p) => value.slice(p.start, p.end))
-        .join(' ');
-    }
-  }
-  return redactSemicolonSegments(value);
+  return redactKeyValueCredentials(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -714,6 +816,8 @@ function holdsCredentialValue(value: unknown): boolean {
  *  - the `value` of a `{ name, value }` pair (also `key` / `header` /
  *    `headerName`) whose name is credential-shaped — a headers list carrying
  *    `Authorization`, `X-API-Key` or `Cookie`;
+ *  - the second element of a `[name, value]` tuple inside a list whose name is
+ *    credential-shaped (`headers: [['Authorization', 'Bearer …']]`);
  *  - a string carrying an embedded credential ({@link embeddedCredentialOf}),
  *    wherever it sits — array elements included;
  *  - a subtree past {@link CONTRACTLESS_CREDENTIAL_WALK_DEPTH}, judged whole.
@@ -748,6 +852,15 @@ export function findContractlessCredentials(config: unknown): ContractlessCreden
     if (Array.isArray(value)) {
       if (credential && holdsCredentialValue(value)) {
         out.push({ path, kind: 'named', value });
+        return;
+      }
+      // A `[name, value]` tuple inside a list (`headers: [['Authorization', 'Bearer …']]`)
+      // is the pair form without labels: its value is judged by its name.
+      if (
+        key === undefined && !credential && value.length === 2 && typeof value[0] === 'string'
+        && isCredentialShapedConfigKey(value[0]) && holdsCredentialValue([value[1]])
+      ) {
+        out.push({ path: [...path, '1'], kind: 'named', value: value[1] });
         return;
       }
       value.forEach((element, index) => visit(undefined, element, [...path, String(index)], credential, depth + 1));

@@ -153,6 +153,24 @@ describe('the edit round trip on a legacy row', () => {
     expect(patch.servers).toEqual([{ host: 'a' }, { host: 'b' }]);
   });
 
+  it('a `[name, value]` header tuple and a credential embedded with a `;` round-trip too', async () => {
+    const stored: StoredDatasource = {
+      name: 'tuples',
+      driver: DRIVER,
+      origin: 'runtime',
+      config: {
+        headers: [['Accept', 'application/json'], ['Authorization', 'Bearer tpl-1']],
+        libpq: 'host=wh password=lp-1;x dbname=d',
+      },
+    };
+    const { service, records } = makeService([stored]);
+    const read = await service.getDatasource('tuples');
+    expect(read!.config).toEqual({ headers: [['Accept', 'application/json'], ['Authorization']], libpq: 'host=wh dbname=d' });
+    expect(JSON.stringify(read)).not.toMatch(/tpl-1|lp-1/);
+    await service.updateDatasource('tuples', { config: read!.config });
+    expect(records[0]!.config).toEqual(stored.config);
+  });
+
   it('an author who changed an array element keeps their word; one who removed the array keeps it removed', () => {
     const changed = { host: 'wh.internal', servers: [{ host: 'a', password: 'new-1' }, { host: 'b' }] };
     const restored = restoreRedactedConfig(DRIVER, changed, LEGACY.config) as Record<string, any>;

@@ -615,7 +615,8 @@ export function redactDatasourceConfig(
  * `findContractlessCredentials` (`driver/contractless-credentials.ts`) reports
  * — the SAME walk the write door refuses by — is withheld. A value under a
  * credential position, or a subtree too deep to judge, is dropped (an array
- * element is dropped from its array); a string with an embedded credential is
+ * element is spliced from the end of its array, or nulled when siblings follow
+ * it); a string with an embedded credential is
  * rewritten without it (`redactEmbeddedCredentials`). Every position is
  * reported, array indices included, so the write-path inverses can restore
  * exactly what was withheld. Pure: the input is never mutated.
@@ -649,7 +650,13 @@ function redactContractlessConfig(config: Record<string, unknown>): RedactedData
   for (const finding of drops) {
     const parent = parentOf(finding.path);
     const leaf = finding.path[finding.path.length - 1] as string;
-    if (Array.isArray(parent)) parent.splice(Number(leaf), 1);
+    // An array element is spliced only from the END of its array, so no
+    // sibling shifts and the write-path inverse restores each withheld
+    // element at its own index; one with siblings after it is nulled instead.
+    if (Array.isArray(parent)) {
+      if (Number(leaf) === parent.length - 1) parent.splice(Number(leaf), 1);
+      else parent[Number(leaf)] = null;
+    }
     else if (parent && typeof parent === 'object') delete (parent as Record<string, unknown>)[leaf];
   }
   const removed = findings

@@ -27,46 +27,65 @@ Datasources create and update; the connection test answers `ok: false`), each at
 own `config.<path>` — array elements included (`config.servers.0.password`):
 
 - **A value under a credential-shaped key:** a non-empty string, a number, or an
-  array holding a non-empty string or number. The key is judged on its whole name,
-  split into words at separators and camel-case boundaries, case-insensitively. It is
-  credential-shaped when one of its words is `password`, `passwd`, `passphrase`,
-  `secret` or `credential`; when its last word is `token`, `pass`, `pw`, `pwd`, `jwt`,
-  `pat`, `cookie`, `sas`, `auth`, `authorization`, `bearer` or `apikey`; when its
-  last word is `key` alone or beside `api`, `private`, `secret`, `signing`, `master`,
-  `encryption`, `decryption`, `account`, `shared`, `client`, `session`, `auth`,
-  `hmac`, `license`, `subscription`, `ssh`, `aes` or `storage`; when its last word is
-  `signature` beside `shared`, `access`, `sas` or `hmac`; when it names
-  service-account key material (`serviceAccountKey`, `serviceAccountJson`); or when it
-  is one of the existing canonical spellings. A trailing `value`, `values`, `pem`,
-  `json`, `b64` or `base64` and a plural `s` are ignored first (`apiKeys`, `tokens`,
-  `privateKeyPem`, `apiKeyValue`, `keyJson`). A one-word key with no surviving
-  boundary (`APIKEY`, `accesstoken`) is judged on its folded spelling against the
-  same stems. Never credential-shaped: a key whose last word is a locator,
-  identifier or descriptor (`ref`, `refs`, `reference`, `arn`, `id`, `ids`, `name`,
-  `names`, `path`, `paths`, `file`, `files`, `filename`, `url`, `urls`, `uri`,
-  `endpoint`, `env`, `type`, `header`, `headers`, `field`, `prefix`, `mode`,
-  `region`, `provider`, `source`, `chain`, `policy`, `method`, `enabled`,
-  `authentication`, `format`, `version`, `expiry`, `expires`, `length`, `count`, or
-  a word ending in `less`), and a multi-word key whose first word is `use`,
-  `enable`, `enabled`, `disable`, `require`, `required`, `allow`, `has`, `is`, `no`,
-  `skip`, `max`, `min`, `num`, `count` or `total`. So `credentialsRef`,
-  `accessKeyId`, `tokenUrl`, `passwordFile`, `secretsManagerRegion`,
-  `credentialProvider`, `useDefaultCredentials`, `passwordless`, `maxTokens`,
-  `primaryKey`, `partitionKey`, `passive`, `bypass…` and a bare `accessKey` (the
-  identity half of an access-key pair) stay accepted.
+  array holding a non-empty string or number (an array of objects there has each
+  object judged as a credential-shaped object, below). The key
+  (`isCredentialShapedConfigKey`) is judged on its whole name, split into words at
+  separators and camel-case boundaries, case-insensitively — words, never substrings.
+  It is never credential-shaped when its last word is a locator, identifier or
+  descriptor (`ref`, `refs`, `reference`, `arn`, `id`, `ids`, `name`, `names`, `path`,
+  `paths`, `file`, `files`, `filename`, `url`, `urls`, `uri`, `endpoint`, `env`,
+  `type`, `header`, `headers`, `field`, `prefix`, `mode`, `region`, `provider`,
+  `source`, `chain`, `policy`, `method`, `enabled`, `authentication`, `format`,
+  `version`, `expiry`, `expires`, `length`, `count`, or a word ending in `less`), or
+  when it has more than one word and its first is `use`, `enable`, `enabled`,
+  `disable`, `require`, `required`, `allow`, `has`, `is`, `no`, `skip`, `max`, `min`,
+  `num`, `count` or `total`. Otherwise it is credential-shaped when it is one of the
+  existing canonical spellings or, after dropping trailing `value`, `values`, `pem`,
+  `json`, `b64` or `base64` words and a plural `s` (never the `s` of a word already
+  ending in `s`: `sass` is not `sas`), when one of its words is `password`, `passwd`,
+  `passphrase`, `secret` or `credential`; when its last word is `token`, `pass`,
+  `pw`, `pwd`, `jwt`, `pat`, `cookie`, `sas`, `auth`, `authorization`, `bearer` or
+  `apikey`, or folds a compound ending (`db_accesstoken`); when its last word is `key`
+  alone or beside `api`, `private`, `secret`, `signing`, `master`, `encryption`,
+  `decryption`, `account`, `shared`, `client`, `session`, `auth`, `hmac`, `license`,
+  `subscription`, `ssh`, `aes` or `storage`; when its last word is `signature` beside
+  `shared`, `access`, `sas` or `hmac`; or when it names service-account key material
+  (`serviceAccountKey`, and `serviceAccount` before a dropped qualifier:
+  `serviceAccountJson`, `serviceAccountPem`). So `apiKeys`, `tokens`, `privateKeyPem`,
+  `apiKeyValue`, `tokenValue`, `keyJson`, `pass`, `pw`, `key`, `auth`,
+  `Authorization`, `bearer`, `jwt`, `pat`, `cookie` and `sas` are credential-shaped,
+  while `credentialsRef`, `accessKeyId`, `tokenUrl`, `passwordFile`,
+  `secretsManagerRegion`, `credentialProvider`, `useDefaultCredentials`,
+  `passwordless`, `maxTokens`, `primaryKey`, `partitionKey`, `passive`, `bypass…` and
+  a bare `accessKey` (the identity half of an access-key pair) stay accepted. A
+  one-word key with no boundary left (`APIKEY`, `accesstoken`, `dbpassword`) is judged
+  on its folded spelling by the same rules: it is credential-shaped when it is one of
+  the stems above (`key` and `signature` included), when it holds `password`, `passwd`, `passphrase`, `secret` or
+  `credential` followed by nothing, `key`, `accesskey`, `hash` or `string`
+  (`secretaccesskey` — not `secretary`), or when it ends in a folded key-material
+  compound (`accesstoken`, `apikey`, `privatekey`, `secretkey`, `serviceaccountkey`,
+  `serviceaccountjson`, …); a one-word key starting with `max`, `min`, `num`, `total`
+  or `count` is not.
 - **The secret leaves of a credential-shaped object** (`credentials: {…}`,
-  `auth: {…}`): every leaf except a descriptor or an identity (`type`, `clientId`,
-  `user`, `username`, `email`, `scope`, `region`, …).
+  `auth: {…}`): every leaf except one whose last word is a descriptor (the list above)
+  or an identity (`user`, `username`, `login`, `email`, `issuer`, `audience`, `scope`,
+  `scopes`, `algorithm`, `alg`, `domain`, `host`, `hostname`, `port`, `realm`,
+  `project`, `tenant`, `subject`, `kind`, `label`, `description`) — so
+  `credentials: { type, clientId }` is accepted whole.
 - **The `value` of a `{ name, value }` pair** (also `key`, `header` or `headerName`)
   whose name is credential-shaped — a headers list carrying `Authorization`,
-  `X-API-Key` or `Cookie`.
-- **A string carrying a credential, anywhere:** a URL userinfo password; a URL query
-  parameter whose name is credential-shaped; a credential property in a URL's
-  `;key=value` tail (`sqlserver://h;user=u;password=p`); a credential segment of a
-  semicolon-delimited connection string (`Server=h;Password=p`, `Pwd=`,
-  `AccountKey=`; quoted values honoured); a credential keyword of a libpq
-  keyword/value string (`host=h password=p`); and a scheme-less userinfo password
-  (`user:password@host/db`).
+  `X-API-Key` or `Cookie` — and **the second element of a `[name, value]` tuple** in
+  a list, judged the same way (`headers: [['Authorization', '…']]`).
+- **A string carrying a credential, anywhere:** a URL userinfo password
+  (`scheme://`, a stacked `jdbc:mysql://` or a scheme-relative `//`); a URL query
+  pair whose name is credential-shaped, or whose `;key=value` run carries a
+  credential; a credential property in a URL's `;key=value` tail
+  (`sqlserver://h;user=u;password=p`); the Oracle thin-driver userinfo
+  (`jdbc:oracle:thin:user/password@…`); a credential segment of a semicolon-delimited
+  connection string (`Server=h;Password=p`, `Pwd=`, `AccountKey=`; quoted values
+  honoured); a credential keyword of a libpq keyword/value string (`host=h
+  password=p`, an unquoted `;` in the value included); and a scheme-less userinfo
+  password (`user:password@host/db`).
 - **A subtree nested deeper than 16 levels**, which cannot be judged and is not
   accepted unjudged.
 

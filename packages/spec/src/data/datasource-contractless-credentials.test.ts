@@ -42,6 +42,9 @@ const CREDENTIAL_SHAPED = [
   'serviceAccountJson', 'sharedAccessSignature',
   // a trailing plural or qualifier
   'apiKeys', 'tokens', 'passwords', 'privateKeyPem', 'apiKeyValue', 'tokenValue', 'keyJson', 'clientSecretValue',
+  // one-word stems, header names, folded compounds
+  'pass', 'pw', 'pat', 'authorization', 'x-auth-token', 'Proxy-Authorization', 'set-cookie', 'service_account_json',
+  'dbpassword', 'secretaccesskey', 'passwordhash',
 ] as const;
 
 /** Spellings that must NOT be judged credential-shaped. */
@@ -52,7 +55,10 @@ const NOT_CREDENTIAL_SHAPED = [
   'primaryKey', 'partitionKey', 'sortKey', 'cacheKey', 'idempotencyKey', 'accessKey', 'accessKeyId', 'clientId',
   'tenantId',
   // words that merely contain a stem
-  'passive', 'bypass', 'bypassCache', 'passThrough', 'cookieDomain', 'tokenTtl',
+  'passive', 'bypass', 'bypassCache', 'passThrough', 'cookieDomain', 'tokenTtl', 'compass', 'author', 'authorName',
+  'tokenizer', 'keyspace', 'secretary', 'credentialing',
+  // a stem already ending in `s` takes no plural `s`
+  'sass', 'compileSass',
   // references, locators, identifiers, descriptors
   'credentialsRef', 'secretArn', 'secretName', 'passwordFile', 'privateKeyPath', 'tokenUrl', 'tokenEndpoint',
   'passwordEnv', 'tokenType', 'apiKeyHeader', 'tokenPrefix', 'clientSecretId', 'secretsManagerRegion',
@@ -83,6 +89,15 @@ describe('embedded credentials in a string value', () => {
     ['libpq keyword/value', 'host=h port=5432 password=p'],
     ['libpq quoted value', "host=h password='a b'"],
     ['scheme-less userinfo', 'u:p@h/db'],
+    ['scheme-relative userinfo', '//u:p@h/db'],
+    ['stacked-scheme userinfo', 'jdbc:postgresql://u:p@h/db'],
+    ['Oracle thin userinfo', 'jdbc:oracle:thin:scott/tiger@//h:1521/svc'],
+    ['libpq unquoted `;` in a password', 'host=h password=a;b'],
+    ['URL userinfo with `;` in the password', 'sqlserver://u:a;b=c@h/db'],
+    ['URL tail property whose value holds `@`', 'sqlserver://h;password=a@b;databaseName=d'],
+    ['URL tail property whose value holds `:` and `@`', 'sqlserver://h;password=a:b@c'],
+    ['query pair holding `;`', 'https://h/x?token=a;b'],
+    ['query pair whose `;` run carries a credential', 'https://h/x?mode=ro;password=p'],
   ])('finds %s', (_label, value) => {
     expect(embeddedCredentialOf(value)).toBeDefined();
   });
@@ -96,6 +111,9 @@ describe('embedded credentials in a string value', () => {
     ['libpq with no credential', 'host=h port=5432 dbname=d'],
     ['an email address', 'ops@example.com'],
     ['a label', 'just a label'],
+    ['a stacked-scheme URL with no userinfo', 'jdbc:postgresql://h/db?ssl=true'],
+    ['an Oracle thin URL with no userinfo', 'jdbc:oracle:thin:@//h:1521/svc'],
+    ['a scheme-relative URL with no userinfo', '//h/db'],
   ])('finds nothing in %s', (_label, value) => {
     expect(embeddedCredentialOf(value)).toBeUndefined();
     expect(redactEmbeddedCredentials(value)).toBe(value);
@@ -123,10 +141,27 @@ describe('embedded credentials in a string value', () => {
     expect(redactEmbeddedCredentials('Driver={x};PWD={a;}}b};Database=d')).toBe('Driver={x};Database=d');
   });
 
-  it('an unquoted password containing `;` and `=` takes its whole tail with it (no partial leak)', () => {
-    const out = redactEmbeddedCredentials('Server=h;Password=ab;cd=ef;gh;Database=d');
-    expect(out).toBe('Server=h;Database=d');
-    expect(out).not.toMatch(/cd|ef|gh/);
+  it.each([
+    ['Server=h;Password=SEK;RIT=a;b;Database=d', 'Server=h;Database=d'],
+    ['Password=SEK;RIT;Server=h', 'Server=h'],
+    ['host=h password=SEK;RIT dbname=d', 'host=h dbname=d'],
+    ["host=h password='SEK RIT' dbname=d", 'host=h dbname=d'],
+    ['sqlserver://u:SEK;RIT=x@h:1433;databaseName=d', 'sqlserver://u@h:1433;databaseName=d'],
+    ['sqlserver://h;password=SEK;RIT=x;databaseName=d', 'sqlserver://h;databaseName=d'],
+    ['sqlserver://h;password=SEK@RIT;databaseName=d', 'sqlserver://h;databaseName=d'],
+    ['sqlserver://h;password=SEK:RIT@x;databaseName=d', 'sqlserver://h;databaseName=d'],
+    ['https://h/x?token=SEK;RIT&mode=ro', 'https://h/x?mode=ro'],
+    ['https://h/x?mode=ro;password=SEKRIT#f', 'https://h/x#f'],
+    ['//u:SEKRIT@h/db', '//u@h/db'],
+    ['jdbc:mysql://u:SEKRIT@h/db?useSSL=true', 'jdbc:mysql://u@h/db?useSSL=true'],
+    ['jdbc:oracle:thin:scott/SEKRIT@//h:1521/svc', 'jdbc:oracle:thin:scott@//h:1521/svc'],
+  ])('an unquoted credential holding `;`, `=`, `:` or `@` leaves no tail: %s', (value, expected) => {
+    expect(embeddedCredentialOf(value)).toBeDefined();
+    const out = redactEmbeddedCredentials(value);
+    expect(out).toBe(expected);
+    expect(out).not.toMatch(/SEK|RIT/);
+    // What the read door serves is itself credential-free: the write door accepts it back.
+    expect(embeddedCredentialOf(out)).toBeUndefined();
   });
 });
 
@@ -172,6 +207,18 @@ describe('write door: DatasourceSchema refuses inline credentials for a driver w
     ).toEqual(['config.headers.0.value', 'config.headers.1.value', 'config.hosts.0', 'config.servers.0.password']);
   });
 
+  it('a credential-shaped key inside array data is refused — array data is no longer off the walk', () => {
+    // Inverts the earlier pin that accepted `seed: [{ password: 'row-data' }]`.
+    expect(refusals({ seed: [{ password: 'row-data' }] })).toEqual(['config.seed.0.password']);
+  });
+
+  it('refuses the value of a `[name, value]` header tuple naming a credential, and only that', () => {
+    expect(
+      refusals({ headers: [['Authorization', 'Bearer t'], ['Cookie', 'sid=1'], ['Accept', 'application/json']] }).sort(),
+    ).toEqual(['config.headers.0.1', 'config.headers.1.1']);
+    expect(refusals({ pairs: [['token', '']], range: ['password', 'x'] })).toEqual([]);
+  });
+
   it('control: plain row data in an array is accepted', () => {
     expect(refusals({ seed: [{ name: 'a', amount: 1 }, { name: 'b', amount: 2 }], tags: ['x', 'y'] })).toEqual([]);
   });
@@ -208,8 +255,13 @@ describe('write door: DatasourceSchema refuses inline credentials for a driver w
         connectionString: 'Server=h;Password=p',
         libpq: 'host=h password=p',
         target: 'u:p@h/db',
+        libpqSemicolon: 'host=h password=a;b',
+        oracle: 'jdbc:oracle:thin:scott/tiger@//h:1521/svc',
       }),
-    ).toEqual(['config.url', 'config.dsn', 'config.jdbc', 'config.connectionString', 'config.libpq', 'config.target']);
+    ).toEqual([
+      'config.url', 'config.dsn', 'config.jdbc', 'config.connectionString', 'config.libpq', 'config.target',
+      'config.libpqSemicolon', 'config.oracle',
+    ]);
   });
 
   it('accepts an environment-name placeholder in place of a value — and only that grammar', () => {
@@ -263,6 +315,7 @@ const STORED = {
   credentials: { type: 'service_account', value: 'sa' },
   servers: [{ host: 'a', password: 'p1' }, { host: 'b' }],
   headers: [{ name: 'Authorization', value: 'Bearer t' }, { name: 'Accept', value: 'application/json' }],
+  tuples: [['Authorization', 'Bearer t2'], ['Accept', 'application/json']],
   connectionString: 'Server=h;User Id=u;Password=p;Database=d',
   libpq: 'host=h password=p dbname=d',
   url: 'https://u:p@h/x?mode=ro',
@@ -280,6 +333,7 @@ describe('read door: redactDatasourceConfig for a driver with no shipped contrac
       credentials: { type: 'service_account' },
       servers: [{ host: 'a' }, { host: 'b' }],
       headers: [{ name: 'Authorization' }, { name: 'Accept', value: 'application/json' }],
+      tuples: [['Authorization'], ['Accept', 'application/json']],
       connectionString: 'Server=h;User Id=u;Database=d',
       libpq: 'host=h dbname=d',
       url: 'https://u@h/x?mode=ro',
@@ -295,9 +349,41 @@ describe('read door: redactDatasourceConfig for a driver with no shipped contrac
       'libpq',
       'oauth.client_secret',
       'servers.0.password',
+      'tuples.0.1',
       'url',
     ]);
     expect(JSON.stringify(config)).not.toMatch(/"k"|k1|"cs"|"sa"|p1|Bearer|Password=p|password=p|u:p@/);
+  });
+
+  it('withholds a subtree too deep to judge — the same position the write door refuses', () => {
+    let deep: Record<string, unknown> = { leaf: 'x' };
+    for (let i = 0; i < 20; i += 1) deep = { n: deep };
+    const { config, redactedKeys } = redactDatasourceConfig(DRIVER, { host: 'h', deep });
+    expect(redactedKeys).toHaveLength(1);
+    expect(['config', ...(redactedKeys[0] as string).split('.')].join('.')).toEqual(refusals({ host: 'h', deep })[0]);
+    expect(JSON.stringify(config)).not.toContain('leaf');
+  });
+
+  it('an array element withheld before its siblings is nulled, never shifting them; one at the end is spliced', () => {
+    // Twenty nested `[inner, 'sib']` pairs: the walk's depth cap lands on an
+    // `inner` that has a sibling after it.
+    let nested: unknown = ['x', 'sib'];
+    for (let i = 0; i < 20; i += 1) nested = [nested, 'sib'];
+    const { config, redactedPaths } = redactDatasourceConfig(DRIVER, { list: nested });
+    expect(redactedPaths).toHaveLength(1);
+    let node = (config as { list: unknown }).list;
+    let levels = 0;
+    while (Array.isArray(node)) {
+      expect(node).toHaveLength(2);
+      expect(node[1]).toBe('sib');
+      node = node[0];
+      levels += 1;
+    }
+    expect(node).toBeNull();
+    expect(levels).toBe((redactedPaths[0] as readonly string[]).length - 1);
+    // A withheld element at the END of its array is spliced.
+    const tail = redactDatasourceConfig(DRIVER, { headers: [['Accept', 'json'], ['Authorization', 'Bearer t']] });
+    expect(tail.config).toEqual({ headers: [['Accept', 'json'], ['Authorization']] });
   });
 
   it('the input is never mutated', () => {
