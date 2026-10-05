@@ -35,7 +35,7 @@ import {
   clearUnlinkTombstone,
   clearUserUnlinkTombstones,
   recordUnlinkTombstone,
-  type LinkingInternalAdapter,
+  type LinkingAuthContext,
   refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
 import type { IDataEngine } from '@objectstack/core';
@@ -1607,7 +1607,7 @@ export class AuthManager {
         validateUserInfo: async (data: any, ctx: any) =>
           (await refuseImplicitAccountLink(data, ctx, {
             requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
-            resolveAdapter: () => this.linkingAdapter(),
+            resolveContext: () => this.linkingContext(),
             logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
           })) ?? this.validateAudienceAdmission(data, ctx),
       },
@@ -1647,6 +1647,15 @@ export class AuthManager {
       },
       verification: {
         ...AUTH_VERIFICATION_CONFIG,
+        // A host `secondaryStorage` would otherwise make the cache the ONLY
+        // home of every verification value (better-auth drops the
+        // `verification` model from the schema), and the implicit-linking
+        // unlink records (`implicit-account-linking.ts`) must be durable: an
+        // evicted record re-opens implicit re-linking without a sound. With
+        // `storeInDatabase` every verification value is a `sys_verification`
+        // row — exactly what it is when no `secondaryStorage` is configured,
+        // ObjectStack's default — and the cache only fronts it.
+        ...(this.config.secondaryStorage ? { storeInDatabase: true } : {}),
       },
 
       // Social / OAuth providers
@@ -4500,15 +4509,15 @@ export class AuthManager {
   }
 
   /**
-   * better-auth's internal adapter read off the auth instance — the store for
-   * the implicit-linking hooks when a call carries no endpoint context (a
+   * better-auth's auth context read off the auth instance — the store for the
+   * implicit-linking hooks when a call carries no endpoint context (a
    * server-side `auth.api.*` call or an internal-adapter write).
    */
-  private async linkingAdapter(): Promise<LinkingInternalAdapter | undefined> {
+  private async linkingContext(): Promise<LinkingAuthContext | undefined> {
     try {
       const auth: any = await this.getOrCreateAuth();
       const context = await auth?.$context;
-      return context?.internalAdapter as LinkingInternalAdapter | undefined;
+      return context?.adapter && context?.internalAdapter ? (context as LinkingAuthContext) : undefined;
     } catch {
       return undefined;
     }
@@ -7373,7 +7382,7 @@ export class AuthManager {
     // it is reported at `warn` and never fails the link. It runs FIRST, ahead
     // of the identity-source stamp, so a stamp failure can never leave a
     // landed link still refused.
-    const resolveLinkingAdapter = () => this.linkingAdapter();
+    const resolveLinkingAdapter = () => this.linkingContext();
     const clearUnlink = async (account: any, ctx: any) => {
       try {
         await clearUnlinkTombstone(account, ctx, resolveLinkingAdapter);

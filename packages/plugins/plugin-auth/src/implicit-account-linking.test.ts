@@ -22,6 +22,7 @@ import {
   decideImplicitLink,
   linkSourceProviderId,
   unlinkTombstoneIdentifier,
+  unlinkTombstoneUserPrefix,
 } from './implicit-account-linking';
 
 // ── In-memory IDataEngine (the audience-posture harness shape) ───────────────
@@ -47,6 +48,7 @@ const createMemoryEngine = () => {
         if ('$gte' in v) return actual >= v.$gte;
         if ('$lt' in v) return actual < v.$lt;
         if ('$lte' in v) return actual <= v.$lte;
+        if ('$startsWith' in v) return typeof actual === 'string' && actual.startsWith(v.$startsWith);
       }
       return eq(actual, v);
     });
@@ -261,14 +263,16 @@ const userRow = (engine: any, email: string) =>
   (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
 const accountsOf = (engine: any, userId: string, providerId: string) =>
   (engine.tables.get('sys_account') ?? []).filter((a: any) => a.user_id === userId && a.provider_id === providerId);
-/** The providers the user's unlink record lists (none when there is no record). */
-const unlinkedProviders = (engine: any, userId: string): string[] => {
-  const rows = (engine.tables.get('sys_verification') ?? []).filter(
-    (v: any) => v.identifier === unlinkTombstoneIdentifier(userId),
-  );
-  expect(rows.length).toBeLessThanOrEqual(1);
-  return rows.length ? JSON.parse(rows[0].value).providers : [];
-};
+/** The providers the user has an unlink record for, sorted (none when there is no record). */
+const unlinkedProviders = (engine: any, userId: string): string[] =>
+  (engine.tables.get('sys_verification') ?? [])
+    .filter((v: any) => typeof v.identifier === 'string' && v.identifier.startsWith(unlinkTombstoneUserPrefix(userId)))
+    .map((v: any) => {
+      const providerId = JSON.parse(v.value).providerId as string;
+      expect(v.identifier).toBe(unlinkTombstoneIdentifier(userId, providerId));
+      return providerId;
+    })
+    .sort();
 const setVerified = (engine: any, email: string, verified: boolean) => {
   userRow(engine, email).email_verified = verified;
 };
@@ -278,6 +282,7 @@ const setVerified = (engine: any, email: string, verified: boolean) => {
 describe('implicit link decision', () => {
   const base = {
     providerId: EXTERNAL,
+    sourceMethod: 'oauth',
     localEmailVerified: false,
     requireLocalEmailVerified: true,
     unlinkedByUser: false,
@@ -293,6 +298,15 @@ describe('implicit link decision', () => {
 
   it('exempts the platform identity provider from the local-verification precondition', () => {
     expect(decideImplicitLink({ ...base, providerId: PLATFORM_IDP_PROVIDER_ID })).toEqual({ allow: true });
+  });
+
+  it('binds the platform exception to the OAuth sign-in method, not the provider id alone', () => {
+    for (const sourceMethod of ['sso-oidc', 'sso-saml', undefined]) {
+      expect(decideImplicitLink({ ...base, providerId: PLATFORM_IDP_PROVIDER_ID, sourceMethod })).toEqual({
+        allow: false,
+        reason: 'local-email-unverified',
+      });
+    }
   });
 
   it('honours an unlink for every provider, the platform identity provider included', () => {
@@ -547,5 +561,89 @@ describe('implicit link on external sign-in, end to end', () => {
 
     expect(userRow(engine, email)).toBeUndefined();
     expect(unlinkedProviders(engine, user.id)).toEqual([]);
+  });
+  /** A verified user signed up with a password and linked to two external providers. */
+  const twoLinkedProviders = async (manager: AuthManager, engine: any, email: string) => {
+    const session = await signUp(manager, email);
+    setVerified(engine, email, true);
+    const user = userRow(engine, email);
+    idpProfile[EXTERNAL] = { sub: `${email}-ext`, email, email_verified: true };
+    idpProfile[OIDC] = { sub: `${email}-oidc`, email, email_verified: true };
+    expect((await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social')).searchParams.get('error')).toBeNull();
+    expect((await oauthRoundTrip(manager, OIDC, 'sign-in/social')).searchParams.get('error')).toBeNull();
+    const [first] = accountsOf(engine, user.id, EXTERNAL);
+    const [second] = accountsOf(engine, user.id, OIDC);
+    return { session, user, first, second };
+  };
+
+  it('a later unlink that cannot be recorded keeps every earlier unlink in force', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const { session, user, first, second } = await twoLinkedProviders(manager, engine, 'twice@example.test');
+
+    expect((await post(manager, 'unlink-account', { accountId: first.id }, joinCookies(session))).status).toBe(200);
+    expect(unlinkedProviders(engine, user.id)).toEqual([EXTERNAL]);
+
+    engine.failInserts.add('sys_verification');
+    const failed = await post(manager, 'unlink-account', { accountId: second.id }, joinCookies(session));
+    engine.failInserts.delete('sys_verification');
+
+    expect(failed.status).toBeGreaterThanOrEqual(400);
+    expect(accountsOf(engine, user.id, OIDC)).toHaveLength(1);
+    expect(unlinkedProviders(engine, user.id)).toEqual([EXTERNAL]);
+    const refused = await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social');
+    expect(refused.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
+    expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(0);
+  });
+
+  it('concurrent unlinks of two providers both stay recorded', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const { session, user, first, second } = await twoLinkedProviders(manager, engine, 'concurrent@example.test');
+
+    const [a, b] = await Promise.all([
+      post(manager, 'unlink-account', { accountId: first.id }, joinCookies(session)),
+      post(manager, 'unlink-account', { accountId: second.id }, joinCookies(session)),
+    ]);
+
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(unlinkedProviders(engine, user.id)).toEqual([OIDC, EXTERNAL].sort());
+    for (const providerId of [EXTERNAL, OIDC]) {
+      const target = await oauthRoundTrip(manager, providerId, 'sign-in/social');
+      expect(target.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
+    }
+  });
+  it('keeps the unlink record in the database when a secondaryStorage cache is configured', async () => {
+    const engine = createMemoryEngine();
+    const cache = new Map<string, string>();
+    const manager = makeManager(engine, {
+      // The embedded OAuth provider refuses a cache-held session store; it is
+      // not what this case is about.
+      plugins: { oidcProvider: false },
+      secondaryStorage: {
+        get: async (key: string) => cache.get(key) ?? null,
+        set: async (key: string, value: string) => {
+          cache.set(key, value);
+        },
+        delete: async (key: string) => {
+          cache.delete(key);
+        },
+      },
+    });
+    const email = 'cached@example.test';
+    const session = await signUp(manager, email);
+    setVerified(engine, email, true);
+    const user = userRow(engine, email);
+    idpProfile[EXTERNAL] = { sub: 'ext-cache', email, email_verified: true };
+    expect((await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social')).searchParams.get('error')).toBeNull();
+    const [linked] = accountsOf(engine, user.id, EXTERNAL);
+    expect((await post(manager, 'unlink-account', { accountId: linked.id }, joinCookies(session))).status).toBe(200);
+
+    // The record is a database row, not a cache entry: evicting every
+    // verification value from the cache leaves the refusal in force.
+    expect(unlinkedProviders(engine, user.id)).toEqual([EXTERNAL]);
+    for (const key of [...cache.keys()]) if (key.startsWith('verification:')) cache.delete(key);
+    const refused = await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social');
+    expect(refused.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
   });
 });

@@ -15,6 +15,7 @@ Clause-②: no (narrowing)
 - An external sign-in links implicitly to an existing local user only when that local user's email is verified. Otherwise the sign-in is refused with `error=account_not_linked`, the same code better-auth's own refusal produces. No link is written and the local user stays unverified. A verified local user links as before.
 - The platform's own identity provider (`objectstack-cloud`) keeps its documented exception and still links to an unverified local user, because it seeds the environment owner's row without a mailbox round-trip.
 - After a user unlinks a provider, an implicit sign-in through it no longer links the identity again, for any provider. An explicit, signed-in link from account settings (`/link-social`) is still allowed and ends the refusal. If the unlink cannot be recorded, the unlink itself is refused and the provider stays linked. Deleting a user removes the user's unlink records.
+- A deployment that passes `secondaryStorage` to the auth plugin now also keeps verification values in the database (`verification.storeInDatabase: true`). The cache still fronts them. This keeps the unlink records durable when the cache evicts entries. Deployments without `secondaryStorage` are unchanged.
 - `account.accountLinking.requireLocalEmailVerified` now reads as follows. Unset (the default) means the rules above. `true` applies the strict check to every provider, including `objectstack-cloud`. `false` turns off only the local-verification check and keeps the unlink rule.
 
 **What to do after upgrading.**
