@@ -253,6 +253,17 @@ export default defineConfig({
               find: /^@objectstack\/trigger-api$/,
               replacement: path.resolve(__dirname, '../../triggers/trigger-api/src/index.ts'),
             },
+            // [#21728] `install-local-purge-sample-data.dogfood.test.ts` mounts
+            // `MarketplaceInstallLocalPlugin` on a real boot and drives its
+            // install / purge / reseed doors. The plugin is the pin's subject,
+            // so the verdict is aliased to THIS checkout's source. A relative
+            // import of the plugin file instead would put its own dynamic
+            // `@objectstack/runtime` import into this package's unaliased set
+            // (`check:test-source-alias`), which is shrink-only.
+            {
+              find: /^@objectstack\/cloud-connection$/,
+              replacement: path.resolve(__dirname, '../../cloud-connection/src/index.ts'),
+            },
           ],
         },
         test: {

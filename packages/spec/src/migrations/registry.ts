@@ -6182,6 +6182,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`translation-widget-sub-caption-retired`.',
   },
   {
+    id: 'ui-action-group-menu-members-typed',
+    order: 82,
+    text:
+      'And it types the members of the `action:group` and `action:menu` page blocks, the last of those forks '
+      + '(the same card, fork 5, letter A): each member was an open record the container draws and runs itself, so '
+      + 'a misspelled key, a node-style `actionType` or an `endpoint` no `api` handler reads passed every door. A '
+      + 'member now takes `action:button`\'s keys with its executor spelled `type`, measured from the containers\' '
+      + 'reads — an `action:menu` item reads no `size` and declares none — with the rows\' prescriptions; '
+      + '`outcomeMessages`, a member `className` and a member `properties.params` are refused, and '
+      + '`outcomeMessages` stays undeclared on all four action blocks as one decision. Read by the '
+      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is registered. '
+      + 'Its D3 record is the semantic entry `ui-action-group-menu-members-typed`.',
+  },
+  {
     id: 'ui-ai-chat-window-retired',
     order: 65,
     text:
@@ -6422,6 +6436,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'semantic entry `ui-object-metric-compare-to-typed`.',
   },
   {
+    id: 'ui-object-metric-drill-down-report-typed',
+    order: 80,
+    text:
+      'It then types the three members the stages above held open, as the maintainer ruled them on the '
+      + 'decision card for those forks. The `object-metric` drill-down\'s `report` is `ReportSchema`, by '
+      + 'reference (fork 1, letter B): it waited until a joined report refused a block that binds no dataset, '
+      + 'and since then every report the member admits is one the drill drawer draws — a report with no '
+      + '`dataset`, a bare report name or a `{ name }` reference, which the drawer answered by listing the '
+      + 'records, is refused. Read by the component-props gate (advisory); a stored page still saves and loads, '
+      + 'so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-metric-drill-down-report-typed`.',
+  },
+  {
     id: 'ui-object-metric-drill-down-typed',
     order: 72,
     text:
@@ -6433,6 +6460,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'dataset-bound report, but the spec declares no drill report yet, and declares that contract first. '
       + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-metric-drill-down-typed`.',
+  },
+  {
+    id: 'ui-object-timeline-items-typed',
+    order: 81,
+    text:
+      'It types the `object-timeline` page block\'s `items` (fork 4, letter B): each entry is one of objectui\'s '
+      + 'two ruled kinds, closed — a feed entry `{ time, title, description, variant, icon, content, className }` '
+      + 'or a gantt row `{ label, items }` of bars `{ title, startDate, endDate, variant }`, each date a string or '
+      + 'epoch milliseconds — and a row refinement pairs each entry with the kind the block\'s `variant` selects, '
+      + 'so a feed entry with no `title`, or a gantt row on a feed timeline, is refused instead of drawn empty. '
+      + 'A feed entry\'s `content` (child components) is held unjudged until a writer appears. Read by the '
+      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is registered. '
+      + 'Its D3 record is the semantic entry `ui-object-timeline-items-typed`.',
   },
   {
     id: 'ui-object-timeline-mapping-typed',
@@ -7687,6 +7727,65 @@ const step18: MigrationStep = {
         + 'seconds exactly as `cacheTtl: 60` did, and its `min(0)` bound rides along, so a negative '
         + 'TTL is still refused. A route declared with `timeoutMs: 30000` aborts after 30 seconds '
         + 'exactly as `timeout: 30000` did.',
+    },
+    {
+      id: 'approval-position-address-role-retired',
+      surface:
+        'approvals position address role:<position> — the approverId filter of the approvals '
+        + 'request list, the actorId of every decision, and a stored pending_approvers slot',
+      replacement:
+        '`position:<position>`, the one spelling of a position address; a flow approver authored '
+        + 'as `{ type: \'role\', value: <a position name> }` becomes '
+        + '`{ type: \'position\', value: <the position> }`',
+      reason:
+        'The fourth face of the ADR-0090 D3 `role` retirement, beside '
+        + '`actor-user-roles-to-positions` and `action-session-roles-to-positions`, and like them '
+        + 'a runtime face with no spec schema. The approvals service read `role:<position>` as a '
+        + 'second spelling of `position:<position>` wherever it compares a slot with the caller '
+        + '(the "My Pending" filter, the participant gate, `viewer.can_act`, and the slot test of '
+        + 'every decision), because 15.x-era slots and the stock console\'s identity list carried '
+        + 'it. ADR-0090 D3 retires the word with no alias window, so once the pinned console sent '
+        + '`position:<position>` the arm came out in one edit (maintainer ruling, 2026-10-04). '
+        + '`position:<position>` is now the only position address: a `role:<position>` ask matches '
+        + 'only a slot stored under that exact spelling, and a `role:<position>` actor is refused '
+        + 'with 403 `FORBIDDEN`. '
+        + 'The same ruling closed the one WRITER of the spelling. The deprecated `role` approver '
+        + 'TYPE already resolved as `org_membership_level` (the org-membership tier: owner, admin, '
+        + 'member), but when that lookup found no one the fallback slot kept the AUTHORED spelling, '
+        + '`role:<value>`, and a holder of a same-named position decided it through the arm, so '
+        + 'the runtime silently honoured a membership-tier declaration as a position. The fallback '
+        + 'now writes the canonical `org_membership_level:<value>`, and no path writes a `role:` '
+        + 'slot. '
+        + 'Two classes of pending request are therefore decided only by the privileged override, '
+        + 'or by a reassign to a real approver: a request a 15.x-era release stored as '
+        + '`role:<position>`, and a new request from a flow that still authors '
+        + '`{ type: \'role\', value: <a position name> }` and whose tier lookup finds no one. No '
+        + 'stored slot is rewritten: the ruling refused a one-time rewrite as the permanent '
+        + 'migration debt ADR-0090\'s first forcing fact names. '
+        + 'Why this is a D3 semantic TODO and not a D2 conversion, on two independent grounds. '
+        + 'FIRST, no metadata key moves: the address is runtime DATA (a request slot, a query '
+        + 'parameter, a decision body\'s actor), never a `sys_metadata` row, so there is no source '
+        + 'for a declarative transform to rewrite. SECOND, the one authored shape that leads here, '
+        + '`{ type: \'role\', value: <x> }`, is ambiguous by construction: the deprecated alias '
+        + 'means the membership TIER, and whether its author meant a position instead is a '
+        + 'judgment only that author can make, so a mechanical rewrite to either type would guess. '
+        + 'The `ApproverType` `role` alias itself is a separate retirement and is unchanged here. '
+        + 'ADR-0090 D3, ADR-0087.',
+      acceptanceCriteria:
+        'No client sends `role:<position>` as an `approverId` or an `actorId`: every such value is '
+        + '`position:<position>`, and a request routed to the position is listed for its holder, '
+        + 'served with `viewer.can_act: true`, and decided by that holder with no `actorId` named. '
+        + 'Every flow approver authored as `{ type: \'role\', value: <x> }` is reviewed by its '
+        + 'author: `<x>` a position name becomes `{ type: \'position\', value: <x> }`, and `<x>` a '
+        + 'membership tier (owner, admin, member) becomes '
+        + '`{ type: \'org_membership_level\', value: <x> }`. `os lint` reports the first as '
+        + '`approval-approver-not-membership-tier` and the second as '
+        + '`approval-approver-type-deprecated`. Every pending request whose slot reads '
+        + '`role:<position>`, or `org_membership_level:<a position name>` from such a flow, is '
+        + 'either decided by a platform admin or a tenant admin of its organization (the approve '
+        + 'or reject is recorded with `via_override: true` and resumes the run) or reassigned to '
+        + 'the position\'s holder, who then decides it. Verify on a running app, as an admin: the '
+        + 'pending list filtered by `approverId` set to each such slot address answers no rows.',
     },
     // #15219 — maintainer ruling A for both keys (2026-09-04, director relay,
     // verbatim 「同意」): `plugins` and `devPlugins` are artifact ENVELOPE keys —
@@ -19277,6 +19376,46 @@ const step18: MigrationStep = {
         + 'local file, and rewrite it to that spelling. Done when every turso datasource parses, the '
         + 'driver builds from it, and a replica datasource reports a file: url beside its syncUrl.',
     },
+    // #21464 — each member of the `action:group` / `action:menu` page blocks'
+    // `actions` was an open record: the container draws and runs the member itself,
+    // and the spec declared none of its keys. The maintainer ruled on #21704 (fork
+    // 5, letter A): the measured read set, `action:button`'s keys keyed by `type`,
+    // with the rows' prescriptions; `outcomeMessages`, a member `className` and
+    // `properties.params` refused; `outcomeMessages` undeclared on all four action
+    // blocks. D3 only: page-component `properties` is not parsed on the metadata
+    // save or load path, so a stored page is never refused; and the authored census
+    // found no working member to respell — the refused values are objectui's probes
+    // of the very reads the ruling refuses (a member `className`, `outcomeMessages`,
+    // `properties.params`) and of the host's `autoTrigger` flag.
+    {
+      id: 'ui-action-group-menu-members-typed',
+      surface: 'page `action:group` and `action:menu` components — each member of `properties.actions` (whose keys '
+        + 'used to pass unjudged)',
+      replacement: 'an inline action with `action:button`\'s keys, its executor spelled `type`: `{ name?, label?, '
+        + 'icon?, type?, variant?, visible?, disabled?, tags?, params?, description?, target?, openIn?, method?, '
+        + 'bodyExtra?, bodyShape?, operation?, patch?, confirmText?, successMessage?, errorMessage?, refreshAfter?, '
+        + 'locations?, toast?, resultDialog?, onSuccess?, objectName? }`, plus `size?` on an `action:group` member. '
+        + 'Write `actionType` as `type`, `endpoint` (and `url` / `path` / `href`) as `target`, `enabled` as `disabled` '
+        + 'with the condition inverted, and `outcomeMessages` as one `successMessage`; drop a member `className`, '
+        + '`properties`, `autoTrigger`, `undoable`, `recordIdField` and an `action:menu` member\'s `size`.',
+      reason: 'An `action:group` or `action:menu` draws and runs each member itself: it draws `label` (or `name`), '
+        + '`icon`, `variant`, `tags` and, on a group\'s inline buttons, `size`; gates the member on `visible` and '
+        + '`disabled`; places it by `locations`; and forwards its `type` and the rest of `action:button`\'s keys to the '
+        + 'action runner. The page-component rows declared each member an open record, so a misspelled key, a '
+        + 'node-style `actionType` or an `endpoint` no `api` handler reads passed the component-props gate, and the '
+        + 'container drew and ran the member without it. The rows now take a closed member: `action:button`\'s keys '
+        + 'by `type`, with the rows\' prescriptions; the keys the rows leave undecided — `outcomeMessages`, a member '
+        + '`className`, a member `properties.params` — are refused, and `outcomeMessages` stays undeclared on all four '
+        + 'action blocks as one decision. It is read where every page component\'s props are: the component-props '
+        + 'gate reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
+        + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves '
+        + 'and loads, because a page component\'s `properties` is not parsed on the metadata save or load path. No '
+        + 'conversion is registered: nothing on the load path refuses the shape, and the authored census found no '
+        + 'working member to respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `action:group` and `action:menu` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.actions`. Each member '
+        + 'is drawn with its label, icon and variant, and runs the executor its `type` names.',
+    },
     {
       id: 'ui-action-undoable-unfulfillable-refused',
       surface: '`action` documents declaring `undoable: true` on a shape no runtime fulfils — '
@@ -20562,6 +20701,39 @@ const step18: MigrationStep = {
         + 'that sets a comparison shows its trend labelled for the kind it names, over the window its own `filter` '
         + 'resolves to.',
     },
+    // #21464 — the `object-metric` page block's `drillDown.report` was `z.unknown()`:
+    // the tile hands it to the shared drill drawer, which draws a dataset-bound
+    // report and lists the records for any other value, and no spec drill shape
+    // declared it. The maintainer ruled on #21704 (fork 1, letter B) that it is
+    // `ReportSchema` by reference, once a joined report refuses a block that binds
+    // no dataset (#21702), so a report the member admits is one the drawer draws.
+    // D3 only: page-component `properties` is not parsed on the metadata save or
+    // load path, so a stored page is never refused; and the authored census found
+    // no drawn report to respell — the refused values are objectui's probes of the
+    // values the drawer does NOT draw.
+    {
+      id: 'ui-object-metric-drill-down-report-typed',
+      surface: 'page `object-metric` components — `properties.drillDown.report` (which used to accept any value)',
+      replacement: 'a report definition, the same shape as `reports[]` (`ReportSchema`): `{ name, label, dataset, '
+        + 'values, … }`, or a `joined` report whose every block binds a `dataset`. Write a bare report name, a '
+        + '`{ name }` reference or the retired `objectName` / `columns` form as the dataset-bound report itself.',
+      reason: 'The metric tile hands `drillDown.report` to the shared drill drawer, which draws it as a report — with '
+        + 'the metric\'s filter joined into the report\'s own `runtimeFilter` — when it is dataset-bound (a non-empty '
+        + '`dataset`, or a `joined` report with a block that binds one), and lists the records for any other value. '
+        + 'The page-component row declared it `z.unknown()`, so a report with no `dataset`, a misspelled report key, a '
+        + 'bare report name or a `{ name }` reference passed the component-props gate, and the drawer quietly listed '
+        + 'the records instead. The row now takes `ReportSchema` by reference — the declaration objectui already '
+        + 'names for the member — and, since a joined report refuses a block that binds no `dataset`, every report it '
+        + 'admits is one the drawer draws. It is read where every page component\'s props are: the component-props gate '
+        + 'reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` finding on '
+        + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves and loads, '
+        + 'because a page component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
+        + 'registered: nothing on the load path refuses the shape, and the authored census found no drawn report to '
+        + 'respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-metric` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.drillDown.report`. Each '
+        + 'tile whose drill names a report opens that report, scoped by the metric\'s filter, instead of the record list.',
+    },
     // #21464 — the `object-metric` page block's `drillDown` was `z.unknown()`
     // although the tile reads it with one shape, so a drill `filter`, a `mode`, a
     // misspelled member or a non-numeric page size passed the component-props gate
@@ -20604,6 +20776,42 @@ const step18: MigrationStep = {
         + 'that sets a drill-down opens it as written: the panel shape `target` names, the heading `title` names, '
         + 'and the records behind the number, scoped by the metric\'s own `filter`, in the columns and page size '
         + 'written.',
+    },
+    // #21464 — the `object-timeline` page block's `items` was `z.array(z.unknown())`:
+    // each entry is objectui's authored timeline element (`TimelineFeedItem` /
+    // `TimelineGanttItem`, ruled on objectui#6356), which the spec did not declare,
+    // and the arm an entry must be is chosen by the row's `variant`. The maintainer
+    // ruled on #21704 (fork 4, letter B): both arms closed, a feed entry's `content`
+    // opaque, a row refinement pairing each entry with the arm `variant` selects,
+    // and a gantt bar's dates a string or a number. D3 only: page-component
+    // `properties` is not parsed on the metadata save or load path, so a stored page
+    // is never refused; and the authored census found no drawn entry to respell —
+    // the refused values are objectui's probes of its render-time gantt date
+    // diagnostic.
+    {
+      id: 'ui-object-timeline-items-typed',
+      surface: 'page `object-timeline` components — `properties.items` (whose entries used to accept any value)',
+      replacement: 'the entry kind the block\'s `variant` selects: on `vertical` (the default) or `horizontal`, a feed '
+        + 'entry `{ time?, title, description?, variant?, icon?, content?, className? }`; on `gantt`, a gantt row '
+        + '`{ label, items? }` whose bars are `{ title?, startDate?, endDate?, variant? }`, each date a string or epoch '
+        + 'milliseconds. Write a feed entry\'s `date` as `time` and its `color` as `variant` (`default`, `success`, '
+        + '`warning`, `danger`, `info`); move a gantt row to `variant: \'gantt\'`, or a feed entry off it.',
+      reason: 'The timeline rail draws `items` as authored, ahead of every record source, and each branch of its '
+        + 'renderer reads only its own kind of entry: the feed branches read `time`, `title`, `description`, `variant`, '
+        + '`icon`, `content` and `className`; the gantt branch reads a row\'s `label` and its bars\' `title`, '
+        + '`startDate`, `endDate` and `variant`. The page-component row declared each entry `z.unknown()`, so a '
+        + 'misspelled key, a feed entry with no `title`, or a gantt row on a feed timeline passed the component-props '
+        + 'gate, and the rail drew an empty, unlabelled entry. The row now takes objectui\'s two ruled kinds, closed, '
+        + 'and pairs each entry with the kind its `variant` selects; a feed entry\'s `content` (child components) is '
+        + 'held unjudged until a writer appears. It is read where every page component\'s props are: the '
+        + 'component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and `objectstack lint`, '
+        + 'and a stored page still saves and loads, because a page component\'s `properties` is not parsed on the '
+        + 'metadata save or load path. No conversion is registered: nothing on the load path refuses the shape, and '
+        + 'the authored census found no drawn entry to respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-timeline` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.items`. Each timeline '
+        + 'with authored entries draws every entry with its title (or row label), date and colour.',
     },
     // #21464 — the `object-timeline` page block's `mapping` was `z.unknown()`: its
     // contract lived only in objectui, so a bare field name, a non-string binding

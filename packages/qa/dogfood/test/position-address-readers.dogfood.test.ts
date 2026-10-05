@@ -25,9 +25,12 @@
 //   ⭐ can_act is the default actor's decision answer, row for row — holder,
 //      bystander, submitter, admin;
 //   ⭐ the holder decides with the default actor AND with the console's
-//      spelling; the decision records the holder in `actor_id` and the slot's
-//      stored spelling in `acted_as` (#21411: the person and the slot are two
-//      facts, in two columns);
+//      spelling, `position:<p>`; the decision records the holder in
+//      `actor_id` and the slot's stored spelling in `acted_as` (#21411: the
+//      person and the slot are two facts, in two columns);
+//   ⭐ the retired `role:<p>` (ADR-0090 D3, no alias window) is no address of
+//      the slot: it lists nothing, and an approve naming it is refused 403
+//      FORBIDDEN with nothing recorded;
 //   ⭐ the holder keeps sight of the request after deciding it; the bystander
 //      never sees it (this widens nobody);
 //   ⭐ the email-keyed slot is listed, flagged, decided and kept in sight.
@@ -119,7 +122,7 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         await ql.insert('sys_user_position', { id: 'pa_hold_bystander', user_id: bystanderId, position: OTHER_POSITION }, SYS);
 
         // ⭐ can_act, served, for every caller who may read the request…
-        const holderRow = (await list(holderToken, [holderId, HOLDER, `role:${ROUTED_POSITION}`]))
+        const holderRow = (await list(holderToken, [holderId, HOLDER, SLOT]))
           .find((r) => r.id === tableRequest);
         const submitterRow = (await list(submitterToken)).find((r) => r.id === tableRequest);
         const adminRow = (await list(adminToken, [SLOT])).find((r) => r.id === tableRequest);
@@ -127,7 +130,9 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         expect(submitterRow?.viewer).toMatchObject({ can_act: false, can_override: false });
         expect(adminRow?.viewer).toMatchObject({ can_act: false, can_override: true });
         // …and the bystander may not read it at all.
-        expect(await list(bystanderToken, [bystanderId, BYSTANDER, `role:${ROUTED_POSITION}`])).toEqual([]);
+        expect(await list(bystanderToken, [bystanderId, BYSTANDER, SLOT])).toEqual([]);
+        // ⭐ The retired spelling lists nothing, for the holder either.
+        expect(await list(holderToken, [holderId, HOLDER, `role:${ROUTED_POSITION}`])).toEqual([]);
         expect(await detail(bystanderToken, tableRequest)).toBe(404);
 
         // ⭐ …is the default actor's decision answer, row for row.
@@ -149,9 +154,13 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         expect(await detail(holderToken, tableRequest)).toBe(200);
         expect(await detail(bystanderToken, tableRequest)).toBe(404);
 
-        // ⭐ The console's spelling reaches the same slot.
+        // ⭐ The retired `role:<p>` is refused, and records nothing…
         const viaRole = await approve(holderToken, consoleSpellingRequest, { actorId: `role:${ROUTED_POSITION}` });
-        expect([viaRole.status, viaRole.requestStatus]).toEqual([200, 'approved']);
+        expect([viaRole.status, viaRole.code]).toEqual([403, 'FORBIDDEN']);
+        expect(await recorded(consoleSpellingRequest)).toEqual([]);
+        // …while the console's spelling, `position:<p>`, reaches the slot.
+        const viaPosition = await approve(holderToken, consoleSpellingRequest, { actorId: SLOT });
+        expect([viaPosition.status, viaPosition.requestStatus]).toEqual([200, 'approved']);
         expect(await recorded(consoleSpellingRequest)).toEqual([{ actor_id: holderId, acted_as: SLOT, via_override: false }]);
 
         // ⭐ The email-keyed slot, for a reviewer who did not submit it.

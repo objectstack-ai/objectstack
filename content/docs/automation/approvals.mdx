@@ -61,7 +61,10 @@ different thing — the better-auth **org-membership tier**, whose only values a
 `os lint` flags it (`approval-approver-not-membership-tier`).
 
 Authored `type: 'role'` on 15.x? That is the deprecated spelling of `org_membership_level`
-(ADR-0090 D3): it still resolves, warns at runtime, and is removed in the next major.
+(ADR-0090 D3): it still resolves, warns at runtime, and is removed in the next major. It resolves
+exactly as `org_membership_level` does, so a position name authored there finds no member and
+leaves the `org_membership_level:<value>` slot, which only an admin override can decide. The fix
+is one line: `{ type: 'position', value: '<the position>' }`.
 </Callout>
 
 <Callout type="warn">
@@ -417,10 +420,11 @@ curl -b cookies.txt \
 `approverId` accepts a user id, an email, or a `<type>:<value>` approver literal
 (`position:finance_manager` — the form an entry falls back to when it resolves
 to no users) — and takes several values (comma-separated or repeated) to cover
-a person's identities in one call. A position literal matches under both
-spellings the service admits a holder of that position under as their own
-identity: `position:<name>`, and the deprecated pre-rename prefix the stock
-console still sends — so either one finds the same requests.
+a person's identities in one call. A position literal matches under
+`position:<name>`, the one spelling the service admits a holder of that
+position under as their own identity. The deprecated pre-rename prefix is no
+alias of it (ADR-0090 D3): it matches only a slot stored under that exact
+spelling, and no holder acts under it.
 Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
 `offset`.
 
@@ -429,7 +433,7 @@ Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
 separately: a request is visible to its **participants** — the submitter, a
 current approver (counted by every identity the decision routes let the caller
 take a slot under: their user id, the email their own account carries, and
-either spelling of a position they hold), and anyone who has already acted on
+the `position:<name>` address of a position they hold), and anyone who has already acted on
 it (a past approver whose slot has moved on, a commenter). An action is recorded
 under the slot it took, so "already acted" is counted by those same identities:
 a decision taken on a `position:<name>` slot keeps the request visible to
@@ -503,11 +507,13 @@ curl -b cookies.txt -X POST \
 
 `actorId` defaults to the caller, who takes the first slot in
 `pending_approvers` keyed by one of their identities — their user id, the email
-their own account carries, or either spelling of a position they hold (a
-`position:<name>` literal left by a position nobody held when the request
-opened, once someone is staffed into it). A named `actorId` must be one of those
-identities, and a position named under either spelling takes that position's
-slot. No such slot and no admin override returns 403 (`FORBIDDEN: actor '…' is
+their own account carries, or the `position:<name>` address of a position they
+hold (the literal left by a position nobody held when the request opened, once
+someone is staffed into it). A named `actorId` must be one of those identities,
+and a named `position:<name>` takes that position's slot; the deprecated
+pre-rename prefix is not one of them (ADR-0090 D3) and returns 403
+(`FORBIDDEN: cannot act as '…'`). No
+such slot and no admin override returns 403 (`FORBIDDEN: actor '…' is
 not a pending approver`); a request that isn't pending returns 409
 (`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
 row: `actor_id` is the user who decided, and `acted_as` is the slot the decision
@@ -624,8 +630,8 @@ service attaches to every request it returns:
 
 - `can_act` — the caller is a **current pending approver**: while the request is
   `pending`, the caller with no `actorId` named would take one of its slots —
-  under their user id, the email their own account carries, or either spelling
-  of a position they hold. It is computed by the same function the decision
+  under their user id, the email their own account carries, or the
+  `position:<name>` address of a position they hold. It is computed by the same function the decision
   routes authorize with, so it reflects position/team/manager resolution and a
   `position:<name>` slot whose position was staffed after the request opened.
 - `is_submitter` — the caller submitted the request.
@@ -654,6 +660,14 @@ approver, or **recall** it — releasing the lock. An admin decision is
 authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`,
 and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
+
+The same override is the only way to decide a slot no position holder addresses
+since ADR-0090 D3 retired the pre-rename word: a request a 15.x-era release stored
+under the pre-rename prefix, and a request opened from a flow that still authors
+the deprecated approver type (above) with a position name as its value (its slot
+is `org_membership_level:<name>`). Approve or reject it as an admin, or reassign it
+to the position's holder, who then decides it normally; then change the flow to
+`{ type: 'position', value: '<the position>' }`.
 
 Note the rule is **"the actor is an admin"**, not "the slate is unstaffed" — so
 an admin can also act on a request whose slate *is* properly staffed, bypassing

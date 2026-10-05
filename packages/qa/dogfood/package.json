@@ -40,6 +40,7 @@
   },
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
+    "@objectstack/cloud-connection": "workspace:*",
     "@objectstack/core": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",

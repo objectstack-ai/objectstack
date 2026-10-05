@@ -3,10 +3,10 @@
 // #21350 — "My Pending" never listed a request routed to a position.
 //
 // A request whose approver position nobody holds when it opens keeps the
-// literal `position:<p>` slot. Staff a user into `p` afterwards and they can
-// approve it — `resolveActor` admits a holder under `position:<p>` or
-// `role:<p>` — yet the approvals inbox's "My Pending" door never showed it:
-// the console asks under `role:<p>`, and the list filter matched literally.
+// literal `position:<p>` slot. Staff a user into `p` afterwards and they could
+// approve it — `resolveActor` admitted a holder under `position:<p>` (and,
+// then, `role:<p>`) — yet the approvals inbox's "My Pending" door never showed
+// it: the console asked under `role:<p>`, and the list filter matched literally.
 // Measured on a real boot before the fix, the defect had TWO halves:
 //
 //   - the STAFFED SUBMITTER (HotCRM's shape) found it under `position:<p>`
@@ -17,14 +17,18 @@
 //     a "current approver" on the bare user id).
 //
 // Both now read the acting path's ONE position-address equivalence
-// (`plugin-approvals/src/approver-address.ts`). This pins the door the inbox
+// (`plugin-approvals/src/approver-address.ts`), whose one position spelling is
+// `position:<p>`: ADR-0090 D3 retired `role:<p>` with no alias window, and the
+// pinned console now asks under `position:<p>`. This pins the door the inbox
 // actually calls, on a booted app, with both halves and both controls:
 //
-//   ⭐ either spelling lists the request, for the reviewer AND the submitter;
+//   ⭐ `position:<p>` lists the request, for the reviewer AND the submitter;
+//      the retired `role:<p>` lists nothing for either;
 //   ⭐ a user who does not hold the position sees nothing (negative control);
-//   ⭐ a spelling the acting path does not admit folds onto nothing;
-//   ⭐ the acting path is unchanged — the reviewer decides under the stored
-//      spelling, the bystander is refused (the control).
+//   ⭐ a spelling the acting path does not admit — `role:` among them — folds
+//      onto nothing;
+//   ⭐ the acting path — the reviewer decides under the stored spelling, the
+//      bystander is refused, and the reviewer naming `role:<p>` is refused.
 
 import { describe, it, expect } from 'vitest';
 import { bootStack } from '@objectstack/verify';
@@ -46,9 +50,9 @@ interface ListBody {
   data: Array<{ id: string; pending_approvers?: string[] }>;
 }
 
-describe('"My Pending" lists a position-routed request under either spelling (#21350)', () => {
+describe('"My Pending" lists a position-routed request under position: (#21350; role: retired, ADR-0090 D3)', () => {
   it(
-    'a holder of the routed position finds it under role: and position:, a non-holder does not, and the acting path is unchanged',
+    'a holder of the routed position finds it under position: and not under role:, a non-holder does not, and the acting path refuses role:',
     async () => {
       const stack = await bootStack(myPendingStack as unknown as Parameters<typeof bootStack>[0], {
         automation: true,
@@ -94,15 +98,19 @@ describe('"My Pending" lists a position-routed request under either spelling (#2
         expect(all[0].pending_approvers).toEqual([`position:${ROUTED_POSITION}`]);
         const requestId = all[0].id;
 
-        // ⭐ Either spelling, for the reviewer (the participant gate's half)
+        // ⭐ `position:<p>`, for the reviewer (the participant gate's half)
         // and for the submitter (the filter's half) — the console's identity
-        // list is `<id>,<email>,role:<p>`.
-        for (const spelling of [`role:${ROUTED_POSITION}`, `position:${ROUTED_POSITION}`]) {
-          const asReviewer = await myPending(reviewerToken, [reviewerId, REVIEWER, spelling]);
-          expect(asReviewer.map((r) => r.id), `reviewer under '${spelling}'`).toEqual([requestId]);
-          const asSubmitter = await myPending(submitterToken, [submitterId, SUBMITTER, spelling]);
-          expect(asSubmitter.map((r) => r.id), `submitter under '${spelling}'`).toEqual([requestId]);
-        }
+        // list is `<id>,<email>,position:<p>`.
+        const spelling = `position:${ROUTED_POSITION}`;
+        const asReviewer = await myPending(reviewerToken, [reviewerId, REVIEWER, spelling]);
+        expect(asReviewer.map((r) => r.id), `reviewer under '${spelling}'`).toEqual([requestId]);
+        const asSubmitter = await myPending(submitterToken, [submitterId, SUBMITTER, spelling]);
+        expect(asSubmitter.map((r) => r.id), `submitter under '${spelling}'`).toEqual([requestId]);
+        // ⭐ The retired `role:<p>` is no address of the slot (ADR-0090 D3): a
+        // filter miss — 200 with no rows — for both of them.
+        const retired = `role:${ROUTED_POSITION}`;
+        expect(await myPending(reviewerToken, [reviewerId, REVIEWER, retired]), `reviewer under '${retired}'`).toEqual([]);
+        expect(await myPending(submitterToken, [submitterId, SUBMITTER, retired]), `submitter under '${retired}'`).toEqual([]);
         const detail = await stack.apiAs(reviewerToken, 'GET', `/approvals/requests/${requestId}`);
         expect(detail.status).toBe(200);
 
@@ -114,19 +122,24 @@ describe('"My Pending" lists a position-routed request under either spelling (#2
         const bystanderDetail = await stack.apiAs(bystanderToken, 'GET', `/approvals/requests/${requestId}`);
         expect(bystanderDetail.status).toBe(404);
 
-        // ⭐ Negative control — only the two spellings the acting path admits
-        // fold; the admin sees every row, so a miss is the filter's verdict.
-        for (const address of [`team:${ROUTED_POSITION}`, `org_membership_level:${ROUTED_POSITION}`]) {
+        // ⭐ Negative control — only the one spelling the acting path admits
+        // folds; the admin sees every row, so a miss is the filter's verdict.
+        for (const address of [`role:${ROUTED_POSITION}`, `team:${ROUTED_POSITION}`, `org_membership_level:${ROUTED_POSITION}`]) {
           expect(await myPending(adminToken, [address]), `'${address}' must not fold`).toEqual([]);
         }
 
-        // ⭐ The acting path, unchanged (the control): a non-holder naming the
-        // slot is refused; the holder decides under the stored spelling.
+        // ⭐ The acting path (the control): a non-holder naming the slot is
+        // refused; the holder naming the retired spelling is refused too; the
+        // holder decides under the stored spelling.
         const refused = await stack.apiAs(bystanderToken, 'POST', `/approvals/requests/${requestId}/approve`, {
           actorId: `position:${ROUTED_POSITION}`,
         });
         expect(refused.status).toBe(403);
         expect(((await refused.json()) as { code?: string }).code).toBe('FORBIDDEN');
+        const viaRetired = await stack.apiAs(reviewerToken, 'POST', `/approvals/requests/${requestId}/approve`, {
+          actorId: `role:${ROUTED_POSITION}`,
+        });
+        expect([viaRetired.status, ((await viaRetired.json()) as { code?: string }).code]).toEqual([403, 'FORBIDDEN']);
 
         const decided = await stack.apiAs(reviewerToken, 'POST', `/approvals/requests/${requestId}/approve`, {
           actorId: `position:${ROUTED_POSITION}`,

@@ -444,6 +444,34 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     ],
     note: 'Deliberately NOT `fail-soft-log` like `cel-action-disabled`: the renderers measured here answer a faulting `disabled` with `true`, and on an un-negated enablement leg that `true` greys the control out — SchemaRenderer.tsx:1258-1265 states exactly that asymmetry ("on the negated visibility legs that means SHOWN, here it means GREYED OUT"). The objectui fix `cel-action-disabled` cites is about an EMPTY `disabled: \'\'`, which `hasDeclaredVisibilityGate` / `hasDeclaredPredicate` now treat as no gate, not about a faulting one. ⚠️ Scope consequence worth knowing: the node-gate leg evaluates at PAGE scope, so a row-scoped `record.*` predicate that does not resolve there faults and greys the button out whatever the row says. Same bare-string limit as `cel-action-block-visible-closed`. ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
   },
+  // The S-final stage of #21464: each `action:group` / `action:menu` MEMBER took
+  // a closed shape that carries the block rows' own `visible` / `disabled`
+  // predicate (`actionContainerMemberShape`). A member is drawn and gated by its
+  // container ITSELF, never through `SchemaRenderer`, so each surface below has
+  // ONE evaluation leg — the container's — and no node gate. Read (not run) at
+  // the `.objectui-sha` pin `2e818d0b51ec`; the renderers
+  // `components/src/renderers/action/action-{group,menu}.tsx`,
+  // `react/src/hooks/useExpression.ts` and
+  // `core/src/evaluator/ExpressionEvaluator.ts` are byte-identical at objectui
+  // `main` `2abec3a96`.
+  {
+    id: 'cel-action-member-visible',
+    summary: '`action:group` / `action:menu` member visibility (a member\'s `visible`) — the member is not drawn when the predicate is FALSE',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/validate-component-props.ts parses `ComponentPropsMap["action:group" | "action:menu"]`, whose `actions` element declares the slot. EVALUATOR, one leg: the container\'s own `useCondition(toPredicateInput(action.visible), recordData, { throwOnError: true, label })` against the host-bound row — action-group.tsx:81-86 (`useMemberVisible`, read by both display modes, :114 and :205) and action-menu.tsx:78-85 (`useMenuActionVisible`, read by the item :104 and by the auto-trigger :187) — where a fault returns `false` and warns once per label and predicate (useExpression.ts:216-238), and the member returns null (action-group.tsx:138, :212; action-menu.tsx:121): fail-CLOSED. No node-gate leg: a member is drawn by its container, never through SchemaRenderer',
+    covers: ['ui/component.zod.ts:actionContainerMemberShape.visible'],
+    note: 'Separate from `cel-action-block-visible-closed` / `cel-action-block-visible-soft`, which classify a BLOCK\'s own `visible` (two legs, the node gate among them), and from `cel-action-visible`, a registered object action drawn by `ActionEngine`. Same bare-string limit as `cel-action-block-visible-closed`: the member rides the opaque `properties` bag verbatim, so a bare string reaches the LEGACY evaluator and only a `{dialect:"cel"}` envelope routes to CEL. ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
+  },
+  {
+    id: 'cel-action-member-disabled',
+    summary: '`action:group` / `action:menu` member disabling (a member\'s `disabled`) — the member stays on screen and cannot be pressed while the predicate is TRUE',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/validate-component-props.ts parses `ComponentPropsMap["action:group" | "action:menu"]`, whose `actions` element declares the slot. EVALUATOR, one leg, un-negated: the container\'s own `useCondition(toPredicateInput(action.disabled), recordData)` WITHOUT `throwOnError` — action-group.tsx:119 + :159-165 (an inline button) and :208 + :219-223 (a dropdown item), action-menu.tsx:108 + :132-136 — where a fault answers `evaluateCondition`\'s fail-soft `true` (ExpressionEvaluator.ts:416-437), which on this leg means DISABLED: the member is drawn and refuses the press, fail-CLOSED. A faulting bare string is silent on this leg (no `onFault` is passed); a faulting `{dialect:"cel"}` envelope is reported through `evalFieldPredicate`',
+    covers: ['ui/component.zod.ts:actionContainerMemberShape.disabled'],
+    note: 'The `cel-action-block-disabled` face on a container member, without its node-gate leg, and for the same reason not `fail-soft-log` like `cel-action-disabled`: a `true` on an un-negated enablement leg greys the control out. The legacy `enabled` fallback the containers also read is a NEGATED leg the member shape refuses by name, so it classifies nothing here. Same bare-string limit as `cel-action-member-visible`. ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
+  },
   // The S-forms stage of #21464: the `object-form` / `object-master-detail-form`
   // page blocks took a closed inline form field (`customFields`, and a
   // section's inline entry) with its own option, and a section shape of their

@@ -8,6 +8,7 @@ import chalk, { chalkStderr } from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
+import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
@@ -2583,6 +2584,12 @@ export default class Serve extends Command {
     // human and may be redacted or labelled, while this one is handed to
     // `stat` — see `describeDriverSqliteFile`.
     let servedSqliteFilePath: string | undefined;
+    // #21733 — the file-backed native SQLite database a composed STANDALONE
+    // stack declared as its `default` datasource, read BEFORE the kernel boots
+    // so the `telemetry` sibling can be provisioned next to it (step 2 below).
+    // `servedSqliteFilePath` cannot serve: on this path it is only learned by
+    // probing the booted kernel. Unset for every other boot and every other kind.
+    let standaloneSqlitePrimary: string | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -2741,7 +2748,7 @@ export default class Serve extends Command {
           // "missing artifact" error and assemble a bare kernel that
           // can later install marketplace apps at runtime.
           const { createDefaultHostConfig } = await import('@objectstack/runtime');
-          const bootResult = await createDefaultHostConfig({
+          const defaultHostInput = {
             requireArtifact: !useEmptyBoot,
             dev: isDev,
             // #8368: the already-fetched, already-verified LOCAL copy. Passing
@@ -2755,7 +2762,15 @@ export default class Serve extends Command {
             ...(pinnedArtifact
               ? { artifactPath: pinnedArtifact.localPath }
               : supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
-          });
+          };
+          const bootResult = await createDefaultHostConfig(defaultHostInput);
+          // #21733 — the `default` database this stack declared, for the
+          // telemetry sibling (step 2). The same input the host config was
+          // built from: the database resolution reads the artifact only for a
+          // declared default datasource, and the empty boot's synthesized stub
+          // declares none, so the artifact rung `createDefaultHostConfig`
+          // settles internally cannot answer differently.
+          standaloneSqlitePrimary = await standaloneTelemetryPrimary(defaultHostInput);
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
           // block, silently dropping `requireAuth` / `enforceProjectMembership`.
@@ -2779,6 +2794,10 @@ export default class Serve extends Command {
             ...(supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
           };
           const bootResult = await createStandaloneStack(standaloneInput);
+          // #21733 — the `default` database the stack just declared, resolved
+          // by the runtime's own pre-boot resolution over the SAME input, for
+          // the telemetry sibling (step 2).
+          standaloneSqlitePrimary = await standaloneTelemetryPrimary(standaloneInput);
           // #21501 — did the standalone stack load a compiled artifact as this
           // app's bundle? Its AppPlugin over the bundle is the proof (it is
           // pushed only when the bundle loaded, and a non-host config carries
@@ -3190,6 +3209,26 @@ export default class Serve extends Command {
          }
       }
 
+      // ADR-0057 §3.6 — the `telemetry` sibling datasource, provisioned next to
+      // a file-backed SQLite primary by EVERY serving boot through ONE helper
+      // (`provisionTelemetryDatasource`, #21733): the config-load fallback in
+      // step 2 below and the standalone stack right after it. Dev default-on;
+      // `OS_TELEMETRY_DB=0` opts out, `OS_TELEMETRY_DB=<path>` opts in anywhere
+      // (incl. serve) — `resolveTelemetryDbPath` is the rule, never restated here.
+      const provisionTelemetry = async (primaryPath: string | undefined): Promise<void> => {
+        const telemetryPath = await provisionTelemetryDatasource({
+          primaryPath,
+          env: process.env,
+          dev: isDev,
+          use: (plugin) => kernel.use(plugin as any),
+          warn: (m) => console.warn(chalk.yellow(m)),
+        });
+        if (telemetryPath) {
+          trackPlugin('TelemetryDatasource');
+          printDiagnostic(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
+        }
+      };
+
       // 2. Auto-register storage driver
       // Priority:
       //   1. OS_DATABASE_DRIVER env var (explicit override)
@@ -3234,7 +3273,7 @@ export default class Serve extends Command {
            // resolveStorageDefinition. The dev sqlite step-down (#2229) and
            // the loosen-only self-heal (#2186, via config.autoMigrate) now run
            // inside the factory at connect.
-           const { DriverPlugin, DefaultDatasourcePlugin } = await import('@objectstack/runtime');
+           const { DefaultDatasourcePlugin } = await import('@objectstack/runtime');
            const resolution = resolveStorageDefinition(driverType, { databaseUrl, isDev, authToken: databaseAuthToken });
            if (resolution) {
              // #5602: libSQL/Turso is the one kind the shared open-core factory
@@ -3257,52 +3296,11 @@ export default class Serve extends Command {
              resolvedDatabaseUrl = resolution.displayUrl;
              servedSqliteFilePath = resolution.sqliteFilePath;
 
-             // ADR-0057 §3.6 (#2834 ②): provision the dedicated `telemetry`
-             // datasource — a sibling SQLite file the engine routes every
-             // telemetry/event/audit-classed object to, so platform-generated
-             // growth can never again bloat the business DB. Dev default-on
-             // for file-backed primaries; `OS_TELEMETRY_DB=0` opts out,
-             // `OS_TELEMETRY_DB=<path>` opts in anywhere (incl. serve). Gated on
-             // an explicit SQLite primary (`sqliteFilePath`, unset for the mingo
-             // memory driver AND the dev-default `:memory:` store). The old
-             // `resolution.engine !== 'memory'` refinement is unknowable now
-             // that the primary connects later (#3826); the telemetry
-             // provision's own `telemetry.engine !== 'memory'` check below
-             // still guards the ABI-broken step-down case. The telemetry
-             // driver itself stays a pre-built DriverPlugin — the documented
-             // escape hatch for named auxiliary drivers.
-             if (resolution.sqliteFilePath) {
-               const { resolveTelemetryDbPath } = await import('../utils/telemetry-datasource.js');
-               const telemetryPath = resolveTelemetryDbPath({ primaryPath: resolution.sqliteFilePath, env: process.env, dev: isDev });
-               if (telemetryPath) {
-                 try {
-                   const { resolveSqliteDriver } = await import('@objectstack/service-datasource');
-                   const telemetry = await resolveSqliteDriver({
-                     filename: telemetryPath,
-                     dev: isDev,
-                     autoMigrate: isDev ? 'safe' : undefined,
-                     warn: (m) => console.warn(chalk.yellow(m)),
-                   });
-                   if (telemetry.engine !== 'memory') {
-                     // The engine keys datasources by driver name — the
-                     // lifecycle router looks this exact name up. The driver
-                     // name is the WHOLE wiring: DriverPlugin.init registers
-                     // `driver.telemetry`, ObjectQL's discovery loop adopts
-                     // it, and lifecycle-classed objects route to it. (An
-                     // options bag once also asked for `datasourceName:
-                     // 'telemetry'` metadata registration — inert since
-                     // inception, retired in #4320.)
-                     Object.defineProperty(telemetry.driver, 'name', { value: 'telemetry' });
-                     await kernel.use(new DriverPlugin(telemetry.driver));
-                     trackPlugin('TelemetryDatasource');
-                     printDiagnostic(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
-                   }
-                 } catch {
-                   // Best-effort: a failed telemetry provision must never block
-                   // boot — objects simply stay on the primary datasource.
-                 }
-               }
-             }
+             // ADR-0057 §3.6 (#2834 ②): the dedicated `telemetry` datasource
+             // next to an explicit SQLite primary (`sqliteFilePath`, unset for
+             // every other kind AND the dev-default `:memory:` store). The ONE
+             // provision, shared with the standalone boot below.
+             await provisionTelemetry(resolution.sqliteFilePath);
            }
          } catch (e: any) {
            // "declared ≠ enforced" guard (#3276-class): a selection the CLI
@@ -3332,6 +3330,12 @@ export default class Serve extends Command {
            if (e?.code === 'MONGODB_MULTI_TENANT_UNSUPPORTED') throw e;
            // silent
          }
+      } else if (standaloneSqlitePrimary !== undefined) {
+        // #21733 — the standalone stack's `default` datasource is a file-backed
+        // SQLite database (resolved by the runtime's own pre-boot resolution in
+        // the boot-mode dispatch above), so it gets the same sibling the
+        // config-load fallback provisions, under the same rule.
+        await provisionTelemetry(standaloneSqlitePrimary);
       }
 
       // 3. Auto-register AppPlugin if config contains app definitions

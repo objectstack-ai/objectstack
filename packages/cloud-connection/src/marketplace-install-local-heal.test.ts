@@ -30,6 +30,15 @@ let loadCalls: any[] = [];
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
         async load(request: any) { loadCalls.push(request); return seedResult; }
+        // The purge reads the loader's dependency order; these objects
+        // reference nothing, so the order is the order asked.
+        async buildDependencyGraph(objectNames: string[]) {
+            return {
+                nodes: objectNames.map((object) => ({ object, dependsOn: [], references: [] })),
+                insertOrder: objectNames,
+                circularDependencies: [],
+            };
+        }
     },
     // #3430 — the heal path records a per-source outcome for the boot banner.
     recordSeedOutcome: vi.fn(),
@@ -46,6 +55,7 @@ import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugi
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { recordSeedOutcome } from '@objectstack/runtime';
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -101,7 +111,13 @@ const MANIFEST = {
     ],
 };
 
-/** Services with a controllable emptiness probe. */
+/**
+ * Services with a controllable emptiness probe. The purge deletes through the
+ * `objectql` ENGINE, so that is where `delete` lives — opened with the real
+ * dispatch contract. A bare `driver` service used to stand here: no kernel
+ * registers one (drivers register as `driver.<name>`), and mocking it is how a
+ * purge that always answered 500 stayed green.
+ */
 function makeServices(findRows: Record<string, any[]>) {
     return {
         manifest: { register: vi.fn() },
@@ -109,9 +125,17 @@ function makeServices(findRows: Record<string, any[]>) {
         objectql: withInstallerGrants({
             syncSchemas: async () => undefined,
             find: vi.fn(async (object: string) => findRows[object] ?? []),
+            delete: vi.fn(async (object: string, options?: any) => {
+                const dispatch = assertEngineDeleteDispatch(options);
+                if (dispatch.kind !== 'by-id') throw new Error('fake engine: the purge deletes by primary key only');
+                const rows = findRows[object] ?? [];
+                const at = rows.findIndex((r) => r.id === dispatch.id);
+                if (at < 0) return false;
+                rows.splice(at, 1);
+                return true;
+            }),
         }),
         metadata: {},
-        driver: { delete: vi.fn(async () => true) },
     };
 }
 
@@ -211,7 +235,8 @@ describe('rehydrate sample-data healing', () => {
         // Install over an empty DB, with rows landing.
         seedResult = { summary: { totalInserted: 3, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
         const rawApp = makeRawApp();
-        const services = makeServices({ crm_x: [], crm_y: [] });
+        const db: Record<string, any[]> = { crm_x: [], crm_y: [] };
+        const services = makeServices(db);
         const { ctx, fire } = makeCtx(rawApp, services);
         const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
         await plugin.start(ctx as any);
@@ -220,12 +245,18 @@ describe('rehydrate sample-data healing', () => {
             makeC({ manifest: MANIFEST }),
         );
         expect(installRes.payload?.success).toBe(true);
+        // What the (mocked) loader reported, as rows: keyed by `name`, the
+        // spec's default `externalId` — these datasets declare none.
+        db.crm_x.push({ id: 'row-1', name: 'a' }, { id: 'row-2', name: 'b' });
+        db.crm_y.push({ id: 'row-3', name: 'c' });
 
         // Purge the sample data.
         const purgeRes = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data')!(
             makeC({}, MANIFEST.id),
         );
         expect(purgeRes.payload?.success).toBe(true);
+        expect(purgeRes.payload?.data).toMatchObject({ deleted: 3, skipped: 0, errors: 0 });
+        expect(db).toEqual({ crm_x: [], crm_y: [] });
         expect(new LocalManifestSource(dir).read(MANIFEST.id).entry?.sampleDataPurged).toBe(true);
 
         // Restart (fresh plugin over the same ledger, DB now empty): no reseed.

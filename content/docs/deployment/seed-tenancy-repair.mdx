@@ -308,9 +308,12 @@ The live condition is the only forward-looking line in the report, and it is the
 perishable one. On a deployment you have not yet restarted since discovering the
 problem, run the report first.
 
-`os migrate duplicates` writes nothing: it boots read-only, declares itself out
-of the boot repair, issues `SELECT`s only, and emits JSON to stdout for you to
-archive.
+`os migrate duplicates` writes no row: it boots read-only, declares itself out
+of the boot repair, its own queries are `SELECT`s only, and it emits JSON to
+stdout for you to archive. Its first connection to a SQLite file still on a
+rollback journal does convert that journal to WAL, a change to the file's header
+and to no row, as the
+[CLI reference](/docs/deployment/cli#data-migrations) describes.
 
 <Callout type="warn" title="This is easy to lose by accident">
 The repair fires at `kernel:ready` on a serving boot. Restarting the server to

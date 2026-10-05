@@ -97,6 +97,7 @@ import {
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
+import { purgeSeedRows } from './marketplace-install-local-purge.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { DeletePackageRequest, UninstallCleanupOutcome } from '@objectstack/metadata-protocol';
 
@@ -1683,11 +1684,28 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     /**
      * POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data
      *
-     * Deletes every record whose id is declared in the cached manifest's
-     * seed datasets. Uses the `driver` service directly to bypass ACL /
-     * lifecycle hooks (same pattern as cloud purge). User-created records
-     * are never touched — only ids declared in the package's bundled
-     * datasets are removed. Already-deleted rows count as `skipped`.
+     * Deletes the rows the cached manifest's seed datasets put in the
+     * database, THROUGH THE OBJECTQL ENGINE, so the deletes run every
+     * lifecycle hook (audit, sharing, storage, the package's own) — the same
+     * posture the seed was written with (`SEED_WRITE_EXECUTION_CONTEXT`).
+     * {@link purgeSeedRows} carries the rules; this handler supplies the scope.
+     *
+     *   • A seed row is matched by the seed's own key — each dataset's
+     *     `externalId`, the key the install's upsert and the reseed match on.
+     *     A row whose key no seed record declares (user-authored data) is never
+     *     touched; a key carried by more than one row in scope is not guessed.
+     *   • Scope is the install's: under an organization wall, the caller's
+     *     active organization (the same `organizationWallActive` +
+     *     `resolveActiveOrgId` the install and reseed seed under), and a session
+     *     with none is answered the way reseed answers it. Without a wall the
+     *     deployment is one logical tenant and the match is table-wide, as the
+     *     loader's upsert match is.
+     *   • Children are deleted before parents — the reverse of the loader's own
+     *     dependency order.
+     *
+     * `skipped` counts seed records no row in scope carries (already deleted);
+     * `errors` counts records that could not be purged — refused by the engine,
+     * or not identifiable — each reason logged.
      */
     private handlePurge = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Purging sample data');
@@ -1718,35 +1736,49 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 400);
         }
 
-        let driver: any;
-        try { driver = ctx.getService('driver'); } catch { /* none */ }
-        if (!driver || typeof driver.delete !== 'function') {
+        // The data engine the seed was written through, and the metadata its
+        // dependency order is read from — the pair the seed run itself needs.
+        let ql: IObjectQLEngine | undefined;
+        let metadata: IMetadataService | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+        if (!ql || !metadata) {
             return c.json({
                 success: false,
-                error: { code: 'DRIVER_UNAVAILABLE', message: 'driver service unavailable — cannot purge.' },
+                error: {
+                    code: 'DRIVER_UNAVAILABLE',
+                    message: 'The data engine (objectql) or the metadata service is not available on this runtime — cannot purge sample data.',
+                },
             }, 500);
         }
 
-        let deleted = 0;
-        let skipped = 0;
-        let errors = 0;
-        for (const ds of datasets) {
-            const object = String(ds.object);
-            for (const rec of ds.records as any[]) {
-                const id = rec?.id;
-                if (id === undefined || id === null || id === '') { skipped++; continue; }
-                try {
-                    const r = await driver.delete(object, id);
-                    if (r === false || r === 0 || r?.deleted === 0) skipped++;
-                    else deleted++;
-                } catch (err: any) {
-                    // Treat "not found" as skipped; anything else as error.
-                    const msg = String(err?.message ?? err);
-                    if (/not.?found|no row/i.test(msg)) skipped++;
-                    else { errors++; ctx.logger?.warn?.(`[MarketplaceInstallLocal] purge ${object}#${id}: ${msg}`); }
-                }
+        // Scope: the one the install and the reseed seed under (applySideEffects).
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            if (!resolved) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'RESEED_SKIPPED',
+                        message: 'Purge did not run: multi-tenant-no-active-org. A purge removes the sample rows of the '
+                            + "caller's active organization only, and this session has none — set an active organization and retry.",
+                    },
+                }, 400);
             }
+            organizationId = resolved;
         }
+
+        const { SeedLoaderService } = await import('@objectstack/runtime');
+        const loader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const graph = await loader.buildDependencyGraph([...new Set(datasets.map((d: any) => String(d.object)))]);
+        const { deleted, skipped, errors } = await purgeSeedRows({
+            engine: ql,
+            datasets,
+            graph,
+            organizationId,
+            warn: (message) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${manifestId}: ${message}`),
+        });
 
         // Flip flag so UI reflects the empty baseline. `sampleDataPurged`
         // additionally tells the rehydrate-time healer this emptiness is
@@ -1757,7 +1789,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             this.ledger.write(entry);
         } catch { /* non-fatal */ }
 
-        ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}${organizationId ? ` (org=${organizationId})` : ''}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
         return c.json({
             success: true,
             data: { manifestId, deleted, skipped, errors, withSampleData: false },

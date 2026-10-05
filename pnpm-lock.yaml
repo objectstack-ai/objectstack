@@ -774,6 +774,9 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
@@ -2100,6 +2103,9 @@ importers:
       '@objectstack/cli':
         specifier: workspace:*
         version: link:../../cli
+      '@objectstack/cloud-connection':
+        specifier: workspace:*
+        version: link:../../cloud-connection
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core

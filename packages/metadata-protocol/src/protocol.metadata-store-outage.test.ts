@@ -557,15 +557,21 @@ describe('[#5840] a MetadataService outage stops arriving as "nobody declared th
     });
 
     it('and that is what stops an outage from unlocking a locked artifact', async () => {
-        // The concrete widening. `lockSource = code ?? overlay ?? {}`, so a
-        // code layer that never arrived resolves the protection envelope from
-        // `{}` — `editable: true, deletable: true` on an item the packager
-        // locked. Left column: what the truth looks like. Right column: what
-        // the outage used to render, and now cannot.
-        const locked = { name: 'acct', label: 'Account', _lock: 'full' };
+        // The concrete widening this was written against: the lock used to
+        // come from `code ?? overlay ?? {}`, so a code layer that never arrived
+        // resolved the protection envelope from `{}` — `editable: true,
+        // deletable: true` on an item the packager locked. [#21738] The lock now
+        // comes from the one item-lock resolution, over the artifact the
+        // registry holds (the layer the `_lock` gate reads), which no
+        // MetadataService outage can take away; the outage itself still answers
+        // 503. Left column: what the truth looks like — the packager's artifact,
+        // package-stamped, in the registry and in the service. Right column:
+        // what the outage used to render, and now cannot.
+        const locked = { name: 'acct', label: 'Account', _lock: 'full', _packageId: 'com.example.crm', _provenance: 'package' };
 
         const healthy: any = await protocolWithService(
             metadataServiceHolding(locked),
+            { acct: locked },
         ).getMetaItemLayered({ type: 'object', name: 'acct' } as any);
         expect(healthy.lock).toBe('full');
         expect([healthy.editable, healthy.deletable]).toEqual([false, false]);

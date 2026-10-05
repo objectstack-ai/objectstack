@@ -34,6 +34,11 @@
  *      refusal reaches this handler through the `dispatchUnscopedMultiWrite`
  *      whole-operation dispatch both registrations declare (#9719/commit c7655d472 built
  *      it for delete; #9974 ruled it onto update).
+ *    * Both write verbs refuse a caller who cannot READ the comment's parent —
+ *      or whose thread names no parent at all, which nobody reads — with the
+ *      platform's not-visible refusal instead of the named one (#21755); see
+ *      {@link refuseNotVisible}. The named refusal is what a caller who can
+ *      read the parent, but may not edit it, receives.
  *  - {@link installCommentReadVisibility} — the read side: a
  *    `find`/`findOne`/`count`/`aggregate` middleware that intersects the query
  *    with the threads whose parent record the caller can actually read.
@@ -61,8 +66,10 @@
  */
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
@@ -189,6 +196,61 @@ function forbid(message: string, object?: string): never {
   throw err;
 }
 
+/**
+ * The code of the platform's not-visible refusal: the one plugin-security's
+ * by-id write pre-image check throws when the caller's own read visibility
+ * does not reach the target row (`PermissionDeniedError`, 403).
+ */
+const NOT_VISIBLE_CODE: StandardErrorCode = 'PERMISSION_DENIED';
+const NOT_VISIBLE_STATUS = 403;
+
+/**
+ * [#21755] Refuse a write on a comment whose parent record the caller cannot
+ * READ — with the platform's not-visible refusal, never the gate's named one.
+ *
+ * The named refusal ({@link forbid}) names the parent record (`object/id`) in
+ * the message, or the raw `thread_id` of a thread that names none, and the
+ * parent's object on the envelope. That is honest to a caller who can read the
+ * parent and may not edit it; to a caller who cannot, it is a disclosure across
+ * the read boundary — the read door answers that same caller "not found" for
+ * the comment, because a comment's visibility IS its parent's
+ * ({@link installCommentReadVisibility}, which also hides every thread naming
+ * no parent). The by-id write pre-image check already refuses such a write
+ * before this gate runs for every principal its row filter binds; this is the
+ * same answer for the principals it does not bind.
+ *
+ * The same answer, not a lookalike: the sentence is rendered by the shared
+ * Operation Message Catalog under the pre-image check's own key
+ * (`record_access_denied`, which names nothing), through the same
+ * locale/override ladder, and the envelope carries the pre-image check's code
+ * and status. Nothing about the parent rides on it — no `object` (the doors
+ * fill the ROUTE's object, exactly as for the pre-image check), no `details`,
+ * no `developerMessage`. The operator's half is logged by the caller instead.
+ *
+ * Who may write does not change: this replaces the refusal a caller was
+ * already getting, on exactly the rows that were already refused.
+ */
+function refuseNotVisible(
+  callerCtx: ExecutionContext,
+  messageTranslator: (() => ValidationMessageTranslator | undefined) | undefined,
+): never {
+  let translate: ValidationMessageTranslator | undefined;
+  try {
+    translate = messageTranslator?.();
+  } catch {
+    // i18n is optional and late-bound; the built-in catalog still renders the
+    // caller's locale without it.
+    translate = undefined;
+  }
+  const locale = typeof callerCtx?.locale === 'string' ? callerCtx.locale : undefined;
+  const err: any = new Error(renderOperationMessage({ messageKey: 'record_access_denied' }, { locale, translate }));
+  err.name = 'PermissionDeniedError';
+  err.code = NOT_VISIBLE_CODE;
+  err.status = NOT_VISIBLE_STATUS;
+  err.statusCode = NOT_VISIBLE_STATUS;
+  throw err;
+}
+
 function asIdList(id: unknown): Array<string | number> | null {
   if (typeof id === 'string' || typeof id === 'number') return [id];
   if (id && typeof id === 'object' && Array.isArray((id as any).$in)) {
@@ -295,11 +357,18 @@ async function callerCanRead(ctx: any, target: CommentThreadTarget): Promise<boo
  * order does not matter, and returns `null` on a deployment without it — in
  * which case the edit checks degrade to caller-scoped parent READ visibility,
  * still strictly tighter than no gate at all.
+ *
+ * `messageTranslator` resolves the deployment's i18n lookup for the
+ * not-visible refusal's sentence ({@link refuseNotVisible}) — lazily, per
+ * refusal, because the i18n service is contributed by another plugin that may
+ * start after this one. Absent, the built-in catalog still renders the
+ * caller's locale.
  */
 export function installCommentAccessHooks(
   engine: CommentAccessEngine,
   getSharing: () => CommentSharingLike | null | undefined,
   logger: CommentAccessLogger,
+  messageTranslator?: () => ValidationMessageTranslator | undefined,
 ): void {
   /** May the caller EDIT the parent record behind `target`? Sharing's
    * `canEdit` when the service is present, else caller-scoped parent read
@@ -412,7 +481,38 @@ export function installCommentAccessHooks(
     verb: 'update' | 'delete',
   ): Promise<void> => {
     const userId = ctx.session.userId as string | undefined;
+    const callerCtx = callerContext(ctx);
     const canEditCache = new Map<string, boolean>();
+    /** Parent READ verdicts, asked only for a row about to be refused. */
+    const canReadCache = new Map<string, boolean>();
+    /** [#21755] Can the caller READ `target`? Decided by the same evaluator
+     * the read door uses ({@link resolveReadableParentIds}), so the write door
+     * never names what the read door hides. */
+    const callerReadsParent = async (target: CommentThreadTarget): Promise<boolean> => {
+      const cacheKey = `${target.object}:${target.recordId}`;
+      let canRead = canReadCache.get(cacheKey);
+      if (canRead === undefined) {
+        canRead = !!(await resolveReadableParentIds(engine, callerCtx, new Map([[target.object, new Set([target.recordId])]])))
+          .get(target.object)
+          ?.has(target.recordId);
+        canReadCache.set(cacheKey, canRead);
+      }
+      return canRead;
+    };
+    /** [#21755] Answer the platform's not-visible refusal; the operator's half
+     * — the sentence naming the parent or the thread — stays server-side. */
+    // A function DECLARATION, not an arrow: TypeScript narrows on a call to a
+    // `never`-returning function only when its type is declared, and the
+    // dangling-thread branch below relies on that narrowing.
+    function answerNotVisible(row: Record<string, unknown>, namedMessage: string): never {
+      logger.warn(`[audit] comment access: ${namedMessage} (the caller cannot read the parent; answered not-visible)`, {
+        operation: verb,
+        object: 'sys_comment',
+        recordId: row.id,
+        userId: userId ?? 'unknown',
+      });
+      return refuseNotVisible(callerCtx, messageTranslator);
+    }
     for (const row of rows) {
       if (userId && row.author_id === userId) continue; // authors govern their own words
 
@@ -420,8 +520,13 @@ export function installCommentAccessHooks(
       const target = parseCommentThreadId(threadId);
       if (!target) {
         // A dangling thread has no parent to inherit authority from, and the
-        // caller is not the author → nobody but system may touch it.
-        forbid(
+        // caller is not the author → nobody but system may touch it. Nobody
+        // READS it either (the read middleware drops every thread naming no
+        // record), so the refusal is the not-visible one: naming the thread
+        // would hand its raw value to a caller the read door answers "not
+        // found" (#21755).
+        answerNotVisible(
+          row,
           `Cannot ${verb} comment ${row.id}: its thread ${JSON.stringify(threadId ?? null)} names no record, ` +
             'so only its author may modify it',
         );
@@ -433,11 +538,13 @@ export function installCommentAccessHooks(
         canEditCache.set(cacheKey, allowed);
       }
       if (!allowed) {
-        forbid(
+        const namedMessage =
           `Cannot ${verb} comment ${row.id}: only its author or a user who can edit the parent record ` +
-            `(${target.object}/${target.recordId}) may ${verb} it`,
-          target.object,
-        );
+          `(${target.object}/${target.recordId}) may ${verb} it`;
+        // The named refusal is for a caller who can READ the parent and may
+        // not edit it; one who cannot read it gets the not-visible refusal.
+        if (!(await callerReadsParent(target))) answerNotVisible(row, namedMessage);
+        forbid(namedMessage, target.object);
       }
     }
   };

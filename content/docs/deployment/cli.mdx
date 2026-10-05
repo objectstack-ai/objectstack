@@ -305,7 +305,7 @@ and a source that finished by throwing may record no counts at all.
 `suppressed` is non-empty when this boot registered a seed source and
 deliberately never ran it — `multi-tenant-replay` (rows are written per
 organization on `sys_organization` insert) or `skip-seed-data` (a planning boot
-that writes nothing). Those sources never settle and no further signal is
+that runs no seed). Those sources never settle and no further signal is
 coming for them, which is exactly why the message is sent anyway with the reason
 attached: a consumer that waited for *every* source to finish would wait
 forever.
@@ -541,18 +541,19 @@ shape they accept. See [Source vs Artifact](#source-vs-artifact) below.
 
 Reports the `sys_secret` rows no producer references any more, and — only behind
 `--delete` — removes the ones it can prove are the settings subsystem's to remove.
-**Report-only by default: without `--delete` it writes nothing and deletes nothing.**
+**Report-only by default: without `--delete` it writes no row and deletes nothing.**
 It is never run for you; nothing on any boot or upgrade path invokes it.
 
 The report boots your app read-only: no schema change, no seed rows, and a SQLite file
-that does not exist is not created. Pointed at a database that lacks `sys_secret` (one
-that was never booted, or the wrong `--database-url`), it does not read the table, since
-a table that does not exist holds no row: it reports nothing to act on, names the
-tables it did not read, and exits 0. Any other read it cannot make still refuses and
-exits 1 (under `--json`: `"error": "scan_failed"`).
+that does not exist is not created. Its first connection can still change a SQLite
+file's header; [Data migrations](#data-migrations) says when. Pointed at a database
+that lacks `sys_secret` (one that was never booted, or the wrong `--database-url`), it
+does not read the table, since a table that does not exist holds no row: it reports
+nothing to act on, names the tables it did not read, and exits 0. Any other read it
+cannot make still refuses and exits 1 (under `--json`: `"error": "scan_failed"`).
 
 ```bash
-os secret orphans                                    # report (writes nothing)
+os secret orphans                                    # report (writes no rows)
 os secret orphans --json                             # the same report, machine-readable
 os secret orphans --no-declared-datasources          # state that this host declares none
 os secret orphans --delete --export ./secrets-backup.json --no-declared-datasources
@@ -599,11 +600,11 @@ Re-wraps the `sys_secret` ciphertext sealed before secrets were bound to the pro
 that wrote them, so it carries the current binding (ADR-0128). Each row is re-sealed
 under the scope of the producer whose holder references it: a setting, an object's
 `secret` field, or a datasource credential. **A dry run by default: without `--apply`
-it writes nothing.** It is never run for you; nothing on any boot or upgrade path
+it writes no row.** It is never run for you; nothing on any boot or upgrade path
 invokes it.
 
 ```bash
-os secret rewrap --no-declared-datasources            # dry run (writes nothing)
+os secret rewrap --no-declared-datasources            # dry run (writes no rows)
 os secret rewrap --json --no-declared-datasources     # the same, machine-readable
 os secret rewrap --declared-datasources ./datasources.json
 os secret rewrap --apply --no-declared-datasources    # write the re-wrapped rows
@@ -865,10 +866,10 @@ os migrate plan --json                       # Machine-readable output
 os migrate unmapped-columns --object contact --json   # A retired field's stored values, keyed by record id (read-only)
 ```
 
-#### Nothing is written before you confirm
+#### Nothing is applied before you confirm
 
-Both commands boot your app to read its metadata. That boot no longer touches
-the target database: the additive schema sync (create missing tables, add
+Both commands boot your app to read its metadata. That boot writes no row and no
+schema to the target database: the additive schema sync (create missing tables, add
 missing columns) and the artifact's inline seed data are **deferred**, not
 performed. So `plan` really is a dry run, and everything `apply` is about to do
 — additive work included — is on screen before the `[y/N]` prompt:
@@ -885,7 +886,9 @@ performed. So `plan` really is a dry run, and everything `apply` is about to do
     ✓ crm_contact.email [relax_not_null]
 ```
 
-Answering `n` leaves the database exactly as it was.
+Answering `n` leaves every table and row exactly as it was. The boot's first
+connection can still change a SQLite file's header; [Data migrations](#data-migrations)
+says when.
 
 The two upper sections differ in a way worth reading carefully. **New** is
 purely additive — it creates tables and columns and never touches a row. **In
@@ -930,7 +933,7 @@ written.
 
 | Command | If the database is in use |
 |---------|---------------------------|
-| `os migrate plan` | Warns and continues — a plan writes nothing either way |
+| `os migrate plan` | Warns and continues — a plan writes no row and no schema either way |
 | `os migrate apply` | **Refuses** (exit 1, `error: database_busy` under `--json`). Stop the other process, or pass `--force` |
 | `os migrate files-to-references --apply` | **Refuses** likewise — it rewrites rows, so a concurrent writer is at least as dangerous |
 | `os migrate meta --stored --apply` | **Refuses** likewise — it rewrites `sys_metadata` rows, and a live process saving metadata is exactly the collision |
@@ -1002,8 +1005,8 @@ os migrate multi-value-columns --table crm_case       # Restrict to one physical
 os migrate multi-value-columns --database-url postgres://…
 ```
 
-**Take a backup first.** The dry run is the default and writes nothing at all —
-not a probe, not a temporary table — so run it, read the statements it prints,
+**Take a backup first.** The dry run is the default and writes no row and no schema
+at all — not a probe, not a temporary table — so run it, read the statements it prints,
 and only then re-run with `--apply`.
 
 The statement is the one the drift finding itself prints, per dialect, and the
@@ -1077,8 +1080,8 @@ them into the declared fields with your own script, then run
   own `id`, `created_at` and `updated_at`.
 - **Operator-only and read-only.** It runs under the database credentials you
   pass, and covers every organization's rows. There is no REST route or API
-  flag behind it. It boots the way `plan` does, so it writes nothing, and it
-  drops nothing.
+  flag behind it. It boots the way `plan` does, so it writes no row and no schema,
+  and it drops nothing.
 - **Values as stored.** An unmapped column has no declared type, so each value is
   emitted as the database client returns it, with no field-type decoding: a
   retired `json` field on SQLite reads as its stored text, a retired `boolean`
@@ -1111,9 +1114,9 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
-| `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes nothing at all; run it before the boot-time tenancy repair, which overwrites part of the evidence |
+| `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes no row and no schema; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
-**The boot itself writes nothing you did not ask for.** Each of these commands boots
+**The boot itself writes no row and no schema you did not ask for.** Each of these commands boots
 your app to read its metadata. Without `--apply`, that boot is read-only, the same boot
 `os migrate plan` takes: the schema sync is held back, the app's inline seed data is not
 loaded, and a SQLite file that does not exist is not created. With `--apply`, the boot
@@ -1132,6 +1135,16 @@ report no secret and no file. A read the command cannot avoid and that fails for
 other reason still refuses and exits 1. Point `--database-url` at the deployment's
 database, or boot the deployment once first, to see what it holds.
 
+**The first connection to a SQLite file can change its header.** SQLite keeps a file's
+journal mode in the file itself, and every ObjectStack connection switches a file still
+on a rollback journal to
+[WAL](/docs/data-modeling/drivers#journal-mode-wal-and-cross-process-access), whether
+the boot behind it is read-only or not. That covers every command on this page that
+boots your app. On a SQLite file no ObjectStack process has opened before (one made by
+another tool, or before ObjectStack defaulted to WAL), the first connection converts
+its journal to WAL, whichever command makes it: the file's header changes, and no row
+or table does. After that, a read-only run leaves the file byte-identical.
+
 **`--object` narrows a run, and only a run over every object records a flag.**
 `files-to-references`, `value-shapes`, `summary-nulls` and `duplicates` take
 `--object` to restrict the run to the objects you name. `duplicates` takes one name,
@@ -1147,7 +1160,7 @@ was, and `--json` carries `filter: { objects }`. Any `--object` narrows, even a 
 that names every object, so run the command without `--object` to record the flag.
 
 ```bash
-os migrate files-to-references            # Dry run: full report, writes nothing
+os migrate files-to-references            # Dry run: full report, writes no rows
 os migrate files-to-references --apply    # Convert, verify, record the flag (prompts)
 os migrate files-to-references --apply --yes --json   # CI / scripts
 os migrate files-to-references --object product       # Restrict to one object (repeatable); records no flag
@@ -1182,7 +1195,7 @@ evidence, because this migration is evidence about *file* values and says
 nothing about theirs.
 
 <Callout type="warn">
-A dry run writes **nothing** — not the conversions, and not the flag either,
+A dry run writes **no row** — not the conversions, and not the flag either,
 even when the self-check would pass. `--apply` is the only writing mode. A
 later run that *fails* its self-check clears the flag's verified state, so a
 database that has drifted closes its own gate.
@@ -1200,7 +1213,7 @@ The same gate for the **non-media** value classes — references (`lookup`,
 `composite`, `repeater`, `record`, `vector`).
 
 ```bash
-os migrate value-shapes                    # Scan: full report, writes nothing
+os migrate value-shapes                    # Scan: full report, writes no rows
 os migrate value-shapes --apply            # Scan, then record the flag if clean (prompts)
 os migrate value-shapes --apply --yes --json   # CI / scripts
 os migrate value-shapes --object contact       # Restrict to one object (repeatable); records no flag
@@ -1212,8 +1225,8 @@ the platform narrowed that storage form and therefore owes the conversion; a
 *application* data whose correct value only its author knows. So the run reports
 — object, field, type, how many records, sample record ids, and the parse issue
 — and you fix the values (or the code writing them) and re-run until it is
-green. Because there is nothing to convert, `--apply`'s only write is the flag
-row itself.
+green. Because there is nothing to convert, the only row `--apply` writes is the
+flag itself.
 
 A scan that is **truncated** (by `--max-records`) or that cannot read an object
 fails the gate even with zero violations found: "none in the part we read" is
@@ -1236,7 +1249,7 @@ know my data" lever, not the route to strictness — the route is running the
 migration that produces the evidence.
 </Callout>
 
-Same writing rules as its sibling: a dry run writes **nothing**, `--apply` is
+Same writing rules as its sibling: a dry run writes **no row**, `--apply` is
 the only writing mode, a later failing run clears the verified state, and a
 running server reads the flag once — **restart it** after a successful apply.
 
@@ -1252,7 +1265,7 @@ then silently omits it, and so do sorting, `GROUP BY` and any formula reading
 the column (null propagation).
 
 ```bash
-os migrate summary-nulls                    # Dry run: full report, writes nothing
+os migrate summary-nulls                    # Dry run: full report, writes no rows
 os migrate summary-nulls --apply            # Recompute and write (prompts)
 os migrate summary-nulls --apply --yes --json   # CI / scripts
 os migrate summary-nulls --object project       # Restrict to one object (repeatable)
@@ -1346,7 +1359,7 @@ them on every load, and each one logs a conversion notice once per boot. This
 command ends that for the deployment that runs it.
 
 ```bash
-os migrate meta --stored                    # Preview: per-row report, writes nothing
+os migrate meta --stored                    # Preview: per-row report, writes no rows
 os migrate meta --stored --apply            # Rewrite the rows (prompts)
 os migrate meta --stored --apply --yes --json   # CI / scripts
 os migrate meta --stored --type view --type object   # Restrict to a type (repeatable)
@@ -1448,8 +1461,8 @@ executor registry the conflict guard needs from the process it is running in.
 
 #### `os migrate duplicates`
 
-The one command in this family that is **not** a migration: it writes nothing
-under any flag, and there is nothing to apply. It inventories business
+The one command in this family that is **not** a migration: it writes no row and
+no schema under any flag, and there is nothing to apply. It inventories business
 identifiers the platform already handed out twice — one value held by rows in
 more than one of the organization partitions a
 [`unique: 'organization'`](/docs/data-modeling/indexing) index separates.
@@ -1473,7 +1486,10 @@ human-rendered mode — the report is the deliverable, you archive it, and a
 second renderer would be a second contract to keep true. The boot behind it is
 read-only: no DDL, no seed, and a missing SQLite file is not brought into
 existence. A full run leaves the rows and the counters byte-identical, so
-pointing it at production changes nothing about production.
+pointing it at production changes no data in production. A SQLite file
+ObjectStack has already switched to WAL comes out byte-identical too; on a file
+still on a rollback journal, the first connection changes the file's header, as
+[Data migrations](#data-migrations) describes.
 
 **Run it before the repair reaches this deployment.** On its first boot after
 the upgrade, a single-organization deployment adopts those untenanted seed rows

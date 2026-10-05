@@ -68,6 +68,11 @@ import { ChartDrillDownSchema, ChartGroupBySchema } from './chart.zod';
 // [#21464] `object-metric.compareTo.kind` is the dashboard widget comparison's
 // own `kind` vocabulary, by reference — the executor's two kinds.
 import { DashboardWidgetSchema } from './dashboard.zod';
+// [#21464] `object-metric.drillDown.report` is the report contract itself, by
+// reference (decision card #21704, fork 1, letter B): a joined report refuses a
+// block that binds no dataset, so a report this schema admits is one the drill
+// drawer draws.
+import { ReportSchema } from './report.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
@@ -3524,44 +3529,205 @@ export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 
 /**
- * The member list `action:group` and `action:menu` both read — a LIST, as the
- * renderers read it (`schema.actions || []`, then `.filter` / `.map`). Both
- * registrations published the input as `type: 'object'` through `db11afd49`;
- * since objectui#11168 slice 1 both publish `type: 'array', of: 'object'`, the
- * shape declared here.
+ * [#21464] The members of `action:group` / `action:menu` — the S-final stage,
+ * per the maintainer's ruling on the decision card #21704, fork 5, letter A
+ * (record 5979239990): the measured read set, `action:button`'s keys by `type`,
+ * with the rows' prescriptions; `outcomeMessages`, a member `className` and
+ * `properties.params` refused; `outcomeMessages` undeclared on all four action
+ * blocks alike. Until this stage each member was an open record
+ * (`z.record(z.string(), z.unknown())`), so a misspelled key, a node-style
+ * `actionType` or an `endpoint` passed and the container drew and ran the
+ * member without it.
+ *
+ * The list itself is what both renderers read (`schema.actions || []`, then
+ * `.filter` / `.map`); both registrations publish it as `type: 'array', of:
+ * 'object'` since objectui#11168 slice 1. A bare string is refused: an action
+ * NAME list is `record:quick_actions`' `actionNames`, and a string member would
+ * draw an unlabeled button that runs nothing.
+ *
+ * ## The read set, measured (not transcribed from `UIActionSchema`)
  *
  * Each member is an action object the container draws and runs ITSELF, never
- * through `SchemaRenderer`, so a member is not a page component and this row
- * does not judge its keys: the members' value contract is the runner's. What
- * the containers read off a member, at the pin: `visible` / `disabled` /
- * `enabled`, `icon`, `variant`, `className`, `label` (falling back to `name`),
- * `tags` (a `separator-before` tag draws a divider), `name` (the React key) and
- * the runner forward — which hands the runner the member's own `type`, not
- * `actionType` (a member is an action entry, and an action entry's executor is
- * `type`), its `objectName`, and its static values off the member's OWN
- * `properties.params`, evaluated by the container
- * (`readMemberStaticParamValues`, `static-params.ts:142-148`). A bare string
- * is refused here: an action NAME list is `record:quick_actions`'
- * `actionNames`, and a string member would render as an unlabeled button that
- * runs nothing.
+ * through `SchemaRenderer`, so it is not a page component. Read at the
+ * `.objectui-sha` pin `2e818d0b51ec` (`components/src/renderers/action/`; every
+ * file byte-identical from `ab1879721595`, where the fork was measured, and at
+ * objectui `main` `2abec3a96`):
+ *
+ * - **drawn**, in `action-group.tsx` — the inline button (`InlineActionButton`,
+ *   `:91-174`) and the dropdown item (`DropdownActionItem`, `:188-247`) — and in
+ *   `action-menu.tsx`'s item (`ActionMenuItem`, `:92-150`): `visible` (the
+ *   shared fail-closed gate, group `:81-86`, menu `:78-85`), `disabled`
+ *   (group `:119` + `:159-165`, `:208` + `:219-223`; menu `:108` + `:132-136`),
+ *   `icon` (group `:122`, `:213`; menu `:111-115`), `label` falling back to
+ *   `name` (group `:171`, `:243`; menu `:147`), `variant` (group inline `:123`,
+ *   `primary` drawn as `default`; the dropdown and menu items `:236` / `:142`,
+ *   where `destructive` draws the item red) and `tags` (`:224` / `:408`: a
+ *   `separator-before` tag draws a divider above the item);
+ * - **`size`**, on an `action:group` member only: its inline button reads it,
+ *   `md` drawn as `default` (`:124`). An `action:menu` item reads no `size`,
+ *   so that member declares none — the `action:icon` precedent, measured per
+ *   block;
+ * - **placed**: `locations`, through `actionRendersAt` on the group (`:304`),
+ *   and forwarded by both;
+ * - **forwarded** to the runner (group `:329-382`, menu `:264-328`), each
+ *   value as `action:button` declares it: the member's own `type` (the
+ *   executor — a member is an action entry, whose executor is `type`, where a
+ *   node spells it `actionType`), `name`, `label`, `description`, `target`,
+ *   `openIn`, `method`, `params` (an array is the input list; an object is
+ *   the request payload of a `type: 'api'` member only, `static-params.ts:172-183`),
+ *   `bodyExtra`, `bodyShape`, `operation`, `patch`, `confirmText`,
+ *   `successMessage`, `errorMessage`, `refreshAfter`, `locations`, `toast`,
+ *   `resultDialog`, `onSuccess` and `objectName`.
+ *
+ * `undoable` and `recordIdField`, which `action:button` forwards, are not
+ * forwarded by either container, so a member declares neither.
+ *
+ * ## Read, and refused anyway — by the ruling, or with the rows' prescription
+ *
+ * - `outcomeMessages` (forwarded since objectui#11344, group `:363`, menu
+ *   `:307`): undeclared on all four action blocks, as one decision, until an
+ *   inline writer appears;
+ * - a member `className` (group `:145`, `:237`; menu `:143`) and the member's
+ *   own `properties.params` bag of static values (`readMemberStaticParamValues`,
+ *   `static-params.ts:142-148`, from group `:329` and menu `:264`);
+ * - `endpoint` (forwarded, group `:346`, menu `:290`): read by no console `api`
+ *   handler, refused onto `target` through the rows' alias table;
+ * - `enabled` (group `:120`, `:209`; menu `:109`), the legacy fallback beside
+ *   `disabled`, and `autoTrigger` (menu `:189`, through `useAutoTriggerOnce`;
+ *   the group never reads it), a host transport flag — each with the rows'
+ *   prescription.
+ *
+ * A code-composed `onClick` (group `:314`, menu `:249`) is a function, which
+ * metadata cannot carry.
+ *
+ * The two members differ only in `size`, so one shape builder serves both
+ * ({@link actionContainerMemberShape}); each container's member is built once.
+ * A factory the rows call, not a {@link lazySchema}, for the reason
+ * {@link objectGanttMarker} gives.
  */
+function actionContainerMemberShape() {
+  return {
+    name: z.string().optional()
+      .describe('Action name, forwarded to the action runner, and the item\'s text when there is no `label`. Optional: a member is not a registered object action, and the runner dispatches a nameless one on its `type`'),
+    label: z.string().optional()
+      .describe('The item\'s text. A literal string, placed as-is — localize through the translation bundle entry for this component id'),
+    icon: z.string().optional()
+      .describe('Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
+    type: z.string().optional()
+      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
+    variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
+      .describe('Item variant — the Button primitive\'s vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly'),
+    visible: actionCondition().optional()
+      .describe('Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the item is not drawn when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible'),
+    disabled: actionCondition().optional()
+      .describe('Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the item is drawn but cannot be pressed while it is TRUE, and a predicate that fails to evaluate disables it. Omit for never-disabled'),
+    tags: z.array(z.enum(['separator-before'])).optional()
+      .describe('Item tags — `separator-before` draws a divider above the item in a dropdown or menu (not above the first item); no other tag is drawn'),
+    params: z.unknown().optional()
+      .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs; an object is forwarded as the request payload of a `type: \'api\'` member only (use `bodyExtra` for that)'),
+    description: z.string().optional()
+      .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
+    target: z.string().optional()
+      .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `type`'),
+    openIn: z.enum(['self', 'new-tab']).optional()
+      .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
+    method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
+    bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
+    bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
+    operation: z.unknown().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`'),
+    patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+    confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
+    successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
+    errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+    refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
+    locations: z.array(ActionLocationSchema).optional()
+      .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),
+    toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
+    resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
+    onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+    objectName: z.string().optional()
+      .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
+  };
+}
+
 /**
- * [#21464] The members of `action:group` / `action:menu`: HELD as open
- * records, in the enumeration pin's ledger as a fork the S-objectui-held stage
- * reported. Each member is objectui's `UIActionSchema`
- * (`types/src/ui-action.ts:571` at the `.objectui-sha` pin `ab1879721595`),
- * drawn and run by the container itself (`action-group.tsx:91-249`,
- * `:303-382`; `action-menu.tsx:80-147`, `:264-328`, `:408`). Measured from
- * those reads, the key set this section's method gives is mostly
- * `action:button`'s, keyed by `type` rather than `actionType` (a member is not
- * a node) — but it also takes keys whose declaration the rows
- * above leave undecided: `outcomeMessages` (forwarded, and recorded on
- * `action:button` / `action:icon` as "a contract decision, not a pin
- * re-measure"), a member `className` (a node key on the rows), the member's own
- * `properties.params` bag of static values (`static-params.ts:142-160`) and
- * `endpoint` (refused on the rows since #21005).
+ * The prescriptions a container member answers an undeclared key with. The
+ * `enabled` one is the rows' own; the rest name what a member writes instead.
  */
-const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
+const actionContainerMemberGuidance = (container: 'action:group' | 'action:menu') => ({
+  enabled: ACTION_NODE_GUIDANCE.enabled,
+  autoTrigger: container === 'action:menu'
+    ? ACTION_NODE_GUIDANCE.autoTrigger
+    : '`autoTrigger` is a host transport flag, not metadata: a host sets it on a schema it composes at runtime '
+      + 'to run an action once on mount. An `action:group` member does not read it at all, so the action never '
+      + 'runs on mount. Remove it.',
+  outcomeMessages:
+    '`outcomeMessages` is not a key an inline action declares: per-outcome success copy is declared on an '
+    + 'object\'s registered action (`actions[]`), and on none of the four action blocks yet. Write the success '
+    + 'toast as `successMessage`.',
+  className:
+    'A member is drawn by its container, not as a page component, and carries no `className`. Style it with its '
+    + '`variant` (`destructive` draws it red), or style the whole container with the node\'s own `className`.',
+  properties:
+    'A member carries no `properties` bag: its static parameter values (`properties.params`) are not part of the '
+    + 'inline action vocabulary. For a `type: \'api\'` member\'s request body write `bodyExtra`; to run an action '
+    + 'with static parameter values, author it as its own `action:button` node, whose `params` object carries them.',
+  undoable:
+    '`undoable` reaches the runner only from an `action:button` node: a container member does not forward it. '
+    + 'Author the action as its own `action:button`, or remove the key.',
+  recordIdField:
+    '`recordIdField` reaches the runner only from an `action:button` node: a container member does not forward '
+    + 'it. Author the action as its own `action:button`, or remove the key.',
+});
+
+/** What a container member's undeclared keys used to cost. */
+const actionContainerMemberHistory = (container: string) =>
+  `Until this shape was declared, each \`${container}\` member was an open record: a misspelled key passed, `
+  + 'and the container drew and ran the member without it.';
+
+/** The aliases a container member answers: the rows' table, with the executor key turned round. */
+const ACTION_CONTAINER_MEMBER_ALIASES = {
+  actionType: 'type',
+  visibleWhen: 'visible',
+  visibility: 'visible',
+  ...ACTION_TARGET_ALIASES,
+} as const;
+
+/** [#21464] One `action:group` member: {@link actionContainerMemberShape}, plus the inline button's `size`. */
+function buildActionGroupMember() {
+  return strictObject({
+    surface: 'this `action:group` member',
+    history: actionContainerMemberHistory('action:group'),
+    aliases: ACTION_CONTAINER_MEMBER_ALIASES,
+    guidance: actionContainerMemberGuidance('action:group'),
+  }, {
+    ...actionContainerMemberShape(),
+    size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
+      .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
+  });
+}
+let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
+/** The one {@link buildActionGroupMember} instance. */
+const actionGroupMember = () => (actionGroupMemberOnce ??= buildActionGroupMember());
+
+/** [#21464] One `action:menu` member: {@link actionContainerMemberShape}; a menu item reads no `size`. */
+function buildActionMenuMember() {
+  return strictObject({
+    surface: 'this `action:menu` member',
+    history: actionContainerMemberHistory('action:menu'),
+    aliases: ACTION_CONTAINER_MEMBER_ALIASES,
+    guidance: {
+      ...actionContainerMemberGuidance('action:menu'),
+      size:
+        'An `action:menu` item reads no `size`: each member is drawn as a menu item, and only the trigger is a sized '
+        + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
+        + 'read a member\'s `size`.',
+    },
+  }, actionContainerMemberShape());
+}
+let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
+/** The one {@link buildActionMenuMember} instance. */
+const actionMenuMember = () => (actionMenuMemberOnce ??= buildActionMenuMember());
 
 /**
  * `action:group` — a row or dropdown of actions
@@ -3619,8 +3785,8 @@ export const ActionGroupPropsSchema = lazySchema(() => strictObject({
       + 'Each member action\'s own `name` is what identifies it. Remove the key.',
   },
 }, {
-  actions: actionMemberList().optional()
-    .describe('The actions in this group, in order — each an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, …); a member\'s executor is its `type`'),
+  actions: z.array(actionGroupMember()).optional()
+    .describe('The actions in this group, in order — each an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `size`, …); a member\'s executor is its `type`'),
   display: z.enum(['inline', 'dropdown']).optional()
     .describe('Display mode: `inline` renders every action as a button row; `dropdown` renders one trigger button and lists the actions in its menu (renderer default: `inline`)'),
   location: ActionLocationSchema.optional()
@@ -3677,7 +3843,7 @@ export const ActionMenuPropsSchema = lazySchema(() => strictObject({
   guidanceSets: [COMPONENT_NODE_KEYS_GUIDANCE],
   aliases: { visibleWhen: 'visible', visibility: 'visible' },
 }, {
-  actions: actionMemberList().optional()
+  actions: z.array(actionMenuMember()).optional()
     .describe('The menu\'s actions, in order — each an action object the menu draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `tags`, …); a member\'s executor is its `type`'),
   label: z.string().optional()
     .describe('Trigger text and accessible label; omit for an icon-only trigger labelled "More actions". A literal string — localize through the translation bundle entry for this component id'),
@@ -4713,7 +4879,8 @@ const ObjectMetricTrendSchema = lazySchema(() => strictObject({
  *   drill-to-record for a clicked row and the metric has no row. The chart's
  *   drill-down declares `filter`, which is why the chart's shape is not taken
  *   whole.
- * - `report` is HELD at `z.unknown()` — see the member.
+ * - `report` is this package's {@link ReportSchema}, by reference — a member
+ *   the chart's drill-down does not declare (see the member).
  */
 const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
   surface: 'this `object-metric` drill-down',
@@ -4753,39 +4920,48 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
   columns: ChartDrillDownSchema.shape.columns,
   maxRows: ChartDrillDownSchema.shape.maxRows,
   /**
-   * [#21464] HELD at `z.unknown()`, not typed: the spec declares no drill
-   * report yet, and the spec declares each such contract first. It waited for
-   * the `objectui-held` stage, which reported it as a fork (the last paragraph
-   * below); the enumeration pin's ledger records it under `fork`.
+   * [#21464] The report the drill opens instead of the record list — this
+   * package's {@link ReportSchema}, BY REFERENCE: the maintainer's ruling on
+   * the decision card #21704, fork 1, letter B (record 5978663135). Until the
+   * S-final stage the member was `z.unknown()`, so a report missing its
+   * `dataset`, a misspelled report key or a bare report name passed the
+   * component-props gate, and the drawer quietly listed the records instead.
    *
-   * Read at the `.objectui-sha` pin `ab1879721595`: the tile hands `report`
-   * to the shared drawer (`ObjectMetricWidget.tsx:742`), and
+   * Read at the `.objectui-sha` pin `2e818d0b51ec` (both files byte-identical
+   * from `ab1879721595`, where the fork was measured, and at objectui `main`
+   * `2abec3a96`): the tile hands `report` to the shared drawer verbatim
+   * (`plugin-dashboard/src/ObjectMetricWidget.tsx:742`), and
    * `DrillDownDrawer.tsx` draws it as a `report` node when
    * `isDatasetBoundReport` holds (`:92`, used at `:115`) — a non-empty
    * `dataset`, or a `joined` report with a block that binds one — joining the
-   * metric's filter into the report's `runtimeFilter`; any other value lists
-   * the records instead. objectui#11506 (`8366acc`) put that predicate in place
-   * of the old "carries `columns` or `objectName`" one, and objectui#11517
-   * (`9ed8d0f`) refuses the named `{ name }` arm on objectui's faces. objectui
-   * types the member as this spec's `ReportSchema` author input
-   * (`types/src/data-display.ts:2592`, `SpecReportInput`), but no spec drill
-   * shape declares a `report` member — the chart's drill-down refuses it — so
-   * the conclusion stage 4 recorded stands: the tile draws a value the
-   * by-reference drill shape refuses, and the member waits for the spec to
-   * declare it.
+   * metric's filter into the report's own `runtimeFilter` (`:150-153`); any
+   * other value lists the records. objectui types the member as this package's
+   * `ReportSchema` author input (`types/src/data-display.ts`,
+   * `SpecReportInput`), so the reference is the declaration both sides already
+   * name.
    *
-   * The S-objectui-held stage measured the by-reference candidate
-   * (`ReportSchema`, `report.zod.ts`) against that predicate and kept the hold, reporting
-   * a fork: every drawn report the census found parses, but the two do not
-   * agree. `ReportSchema` admits a `joined` report none of whose blocks binds a
-   * `dataset` (a block's `dataset` is optional there), which
-   * `isDatasetBoundReport` does not draw — the drawer lists the records
-   * instead, the silent fallback this card closes — and it refuses a
-   * dataset-bound report with no `name`, `label` or `values`, which the drawer
-   * does draw.
+   * ## Admitted implies drawn
+   *
+   * The fork existed because `ReportSchema` admitted a `joined` report none of
+   * whose blocks binds a `dataset`, which the drawer does not draw. Since #21702
+   * its joined arm refuses every block with no `dataset`, at
+   * `blocks[i].dataset`; every other type needs a `dataset` and `values`. So
+   * every report this member admits satisfies `isDatasetBoundReport`, and is
+   * drawn as a report.
+   *
+   * The two still differ in one direction, which no measured writer reaches:
+   * the drawer also draws a dataset-bound report this schema refuses for its
+   * own reasons — one with no `name` or `label`, a non-joined one with no
+   * `values`, a joined one with a container `dataset`, or one whose other
+   * blocks bind none. Those are incomplete reports, and the census found none
+   * written on this member.
+   *
+   * The parsed member carries `ReportSchema`'s defaults (`type: 'tabular'`,
+   * `drilldown: true`); a page component's `properties` is not parsed on the
+   * way to the renderer, so the drawer still reads the report as written.
    */
-  report: z.unknown().optional()
-    .describe('Drill into a report instead of the record list — not typed on this row yet: the tile draws a dataset-bound report here, but no spec drill shape declares a `report` member yet (the chart\'s drill-down refuses it)'),
+  report: ReportSchema.optional()
+    .describe('Drill into a report instead of the record list — a report definition (the same shape as `reports[]`): `{ name, label, dataset, values, … }`, or a `joined` report whose every block binds a `dataset`. The drawer draws it as a report, with the metric\'s filter joined into its `runtimeFilter`'),
 }));
 
 /**
@@ -4998,10 +5174,10 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * [#21464] The click-through to the records behind the number — see
    * {@link ObjectMetricDrillDownSchema}. Its five list members are the chart
    * drill-down's by reference; `filter` and `mode` are refused by name; its
-   * `report` is held open until the spec declares a drill report.
+   * `report` is {@link ReportSchema}, by reference.
    */
   drillDown: ObjectMetricDrillDownSchema.optional()
-    .describe('Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric\'s own `filter`; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row'),
+    .describe('Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric\'s own `filter` — or draws the report `report` defines; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row'),
   /**
    * [#21464] The period-over-period comparison — see
    * {@link ObjectMetricCompareToSchema}. `kind` is the dashboard widget
@@ -5013,11 +5189,13 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
 /**
- * ADR-0122: the parsed state differs from the authored state on exactly one
- * key — `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
+ * ADR-0122: the parsed state differs from the authored state on two keys —
+ * `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
  * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
- * parse). So `object-metric` leaves the type-alias convention pin's default-free
- * family the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
+ * parse), and `drillDown.report` carries {@link ReportSchema}, whose defaults
+ * (`type`, `drilldown`) materialize on a report the author wrote (#21464). So
+ * `object-metric` leaves the type-alias convention pin's default-free family
+ * the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
  */
 export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
 
@@ -7847,6 +8025,195 @@ const ObjectTimelineMappingSchema = lazySchema(() => strictObject({
     .describe('Field whose value picks each entry\'s marker colour (renderer default `variant`) — the only spelling this binding has'),
 }));
 
+// ---------------------------------------------------------------------------
+// [#21464] `object-timeline` `items` — the authored entry, in the shape the
+// maintainer ruled on the decision card #21704, fork 4, letter B (record
+// 5979239990): both arms closed, as objectui#6356 ruled them
+// (`TimelineFeedItem`, `TimelineGanttItem`); a feed entry's `content` an
+// opaque member; a row refinement pairing each entry with the arm the row's
+// `variant` selects; a gantt bar's dates a string or a number. Read at the
+// `.objectui-sha` pin `2e818d0b51ec`; the arm declarations and every cited
+// reader are unchanged at objectui `main` `2abec3a96` (comments only).
+// ---------------------------------------------------------------------------
+
+/**
+ * The five colours an authored timeline element names — a feed entry's marker
+ * or a gantt bar: objectui's `TimelineItemVariant`
+ * (`types/src/data-display.ts`), the "Marker Variants" its timeline guide
+ * documents. The marker primitive paints three more (`todo`, `in-progress`,
+ * `done`), reached only by the entries the object-bound rail composes from
+ * records — not an authoring vocabulary, and no gantt bar paints them.
+ */
+const OBJECT_TIMELINE_ITEM_VARIANTS = ['default', 'success', 'warning', 'danger', 'info'] as const;
+
+/** What an authored timeline entry's undeclared keys used to cost. */
+const OBJECT_TIMELINE_ITEM_HISTORY =
+  'Until this shape was declared, a timeline entry was `z.unknown()`: a misspelled key, or an entry of the '
+  + 'wrong kind for the timeline\'s `variant`, passed, and the rail drew an empty, unlabelled entry for it.';
+
+/**
+ * [#21464] One bar of a gantt row — objectui's `TimelineGanttItemBar`, closed.
+ * The gantt branch reads `startDate` / `endDate` (`renderer.tsx:1909`, the axis
+ * reduce at `:651` and `:686-688`), `variant` (`:1916`, default `default`) and
+ * `title` (`:1918`, `:1921`, inside the bar and in its tooltip). Every member
+ * is optional, as objectui#6356 left them: a bar with no usable dates is not an
+ * authoring error but the renderer's `timeline.gantt.unusableRange` diagnostic.
+ * A date is a string or a FINITE number (epoch milliseconds — `z.number()`
+ * refuses `Infinity` and `NaN`), the renderer's own date rule; its third arm, a
+ * `Date`, is one authored JSON cannot carry (the ruling: string or number).
+ */
+function buildObjectTimelineGanttBar() {
+  return strictObject({
+    surface: 'this gantt bar',
+    history: OBJECT_TIMELINE_ITEM_HISTORY,
+    aliases: { label: 'title', name: 'title', start: 'startDate', end: 'endDate', color: 'variant' },
+  }, {
+    title: z.string().optional().describe('Bar label, drawn inside the bar and in its tooltip'),
+    startDate: z.union([z.string(), z.number()]).optional()
+      .describe('Bar start — a date string (`YYYY-MM-DD`, or an ISO date-time) or epoch milliseconds'),
+    endDate: z.union([z.string(), z.number()]).optional()
+      .describe('Bar end — a date string or epoch milliseconds; a date-only `YYYY-MM-DD` end is drawn through the end of that day'),
+    variant: z.enum(OBJECT_TIMELINE_ITEM_VARIANTS).optional().describe('Bar colour (renderer default `default`)'),
+  });
+}
+
+/**
+ * The FEED arm's members (`variant` absent, `vertical` or `horizontal`) —
+ * objectui's `TimelineFeedItem`, the seven keys objectui#6356 declared, with
+ * `title` the arm's required key. Both feed branches read them: `time`
+ * (`renderer.tsx:1612-1614`, `:1703-1705`), `title` (`:1642`, `:1708`),
+ * `description` (`:1650`, `:1709`), `variant` (`:1627`, `:1699`), `icon`
+ * (`:1630`, `:1700`), `content` (`renderChildren`, `:1659`, `:1716`) and
+ * `className` (`:1623`, `:1697`).
+ *
+ * `content` is held OPAQUE (`z.unknown()`), by the ruling: it is child schema
+ * nodes the entry draws below its description (`SchemaNode | SchemaNode[]`),
+ * which this map would judge only as a slot position the page walks visit,
+ * and no measured writer fills it. It becomes a slot when a writer appears;
+ * the enumeration pin records it with that reason.
+ */
+const objectTimelineFeedItemShape = () => ({
+  time: z.string().optional().describe('When it happened — an ISO 8601 date (or date-time) string, formatted by the row\'s `dateFormat`'),
+  title: z.string().optional().describe('The entry\'s heading — required on a feed entry (the arm a feed `variant` selects)'),
+  description: z.string().optional().describe('Secondary line under the title'),
+  variant: z.enum(OBJECT_TIMELINE_ITEM_VARIANTS).optional().describe('Marker colour (renderer default `default`)'),
+  icon: z.string().optional().describe('Emoji or short text drawn inside the marker'),
+  content: z.unknown().optional()
+    .describe('Child page components drawn below the description — a component node or a list of them. Held opaque: not judged on this row'),
+  className: z.string().optional().describe('Tailwind classes for the entry'),
+});
+
+/**
+ * The GANTT arm's members (`variant: 'gantt'`) — objectui's
+ * `TimelineGanttItem`: `label` (`renderer.tsx:1899-1900`, the row-label
+ * gutter), the arm's required key, and `items`, the row's bars
+ * (`classifyGanttRows`, `:617-621`; drawn at `:1908`), optional because a row
+ * with no bars yet is an ordinary empty state.
+ */
+const objectTimelineGanttRowShape = () => ({
+  label: z.string().optional().describe('Row label, drawn in the row-label gutter — required on a gantt row (the arm `variant: \'gantt\'` selects)'),
+  items: z.array(buildObjectTimelineGanttBar()).optional()
+    .describe('The row\'s bars, each `{ title?, startDate?, endDate?, variant? }`'),
+});
+
+/**
+ * [#21464] One authored `object-timeline` entry: every member of BOTH arms,
+ * each optional, closed against anything else — objectui's own element shape
+ * (`types/src/zod/data-display.zod.ts`, `TimelineItemSchema`). Which arm an
+ * entry must be is decided by the ROW's `variant`, so it is judged where the
+ * row is visible: {@link objectTimelineItemsFitVariant}. Not a union of the two
+ * arms, for the reason objectui gives: when neither arm accepts an entry, a
+ * union reports one `invalid_union` at the entry and folds each arm's issues
+ * beneath it, so an off-shape bar or an unknown key would lose its own path.
+ *
+ * The keys the object-bound rail composes onto an entry it maps from a record
+ * (`color`, `group`, `meta`, `startDate`, `endDate`) are renderer-internal,
+ * not authorable — objectui#6356 refuses them on its strict face — and are
+ * refused here with what to write instead.
+ *
+ * A factory the row calls, not a {@link lazySchema}, for the reason
+ * {@link objectGanttMarker} gives.
+ */
+function buildObjectTimelineItem() {
+  return strictObject({
+    surface: 'this timeline entry',
+    history: OBJECT_TIMELINE_ITEM_HISTORY,
+    aliases: { date: 'time', timestamp: 'time', heading: 'title' },
+    guidance: {
+      color:
+        'A timeline entry\'s colour is `variant` (`default`, `success`, `warning`, `danger`, `info`): `color` is a '
+        + 'key the record-bound rail composes onto the entries it maps, not one an authored entry carries. Write '
+        + 'it as `variant`.',
+      startDate:
+        '`startDate` is a gantt BAR\'s key, written inside a gantt row\'s `items`; a feed entry\'s date is `time`. '
+        + 'On a feed timeline write `time`; on `variant: \'gantt\'` write `{ label, items: [{ startDate, endDate }] }`.',
+      endDate:
+        '`endDate` is a gantt BAR\'s key, written inside a gantt row\'s `items`; a feed entry has one date, `time`. '
+        + 'On a feed timeline write `time`; on `variant: \'gantt\'` write `{ label, items: [{ startDate, endDate }] }`.',
+      group:
+        '`group` is a key the record-bound rail composes onto the entries it maps (the date bucket it groups them '
+        + 'under), not one an authored entry carries. Remove it — authored entries are drawn in the order written.',
+      meta:
+        '`meta` is a key the record-bound rail composes onto the entries it maps, not one an authored entry '
+        + 'carries. Put the text in the entry\'s `description`, or remove it.',
+    },
+  }, {
+    ...objectTimelineFeedItemShape(),
+    ...objectTimelineGanttRowShape(),
+  });
+}
+let objectTimelineItemOnce: ReturnType<typeof buildObjectTimelineItem> | undefined;
+/** The one {@link buildObjectTimelineItem} instance. */
+const objectTimelineItem = () => (objectTimelineItemOnce ??= buildObjectTimelineItem());
+
+/**
+ * [#21464] The row refinement that pairs each `items` entry with the arm the
+ * row's `variant` selects (absent ⇒ `vertical`) — objectui's node-level
+ * refinement (`timelineItemsFitVariant`, `types/src/zod/data-display.zod.ts`),
+ * restated for this row: each branch of the renderer reads only its own arm's
+ * keys, so a gantt row on a feed timeline, or a feed entry on a gantt one, drew
+ * an empty, unlabelled entry.
+ *
+ * Two refusals per entry, each at the key it names: the arm's REQUIRED key is
+ * absent (`title` on a feed entry, `label` on a gantt row), or a key only the
+ * OTHER arm declares is present. An undeclared key is the entry shape's own
+ * refusal. The arm key lists are read off the two shapes above, never
+ * restated, so a key added to an arm is judged the moment it is declared.
+ */
+function objectTimelineItemsFitVariant() {
+  const feedKeys = Object.keys(objectTimelineFeedItemShape());
+  const ganttKeys = Object.keys(objectTimelineGanttRowShape());
+  const ARMS = {
+    feed: { name: 'feed entry', plural: 'feed entries', variants: "`variant: 'vertical'` (the default) or `'horizontal'`", required: 'title', keys: feedKeys },
+    gantt: { name: 'gantt row', plural: 'gantt rows', variants: "`variant: 'gantt'`", required: 'label', keys: ganttKeys },
+  } as const;
+  return (row: { variant?: string; items?: readonly unknown[] }, ctx: z.RefinementCtx): void => {
+    if (!Array.isArray(row.items)) return;
+    const variant = row.variant ?? 'vertical';
+    const [arm, other] = variant === 'gantt' ? [ARMS.gantt, ARMS.feed] : [ARMS.feed, ARMS.gantt];
+    const draws = `\`variant: '${variant}'\`${row.variant === undefined ? ' (the default)' : ''} draws ${arm.plural} \`{ ${arm.keys.join(', ')} }\``;
+    row.items.forEach((entry, index) => {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return;
+      const item = entry as Record<string, unknown>;
+      if (item[arm.required] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', index, arm.required],
+          message: `\`${arm.required}\` is required on a ${arm.name}: ${draws}, and an entry without it is drawn empty and unlabelled.`,
+        });
+      }
+      for (const key of other.keys) {
+        if (arm.keys.includes(key) || item[key] === undefined) continue;
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', index, key],
+          message: `\`${key}\` is a ${other.name} key, and ${draws}; author ${other.plural} under ${other.variants}.`,
+        });
+      }
+    });
+  };
+}
+
 /**
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
@@ -7992,9 +8359,10 @@ const ObjectTimelineMappingSchema = lazySchema(() => strictObject({
  * optional field names), written here first and then taken; it was
  * `z.unknown()` while that contract lived only in objectui
  * (`TimelineMappingSchema`), the `object-calendar.calendar` posture this
- * section's header prescribes for exactly that case. `items` stays
- * `z.array(z.unknown())`: that stage found two viable spec shapes for the
- * authored entry (see the member). `navigation` takes
+ * section's header prescribes for exactly that case. `items` takes
+ * {@link buildObjectTimelineItem} since #21464's S-final stage: objectui's two
+ * ruled arms, closed, with the row's {@link objectTimelineItemsFitVariant}
+ * pairing each entry with the arm `variant` selects. `navigation` takes
  * {@link NavigationConfigSchema}, by reference, for the reason the ruling gives.
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
@@ -8118,22 +8486,19 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   data: z.array(z.unknown()).optional()
     .describe("Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written"),
   /**
-   * [#21464] HELD at `z.unknown()` elements, in the enumeration pin's ledger as
-   * a fork the S-objectui-held stage reported. Each element is objectui's
-   * declared authored timeline entry (`types/src/data-display.ts` at the
-   * `.objectui-sha` pin `ab1879721595`: `TimelineFeedItem`, `:2973`, or
-   * `TimelineGanttItem`, `:3042`, ruled on objectui#6356), handed to the rail
-   * verbatim (`ObjectTimeline.tsx:587`). Writing that contract here needs two
-   * decisions no ruling has made: a feed entry's `content` is child schema nodes
-   * (`SchemaNode | SchemaNode[]`), which this map either declares as a slot
-   * position the page walks judge or keeps as an opaque member; and the arm an
-   * entry must match is chosen by the PARENT's `variant`, which objectui judges
-   * in a node-level refinement and a spec row would either repeat or replace
-   * with a plain union of the two arms. (A gantt bar's dates also take a `Date`
-   * there, which authored JSON cannot carry.)
+   * [#21464] The authored entries — typed in the S-final stage, per the
+   * maintainer's ruling on the decision card #21704, fork 4, letter B (record
+   * 5979239990). Each element is objectui's declared authored timeline entry
+   * (`types/src/data-display.ts` at the `.objectui-sha` pin `2e818d0b51ec`:
+   * `TimelineFeedItem` or `TimelineGanttItem`, ruled on objectui#6356), handed
+   * to the rail verbatim (`ObjectTimeline.tsx:587`) — see
+   * {@link buildObjectTimelineItem}. The arm an entry must be is the one this
+   * row's `variant` selects, judged by the row's refinement
+   * ({@link objectTimelineItemsFitVariant}). A feed entry's `content` is held
+   * opaque; a gantt bar's dates are a string or a number.
    */
-  items: z.array(z.unknown()).optional()
-    .describe("Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each element is objectui's declared timeline element, `@object-ui/types`'s `TimelineFeedItem` (`variant` absent / `vertical` / `horizontal`) or `TimelineGanttItem` (`variant: 'gantt'`), the arm this node's `variant` selects"),
+  items: z.array(objectTimelineItem()).optional()
+    .describe("Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each entry is the kind this node's `variant` selects: a feed entry `{ time?, title, description?, variant?, icon?, content?, className? }` (`variant` absent / `vertical` / `horizontal`), or a gantt row `{ label, items? }` (`variant: 'gantt'`) whose bars are `{ title?, startDate?, endDate?, variant? }`, each date a string or epoch milliseconds"),
   variant: z.enum(['vertical', 'horizontal', 'gantt']).optional()
     .describe("Rail layout (renderer default `vertical`). ⚠️ `gantt` needs authored `items`: the object-bound path composes flat feed entries, which the gantt branch cannot draw, and refuses that combination with a named diagnostic instead of drawing an empty chart"),
   dateFormat: z.enum(['short', 'long', 'iso']).optional()
@@ -8158,7 +8523,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    */
   navigation: NavigationConfigSchema.optional()
     .describe("Entry-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })"),
-}));
+}).superRefine(objectTimelineItemsFitVariant()));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTimelineProps = z.input<typeof ObjectTimelinePropsSchema>;
 /**

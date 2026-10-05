@@ -49,6 +49,26 @@
  *    in one line: slots are compared only with `acted_as`, and `actor_id` only
  *    with a caller's user id.
  *
+ * 4. NO `role:` SLOT (ADR-0090 D3). `position:<p>` is the one spelling of a
+ *    position address: no writer in this package produces a `role:` slot, and
+ *    no reader compares one. Two scans over EVERY non-test `.ts` under `src/`,
+ *    `approver-address.ts` included:
+ *      - THE LITERALS. Every string-like literal — a quoted string, a
+ *        no-substitution template, each literal piece of a template — is read
+ *        from the syntax tree, so a comment is masked by construction. None
+ *        may carry a `role:` prefix: that is a reader's prefix (`'role:'` back
+ *        in the equivalence), a compared `` `role:${p}` ``, and a writer's
+ *        literal alike. Positive control: the same scan finds the `position:`
+ *        prefix in `approver-address.ts`, so it reads the module it guards.
+ *      - THE `<type>:<value>` TEMPLATES. The writer the literal scan cannot
+ *        see is an interpolated TYPE: `resolveApproverSpec`'s fallback once
+ *        wrote `${a.type}:${a.value}`, the AUTHORED spelling, so a flow still
+ *        authoring the deprecated `role` approver type opened `role:` slots.
+ *        Every template of that shape is classified in `TYPE_VALUE_TEMPLATES`
+ *        (new or changed ones fail with their location, as in 2), and none
+ *        may interpolate a `<x>.type` property: the fallback's `type` is the
+ *        `canonicalApproverType(...)` result, pinned by name.
+ *
  * What it does not see: a comparison spelled with none of those shapes (a
  * hand-written loop over a slate with `===`). The shapes are the ones every
  * reader in this file's history has used; a new spelling is caught in review,
@@ -179,6 +199,86 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
   },
 };
 const PREDICATE_NAMES = new Set(['where', 'filter']);
+
+/**
+ * The retired position-address prefix (ADR-0090 D3), and the live one for the
+ * positive control. A `.` or word character before it is a different word
+ * (`sys_member.role: …` in a message names a column, not a slot).
+ */
+const RETIRED_PREFIX = /(?<![\w.])role:/;
+const LIVE_PREFIX = /(?<![\w.])position:/;
+
+type TemplateRole = 'slot-writer' | 'not-a-slot';
+
+/**
+ * Every `${X}:${Y}`-shaped template in this package — a `<type>:<value>`
+ * literal in the making — keyed `<file> · <enclosing function> · <source
+ * text>`. A slot writer's type must be one no flow can spell `role`.
+ */
+const TYPE_VALUE_TEMPLATES: Readonly<Record<string, { role: TemplateRole; why: string }>> = {
+  'approval-service.ts · resolveApproverSpec · `${type}:${a.value}`': {
+    role: 'slot-writer',
+    why: 'the empty-lookup fallback; `type` is canonicalApproverType(a.type), so the deprecated `role` type writes '
+      + '`org_membership_level:<v>` (ADR-0090 D3)',
+  },
+  'approval-service.ts · resolveExpressionApprovers · `${resolveAs}:${key}`': {
+    role: 'slot-writer',
+    why: 'an expression approver\'s empty expansion; `resolveAs` is one of department / position / team here — any '
+      + 'other value threw VALIDATION_FAILED above',
+  },
+  'approval-service.ts · expandApprovers · `${groupKey}:${entry.subGroup}`': {
+    role: 'not-a-slot',
+    why: 'a per_group group key (#3266), never written to a slate',
+  },
+};
+
+/** Every string-like literal piece in `sf`: its cooked text and its node. */
+function literalPieces(sf: ts.SourceFile): Array<{ text: string; node: ts.Node }> {
+  const out: Array<{ text: string; node: ts.Node }> = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) out.push({ text: node.text, node });
+    if (ts.isTemplateExpression(node)) {
+      out.push({ text: node.head.text, node });
+      for (const span of node.templateSpans) out.push({ text: span.literal.text, node });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/**
+ * Every template in `sf` that opens with `${X}:` and no space after the colon —
+ * the `<type>:<value>` shape (`${path}: ${message}` is prose, not an address).
+ */
+function typeValueTemplates(sf: ts.SourceFile): ts.TemplateExpression[] {
+  const out: ts.TemplateExpression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isTemplateExpression(node) && node.head.text === '' && /^:(?!\s)/.test(node.templateSpans[0]?.literal.text ?? '')) {
+      out.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** Is the template's type interpolation an AUTHORED spelling — a `<x>.type` property read? */
+function interpolatesAuthoredType(template: ts.TemplateExpression): boolean {
+  const first = template.templateSpans[0].expression;
+  return ts.isPropertyAccessExpression(first) && first.name.text === 'type';
+}
+
+/** Every non-test `.ts` under `src/`, the equivalence module included. */
+function allSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) out.push(...allSourceFiles(path));
+    else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) out.push(path);
+  }
+  return out;
+}
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -335,6 +435,75 @@ describe('approver-address — the readers of the equivalence, and no comparison
     expect(comparisons).toEqual(['approval-service.ts · visibleRequestIds · actor_id: uid']);
     const service = parse(join(HERE, SERVICE));
     expect(method(service, 'visibleRequestIds').getText(service)).toMatch(/const uid = who\.userId;/);
+  });
+
+  it('no role: slot (ADR-0090 D3): no string literal in this package carries the retired prefix — comments masked, position: found as the positive control', () => {
+    const files = allSourceFiles(HERE);
+    expect(files.map((f) => relative(HERE, f))).toContain(EQUIVALENCE_MODULE);
+    const retired: string[] = [];
+    const live: string[] = [];
+    for (const path of files) {
+      const sf = parse(path);
+      for (const { text, node } of literalPieces(sf)) {
+        const where = `${relative(HERE, path)}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1} · ${JSON.stringify(text)}`;
+        if (RETIRED_PREFIX.test(text)) retired.push(where);
+        if (LIVE_PREFIX.test(text)) live.push(where);
+      }
+    }
+    expect(
+      retired,
+      'a `role:` slot literal: position:<p> is the one position address (ADR-0090 D3) — write position:, and never '
+      + 'put role: back into approver-address.ts',
+    ).toEqual([]);
+    // The positive control: the scan reads the equivalence module's own prefix.
+    expect(live.filter((w) => w.startsWith(`${EQUIVALENCE_MODULE}:`)).length).toBeGreaterThan(0);
+  });
+
+  it('no role: slot (ADR-0090 D3): every <type>:<value> template is classified, and no slot writer interpolates an authored type', () => {
+    const sites: string[] = [];
+    const authored: string[] = [];
+    for (const path of allSourceFiles(HERE)) {
+      const sf = parse(path);
+      for (const template of typeValueTemplates(sf)) {
+        const key = `${relative(HERE, path)} · ${enclosingFunction(template, sf)} · ${template.getText(sf).replace(/\s+/g, ' ')}`;
+        sites.push(key);
+        if (interpolatesAuthoredType(template)) authored.push(key);
+      }
+    }
+    const unclassified = sites.filter((s) => !(s in TYPE_VALUE_TEMPLATES));
+    expect(
+      unclassified,
+      'a <type>:<value> literal is built outside the classified set: if it writes a slot, its type must be canonical '
+      + '(canonicalApproverType) — classify it in TYPE_VALUE_TEMPLATES with its reason',
+    ).toEqual([]);
+    const stale = Object.keys(TYPE_VALUE_TEMPLATES).filter((s) => !sites.includes(s));
+    expect(stale, 'a classified template changed or disappeared: re-classify it').toEqual([]);
+    expect(
+      authored,
+      'a template interpolates `<x>.type` — the AUTHORED approver type, which a flow can still spell `role`: '
+      + 'interpolate the canonicalApproverType(...) result instead',
+    ).toEqual([]);
+    // The fallback writer's `type` IS the canonical type, by name.
+    const service = parse(join(HERE, SERVICE));
+    expect(method(service, 'resolveApproverSpec').getText(service))
+      .toMatch(/const type = canonicalApproverType\(String\(a\.type\)\);[\s\S]*return \[`\$\{type\}:\$\{a\.value\}`\];/);
+  });
+
+  it('the role: scans catch what they name (planted literals, comments and templates)', () => {
+    const planted = ts.createSourceFile('planted.ts', [
+      '// role:sales_manager in a comment is masked',
+      '/* role:x */ const prefixes = [\'position:\', \'role:\'];',
+      'const asked = (p: string) => `role:${p}`;',
+      'const csv = \'u1,role:finance\';',
+      'const column = \'sys_member.role: owner\';',
+      'const key = { role: \'admin\' };',
+      'function f(a: any, type: string) { return [`${a.type}:${a.value}`, `${type}:${a.value}`, `${a.path}: ${a.message}`]; }',
+    ].join('\n'), ts.ScriptTarget.Latest, true);
+    const flagged = literalPieces(planted).filter(({ text }) => RETIRED_PREFIX.test(text)).map(({ text }) => text);
+    expect(flagged).toEqual(['role:', 'role:', 'u1,role:finance']);
+    const templates = typeValueTemplates(planted);
+    expect(templates.map((t) => t.getText(planted))).toEqual(['`${a.type}:${a.value}`', '`${type}:${a.value}`']);
+    expect(templates.map(interpolatesAuthoredType)).toEqual([true, false]);
   });
 
   it('the detector catches the shapes it names (a planted user-id comparison in each shape)', () => {
