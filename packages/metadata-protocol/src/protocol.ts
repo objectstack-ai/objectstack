@@ -1978,7 +1978,8 @@ interface StoredRowPlace {
  * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
  * (`getMetaItem`, its draft-preview arm, `getMetaItemLayered`) asks the store
  * candidate by candidate, and {@link mergePackageAwareOverlay} (the list's
- * active and draft-preview merges) asks the rows it already read. Before
+ * active and draft-preview merges, a list scoped to a package included, whose
+ * package-less rows enter as stand-ins, #21817) asks the rows it already read. Before
  * #21804 the list took the LATEST of a package's row and the package-less row
  * in row order, so in one order the list served the package-less body for a
  * package whose by-name read served the package's own row.
