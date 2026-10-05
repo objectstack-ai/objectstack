@@ -74,8 +74,10 @@ export type ParsedNodeConfig<T> =
     | { ok: false; refusal: { success: false; error: string; errorClass: 'guard' } };
 
 /** `config.fields[0].name` — the same path spelling the registration-time
- *  undeclared-key diagnostic uses, so both layers report locations alike. */
-function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
+ *  undeclared-key diagnostic uses, so both layers report locations alike.
+ *  [#21848] Also the spelling of registration's config-VALUE refusal
+ *  (`AutomationEngine.validateNodeConfigValues`), which reads it from here. */
+export function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
     let out = 'config';
     for (const seg of path) {
         out += typeof seg === 'number' ? `[${seg}]` : `.${String(seg)}`;
