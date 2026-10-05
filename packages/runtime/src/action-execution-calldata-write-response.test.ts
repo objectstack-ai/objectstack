@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SECRET_MASK } from '@objectstack/spec/data';
-import { callData, type ActionExecutionDeps } from './action-execution.js';
+import { callData, executeDeclarativeUpdateAction, type ActionExecutionDeps } from './action-execution.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
 const EC = { userId: 'u1', isSystem: false, positions: [], permissions: [] } as any;
@@ -102,5 +102,80 @@ describe('callData fallback write arms apply the write-response rules', () => {
     const { ql } = fallbackHarness();
     const raw = await ql.insert('cred_holder', { title: 'x' });
     expect(leaks(raw)).toEqual([STORED_PASSWORD, STORED_REF, STORED_INTERNAL]);
+  });
+});
+
+describe('callData fallback write arms fail closed when no schema resolves', () => {
+  function schemaLessHarness() {
+    const { ql } = fallbackHarness();
+    // No registry entry, and a metadata service that throws: nothing to judge the fields by.
+    ql.registry = { getObject: () => undefined };
+    const deps: ActionExecutionDeps = {
+      resolveService: (async (_c: HttpProtocolContext, name: string) => {
+        if (name === 'metadata') throw new Error('metadata unavailable');
+        return name === 'objectql' ? ql : undefined;
+      }) as any,
+      getObjectQL: async () => ql,
+    };
+    return { deps, ql };
+  }
+
+  it('create: answers the receipt only, carrying no record', async () => {
+    const { deps, ql } = schemaLessHarness();
+    // The exposure gate reads metadata too and falls open on its own; the write arm must not.
+    const res = await callData(deps, REQ, 'create', { object: 'cred_holder', data: { title: 'kept' } }, ql, undefined, EC);
+    expect(res).toEqual({ object: 'cred_holder', id: 'r1' });
+    expect(leaks(res)).toEqual([]);
+  });
+
+  it('update: answers the receipt only, carrying no record', async () => {
+    const { deps, ql } = schemaLessHarness();
+    await ql.insert('cred_holder', { title: 'one' });
+    const res = await callData(
+      deps, REQ, 'update',
+      { object: 'cred_holder', id: 'r1', data: { login_password: 'caller-sent-password' } },
+      ql, undefined, EC,
+    );
+    expect(res).toEqual({ object: 'cred_holder', id: 'r1' });
+    expect(leaks(res)).toEqual([]);
+  });
+});
+
+describe('declarative update action result applies the write-response rules', () => {
+  const ACTION = { name: 'set_cred', operation: 'update', undoable: true, params: [{ name: 'login_password', type: 'text' }] };
+  const run = async (opts: { schema: boolean; written?: unknown }) => {
+    const ql: any = { registry: { getObject: (n: string) => (opts.schema && n === 'cred_holder' ? SCHEMA : undefined) } };
+    const deps: ActionExecutionDeps = {
+      resolveService: (async () => { throw new Error('metadata unavailable'); }) as any,
+      getObjectQL: async () => ql,
+    };
+    return await executeDeclarativeUpdateAction(deps, ACTION, {
+      objectName: 'cred_holder',
+      actionName: 'set_cred',
+      subject: { record: { id: 'r1', title: 'one', login_password: SECRET_MASK }, recordLoadDenied: false },
+      recordId: 'r1',
+      params: { login_password: 'caller-sent-password', hidden_hash: STORED_INTERNAL },
+      ec: EC,
+      driver: ql,
+      requestContext: REQ,
+      callData: async () => opts.written,
+    });
+  };
+
+  it('redoData and the fallback record mask the patch; a masked redo value replays as unchanged', async () => {
+    const res: any = await run({ schema: true, written: { object: 'cred_holder', id: 'r1' } });
+    expect(leaks(res)).toEqual([]);
+    expect(res.undo.redoData.login_password).toBe(SECRET_MASK);
+    expect(Object.keys(res.undo.redoData)).not.toContain('hidden_hash');
+    expect(res.record.login_password).toBe(SECRET_MASK);
+    // The undo half is the prior READ, which was already masked.
+    expect(res.undo.undoData.login_password).toBe(SECRET_MASK);
+  });
+
+  it('fails closed with no schema: no undo anchor and no echoed patch', async () => {
+    const res: any = await run({ schema: false, written: { object: 'cred_holder', id: 'r1' } });
+    expect(leaks(res)).toEqual([]);
+    expect(res.undo).toBeUndefined();
+    expect(res.record).toEqual({ id: 'r1' });
   });
 });

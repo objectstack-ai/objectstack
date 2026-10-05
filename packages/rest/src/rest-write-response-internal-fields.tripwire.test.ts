@@ -469,6 +469,21 @@ describe('#8497 tripwire: no REST write response carries an `internal: true` val
     expect(raw[TOKEN_FIELD]).toBe(CREDENTIAL_SENTINELS[1]);
   }, 60_000);
 
+  it('POST /api/v1/batch update arm applies the rules even when the protocol has no helper method', async () => {
+    // The arm must not depend on an optional protocol method: a protocol
+    // occupant without it would otherwise skip both rules silently.
+    const booted = await bootRest();
+    const protocol = (booted.rest as unknown as { protocol: Record<string, unknown> }).protocol;
+    Object.defineProperty(protocol, 'omitInternalWriteFields', { value: undefined, configurable: true });
+    const id = await seed(booted);
+    const res = await call(booted, 'POST', '/api/v1/batch', {
+      body: { operations: [{ object: 'vault', action: 'update', id, data: { name: CONTROL } }] },
+    });
+    const wire = JSON.stringify(res.body ?? null);
+    expect(leaks(wire), wire).toEqual([]);
+    expect(wire.includes(CONTROL), wire).toBe(true);
+  }, 60_000);
+
   it('NEGATIVE CONTROL: the machinery goes red on a direct engine mouth that skips the helper', async () => {
     // A future author adds a second direct `ql.*` write mouth beside the batch
     // arm and forgets the strip. Reproduce that mouth here — same engine, same

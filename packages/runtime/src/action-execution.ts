@@ -136,6 +136,44 @@ export interface ActionExecutionDeps {
  * @param dataDriver - Optional environment-scoped driver to use instead of kernel default
  * @param scopeId - Optional project ID for scoped service resolution (SharedProjectPlugin mode)
  */
+/**
+ * The registered object schema a write mouth in this file applies the
+ * write-response rules (credential-class mask, `internal` omit) from: the
+ * engine's live registry first, then the metadata service. `undefined` when
+ * neither answers — callers FAIL CLOSED on that (echo no record), because an
+ * unjudged record is exactly the one that may carry a stored credential.
+ */
+export async function resolveWriteResponseSchema(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext | undefined,
+    ql: any,
+    object: string | undefined,
+    scopeId?: string,
+): Promise<unknown> {
+    if (!object) return undefined;
+    try {
+        const fromEngine = ql?.registry?.getObject?.(object);
+        if (fromEngine) return fromEngine;
+    } catch {
+        // fall through to the metadata service
+    }
+    try {
+        const meta = await deps.resolveService(requestContext as HttpProtocolContext, 'metadata', scopeId);
+        return (await (meta as any)?.getObject?.(object)) ?? undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** The engine for a schema lookup, or `undefined` — a lookup failure is judged by the caller's fail-closed branch. */
+async function resolveEngineQuietly(deps: ActionExecutionDeps, requestContext: HttpProtocolContext | undefined, envId?: string): Promise<unknown> {
+    try {
+        return (await deps.getObjectQL(requestContext as HttpProtocolContext, envId)) ?? undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 export async function callData(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: string,
@@ -170,17 +208,8 @@ export async function callData(deps: ActionExecutionDeps,
         const base = qlOpts ? { ...qlOpts } : {};
         return extra ? { ...base, ...extra } : (qlOpts ? base : undefined);
     };
-    /** The object schema the fallback write arms apply the write-response rules from. */
-    const writeResponseSchema = async (): Promise<unknown> => {
-        const fromEngine = ql?.registry?.getObject?.(params.object);
-        if (fromEngine) return fromEngine;
-        try {
-            const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
-            return await (meta as any)?.getObject?.(params.object);
-        } catch {
-            return undefined;
-        }
-    };
+    const writeResponseSchema = () =>
+        resolveWriteResponseSchema(deps, requestContext, ql, params?.object, scopeId);
 
     if (action === 'create') {
         // Prefer the protocol service (validations + RLS + audit), mirroring
@@ -198,7 +227,11 @@ export async function callData(deps: ActionExecutionDeps,
             // The engine's write result keeps the stored row whole, so this
             // fallback mouth owes the same write-response rules the protocol
             // ingress applies (credential-class mask, `internal` omit).
-            omitInternalFieldsFromWriteResponse(await writeResponseSchema(), record);
+            // Fail closed: with no schema to judge the fields by, no record
+            // is echoed at all — only the receipt.
+            const schema = await writeResponseSchema();
+            if (!schema) return { object: params.object, id: record.id };
+            omitInternalFieldsFromWriteResponse(schema, record);
             return { object: params.object, id: record.id, record };
         }
         throw { statusCode: 503, message: 'Data service not available' };
@@ -246,8 +279,11 @@ export async function callData(deps: ActionExecutionDeps,
             await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }));
             const record = { ...existing, ...params.data };
             // The echo carries the caller's own patch: a credential-class value
-            // in it is masked like a read of the stored row would be.
-            omitInternalFieldsFromWriteResponse(await writeResponseSchema(), record);
+            // in it is masked like a read of the stored row would be. Fail
+            // closed, as on create: no schema ⇒ the receipt only.
+            const schema = await writeResponseSchema();
+            if (!schema) return { object: params.object, id: params.id };
+            omitInternalFieldsFromWriteResponse(schema, record);
             return { object: params.object, id: params.id, record };
         }
         throw { statusCode: 503, message: 'Data service not available' };
@@ -2018,6 +2054,8 @@ export async function executeDeclarativeUpdateAction(
         ec: any;
         driver?: any;
         envId?: string;
+        /** The request the action arrived on — resolves the schema the result's credential mask reads. */
+        requestContext?: HttpProtocolContext;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
     },
 ): Promise<DeclarativeUpdateResult> {
@@ -2075,14 +2113,32 @@ export async function executeDeclarativeUpdateAction(
     const written = await callData('update', { object: objectName, id: recordId, data }, driver, envId, ec);
 
     const prior: Record<string, unknown> = subject.record ?? {};
+    // The result carries the caller's merged patch (`record`'s fallback,
+    // `undo.redoData`), so it owes the write-response rules a data-plane write
+    // response applies: a credential-class value is masked (and a masked value
+    // replays as "unchanged" through the echoed-mask guard), an `internal`
+    // value is omitted. Fail closed with no schema to judge by: no echoed
+    // record, and no undo anchor carrying the patch.
+    const responseSchema = await resolveWriteResponseSchema(
+        _deps,
+        wiring.requestContext,
+        driver ?? await resolveEngineQuietly(_deps, wiring.requestContext, envId),
+        objectName,
+        envId,
+    );
+    const echoed = (bag: Record<string, unknown>): Record<string, unknown> => {
+        const copy = { ...bag };
+        omitInternalFieldsFromWriteResponse(responseSchema, copy);
+        return copy;
+    };
     const record: Record<string, unknown> =
         written && typeof written === 'object' && (written as any).record && typeof (written as any).record === 'object'
             ? (written as any).record
-            : { ...prior, ...data };
+            : responseSchema ? echoed({ ...prior, ...data }) : { id: recordId };
 
     // ── contract point 5: `undoable` gets its anchor ─────────────────────────
     let undo: DeclarativeUpdateUndo | undefined;
-    if (action?.undoable === true) {
+    if (action?.undoable === true && responseSchema) {
         const undoData: Record<string, unknown> = {};
         // EXACTLY the fields written — the patch names them, which is the whole
         // reason `undoable` has an anchor now. `?? null` rather than a
@@ -2094,7 +2150,7 @@ export async function executeDeclarativeUpdateAction(
             objectName,
             recordId,
             undoData,
-            redoData: { ...data },
+            redoData: echoed(data),
         };
     }
 
@@ -2250,7 +2306,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // commit f19475c0a and #15168 each paid for once, on this exact seam.
     if (isDeclarativeUpdateAction(action)) {
         const result = await executeDeclarativeUpdateAction(deps, action, {
-            objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData,
+            objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData, requestContext,
         });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
