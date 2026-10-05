@@ -175,6 +175,20 @@ describe('reseed honest result', () => {
         expect(recordedWithSampleData()).toBe(false);
     });
 
+    it('a package with no seed dataset at all never reaches the loader: 400 RESEED_SKIPPED, unchanged', async () => {
+        const rawApp = await installAndGetRoutes();
+        const { data: _none, ...noData } = MANIFEST;
+        const installRes = await rawApp.routes.get('POST /api/v1/marketplace/install-local')!(
+            makeC({ manifest: { ...noData, id: 'app.test.nodata' } }),
+        );
+        expect(installRes.payload?.success).toBe(true);
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.nodata'));
+        expect(res.status).toBe(400);
+        expect(res.payload?.success).toBe(false);
+        expect(res.payload?.error?.code).toBe('RESEED_SKIPPED');
+        expect(res.payload?.error?.message).toContain('no-datasets');
+    });
+
     it('SUCCEEDS (200) over an intact baseline: every declared record already present, all of them skipped', async () => {
         const rawApp = await installAndGetRoutes();
         expect(recordedWithSampleData()).toBe(false);
