@@ -393,13 +393,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
-    type: 'object',
-    path: ROOT_PATH,
-    key: 'imageField',
-    why: 'declared, not enforced yet — liveness verdict `planned` (the record picture: the parse refuses any name but a declared `image` / `avatar` field, and the record chrome that is to draw it in the record page header does not read it yet). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
-  },
-  {
-    kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
     key: 'picklist',

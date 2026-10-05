@@ -47,6 +47,16 @@ export const objectForm = defineForm({
         // takes its candidates from a `dependsOn` source row, which a top-level
         // object row has nothing to point at).
         { field: 'nameField', type: 'text', colSpan: 1, helpText: 'Field whose value titles each record (e.g. "name", "subject"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews.' },
+        // #21765 (director ruling 5989738766, letter A) — `imageField`, the
+        // record's picture (#21182 ruling A), is the sibling pointer of
+        // `nameField` and gets the same face, for the same reason: it names one
+        // of THIS object's own fields and the registry has no own-field picker.
+        // No validator here either. The parse (`refuseNonPictureImageField` in
+        // `object.zod.ts`) is the one judge of the value, and its refusal at
+        // save is what an author sees for a name that is not an `image` /
+        // `avatar` field of this object. A cleared input writes no key, which
+        // the parse reads as no picture.
+        { field: 'imageField', type: 'text', colSpan: 1, helpText: 'Field whose value is each record\'s picture, drawn beside the title in the record page header. Must name a field of this object whose type is image or avatar; any other name is refused when the object is saved. Empty: no record picture, and no placeholder is drawn.' },
         { field: 'isSystem', type: 'boolean', colSpan: 1, helpText: 'System object (protected from deletion; defaults sharing to public)' },
         // #20349 — the object's two own field-name LISTS, beside the `nameField`
         // pointer. Free text, the `view.form.ts` `searchableFields` row's face:
