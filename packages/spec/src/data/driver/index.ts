@@ -12,6 +12,7 @@
  */
 
 export * from './common.zod';
+export * from './contractless-credentials';
 export * from './config-registry.zod';
 export * from './memory.zod';
 export * from './mongo.zod';

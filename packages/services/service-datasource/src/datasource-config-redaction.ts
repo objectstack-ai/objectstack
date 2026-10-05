@@ -92,13 +92,14 @@ export function restoreRedactedConfig(
     const parentPath = path.slice(0, -1);
     const leafKey = path[path.length - 1] as string;
     const patchParent = parentPath.length === 0 ? out : valueAt(out, parentPath);
-    if (!patchParent || typeof patchParent !== 'object' || Array.isArray(patchParent)) continue;
+    if (!patchParent || typeof patchParent !== 'object') continue;
+    if (Array.isArray(patchParent) && !isIndex(leafKey)) continue;
     // What the read path served at this position: `undefined` for a dropped
     // key, the rewritten string for a URL redaction. The patch speaks for the
     // author exactly where it DIFFERS from that projection.
     const servedParent = parentPath.length === 0 ? served.config : valueAt(served.config, parentPath);
     const servedLeaf =
-      servedParent && typeof servedParent === 'object' && !Array.isArray(servedParent)
+      servedParent && typeof servedParent === 'object'
         ? (servedParent as Record<string, unknown>)[leafKey]
         : undefined;
     if ((patchParent as Record<string, unknown>)[leafKey] !== servedLeaf) continue;
@@ -108,11 +109,20 @@ export function restoreRedactedConfig(
   return out;
 }
 
-/** The value at `path` inside a record-ish value, or `undefined` off the walk. */
+/** An array position, as the redactor spells it in a path (its decimal index). */
+const isIndex = (segment: string): boolean => /^(0|[1-9][0-9]*)$/.test(segment);
+
+/**
+ * The value at `path` inside a record-ish value, or `undefined` off the walk.
+ * An array is entered only at an index segment — the contractless-driver
+ * redaction withholds credentials inside array elements (`servers.0.password`),
+ * and an untouched round trip must restore them there too.
+ */
 function valueAt(value: unknown, path: readonly string[]): unknown {
   let node: unknown = value;
   for (const segment of path) {
-    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    if (!node || typeof node !== 'object') return undefined;
+    if (Array.isArray(node) && !isIndex(segment)) return undefined;
     node = (node as Record<string, unknown>)[segment];
   }
   return node;
@@ -125,11 +135,12 @@ function valueAt(value: unknown, path: readonly string[]): unknown {
  * known to exist and be a record — the caller checked before grafting.
  */
 function graftAt(out: Record<string, unknown>, path: readonly string[], value: unknown): void {
-  let node = out;
+  let node: Record<string, unknown> = out;
   for (const segment of path.slice(0, -1)) {
-    const child = { ...(node[segment] as Record<string, unknown>) };
+    const current = node[segment];
+    const child = Array.isArray(current) ? [...current] : { ...(current as Record<string, unknown>) };
     node[segment] = child;
-    node = child;
+    node = child as unknown as Record<string, unknown>;
   }
   node[path[path.length - 1] as string] = value;
 }

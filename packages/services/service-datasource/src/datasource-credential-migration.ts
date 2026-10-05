@@ -71,9 +71,8 @@
  */
 
 import {
-  connectionStringCredentialKeys,
+  findContractlessCredentials,
   isContractlessDriver,
-  isCredentialShapedConfigKey,
   redactableConfigKeys,
   redactUrlCredentials,
   refusedCredentialKeys,
@@ -149,14 +148,17 @@ function unbindableCredentialKeys(
 ): string[] {
   const present = new Set(stringValued(config).map(([key]) => key));
   const named = new Set(redactableConfigKeys(driver));
-  // A driver the platform ships no contract for is judged by NAME on the read
-  // path (`isContractlessDriver`): every credential-shaped key, and every
-  // connection string carrying a credential segment, is withheld there, so
-  // each is residue here too — never `nothing-to-migrate` for a row whose
-  // `apiKey` sits cleartext at rest.
+  // A driver the platform ships no contract for is judged by the read path's
+  // own walk (`findContractlessCredentials`): every top-level key holding a
+  // finding is residue here too — never `nothing-to-migrate` for a row whose
+  // credential sits cleartext at rest.
   if (isContractlessDriver(driver)) {
-    for (const [key, value] of stringValued(config)) {
-      if (isCredentialShapedConfigKey(key) || connectionStringCredentialKeys(value).length > 0) named.add(key);
+    for (const finding of findContractlessCredentials(config)) {
+      const top = finding.path[0];
+      if (top !== undefined) {
+        named.add(top);
+        present.add(top);
+      }
     }
   }
   return [...named]

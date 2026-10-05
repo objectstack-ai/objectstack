@@ -64,13 +64,12 @@
  *
  * For a driver the platform ships no contract for, source 1 is empty — the
  * registry is saying "nothing to check against", not "nothing to protect". Such
- * a driver's config is therefore judged by NAME: every key whose spelling is
- * credential-shaped (`isCredentialShapedConfigKey` in `driver/common.zod.ts` —
- * `password`, `apiKey`, `client_secret`, `secretAccessKey`, `privateKey`,
- * `accessToken`, …, case- and separator-insensitively) is dropped at every
- * object depth, and a credential segment inside a semicolon-delimited
- * connection string (`Server=h;Password=p`) is stripped like a URL's userinfo
- * password ({@link isContractlessDriver}). The write door judges the SAME
+ * a driver's config is judged by NAME and value SHAPE instead, through the one
+ * walk in `driver/contractless-credentials.ts` (`findContractlessCredentials`,
+ * built on `isCredentialShapedConfigKey`): values under credential-shaped keys,
+ * credential-shaped objects, `{ name, value }` header pairs, array elements,
+ * and credentials embedded in URLs and connection strings
+ * ({@link isContractlessDriver}). The write door judges the SAME
  * predicate: since ADR-0015 §10 ("credentials never appear in metadata
  * artefacts"), a contractless driver's config refuses the same credential
  * material at publish (`data/datasource.zod.ts`), so this read half is what
@@ -114,10 +113,9 @@ import {
   CREDENTIAL_URL_QUERY_PARAM_NAMES,
   credentialQueryParamOf,
   FORMER_CREDENTIAL_ALIASES,
-  isCredentialShapedConfigKey,
   MONGO_OPTIONS_CREDENTIAL_PATHS,
-  redactConnectionStringCredentials,
 } from './driver/common.zod';
+import { findContractlessCredentials, redactEmbeddedCredentials } from './driver/contractless-credentials';
 import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry.zod';
 
 // The canonical spellings and former aliases MOVED to `driver/common.zod.ts`
@@ -379,13 +377,10 @@ export function refusedCredentialKeys(driver: unknown): string[] {
  * Does the platform ship NO config contract for `driver` (a plugin-contributed
  * driver, or a spelling no builtin claims)?
  *
- * For such a driver the read path adds two NAME judgments to the four sources
- * below, both through the ONE predicate the write door's refusal also uses
- * (`isCredentialShapedConfigKey`, `driver/common.zod.ts`): every config key at
- * every object depth whose spelling is credential-shaped (`apiKey`,
- * `client_secret`, `secretAccessKey`, `privateKey`, `accessToken`, …), and
- * every credential segment inside a semicolon-delimited connection string
- * (`Server=h;Password=p`). Without a contract nothing else can say which key is
+ * For such a driver the read path does not run the four sources below: it
+ * withholds every position `findContractlessCredentials`
+ * (`driver/contractless-credentials.ts`) reports — the same walk the write
+ * door refuses by. Without a contract nothing else can say which key is
  * the secret, and serving one back in cleartext is a leak under any boundary.
  * A driver WITH a contract is unaffected: its measured lists decide.
  */
@@ -550,13 +545,12 @@ export function redactDatasourceConfig(
 ): RedactedDatasourceConfig {
   if (!config || typeof config !== 'object') return { config: {}, redactedKeys: [], redactedPaths: [] };
 
-  const hidden = new Set(redactableConfigKeys(driver));
   const contractless = isContractlessDriver(driver);
-  const isHidden = (key: string): boolean => hidden.has(key) || (contractless && isCredentialShapedConfigKey(key));
-  const redactString = (value: string): string => {
-    const url = redactUrlCredentials(value);
-    return contractless ? redactConnectionStringCredentials(url) : url;
-  };
+  if (contractless) return redactContractlessConfig(config);
+
+  const hidden = new Set(redactableConfigKeys(driver));
+  const isHidden = (key: string): boolean => hidden.has(key);
+  const redactString = (value: string): string => redactUrlCredentials(value);
   const removed: (readonly string[])[] = [];
 
   const scrub = (node: Record<string, unknown>, prefix: readonly string[]): Record<string, unknown> => {
@@ -614,6 +608,54 @@ export function redactDatasourceConfig(
     redactedKeys: removed.map((path) => path.join('.')),
     redactedPaths: removed,
   };
+}
+
+/**
+ * The read half of the contractless-driver judgment: every position
+ * `findContractlessCredentials` (`driver/contractless-credentials.ts`) reports
+ * — the SAME walk the write door refuses by — is withheld. A value under a
+ * credential position, or a subtree too deep to judge, is dropped (an array
+ * element is dropped from its array); a string with an embedded credential is
+ * rewritten without it (`redactEmbeddedCredentials`). Every position is
+ * reported, array indices included, so the write-path inverses can restore
+ * exactly what was withheld. Pure: the input is never mutated.
+ */
+function redactContractlessConfig(config: Record<string, unknown>): RedactedDatasourceConfig {
+  const findings = findContractlessCredentials(config);
+  if (findings.length === 0) return { config, redactedKeys: [], redactedPaths: [] };
+  const out = structuredClone(config) as Record<string, unknown>;
+  // Rewrites first, then drops deepest-first and, inside one array, highest
+  // index first — so a drop never shifts a position still to be visited.
+  const parentOf = (path: readonly string[]): unknown => {
+    let node: unknown = out;
+    for (const segment of path.slice(0, -1)) {
+      if (!node || typeof node !== 'object') return undefined;
+      node = (node as Record<string, unknown>)[segment];
+    }
+    return node;
+  };
+  for (const finding of findings) {
+    if (finding.kind !== 'embedded') continue;
+    const parent = parentOf(finding.path) as Record<string, unknown> | undefined;
+    const leaf = finding.path[finding.path.length - 1] as string;
+    if (parent && typeof parent[leaf] === 'string') parent[leaf] = redactEmbeddedCredentials(parent[leaf] as string);
+  }
+  const drops = findings
+    .filter((finding) => finding.kind !== 'embedded')
+    .sort((a, b) => {
+      if (a.path.length !== b.path.length) return b.path.length - a.path.length;
+      return Number(b.path[b.path.length - 1]) - Number(a.path[a.path.length - 1]) || 0;
+    });
+  for (const finding of drops) {
+    const parent = parentOf(finding.path);
+    const leaf = finding.path[finding.path.length - 1] as string;
+    if (Array.isArray(parent)) parent.splice(Number(leaf), 1);
+    else if (parent && typeof parent === 'object') delete (parent as Record<string, unknown>)[leaf];
+  }
+  const removed = findings
+    .map((finding) => finding.path)
+    .sort((a, b) => (a.join('.') < b.join('.') ? -1 : a.join('.') > b.join('.') ? 1 : 0));
+  return { config: out, redactedKeys: removed.map((path) => path.join('.')), redactedPaths: removed };
 }
 
 /**

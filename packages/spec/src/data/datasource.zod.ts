@@ -4,14 +4,8 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import {
-  connectionStringCredentialKeys,
-  CREDENTIAL_URL_QUERY_PARAM_NAMES,
-  isCredentialShapedConfigKey,
-  urlCredentialQueryParams,
-  urlUserinfoPassword,
-  urlUserinfoUsername,
-} from './driver/common.zod';
+import { urlUserinfoUsername } from './driver/common.zod';
+import { embeddedCredentialOf, findContractlessCredentials } from './driver/contractless-credentials';
 import { resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
 
 /*
@@ -493,9 +487,9 @@ const CONTRACTLESS_CREDENTIAL_REMEDY =
   + "this driver's factory as the connection secret. The driver receives it only if its factory "
   + 'reads that injected secret — a driver that needs it under this key must be taught to.';
 
-/** Refusal for a credential-SPELLED key in a contractless driver's `config`. */
+/** Refusal for credential material under a credential-shaped key in a contractless driver's `config`. */
 const CONTRACTLESS_INLINE_CREDENTIAL_REFUSED = (path: string, driver: string): string =>
-  `\`${path}\` is spelled like a credential and is not accepted in the \`config\` of a datasource `
+  `\`${path}\` holds credential material and is not accepted in the \`config\` of a datasource `
   + `whose driver ('${driver}') the platform ships no config contract for: the datasource is `
   + 'persisted whole into `sys_metadata` and its history, so an inline credential lands in '
   + 'cleartext at rest — credentials never appear in metadata artefacts. '
@@ -510,6 +504,22 @@ const CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED = (path: string, driver: string, 
   + '`user@host`, a connection string without the credential segment, is accepted). '
   + CONTRACTLESS_CREDENTIAL_REMEDY;
 
+/** Refusal for a subtree nested past the depth the credential walk judges. */
+const CONTRACTLESS_TOO_DEEP_REFUSED = (path: string, driver: string): string =>
+  `\`${path}\` is nested deeper than the credential check of a datasource whose driver ('${driver}') `
+  + 'the platform ships no config contract for reads, so whether it holds credential material '
+  + 'cannot be judged, and it is not accepted unjudged. Flatten the configuration. '
+  + CONTRACTLESS_CREDENTIAL_REMEDY;
+
+/**
+ * An environment placeholder in the one grammar a value may be replaced by
+ * (`${API_KEY}`: an upper-case environment name in `${…}`, the shell/compose
+ * convention the placeholder census measured authors writing). Such a span
+ * carries no credential material, so a value made only of them is not refused;
+ * any other `${…}` content is judged as written.
+ */
+const ENV_NAME_PLACEHOLDER_RE = /\$\{[A-Z_][A-Z0-9_]*\}/g;
+
 /**
  * Refuse inline credential material in the `config` of a datasource whose
  * driver the platform ships NO contract for (ADR-0015 §10: credentials never
@@ -521,20 +531,21 @@ const CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED = (path: string, driver: string, 
  * redactor also uses (`isCredentialShapedConfigKey`), so publish-time refusal
  * and read-time redaction treat a position identically:
  *
- *  - a non-empty STRING whose key, or any enclosing object's key, is
- *    credential-shaped (`apiKey`, `client_secret`, `auth.accessToken`,
- *    `credentials.privateKey`) — the enclosing-key half matches the read side,
- *    which drops a credential-shaped subtree whole;
- *  - a string carrying a URL userinfo password or a credential query parameter
- *    (the URL composite the read side strips), or a credential segment of a
- *    semicolon-delimited connection string (`Server=h;Password=p`).
+ * The judgment is ONE walk (`findContractlessCredentials`,
+ * `driver/contractless-credentials.ts`) that the read-path redactor reads too,
+ * so every position refused here is a position withheld there: a value under
+ * a credential-shaped key (strings, numbers, arrays of them), the non-descriptor
+ * leaves of a credential-shaped object, the `value` of a `{ name, value }`
+ * pair naming a credential, a string with an embedded credential (URL
+ * userinfo or query parameter, a URL `;key=value` tail, a semicolon or libpq
+ * connection string, scheme-less `user:password@host`), array elements
+ * included, and a subtree too deep to judge.
  *
- * Bounds: arrays are off the walk (row-shaped seed data, not configuration —
- * the read side's own boundary); an EMPTY string carries no secret and is
- * accepted (the `user:@host` posture, and the explicit way to clear a stored
- * value); a `${…}` environment placeholder is not credential material and is
- * judged as if absent; a non-string value under a credential-shaped name
- * (`usePassword: true`) is not credential material.
+ * Accepted: an EMPTY string (the `user:@host` posture, and the explicit way to
+ * clear a stored value), a boolean, and a value made only of environment
+ * placeholders in the `${NAME}` grammar ({@link ENV_NAME_PLACEHOLDER_RE}) —
+ * judged with those spans removed, so a literal secret beside one is still
+ * found.
  *
  * Routing the value into the secret store instead was the other option, and
  * is not taken: for a contractless driver nothing says which key the factory
@@ -549,52 +560,22 @@ function reportContractlessInlineCredentials(
   config: unknown,
   basePath: (string | number)[],
 ): void {
-  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
   const driverName = String(driver);
-  const walk = (node: Record<string, unknown>, prefix: string[], underCredential: boolean, depth: number): void => {
-    if (depth > 16) return;
-    for (const [key, value] of Object.entries(node)) {
-      const path = [...prefix, key];
-      const dotted = ['config', ...path].join('.');
-      const credentialNamed = underCredential || isCredentialShapedConfigKey(key);
-      if (typeof value === 'string') {
-        // A `${…}` span is an environment placeholder, not credential
-        // material: judged with every span removed, so `apiKey: '${API_KEY}'`
-        // and `Password=${PW}` stay accepted — this driver's config shape is
-        // unjudged, placeholders included (the #4410 boundary) — while a
-        // literal secret beside a placeholder is still found.
-        const judged = value.replace(/\$\{[^}]*\}/g, '');
-        if (judged.trim() === '') continue;
-        if (credentialNamed) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [...basePath, ...path],
-            message: CONTRACTLESS_INLINE_CREDENTIAL_REFUSED(dotted, driverName),
-          });
-          continue;
-        }
-        const segments = connectionStringCredentialKeys(judged);
-        const what = urlUserinfoPassword(judged) !== undefined
-          || urlCredentialQueryParams(judged, CREDENTIAL_URL_QUERY_PARAM_NAMES).length > 0
-          ? 'a credential inside a URL (a userinfo password or a credential query parameter)'
-          : segments.length > 0
-            ? `a credential segment (${segments.map((k) => `\`${k}=\``).join(', ')}) inside a connection string`
-            : undefined;
-        if (what) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [...basePath, ...path],
-            message: CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED(dotted, driverName, what),
-          });
-        }
-        continue;
-      }
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        walk(value as Record<string, unknown>, path, credentialNamed, depth + 1);
-      }
+  for (const finding of findContractlessCredentials(config)) {
+    const dotted = ['config', ...finding.path].join('.');
+    let message: string;
+    if (finding.kind === 'depth') {
+      message = CONTRACTLESS_TOO_DEEP_REFUSED(dotted, driverName);
+    } else if (finding.kind === 'named') {
+      if (typeof finding.value === 'string' && finding.value.replace(ENV_NAME_PLACEHOLDER_RE, '').trim() === '') continue;
+      message = CONTRACTLESS_INLINE_CREDENTIAL_REFUSED(dotted, driverName);
+    } else {
+      const what = embeddedCredentialOf(String(finding.value).replace(ENV_NAME_PLACEHOLDER_RE, ''));
+      if (!what) continue;
+      message = CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED(dotted, driverName, what);
     }
-  };
-  walk(config as Record<string, unknown>, [], false, 0);
+    ctx.addIssue({ code: 'custom', path: [...basePath, ...finding.path], message });
+  }
 }
 
 /**
