@@ -7,6 +7,8 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
+// [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
+import { isFederatedObject } from './federated-object.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
@@ -1492,7 +1494,7 @@ export class ObjectQLPlugin implements Plugin {
       );
       return;
     }
-    const federated = allObjects.filter((o: any) => o?.external != null);
+    const federated = allObjects.filter((o: any) => isFederatedObject(o));
     if (federated.length === 0) return;
 
     let bound = 0;
@@ -1614,7 +1616,7 @@ export class ObjectQLPlugin implements Plugin {
     let unbound = 0;
 
     for (const obj of allObjects) {
-      if ((obj as any).external != null) {
+      if (isFederatedObject(obj)) {
         federated++;
         continue;
       }
@@ -1757,7 +1759,7 @@ export class ObjectQLPlugin implements Plugin {
         // That is the point at which "still no driver" is final and is a real
         // defect, and it is reported as one — this skip is no longer the last
         // word on a declared external object.
-        if (obj.external != null) {
+        if (isFederatedObject(obj)) {
           ctx.logger.debug(
             'No driver yet for federated object — deferring its remote-table binding to the kernel:ready reconciliation',
             { object: obj.name, datasource: this.ql.resolveEffectiveDatasource?.(obj.name) },
@@ -1776,8 +1778,10 @@ export class ObjectQLPlugin implements Plugin {
       // remote database, so DDL (syncSchema/initObjects) is forbidden and would
       // throw. Register read metadata (physical remote table + coercion maps)
       // without DDL so the query path resolves to the remote table, then skip
-      // the DDL grouping below.
-      if (obj.external != null) {
+      // the DDL grouping below. `ObjectQL.syncSchemas` (the runtime sync) routes
+      // by this SAME predicate and gives the same treatment, so the two passes
+      // cannot disagree about which objects are DDL targets (#21777).
+      if (isFederatedObject(obj)) {
         if (typeof driver.registerExternalObject === 'function') {
           try {
             await driver.registerExternalObject(obj);
