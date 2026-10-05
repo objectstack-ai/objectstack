@@ -2626,7 +2626,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
         type: 'autolaunched' as const,
         nodes: [
             { id: 'start', type: 'start', label: 'Start' },
-            { id: 'custom', type, label: 'Custom' },
+            { id: 'custom', type, label: 'Custom', ...(type === 'approval' ? { config: { approvers: [{ type: 'user', value: 'u1' }] } } : {}) },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [

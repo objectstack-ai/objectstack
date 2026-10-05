@@ -97,28 +97,31 @@
       "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": ["three DISTINCT users each holding one of the approver positions"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["a quorum (minApprovals: 2) request whose three position approvers resolve to three distinct users"],
+        "requires": [
+          "a quorum (minApprovals: 2) request whose three position approvers resolve to three distinct users",
+          "RUNTIME FIXTURE (admin API only, stock boot, nothing seeded or committed; proved by run #21845) — apply it before the quorum steps, in this order: (1) bind a second committee position holder: as the admin, POST /api/v1/data/sys_user_position {user_id: <Ada Auditor's user id>, position: 'finance', organization_id: <the showcase organization id>} — admin + Ada is a real 2-of-2 slate; (2) for the full 2-of-3, invite + sign up a third user and bind them to position 'legal' the same way; prove each persona with GET /api/v1/auth/get-session before it acts; (3) DISABLE the competing per-group sign-off flow for the run: POST /api/v1/automation/showcase_expense_signoff/toggle {\"enabled\": false} — it has no amount ceiling and opens its request first on any >= 5000 report, so without this the quorum flow's open fails DUPLICATE_REQUEST; re-enable it with {\"enabled\": true} afterwards; (4) open a FRESH request after the bindings, because a slate is fixed when its request opens: create a draft showcase_expense_report, add one showcase_expense_line of 6000 (total_amount >= 5000, the committee threshold), then PATCH the report's status to 'submitted'. Use a second fresh request the same way for the veto case"
+        ],
         "knownGaps": [
           "the FLOW half of the fixture is real and seeded — showcase_committee_quorum (2-of-3 quorum over positions manager/finance/legal, examples/app-showcase/src/automation/flows/index.ts) is launched on EXP-DEMO by seed-approval-demo.ts. What still collapses the slate is POSITION ASSIGNMENT, not a missing flow or a pending design call: the admin holds all three committee positions (ADMIN_APPROVAL_POSITIONS = manager/finance/legal/exec, seed-approval-demo.ts) and Ada Auditor deliberately holds ONLY auditor, so all three slots resolve to one person and the runtime clamps 2-of-3 to 1-of-1",
-          "the remaining unblock is a SEED LINE: assign Ada 'finance' (or 'legal') in seed-approval-demo.ts. She has been a real credential login on a stock boot since #9308, and the per-group demo is untouched by the grant — its finance GROUP routes position 'auditor' (flows/index.ts), not position 'finance'. That one line yields a two-distinct-holder slate (admin + Ada), turning minApprovals 2 into a real 2-of-2: the threshold tally, actor distinctness and the one-rejection veto all become demonstrable. Only the 'third approver's pending task is closed by finalization' clause needs more — a THIRD distinct holder (e.g. a legal-holding persona), an equally mechanical seed addition"
+          "CLOSED for runs by the runtime fixture in requires (#21845) — the seed gap itself remains and is why the fixture exists: the remaining unblock is a SEED LINE: assign Ada 'finance' (or 'legal') in seed-approval-demo.ts. She has been a real credential login on a stock boot since #9308, and the per-group demo is untouched by the grant — its finance GROUP routes position 'auditor' (flows/index.ts), not position 'finance'. That one line yields a two-distinct-holder slate (admin + Ada), turning minApprovals 2 into a real 2-of-2: the threshold tally, actor distinctness and the one-rejection veto all become demonstrable. Only the 'third approver's pending task is closed by finalization' clause needs more — a THIRD distinct holder (e.g. a legal-holding persona), an equally mechanical seed addition. Landing those seed lines (and an amount ceiling on the per-group flow) retires the runtime fixture; until then a run states that its verdict rests on the runtime fixture, and the seeded EXP-DEMO request stays the clamp contrast because its slate was fixed when it opened at seed time"
         ]
       },
-      "blocked": { "by": "fixture", "ref": "#3358 — slate collapse is now a one-line seed gap, not a design call: the quorum flow ships (showcase_committee_quorum) and Ada is loginable (#9308); assign her a committee position for 2-of-2, add a third holder for full 2-of-3 (see knownGaps)" },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "runnable today (the clamp contrast): GET the seeded showcase_committee_quorum request on EXP-DEMO (behavior quorum, minApprovals 2 over manager/finance/legal — all resolving to the admin); record the collapsed pending slate",
         "approve it ONCE as the admin and re-read: it finalizes immediately — the documented runtime clamp (minApprovals can never exceed the resolvable approver count), recorded as the CONTRAST, never as M-of-N proof",
-        "once the three-distinct-users fixture exists: as approver 1, POST /api/v1/approvals/requests/:id/approve — re-read: status STILL pending (1 of 2), approver 1 dropped from the slate",
+        "apply the runtime fixture (fixtures.requires, steps 1-4) and open a FRESH quorum request; then as approver 1, POST /api/v1/approvals/requests/:id/approve — re-read: status STILL pending (1 of 2), approver 1 dropped from the slate",
+        "repeat-actor probe: as the NON-PRIVILEGED approver who already decided (e.g. Ada), approve the same request again — refused (403) and the tally unchanged; a user holding none of the routed positions is refused the same way. ⛔ Never use the platform/tenant admin for this probe — an admin decision is the documented override (#3424) and finalizes by design",
         "as approver 2, approve — re-read: status=approved, remaining pending task for approver 3 closed",
         "GET /:id/actions — exactly two approve rows from two distinct actors",
         "on a SECOND quorum request: as any single approver, POST /reject — re-read immediately",
-        "screenshot the drawer's M-of-N progress at each stage alongside the API reads"
+        "screenshot the drawer's tally line ('Approvals — x of y') at each stage alongside the API reads — the drawer subtitle '(2 of 3)' is the flow's static text, not the tally"
       ],
       "acceptance": [
         {
@@ -136,37 +139,43 @@
         {
           "clause": "a single rejection vetoes even with quorum-1 approvals already recorded",
           "oracle": "api",
-          "verify": "on the second request: status flips to rejected on the first reject; no further tasks remain actionable; the flow run resumes down its reject edge",
+          "verify": "on the second request: status flips to rejected on the first reject; no further tasks remain actionable; the run goes paused → completed and the request is rejected. The reject EDGE itself is not observable — end nodes log no step — so the run's status transition is the run-side evidence",
           "evidence": "API read after the reject + run read"
         },
         {
           "clause": "the third approver's pending task is closed by finalization, not left dangling",
           "oracle": "api",
-          "verify": "after quorum is met, the request no longer lists approver 3 in pending_approvers and their inbox 待我审批 count drops",
+          "verify": "after quorum is met, the request no longer lists approver 3 in pending_approvers and their inbox 'My Pending' tab count drops (the English console's label; 待我审批 only on a zh-CN session)",
           "evidence": "request read + inbox count"
         },
         {
           "clause": "the drawer's M-of-N tally is server-computed and matches the API at each stage",
           "oracle": "screenshot",
-          "verify": "progress screenshot after each decision alongside the paired API read",
+          "verify": "after each decision, the drawer's 'Approvals — x of y' tally line alongside the paired API read; the drawer subtitle '(2 of 3)' is static flow text and is never read as the tally",
           "evidence": "screenshots + reads"
         }
       ],
       "negative": [
-        "a second approval by the SAME user must not count twice toward the quorum — a request that finalizes on two approvals from one actor is a FAIL of the distinctness the tally claims",
-        "the clamp contrast must be filed as evidence of the fixture gap, never ticked as M-of-N passing — a run record marking this item pass on stock seeds is itself a FAIL of protocol"
+        "a second approval by the SAME NON-PRIVILEGED user must not count twice toward the quorum — the repeat decision is refused, and a request that finalizes on two approvals from one such actor is a FAIL of the distinctness the tally claims. The repeat actor must be a plain member holder: a platform/tenant admin's decision is the documented privileged override (#3424) and finalizes by design, recorded with via_override:true — that is never a distinctness FAIL",
+        "the clamp contrast must be filed as evidence of the fixture gap, never ticked as M-of-N passing — a run record marking this item pass on stock seeds WITHOUT the runtime fixture is itself a FAIL of protocol"
       ],
       "traps": ["seed-data-thin", "wrong-persona"],
       "source": [
         "#3358 §1",
         "examples/app-showcase/src/automation/flows/index.ts#CommitteeQuorumFlow (CommitteeQuorumFlow, #3266)",
         "packages/spec/src/automation/approval.zod.ts#minApprovals (behavior 'quorum' + minApprovals clamp: 'Clamped at runtime so it can never exceed the resolvable approver count')",
-        "examples/app-showcase/src/security/seed-approval-demo.ts#admin (EXP-DEMO launch + admin position grants)"
+        "examples/app-showcase/src/security/seed-approval-demo.ts#admin (EXP-DEMO launch + admin position grants)",
+        "examples/app-showcase/src/automation/flows/index.ts#ExpenseSignoffFlow (the competing per-group flow the fixture disables — same trigger, no amount ceiling)",
+        "packages/runtime/src/domains/automation.ts (POST /automation/:name/toggle — the enablement door the fixture uses)",
+        "packages/plugins/plugin-security/src/objects/sys-user-position.object.ts (the position binding row the fixture writes: user_id / position / organization_id)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts (privileged-override gate #3424, via_override on the action row)",
+        "#21845 (follow-up run: 2-of-2 and 2-of-3 PASS under the runtime fixture)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; carried the fixture blocker forward explicitly", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-30", "change": "blocked ref re-worded to price the gap honestly: the old 'showcase design call pending' read as an open-ended product decision, but the quorum flow fixture ships (showcase_committee_quorum, 2-of-3 over manager/finance/legal) and Ada Auditor has been a real login since #9308 — the slate collapse survives only because seed-approval-demo.ts gives the admin all three committee positions and Ada only auditor. knownGaps now states the exact remaining cost (one seed line assigning Ada a committee position → 2-of-2 demonstrable; a third distinct holder for the full 2-of-3), verified against source including the per-group demo's non-collision (its finance group keys on position 'auditor')", "ref": "#sweep-2026-08-30" }
+        { "revision": 3, "date": "2026-08-30", "change": "blocked ref re-worded to price the gap honestly: the old 'showcase design call pending' read as an open-ended product decision, but the quorum flow fixture ships (showcase_committee_quorum, 2-of-3 over manager/finance/legal) and Ada Auditor has been a real login since #9308 — the slate collapse survives only because seed-approval-demo.ts gives the admin all three committee positions and Ada only auditor. knownGaps now states the exact remaining cost (one seed line assigning Ada a committee position → 2-of-2 demonstrable; a third distinct holder for the full 2-of-3), verified against source including the per-group demo's non-collision (its finance group keys on position 'auditor')", "ref": "#sweep-2026-08-30" },
+        { "revision": 4, "date": "2026-10-05", "change": "blocked lifted: run #21845 passed 2-of-2 and 2-of-3 on fresh requests under a runtime fixture (admin-API position bindings, a third signed-up holder, and the per-group sign-off flow disabled because it opens first on any >= 5000 report and the quorum open then fails DUPLICATE_REQUEST); the recipe is written into fixtures.requires and the seed-gap knownGap is marked CLOSED-for-runs, not deleted. Three clauses re-pointed from the same run: negative[0] now requires a NON-PRIVILEGED repeat actor, because an admin decision is the documented override (#3424, via_override:true) and finalizes by design; acceptance[2] asserts the run's paused → completed transition with the request rejected, since the reject edge is not observable (end nodes log no step); acceptance[3] names the English inbox tab 'My Pending', and acceptance[4] plus the screenshot step read the drawer's 'Approvals — x of y' line as the tally, not the static '(2 of 3)' subtitle (card #21851 entries 1, 5, 6, 7)", "ref": "#21845" }
       ]
     },
     {
@@ -813,31 +822,32 @@
       "title": "A node's SLA escalation fires once past its timeout — the declared action runs and an escalate timeline row lands",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": ["dev admin"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch autolaunched flow in a WRITABLE package with an approval node carrying config.escalation {enabled:true, timeoutHours, action, escalateTo, notifySubmitter} (ApprovalEscalationSchema, packages/spec/src/automation/approval.zod.ts)",
-          "clock control OR fractional-hour support: timeoutHours has a min of 1 and the escalation sweep (ApprovalService.runEscalations, ESCALATION_JOB_NAME, ADR-0042) runs on an interval against this.clock.now(), so driving a request PAST its deadline needs an injected/advanced clock or a direct runEscalations() call with a clock whose now() is beyond slaDueAt = created_at + timeoutHours"
+          "one scratch autolaunched flow PER escalation action, each with an approval node carrying config.escalation {enabled:true, timeoutHours:1, action, escalateTo (reassign only), notifySubmitter:true} (ApprovalEscalationSchema, packages/spec/src/automation/approval.zod.ts), registered at runtime by the admin through POST /api/v1/automation — NO writable package is needed",
+          "clock control: timeoutHours has a min of 1 and the escalation sweep (ApprovalService.runEscalations, ESCALATION_JOB_NAME, ADR-0042) reads this.clock.now(), so the deadline is reached by moving the process's wall clock, never by waiting an hour",
+          "RUNTIME FIXTURE — wall-clock offset shim (proved by run #21845; a test fixture that lives in the run's scratch dir, ⛔ never committed and never a product change): a small CommonJS module loaded into the server with NODE_OPTIONS=--require <path-to-shim> that wraps the global Date constructor and Date.now so every reading adds an offset in milliseconds read from a file the runner controls, and sets Date.prototype.constructor to the wrapper; timers (setTimeout / setInterval) are untouched, and no product logic is changed. Start the boot with the offset at 0; advance by writing a new offset (e.g. +2h) to the file"
         ],
         "knownGaps": [
-          "hour-granular SLAs are not drivable on stock fixtures in a single session: the minimum timeoutHours is 1 and the sweep uses real time, so reaching the deadline requires a timing harness (clock injection / controllable runEscalations) that stock showcase does not provide — the timeout-dependent clauses (2/3/4) run only under that harness; clauses 1 and 5 are runnable today"
+          "CLOSED for runs by the wall-clock offset shim in requires (#21845): hour-granular SLAs are not drivable on stock fixtures without it — the minimum timeoutHours is 1 and the sweep uses real time — so the timeout-dependent clauses (2/3/4) rest on the shim, and a run states that it used it; clauses 1 and 5 need no shim",
+          "the sweep cadence a run waits on: the periodic sweep runs every 5 minutes (ESCALATION_SCAN_INTERVAL_MS = 5 * 60 * 1000, approval-service.ts; scheduled as ESCALATION_JOB_NAME in approvals-plugin.ts), and the plugin also runs one catch-up sweep at boot. After advancing the offset, either wait for the next 5-minute sweep or restart the server (shim still loaded, offset file kept) to get the boot sweep — there is no public route that fires a sweep on demand"
         ]
       },
-      "blocked": { "by": "fixture", "ref": "hour-granular SLA needs a clock-control / runEscalations timing harness (timeoutHours min 1, sweep on real-time interval) — no stock-fixture way to advance past the deadline in-session" },
       "variants": ["reassign", "auto_approve", "auto_reject", "notify"],
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "in a writable package author + register a flow whose approval node config.escalation = {enabled:true, timeoutHours:1, action:'reassign', escalateTo:'<position machine name or user id>', notifySubmitter:true}",
+        "start the server with the wall-clock offset shim loaded (NODE_OPTIONS=--require <path-to-shim>, offset 0 — see fixtures.requires); as the admin, register one flow per variant through POST /api/v1/automation (no writable package needed) whose approval node config.escalation = {enabled:true, timeoutHours:1, action:<the variant>, notifySubmitter:true}, plus escalateTo:'<position machine name or user id>' on the reassign flow",
         "trigger the flow; GET /api/v1/approvals/requests/:id — status=pending and the request carries sla_due_at = created_at + timeoutHours (the SLA is materialized on open)",
-        "[needs clock control] advance the clock past sla_due_at (inject a clock / drive ApprovalService.runEscalations() with a clock whose now() is beyond the deadline) and run one escalation sweep",
+        "advance the shim's offset to +2h (past sla_due_at) and let ONE escalation sweep run: wait for the next 5-minute periodic sweep, or restart the server with the shim and offset kept so the boot catch-up sweep runs",
         "GET /:id/actions — assert exactly one action='escalate' row (the audit-first idempotency marker) whose comment names the action and which carries no actor: actor_id is absent on the read (stored null), because a machine action records no actor and the escalate row is the attribution (ADR-0118 D1)",
         "assert the declared action's effect: reassign → pending_approvers swapped to the escalatees + an approval.escalated notification to them; auto_approve/auto_reject → request finalized approved/rejected and the owning run resumes; notify → an approval.sla_breached notification to the pending approvers",
         "with notifySubmitter!==false, read the submitter's inbox — an approval.sla_breached notification addressed to them",
-        "idempotency: run the sweep a SECOND time — GET /:id/actions shows NO second escalate row (single-shot, marker-guarded)",
+        "idempotency: let a SECOND sweep run (the next 5-minute tick, and a restart for the boot sweep) — GET /:id/actions shows NO second escalate row (single-shot, marker-guarded)",
         "author-negative: build a scratch flow whose escalation carries an unknown key (or the `timeout`/`sla` alias) and validate it"
       ],
       "acceptance": [
@@ -850,7 +860,7 @@
         {
           "clause": "past the deadline the sweep escalates exactly ONCE: one action='escalate' timeline row, and a re-run adds none",
           "oracle": "api",
-          "verify": "after advancing past sla_due_at and sweeping, GET /:id/actions has exactly one action='escalate' row with no actor (actor_id absent on the read, stored null — ADR-0118 D1: a machine action records no actor, and the escalate row is the attribution); a second sweep adds no further escalate row (the audit row is the idempotency marker, written before any mutation)",
+          "verify": "after advancing the shim past sla_due_at and a sweep (5-minute periodic or the boot catch-up), GET /:id/actions has exactly one action='escalate' row with no actor (actor_id absent on the read, stored null — ADR-0118 D1: a machine action records no actor, and the escalate row is the attribution); a second sweep adds no further escalate row (the audit row is the idempotency marker, written before any mutation)",
           "evidence": "actions reads after the first and second sweeps"
         },
         {
@@ -881,11 +891,16 @@
       "source": [
         "packages/spec/src/automation/approval.zod.ts#ApprovalEscalationSchema (ApprovalEscalationSchema — enabled/timeoutHours(min 1)/action(reassign|auto_approve|auto_reject|notify)/escalateTo/notifySubmitter, strict, #4001; carried on the approval node as config.escalation)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#runEscalations (runEscalations sweep + escalateRequest — audit-first escalate row, per-action effects, notifySubmitter; slaDueAt; ESCALATION_JOB_NAME ADR-0042; this.clock)",
-        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (sla_due_at surfaced on the request)"
+        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (sla_due_at surfaced on the request)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#ESCALATION_SCAN_INTERVAL_MS (the 5-minute sweep interval)",
+        "packages/plugins/plugin-approvals/src/approvals-plugin.ts (schedules the interval sweep under ESCALATION_JOB_NAME and runs one boot catch-up sweep)",
+        "packages/runtime/src/domains/automation.ts (POST /automation → registerFlow: the runtime registration door the fixture uses)",
+        "#21845 (follow-up run: the clauses ran under the wall-clock offset shim)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — pins the ADR-0042 SLA escalation (declared action fires once past timeout + escalate timeline row); blocked on a clock-control timing harness (hour granularity), with the sla_due_at materialization and the strict-schema build clause runnable today", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-03", "change": "the escalate row's expected actor corrected: step 5 and the single-shot clause asserted actor SLA_ACTOR_ID, but under ADR-0118 D1 the sweep records no actor (actor_id null, absent on the GET /:id/actions read) and the escalate row is the attribution, so a run following the old text would report a false failure. Nothing else in the item changes", "ref": "#21517" }
+        { "revision": 2, "date": "2026-10-03", "change": "the escalate row's expected actor corrected: step 5 and the single-shot clause asserted actor SLA_ACTOR_ID, but under ADR-0118 D1 the sweep records no actor (actor_id null, absent on the GET /:id/actions read) and the escalate row is the attribution, so a run following the old text would report a false failure. Nothing else in the item changes", "ref": "#21517" },
+        { "revision": 3, "date": "2026-10-05", "change": "blocked lifted: run #21845 drove every clause under a wall-clock offset shim loaded with NODE_OPTIONS=--require (Date and Date.now offset from a file, timers untouched, no product logic changed). The shim is written into fixtures.requires as a recipe, not committed as code; the clock knownGap is marked CLOSED-for-runs, not deleted. The item now registers its flows through POST /api/v1/automation (no writable package needed), one flow per escalation action, and names the 5-minute sweep interval plus the boot catch-up sweep that the advance-the-clock and idempotency steps wait on (card #21851 entry 2)", "ref": "#21845" }
       ]
     },
     {

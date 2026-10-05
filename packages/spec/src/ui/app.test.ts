@@ -331,7 +331,7 @@ describe('NavigationItemSchema (Recursive)', () => {
     expect(() => NavigationItemSchema.parse(item)).toThrow();
   });
 
-  it('rejects runAction combined with recordId (no list surface to auto-run on, #4848)', () => {
+  it('rejects runAction combined with recordId (no list surface to auto-run on)', () => {
     const item = {
       id: 'nav_bad3',
       label: 'Bad',
@@ -658,7 +658,7 @@ describe('AppSchema', () => {
   });
 });
 
-describe('App Mobile Navigation (retired, #4001)', () => {
+describe('App Mobile Navigation (retired)', () => {
   it('rejects the retired mobileNavigation block with the prescription', () => {
     // Pre-#4001 these tests asserted a mode picker that changed NOTHING — the
     // block was fully unimplemented (2026-06 liveness audit: even
@@ -705,7 +705,7 @@ describe('defineApp', () => {
   });
 });
 
-describe('AppSchema retired sharing/embed keys (#4001)', () => {
+describe('AppSchema retired sharing/embed keys', () => {
   it('rejects app-level sharing with the FormView prescription', () => {
     const result = AppSchema.safeParse({
       name: 'public_app',
@@ -1066,7 +1066,7 @@ describe('AppSchema with areas', () => {
 // authors, and a parse-time prescription for everyone else. Not a silent
 // strip: AppSchema is not yet .strict(), so a bare deletion would have
 // reintroduced the exact failure mode this campaign eliminates.
-describe('retired dead keys carry prescriptions (#4001)', () => {
+describe('retired dead keys carry prescriptions', () => {
   it.each([
     ['version', '1.0.0', 'manifest.version'],
     // ⚠️ The expected fragment used to be `component/widget`. The widget half
@@ -1101,7 +1101,7 @@ describe('retired dead keys carry prescriptions (#4001)', () => {
   // of the new words would keep passing if the retired claim were re-added
   // underneath them, and asserting only the absence would pass on an empty
   // string — the vacuity the surrounding pins exist to avoid.
-  describe('the `apis` prescription tracks the executor (#5238)', () => {
+  describe('the `apis` prescription tracks the executor', () => {
     const prescription = (): string => {
       const result = AppSchema.safeParse({ name: 'app_x', label: 'X', apis: [] });
       expect(result.success).toBe(false);
@@ -1135,7 +1135,7 @@ describe('retired dead keys carry prescriptions (#4001)', () => {
 // union is DISCRIMINATED on `type` so strict stays readable: one unknown key
 // yields one issue against the branch the author actually wrote, at an exact
 // path, instead of an `invalid_union` wall naming all nine branches.
-describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
     const result = schema.safeParse(value);
     expect(result.success).toBe(false);
@@ -1377,7 +1377,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
     });
   });
   // ── homePageId / areas[].order retired in 17.0.0 (#4667, ADR-0049) ────────
-  describe('retired app keys (#4667)', () => {
+  describe('retired app keys', () => {
     it('rejects `homePageId` and names what actually decides the landing page', () => {
       // Tombstoned (retiredKey), matching the seven #4142 retirements on this
       // schema — so it is a tsc error as well as a parse error. Post-v17 the
@@ -1392,7 +1392,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       expect(parse).toThrow(/isDefault/s);
     });
 
-    it('the tombstone states the REAL reason, not the false "no shell read it" premise (#4709)', () => {
+    it('the tombstone states the REAL reason, not the false "no shell read it" premise', () => {
       // #4667 shipped this tombstone claiming "no shell ever read it". It was
       // false — objectui's console read the key in `resolveLandingRoute()`
       // (packages/app-shell/src/console/AppContent.tsx @785b8a5d) and it was the
@@ -1459,7 +1459,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
   // looking for the replacement knob on the area, and there is none. The
   // message has to move them one level down (per item) or one level up (per
   // app) — the two layers that are actually enforced.
-  describe('retired fail-open area gates (#4651)', () => {
+  describe('retired fail-open area gates', () => {
     const withArea = (extra: Record<string, unknown>) => ({
       name: 'crm', label: 'CRM',
       areas: [{ id: 'area_admin', label: 'Admin', navigation: [], ...extra }],

@@ -94,6 +94,7 @@ export const SysUser = ObjectSchema.create({
       // and every add flows through better-auth invitations, never bespoke
       // sys_user CRUD.
       requiresFeature: 'organization',
+      requiresMembershipReach: 'invite_member',
       successMessage: 'Invitation sent',
       refreshAfter: true,
       params: [

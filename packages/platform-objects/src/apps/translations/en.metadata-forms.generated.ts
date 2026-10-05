@@ -1772,6 +1772,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Requires Feature",
         helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
       },
+      requiresMembershipReach: {
+        label: "Requires Membership Reach",
+        helpText: "The organization endpoint this action calls, so it is offered only to members whose grade reaches that endpoint. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
+      },
       requiredPermissions: {
         label: "Required Permissions",
         helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them."

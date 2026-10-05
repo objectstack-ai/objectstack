@@ -90,7 +90,7 @@ function stackRefusals(config: unknown): string[] {
   }
 }
 
-describe('#14092 — `operation: \'update\'` + `patch` is accepted (the bulk def\'s vocabulary, mirrored)', () => {
+describe('`operation: \'update\'` + `patch` is accepted (the bulk def\'s vocabulary, mirrored)', () => {
   it('accepts the duly shape on a standalone action that names its object', () => {
     const parsed = ActionSchema.parse({ ...duly, objectName: 'duly_task' });
     expect(parsed.operation).toBe('update');
@@ -160,7 +160,7 @@ describe('#14092 — `operation: \'update\'` + `patch` is accepted (the bulk def
   });
 });
 
-describe('#14092 — key shape: a parallel key beside `type`, not an `ActionType` member', () => {
+describe('key shape: a parallel key beside `type`, not an `ActionType` member', () => {
   it('leaves the ActionType vocabulary exactly as it was', () => {
     // objectui types its dispatch table `Record<RunnableActionType, …>` so a
     // member added here stops the console compiling until it has an executor —
@@ -206,7 +206,7 @@ describe('#14092 — key shape: a parallel key beside `type`, not an `ActionType
   });
 });
 
-describe('#14092 — mixing rule: one refusal per contradiction, at the contradicting key', () => {
+describe('mixing rule: one refusal per contradiction, at the contradicting key', () => {
   const refused: ReadonlyArray<readonly [key: string, value: unknown, opening: RegExp]> = [
     ['target', 'doThing', /^`target` names a handler, URL, page, flow or endpoint — an `operation: 'update'` action dispatches on none of them/],
     ['body', { language: 'js', source: 'return 1;', capabilities: [] }, /^`body` is the inline handler of a `type: 'script'` action — an `operation: 'update'` action has no handler/],
@@ -277,7 +277,7 @@ describe('#14092 — mixing rule: one refusal per contradiction, at the contradi
     expect(custom?.message).toMatch(/^`operation: 'custom'` is a bulk-def operation with no row-level form: on a bulk def `'custom'` dispatches the action the def NAMES/);
   });
 
-  it('composes with the #7428 pair rule — `confirmText` beside a non-empty `params` is still one dialog too many', () => {
+  it('composes with the `confirmText` + `params` pair rule — `confirmText` beside a non-empty `params` is still one dialog too many', () => {
     const result = ActionSchema.safeParse({ ...duly, confirmText: 'Sure?', params: [{ name: 'note', type: 'text' as const }] });
     expect(issueAt(result, 'confirmText')?.code).toBe('custom');
     // and nothing ELSE fires — the update itself is well-formed.
@@ -285,7 +285,7 @@ describe('#14092 — mixing rule: one refusal per contradiction, at the contradi
   });
 });
 
-describe('#14092 — boundaries', () => {
+describe('the declarative row update — boundaries', () => {
   it('an inline page-element action cannot carry the keys at all (registered-action form only)', () => {
     const result = InlineActionSchema.safeParse({ operation: 'update', patch: { status: 'done' } });
     expect(result.success).toBe(false);

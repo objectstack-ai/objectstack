@@ -55,7 +55,7 @@ const unknownKeyIssue = (type: string, extra: Record<string, unknown>) => {
   return r.error!.issues.find((i) => i.code === 'unrecognized_keys');
 };
 
-describe('#18159 — the three blocks are the ones under test, and they are strict', () => {
+describe('the three record blocks are the ones under test, and they are strict', () => {
   it('each baseline document parses on its own — the positive control every refusal below rests on', () => {
     for (const type of BLOCKS) {
       expect(parse(type, {}).success).toBe(true);
@@ -77,7 +77,7 @@ describe('#18159 — the three blocks are the ones under test, and they are stri
   });
 });
 
-describe('#18159 — `enforceFieldSecurity` is declared on all three blocks', () => {
+describe('`enforceFieldSecurity` is declared on all three blocks', () => {
   it('parses GREEN with the key set — the whole document, not just the key name', () => {
     for (const type of BLOCKS) {
       const r = parse(type, { enforceFieldSecurity: true });
@@ -115,7 +115,7 @@ describe('#18159 — `enforceFieldSecurity` is declared on all three blocks', ()
   });
 });
 
-describe('#18159 — `redactFields` is declared on all three blocks', () => {
+describe('`redactFields` is declared on all three blocks', () => {
   it('parses GREEN with the key set, and keeps the authored list', () => {
     for (const type of BLOCKS) {
       const r = parse(type, { redactFields: ['salary', 'ssn'] });
@@ -171,7 +171,7 @@ const declaring = (key: string) =>
 /** One lit `aria` value — accepted on all three blocks, so the probe can say yes. */
 const ARIA = { ariaLabel: 'Record block' };
 
-describe('#18159 — `requiredPermissions` is declared on the three blocks (instruments A and B)', () => {
+describe('`requiredPermissions` is declared on the three blocks as a capability set (instruments A and B)', () => {
   it.each(BLOCKS)('A · %s parses GREEN with the key set — the whole document, beside the lit control `aria`', (type) => {
     // Lit control first, on the same block and the same base document: a probe
     // that cannot say yes to a key known to be declared proves nothing below.
@@ -252,7 +252,7 @@ describe('#18159 — `requiredPermissions` is declared on the three blocks (inst
   });
 });
 
-describe('#18159 — the pair was declared on THESE blocks only', () => {
+describe('the field-security pair was declared on THESE blocks only', () => {
   it('the sibling `record:quick_actions` still refuses both keys — no spray', () => {
     for (const key of ['enforceFieldSecurity', 'redactFields'] as const) {
       const r = RecordQuickActionsProps.safeParse({
