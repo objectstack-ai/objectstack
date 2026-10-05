@@ -264,6 +264,15 @@ export default defineConfig({
               find: /^@objectstack\/cloud-connection$/,
               replacement: path.resolve(__dirname, '../../cloud-connection/src/index.ts'),
             },
+            // [#21788] `external-import-saves-like-meta.dogfood.test.ts` mounts
+            // `ExternalDatasourceServicePlugin` on a real boot (the harness
+            // does not) and drives the import door. The plugin's save path is
+            // the pin's subject, so the verdict is aliased to THIS checkout's
+            // source, not to the last `pnpm build`.
+            {
+              find: /^@objectstack\/service-datasource$/,
+              replacement: path.resolve(__dirname, '../../services/service-datasource/src/index.ts'),
+            },
           ],
         },
         test: {
