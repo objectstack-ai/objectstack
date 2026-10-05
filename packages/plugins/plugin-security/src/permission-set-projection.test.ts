@@ -1136,9 +1136,9 @@ describe('[#21861] a data-door UPDATE writes back into the stored row it edits â
     };
     expect(await run(makeMiddleware(ql, protocol), opCtx)).toBe(false);
 
-    expect(protocol.saves.map((s: any) => s.packageId), 'the save names the row\'s own package').toEqual([PKG]);
     expect(activeRows(ql, 'support_agent'), 'after: still one row, same binding, carrying the edit')
       .toEqual([{ organization_id: null, package_id: PKG, description: 'edited at the data door' }]);
+    expect(protocol.saves.map((s: any) => s.packageId), 'the save names the row\'s own package').toEqual([PKG]);
     expect(opCtx.result?.description, 'the projected record follows').toBe('edited at the data door');
   });
 
@@ -1175,12 +1175,12 @@ describe('[#21861] a data-door UPDATE writes back into the stored row it edits â
       data: { description: 'bulk' }, options: { where: { name: { $in: ['pkg_set', 'org_set'] } } },
     });
 
-    expect(protocol.saves.map((s: any) => [s.name, s.packageId ?? null]))
-      .toEqual([['pkg_set', PKG], ['org_set', null]]);
-    expect({ pkg: activeRows(ql, 'pkg_set'), org: activeRows(ql, 'org_set') }).toEqual({
+    expect({ pkg: activeRows(ql, 'pkg_set'), org: activeRows(ql, 'org_set') }, 'after').toEqual({
       pkg: [{ organization_id: null, package_id: PKG, description: 'bulk' }],
       org: [{ organization_id: null, package_id: null, description: 'bulk' }],
     });
+    expect(protocol.saves.map((s: any) => [s.name, s.packageId ?? null]))
+      .toEqual([['pkg_set', PKG], ['org_set', null]]);
   });
 
   it('a set a code package ships is still refused by the lock (403 NOT_OVERRIDABLE) before any binding read or save', async () => {
