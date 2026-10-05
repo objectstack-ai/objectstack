@@ -141,7 +141,7 @@ function expectTombstoneRefusal(site: Pick<RetiredSite, 'qualified' | 'schema' |
   expect(issue!.message).not.toMatch(/os migrate meta/);
 }
 
-describe('[#14477] ESignatureConfig deadline pair retirement — refusal at every site', () => {
+describe('ESignatureConfig deadline pair retirement — refusal at every site', () => {
   for (const site of SITES) {
     it(`REJECTS an authored \`${site.qualified}\` at path \`${site.issuePath.join('.')}\`, carrying the prescription`, () => {
       expectTombstoneRefusal(site);
@@ -169,7 +169,7 @@ describe('[#14477] ESignatureConfig deadline pair retirement — refusal at ever
   });
 });
 
-describe('[#14477] no-materialize: parsed configurations carry neither key and neither former default', () => {
+describe('no-materialize: parsed configurations carry neither key and neither former default', () => {
   it('on the base schema', () => {
     const parsed = ESignatureConfigSchema.parse(CONFIG);
     expect(parsed).not.toHaveProperty('expirationDays');
@@ -187,7 +187,7 @@ describe('[#14477] no-materialize: parsed configurations carry neither key and n
   });
 });
 
-describe('[#14477] the tsc channel: the input type of both retired keys is `never`', () => {
+describe('the tsc channel: the input type of both retired keys is `never`', () => {
   it('fails tsc at both authoring sites', () => {
     const config: ESignatureConfig = {
       ...CONFIG,
@@ -215,7 +215,7 @@ describe('[#14477] the tsc channel: the input type of both retired keys is `neve
   });
 });
 
-describe('[#14477] ADR-0087 registration', () => {
+describe('ADR-0087 registration', () => {
   it('declares both sites under major 18, with the D3 semantic entry wired and no D2 conversion', () => {
     for (const site of SITES) {
       expect(RETIRED_KEYS_BY_MAJOR[18], `${site.registered} must be declared`).toContain(site.registered);

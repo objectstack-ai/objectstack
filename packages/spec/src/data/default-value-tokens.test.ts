@@ -12,7 +12,7 @@ import {
   isAppResolvedDefaultToken,
 } from './default-value-tokens.js';
 
-describe('defaultValue runtime tokens (#4560)', () => {
+describe('defaultValue runtime tokens — one vocabulary the engine and the DDL both read', () => {
   it('declares the complete family, and every member is described', () => {
     expect([...DEFAULT_VALUE_TOKENS]).toEqual(['NOW()', 'current_user']);
     for (const token of DEFAULT_VALUE_TOKENS) {

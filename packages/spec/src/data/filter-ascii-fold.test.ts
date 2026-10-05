@@ -29,7 +29,7 @@ describe('foldAsciiCase', () => {
     expect(foldAsciiCase('acme corp')).toBe('acme corp');
   });
 
-  it('leaves non-ASCII letters ALONE — the #4706 Q1 boundary', () => {
+  it('leaves non-ASCII letters ALONE — the case-insensitive operators fold ASCII only', () => {
     // The whole contract in one line: `toLowerCase()` answers 'café' here, and
     // that is the answer three of the five backends cannot deliver.
     expect(foldAsciiCase('CAFÉ')).toBe('cafÉ');
