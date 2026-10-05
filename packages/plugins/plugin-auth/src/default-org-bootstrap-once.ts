@@ -19,9 +19,12 @@
  *  - once recorded — or once acted on in this process, whether or not the
  *    record landed — the bootstrap still (re)creates a missing default
  *    organization but binds nobody and hands over no seed ownership;
- *  - with no readable ledger it binds only on the call that CREATES the
+ *  - with no ledger on the kernel it binds only on the call that CREATES the
  *    default organization, so a fresh install still gets its owner and an
- *    existing organization is never re-bound.
+ *    existing organization is never re-bound;
+ *  - with a ledger that failed to answer it binds nobody on that call (it may
+ *    still create the organization) and leaves the decision to the next
+ *    trigger.
  */
 
 import {
@@ -71,7 +74,16 @@ export function createEnsureDefaultOrganizationOnce(
       return ensure(ql, { ...base, bindOwner: false });
     }
 
-    const res = await ensure(ql, { ...base, bindOnlyOnCreate: reading !== 'absent' });
+    // `unavailable` (this kernel has no ledger) binds only on the call that
+    // CREATES the default organization, so a fresh install without a ledger
+    // still gets its owner. `unreadable` is a ledger that exists but failed to
+    // answer: the decision may well be recorded, so this call binds nobody —
+    // it can still (re)create the organization — and the next trigger, with a
+    // readable ledger, decides.
+    const res =
+      reading === 'unreadable'
+        ? await ensure(ql, { ...base, bindOwner: false })
+        : await ensure(ql, { ...base, bindOnlyOnCreate: reading === 'unavailable' });
     // Decided: the admin was bound now, or already held a membership.
     // `no_admin` and the failed writes leave it open for the next trigger.
     const actedOn = res.memberCreated || res.reason === 'admin_already_in_org';

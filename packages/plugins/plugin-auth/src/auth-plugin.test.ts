@@ -1617,16 +1617,41 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_migration).toHaveLength(0);
     });
 
-    it('CONTROL: unreadable ledger on a fresh install still creates the organization and binds its owner', async () => {
+    it('fresh install, ledger UNREADABLE: the org is created, nobody is bound, and the next readable trigger decides', async () => {
       const realFindOne = ql.findOne.getMockImplementation();
+      let ledgerDown = true;
       ql.findOne.mockImplementation(async (object: string, q: any) => {
-        if (object === 'sys_migration') throw new Error('ledger read failed');
+        if (object === 'sys_migration' && ledgerDown) throw new Error('ledger read failed');
         return realFindOne(object, q);
       });
       await boot();
       await hookCapture.trigger('kernel:ready');
       expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(0);
+
+      // The ledger answers again: the bind is decided now, once, and recorded.
+      ledgerDown = false;
+      await fireBootstrapWrite({ object: 'sys_user', operation: 'update', data: { email_verified: true } });
       expect(ql.tables.sys_member).toEqual([expect.objectContaining({ user_id: 'admin', role: 'owner' })]);
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-default-org-owner-bind');
+    });
+
+    it('fresh install, NO ledger on the kernel: the org is created and its owner bound on that call', async () => {
+      ql.getObject.mockImplementation((name: string) => (name === 'sys_migration' ? undefined : { name }));
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toEqual([expect.objectContaining({ user_id: 'admin', role: 'owner' })]);
+
+      // Removed, then a later trigger in a new process: the org exists, so
+      // the no-ledger rule binds nobody.
+      ql.tables.sys_member.length = 0;
+      hookCapture = createHookCapture();
+      mockContext.hook = hookCapture.hookFn;
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member).toHaveLength(0);
     });
 
     it('a failed ledger write is latched in-process: a second trigger re-binds nobody', async () => {

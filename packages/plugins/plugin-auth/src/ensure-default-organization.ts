@@ -307,6 +307,12 @@ export interface EnsureDefaultOrganizationResult {
  * Ensure the platform admin has a Default Organization to operate in.
  * Safe to call multiple times — idempotent on stable slug `default`
  * and on the presence of any existing `sys_member` row for the admin.
+ *
+ * @deprecated Call it through {@link createEnsureDefaultOrganizationOnce}
+ * (`default-org-bootstrap-once.ts`). Called directly, this helper binds the
+ * platform admin as owner whenever they hold no membership, so a bootstrap
+ * trigger re-binds an admin whose membership was removed — ADR-0093 D7
+ * decides membership once. Kept as the primitive the gated factory wraps.
  */
 export async function ensureDefaultOrganization(
   ql: any,
