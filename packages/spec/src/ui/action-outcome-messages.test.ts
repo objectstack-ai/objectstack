@@ -12,7 +12,10 @@
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
  * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
  * carried from the pin this repo builds against (`.objectui-sha` =
- * `9dfaca654`; `ActionRunner.composeSuccessMessage`, in
+ * `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654`; `ActionRunner.composeSuccessMessage`, in
  * `core/src/actions/ActionRunner.ts`, byte-identical to `2e818d0b5`, re-read
  * 2026-10-05, and to `ab1879721` before it), where the ledger row
  * turned `live`. Its behaviour is pinned on objectui's side, so the "a handler returning

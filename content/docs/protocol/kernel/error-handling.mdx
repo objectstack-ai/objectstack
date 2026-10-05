@@ -907,6 +907,12 @@ Content-Type: application/json
 }
 ```
 
+⚠️ **This is the answer for a row the caller can read.** A by-id update or delete of a row
+the caller **cannot read** answers exactly what an id that names no row answers —
+`404 RECORD_NOT_FOUND` — whichever rule hides the row, so the write door never tells
+"hidden" apart from "gone". A caller who can read the row but may not write it gets the 403
+shown here.
+
 ⚠️ **`FORBIDDEN`, not `PERMISSION_DENIED`.** A by-id write the sharing rules refuse carries
 `FORBIDDEN`; `PERMISSION_DENIED` is what the capability and identity guards carry. Both are
 403s in the same envelope on this door, so branch on either — ⛔ but do not assume one code

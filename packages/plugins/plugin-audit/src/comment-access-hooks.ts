@@ -200,6 +200,12 @@ function forbid(message: string, object?: string): never {
  * The code of the platform's not-visible refusal: the one plugin-security's
  * by-id write pre-image check throws when the caller's own read visibility
  * does not reach the target row (`PermissionDeniedError`, 403).
+ *
+ * [#21771] No longer the pre-image check's answer for a row the caller cannot
+ * read: under the write doors' ruling A that check asks the caller's read
+ * visibility for every principal, and answers the by-id update or delete the
+ * caller addressed with what a nonexistent id answers, before this gate runs.
+ * This refusal stays the gate's own, for a write the gate answers first.
  */
 const NOT_VISIBLE_CODE: StandardErrorCode = 'PERMISSION_DENIED';
 const NOT_VISIBLE_STATUS = 403;

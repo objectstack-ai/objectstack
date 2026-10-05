@@ -76,7 +76,6 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
-import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 // ── the two objects under probe ────────────────────────────────────────────
 
@@ -375,10 +374,12 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
       const res = await stack.apiAs(bobToken, 'PATCH', `/data/${object}/${target}`, { body: 'should-not-land' });
       expect(res.status, `${object}: a row outside the declaration must be refused`).toBeGreaterThanOrEqual(400);
       const envelope: any = await res.json().catch(() => ({}));
+      // On `private` Bob cannot READ the row, and a row the caller cannot read
+      // answers what a nonexistent id answers (the write doors' ruling A).
       expect(
         JSON.stringify(envelope),
         `${object}: the refusal carries a real error envelope, not a bare throw`,
-      ).toMatch(/FORBIDDEN|PERMISSION_DENIED/);
+      ).toMatch(object === CLOSED ? /RECORD_NOT_FOUND/ : /FORBIDDEN|PERMISSION_DENIED/);
       expect((await rowById(object, target))?.body, `${object}: the row is untouched`).toBe('seed');
     }
   });
@@ -427,22 +428,21 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
     const target = ids(CLOSED).theirsAdmitted;
     await expect(security.checkAuthoredRowWrite(CLOSED, target, 'update', bobCtx)).resolves.toBe('admit');
 
+    // The contract question this case left open is now ruled (the write doors'
+    // ruling A): a by-id write does not land on a row the caller cannot read,
+    // and the answer is the read door's — what a nonexistent id answers.
     const res = await stack.apiAs(bobToken, 'PATCH', `/data/${CLOSED}/${target}`, { body: 'e2e-secret' });
-    expect(res.status, 'still refused — the pre-image gate reads as the caller').toBe(403);
+    expect(res.status, 'still refused — the pre-image gate reads as the caller').toBe(404);
     const envelope: any = await res.json().catch(() => ({}));
-    expect(envelope?.code, 'ADR-0112 error code').toBe('PERMISSION_DENIED');
-    // [#7451] Re-spelled against the catalog CONSTANT. The English developer
-    // sentence this used to match is now `developerMessage`, logged at the
-    // throw site and never shipped; what a caller reads is the localized
-    // `record_access_denied` entry (`en` here — this caller declares no
-    // locale). It still discriminates exactly as before: the sharing
-    // middleware's refusal is a different code AND a different sentence
-    // (`FORBIDDEN: insufficient privileges`), so matching the row gate's own
-    // catalog entry still proves which gate answered.
+    expect(envelope?.code, 'ADR-0112 error code').toBe('RECORD_NOT_FOUND');
+    // The sentence is the read door's not-found for the id Bob supplied. It
+    // still discriminates which gate answered: the sharing middleware's
+    // refusal is a different code AND a different sentence (`FORBIDDEN:
+    // insufficient privileges`).
     expect(
       String(envelope?.error ?? ''),
       'the row-level gate refused, NOT the sharing middleware (that shape would be `FORBIDDEN: insufficient privileges`)',
-    ).toBe(BUILTIN_OPERATION_MESSAGES.en.record_access_denied);
+    ).toBe(`Record ${target} not found in ${CLOSED}`);
     // And the developer half stays off the wire — this is the END-TO-END
     // measurement behind #7414's decision to log rather than ship it. REST's
     // `mapDataError` builds `{ error, code, object? }` and never reads
@@ -461,7 +461,8 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
       const res = await stack.apiAs(carolToken, 'PATCH', `/data/${object}/${target}`, { body: 'carol-should-not-land' });
       expect(res.status, `${object}: Carol declares nothing and must be refused`).toBeGreaterThanOrEqual(400);
       const envelope: any = await res.json().catch(() => ({}));
-      expect(JSON.stringify(envelope)).toMatch(/FORBIDDEN|PERMISSION_DENIED/);
+      // Carol cannot read the `private` row: the read door's not-found (ruling A).
+      expect(JSON.stringify(envelope)).toMatch(object === CLOSED ? /RECORD_NOT_FOUND/ : /FORBIDDEN|PERMISSION_DENIED/);
       expect((await rowById(object, target))?.body, `${object}: the row is untouched`).toBe(before);
     }
   });

@@ -228,7 +228,7 @@ describe('parent-derived write refusal on an unreadable parent names nothing', (
 
   for (const c of cases) {
     for (const verb of ['DELETE', 'PATCH'] as const) {
-      it(`${c.label} ${verb}: the outside-the-domain caller gets the pre-image check's not-visible refusal, naming nothing`, async () => {
+      it(`${c.label} ${verb}: the outside-the-domain caller gets the same answer as the org_member, naming nothing`, async () => {
         const mine = outsideRows[c.key];
         const ref = insideRows[c.key];
         const payload = verb === 'PATCH' ? c.patch : undefined;
@@ -239,12 +239,16 @@ describe('parent-derived write refusal on an unreadable parent names nothing', (
         const got = await answer(await outside.stack.apiAs(outside.token, verb, `/data/${c.object}/${mine.row.id}`, payload));
         const reference = await answer(await inside.stack.apiAs(inside.token, verb, `/data/${c.object}/${ref.row.id}`, payload));
 
-        // Pin 1 — the reference really is the pre-image check's refusal…
-        expect(reference.status, reference.text).toBe(403);
-        expect(reference.body.code).toBe('PERMISSION_DENIED');
-        // …and the outside caller's answer is the same answer, field by field.
+        // Pin 1 — the reference is the by-id write pre-image check's answer
+        // for a row the caller cannot read, which since the write doors'
+        // ruling A is the read door's: what a nonexistent id answers…
+        expect(reference.status, reference.text).toBe(404);
+        expect(reference.body.code).toBe('RECORD_NOT_FOUND');
+        // …and the outside caller's answer is the same answer, field by field
+        // — the one difference being the id each caller itself supplied.
         expect(got.status, got.text).toBe(reference.status);
-        expect(got.body).toEqual(reference.body);
+        expect(JSON.parse(got.text.split(String(mine.row.id)).join('ID')))
+          .toEqual(JSON.parse(reference.text.split(String(ref.row.id)).join('ID')));
 
         // Pin 2 — no parent identity anywhere in the body.
         const [parentObject, parentId] = mine.parent;

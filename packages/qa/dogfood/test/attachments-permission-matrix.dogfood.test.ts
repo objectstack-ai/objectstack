@@ -327,9 +327,12 @@ describe('attachments permission matrix (#2755)', () => {
     // cannot read that record. The gate's own code is pinned on a parent the
     // caller CAN read (the next case). This used to accept either code because
     // which one arrived depended on whether the boot was org-bound.
+    //
+    // Since the write doors' ruling A that refusal IS the read door's answer:
+    // a row the caller cannot read answers what a nonexistent id answers.
     const denied = await stack.apiAs(memberBTok, 'DELETE', `/data/sys_attachment/${row.id}`);
-    expect(denied.status).toBe(403);
-    expect(((await denied.json()) as any).code).toBe('PERMISSION_DENIED');
+    expect(denied.status).toBe(404);
+    expect(((await denied.json()) as any).code).toBe('RECORD_NOT_FOUND');
     expect(await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS })).toBeTruthy();
 
     // The uploader (admin) may delete it.
