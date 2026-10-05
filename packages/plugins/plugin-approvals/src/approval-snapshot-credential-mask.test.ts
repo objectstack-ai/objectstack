@@ -41,8 +41,9 @@ function makeEngine(withSchema = true) {
       return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 1000));
     },
     async insert(object: string, data: any) { ensure(object).push({ ...data }); return { ...data }; },
-    async update(_object: string, data: any) { return data; },
-    async delete() { return null; },
+    // Opening a request and reading it back reach no update/delete verb, so
+    // the double declares none (the same reasoning as
+    // `approval-payload-masked-field.test.ts`).
   };
   if (withSchema) {
     engine.getSchema = (object: string) => object !== OBJECT ? undefined : {
