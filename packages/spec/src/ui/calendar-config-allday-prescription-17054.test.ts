@@ -57,7 +57,7 @@ const flatRefusalMessage = (): string => {
   return String(issue?.message ?? '');
 };
 
-describe('[#17054] the `object-calendar` prescription names only keys `CalendarConfigSchema` accepts', () => {
+describe('the `object-calendar` prescription names only keys `CalendarConfigSchema` accepts', () => {
   /**
    * ⭐ The pin for the DEFECT CLASS, not for one key. It reads the key list out
    * of the prescription the runtime actually prints and asks the config schema
@@ -103,7 +103,7 @@ describe('[#17054] the `object-calendar` prescription names only keys `CalendarC
   });
 });
 
-describe('[#17054] what the widening did NOT open', () => {
+describe('what declaring `allDayField` did NOT open', () => {
   /**
    * The flat spelling stays refused. `allDayField` became a member of the
    * `calendar` config object, ⛔ not a second authorable spelling on the block

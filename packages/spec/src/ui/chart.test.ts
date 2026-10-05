@@ -268,7 +268,7 @@ describe('Chart I18n Integration', () => {
 // renaming onto the tombstone — lives with its siblings in
 // `aria-carrier-tombstones.test.ts`; this one holds the local fact that the door
 // on THIS shape is shut.
-describe('Chart ARIA Integration — retired (#17751)', () => {
+describe('Chart ARIA Integration — retired, no renderer ever applied it', () => {
   it('refuses an ARIA block and carries the upgrade in the rejection', () => {
     const result = ChartConfigSchema.safeParse({
       type: 'pie',
@@ -324,7 +324,7 @@ describe('Chart ARIA Integration — retired (#17751)', () => {
 // meets a `no gate` verdict elsewhere and closes it in passing is the failure
 // this file was written to make visible (#4583).
 // ============================================================================
-describe('#4001 批 15 — the five closed chart sites', () => {
+describe('批 15 — the five closed chart sites', () => {
   const reject = (schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: unknown } } }, value: unknown): string => {
     const r = schema.safeParse(value);
     expect(r.success, 'expected this to be REJECTED').toBe(false);
@@ -473,7 +473,7 @@ describe('#4001 批 15 — the five closed chart sites', () => {
   });
 });
 
-describe('#4001 批 15 — the two chart sites left open on a measurement, CLOSED at #5583', () => {
+describe('批 15 — the two chart sites left open on a measurement, since CLOSED as strict objects', () => {
   // `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm have a LIVE
   // carrier — the react tier's `<ObjectChart aggregate={…}>` prop, which
   // objectui's ObjectChart reads to run the query — and, as of **#5020**, a
@@ -490,7 +490,7 @@ describe('#4001 批 15 — the two chart sites left open on a measurement, CLOSE
   // here from a future sweep should be able to see both states. The companion
   // pins live in `packages/lint`'s `validate-react-page-props.test.ts`, which
   // inverted in the same PR.
-  it('ChartAggregateSchema REJECTS an undeclared key, by name (#5583 — was a silent strip)', () => {
+  it('ChartAggregateSchema REJECTS an undeclared key, by name (was a silent strip)', () => {
     const r = ChartAggregateSchema.safeParse({ function: 'count', groupBy: 'status', groupby: 'status' });
     expect(r.success, 'if this parses again the strictness was reverted — re-read the header in chart.zod.ts').toBe(false);
     const issue = r.error!.issues[0];
@@ -515,7 +515,7 @@ describe('#4001 批 15 — the two chart sites left open on a measurement, CLOSE
     expect(ChartAggregateSchema.safeParse({ function: 'count', groupBy: 'status' }).success).toBe(true);
   });
 
-  it("ChartGroupBySchema's object arm REJECTS an undeclared key — and the UNION collapses its message (#5583)", () => {
+  it("ChartGroupBySchema's object arm REJECTS an undeclared key — and the UNION collapses its message", () => {
     const r = ChartGroupBySchema.safeParse({ field: 'created_at', dateGranularty: 'month' });
     expect(r.success).toBe(false);
 
@@ -628,7 +628,7 @@ describe('#4001 批 15 — the two chart sites left open on a measurement, CLOSE
 // declared key is one an `ObjectChart.tsx` read point was measured for, and
 // nothing else got in.
 // ============================================================================
-describe('#5022 — ChartDrillDownSchema', () => {
+describe('ChartDrillDownSchema — the honest subset, every key one ObjectChart reads', () => {
   const reject = (value: unknown): string => {
     const r = ChartDrillDownSchema.safeParse(value);
     expect(r.success, 'expected this to be REJECTED').toBe(false);
@@ -718,7 +718,7 @@ describe('#5022 — ChartDrillDownSchema', () => {
     expect(msg, 'a guidance entry suppresses the rename suggestion').not.toContain(`\`${key}\` → `);
   });
 
-  it("target: 'navigate' is ACCEPTED — objectui#3382 made the renderer deliver it (#5435)", () => {
+  it("target: 'navigate' is ACCEPTED — the chart renderer delivers it now", () => {
     // This test asserted the exact opposite until #5435, and the flip is the
     // point: #5022 excluded `'navigate'` on a MEASUREMENT ("ObjectChart falls
     // through to the Sheet"), not on a design preference. objectui#3382
