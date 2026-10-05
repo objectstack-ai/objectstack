@@ -2,6 +2,7 @@
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
+import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 
 import { decoupleFromEngineState } from './decouple-flow-record.js';
 
@@ -472,6 +473,32 @@ export class RecordChangeTrigger implements FlowTrigger {
         const isolatedRecord = decoupleFromEngineState(hydrated, isolation);
         const isolatedPrevious = decoupleFromEngineState(materializedPrevious, isolation);
 
+        // ADR-0100 — the flow's trigger record is served on the GENERIC read
+        // path's terms: a credential-class field (`secret`, and `password`
+        // outside the exempt `managedBy` buckets) carries `SECRET_MASK` (or
+        // `null` when unset) and an `internal: true` field is omitted. The
+        // engine's own write result keeps the stored row whole for privileged
+        // in-process callers, so this consumer — the one that hands the row to
+        // flow authoring — is where the mask belongs, through THE one helper
+        // every other external mouth uses (no second statement of the rule).
+        // Everything downstream inherits it: the variables map (`record`,
+        // `$record`, `previous`), a paused run's persisted state and its read
+        // doors, and the run a resume rehydrates, in-process or after a
+        // restart. A flow that needs a credential reads it through a
+        // privileged binder, never off the trigger record.
+        //
+        // Applied LAST — after hydration, materialisation and the decoupling
+        // copy — so no later layer re-introduces a clear value, and IN PLACE on
+        // the decoupled copies only, so the engine's `ctx.result` /
+        // `ctx.previous` (shared with every other binding and hook on this
+        // write) are never touched. The definition is read here regardless of
+        // `groundTruth`: materialisation needs persisted state, the mask does
+        // not. No definition ⇒ nothing to mask (an unknown object was refused
+        // upstream by the object-existence gate).
+        const definition = object ? this.readObjectDefinition(object) : undefined;
+        omitInternalFieldsFromWriteResponse(definition, isolatedRecord);
+        omitInternalFieldsFromWriteResponse(definition, isolatedPrevious);
+
         return {
             record: isolatedRecord,
             previous: isolatedPrevious,
@@ -499,6 +526,22 @@ export class RecordChangeTrigger implements FlowTrigger {
             // change on top of the aliasing fix).
             params: isolatedRecord,
         };
+    }
+
+    /**
+     * The trigger object's registered definition, through the engine's
+     * optional `getObject` accessor — `undefined` when the accessor is absent,
+     * answers nothing, or throws. Read for the ADR-0100 mask in
+     * {@link buildContext}.
+     */
+    private readObjectDefinition(object: string): unknown {
+        const getObj = this.engine.getObject;
+        if (typeof getObj !== 'function') return undefined;
+        try {
+            return getObj.call(this.engine, object) ?? undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     /**
