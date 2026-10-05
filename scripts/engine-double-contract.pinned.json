@@ -2672,6 +2672,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-plugin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-settings-refusal-isolation.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2749,6 +2754,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/member-role-canonical.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/membership-backfill-ledger.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
