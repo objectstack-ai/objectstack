@@ -4,7 +4,7 @@
 
 The content hash keeps the order of an object's `fields`, so a pure field reorder is a new version instead of "no change" (#21790).
 
-Clause-②: no
+Clause-②: yes
 
 - **`canonicalize(value, type?)` and `hashSpec(value, type?)`** take the metadata type. For a type whose body has a map the spec declares ordered, that map keeps its insertion order in the canonical form. Today that is one map: `object.fields`, whose traversal order is the field order the platform presents. Every other map stays key-order independent, including the keys around `fields` and the keys inside each field definition. Called without a type, both functions return exactly what they returned before.
 - **`orderedMapKeys(type?)`** is a new export. It returns the top-level keys of a `type` body whose map keeps its order (`['fields']` for `object`, `[]` otherwise).

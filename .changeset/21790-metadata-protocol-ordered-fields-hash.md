@@ -4,7 +4,7 @@
 
 Publishing a pure field reorder of an object now saves it. The object designer's drag-to-reorder used to answer success on publish, keep the old order and delete the draft (#21790).
 
-Clause-②: no
+Clause-②: yes
 
 - `SysMetadataRepository` hashes each body as its type, so a reorder of an object's `fields` is a content change. It is written, recorded in history and served by `GET /api/v1/meta/object/:name`.
 - **Rows stored before this release** keep the `checksum` they were written with. That value is still the version token: reads return it, `If-Match` tokens are derived from it, and the optimistic lock compares against it, so upgrading raises no conflict.
