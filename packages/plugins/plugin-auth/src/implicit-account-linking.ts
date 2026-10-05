@@ -15,11 +15,10 @@
  *
  *  1. **Every provider meets the library's standard local-ownership
  *     requirement** before an implicit link: the existing local row must be
- *     `emailVerified: true`. Without it, anyone who can register an
- *     UNVERIFIED local row at a victim's address (open self-registration)
- *     gets the victim's external identity linked into the row they control —
- *     and the link then flips that row to verified. better-auth names this
- *     exact case as the reason `requireLocalEmailVerified` defaults to `true`.
+ *     `emailVerified: true` — the account-ownership precondition better-auth
+ *     documents as the reason `requireLocalEmailVerified` defaults to `true`.
+ *     A refused link writes nothing, so it also never flips the local row to
+ *     verified.
  *  2. **The platform's own cloud identity provider keeps its documented
  *     exception** ({@link PLATFORM_IDP_PROVIDER_ID}). The cloud is the IdP
  *     for every environment, and the environment's owner row is seeded by the
