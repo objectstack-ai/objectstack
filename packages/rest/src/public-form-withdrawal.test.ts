@@ -16,6 +16,14 @@
 //   - withdrawn env-wide with no organization to resolve: both doors refuse;
 //   - tenancy never registered: the env-wide read, unchanged;
 //   - tenancy registered but unreachable: both doors refuse (fail closed).
+//
+// A withdrawal is a kill switch: any layer the doors read that withdraws the
+// form closes it, and layering may only narrow intake, never re-open it. The
+// doors therefore read the env-wide layer beneath the organization's too:
+//   - withdrawn env-wide, re-opened in the organization: both doors refuse;
+//   - withdrawn in the organization, open env-wide: both doors refuse;
+//   - open in both: both doors accept;
+//   - a form only the organization has (no env-wide body): it is served.
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
@@ -82,14 +90,19 @@ interface Setup {
   tenancy: 'org' | 'no-org' | 'not-registered' | 'unreachable';
   /** Replaces the form's whole `sharing` on every read (the `envWide`/`inOrg` switch is then ignored). */
   sharing?: Record<string, unknown>;
+  /** Replaces the env-wide read's whole view list (the organization read is unchanged). */
+  envWideViews?: unknown[];
+  /** Extra views every read answers alongside the form view. */
+  extraViews?: unknown[];
 }
 
 function build(setup: Setup) {
   const createData = vi.fn().mockResolvedValue({ object: 'inquiry', id: 'rec_1', record: {} });
   const getMetaItems = vi.fn(async (req: { type: string; organizationId?: string }) => {
     if (req.type === 'view') {
+      if (req.organizationId !== ORG && setup.envWideViews) return setup.envWideViews;
       const effective = req.organizationId === ORG && setup.inOrg !== undefined ? setup.inOrg : setup.envWide;
-      return [formView(effective, setup.sharing)];
+      return [formView(effective, setup.sharing), ...(setup.extraViews ?? [])];
     }
     if (req.type === 'object') return [inquiryObject];
     return [];
@@ -159,15 +172,15 @@ describe('[#21331] public form withdrawal reaches every intake door', () => {
     const post = await s.post();
     expect(post.statusCode).toBe(201);
     expect(s.createData).toHaveBeenCalledTimes(1);
+    // Every read names the organization, except the env-wide view read the
+    // kill switch adds beneath the organization's view read.
     const reads = s.getMetaItems.mock.calls.map(([r]) => [r.type, r.organizationId]);
     expect(reads.length).toBeGreaterThan(0);
-    for (const [, organizationId] of reads) expect(organizationId).toBe(ORG);
-  });
-
-  it('an organization overlay that publishes a form the package withdrew is honoured too', async () => {
-    const s = build({ envWide: false, inOrg: true, tenancy: 'org' });
-    expect((await s.get()).statusCode).toBe(200);
-    expect((await s.post()).statusCode).toBe(201);
+    for (const [type, organizationId] of reads) {
+      if (type !== 'view') expect(organizationId).toBe(ORG);
+    }
+    // One resolution per door: the organization's view read, then the env-wide one.
+    expect(reads.filter(([type]) => type === 'view').map(([, o]) => o)).toEqual([ORG, undefined, ORG, undefined]);
   });
 
   it('withdrawn env-wide with no organization to resolve: both doors refuse', async () => {
@@ -226,4 +239,55 @@ describe('either declared switch withdraws a public form from every anonymous do
       expect(s.createData).toHaveBeenCalledTimes(1);
     });
   }
+});
+
+describe('a public form withdrawal is a kill switch: layering only narrows intake', () => {
+  const expectClosed = async (s: ReturnType<typeof build>) => {
+    const get = await s.get();
+    expect([get.statusCode, get.body.code]).toEqual([404, 'FORM_NOT_FOUND']);
+    const post = await s.post();
+    expect([post.statusCode, post.body.code]).toEqual([404, 'FORM_NOT_FOUND']);
+    expect(s.createData).not.toHaveBeenCalled();
+  };
+
+  it('withdrawn env-wide (allowAnonymous false), re-opened in the organization: both doors refuse', async () => {
+    await expectClosed(build({ envWide: false, inOrg: true, tenancy: 'org' }));
+  });
+
+  it('withdrawn env-wide through `enabled: false`, re-opened in the organization: both doors refuse', async () => {
+    const withdrawn = formView(true, { enabled: false, allowAnonymous: true, publicLink: '/forms/contact-us' });
+    await expectClosed(build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [withdrawn] }));
+  });
+
+  it('switched off env-wide with its public link cleared, re-opened in the organization: both doors refuse', async () => {
+    const withdrawn = formView(true, { enabled: true, allowAnonymous: false });
+    await expectClosed(build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [withdrawn] }));
+  });
+
+  it('the slug withdrawn env-wide by another view: an organization view opening it is refused', async () => {
+    const other = { ...formView(false), name: 'legacy_contact' };
+    await expectClosed(build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [formView(true), other] }));
+  });
+
+  it('withdrawn in the organization, open env-wide: both doors refuse', async () => {
+    await expectClosed(build({ envWide: true, inOrg: false, tenancy: 'org' }));
+  });
+
+  it('open in both layers (control): both doors accept', async () => {
+    const s = build({ envWide: true, inOrg: true, tenancy: 'org' });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
+    expect(s.createData).toHaveBeenCalledTimes(1);
+  });
+
+  it('a form only the organization carries (no env-wide body, control): both doors accept', async () => {
+    const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [] });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
+  });
+
+  it('one read: another view withdrawing the same slug closes it with no organization to resolve', async () => {
+    const other = { ...formView(false), name: 'legacy_contact' };
+    await expectClosed(build({ envWide: true, tenancy: 'no-org', extraViews: [other] }));
+  });
 });
