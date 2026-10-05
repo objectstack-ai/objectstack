@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { IDataEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   ExternalDatasourceService,
@@ -29,6 +30,9 @@ interface MetadataServiceLike {
   list?: (type: string) => Promise<unknown[]>;
   register?: (type: string, name: string, data: unknown) => Promise<void> | void;
 }
+
+/** The metadata door's save, as the `'protocol'` service declares it. */
+type MetadataSaveDoor = Pick<MetadataProtocol, 'saveMetaItem'>;
 
 export interface ExternalDatasourceServicePluginOptions {
   /** Override the introspection function (mainly for tests). */
@@ -77,6 +81,20 @@ export class ExternalDatasourceServicePlugin implements Plugin {
         );
       });
 
+    /**
+     * [#21788] The metadata door's own save: `saveMetaItem` on the `'protocol'`
+     * service, the call `PUT /api/v1/meta/object/:name` makes.
+     *
+     * Resolved where it is used, never at `init()`: the protocol registers in
+     * another plugin's `init()`, which may run after this one, and a verdict
+     * drawn here would be kept for the life of the process (AGENTS.md, "Startup
+     * registry reads").
+     */
+    const metadataSaveDoor = (): MetadataSaveDoor | undefined => {
+      const protocol = safeGetService<Partial<MetadataSaveDoor>>(ctx, 'protocol');
+      return typeof protocol?.saveMetaItem === 'function' ? (protocol as MetadataSaveDoor) : undefined;
+    };
+
     const config: ExternalDatasourceServiceConfig = {
       introspect,
       getDatasource: async (n) => (await metadata?.get('datasource', n)) as DatasourceLike | undefined,
@@ -94,13 +112,42 @@ export class ExternalDatasourceServicePlugin implements Plugin {
             persistCatalog: async (catalog) => {
               await metadata.register!('external_catalog', catalog.name, catalog);
             },
-            // Runtime "Import as Object": persist a federated object so it's
-            // immediately queryable, no git commit required (ADR-0015 Addendum).
-            persistObject: async (name, definition) => {
-              await metadata.register!('object', name, definition);
-            },
           }
         : {}),
+      /**
+       * Runtime "Import as Object" (ADR-0015 Addendum): save the federated
+       * object through the metadata door's own save, so it is exactly what a
+       * `PUT /meta/object/:name` of the same body makes it — a `sys_metadata`
+       * row the next boot binds, written through to the engine registry, its
+       * storage synced. For a federated object that sync is what maps the
+       * object onto its `external.remoteName` table in the driver.
+       *
+       * [#21788] This used to be `metadata.register('object', …)`, which only
+       * held the definition in the metadata service's memory: an object named
+       * differently from its remote table answered `500 no such table`, and
+       * every import was gone after a restart. ⛔ No second registration path
+       * beside the save — the save already writes the registry through.
+       *
+       * The request is the one that door sends for an `object`, field for
+       * field: no `organizationId`, because `object` is not org-overridable and
+       * that door's `organizationIdForMetaWrite` resolves none for it; no
+       * `packageId`, `mode` or `force`, because the import route takes no
+       * `?package`, `?mode` or `?force`.
+       *
+       * A GETTER, so the save door is asked for when an import runs: the
+       * service reads this slot before the draft and refuses with its own
+       * "requires a writable metadata store" when it is absent — before any
+       * remote introspection, and only when no save door is registered by
+       * then. ⛔ Do not move it into a spread: spreading reads the getter
+       * once, here, at `init()`.
+       */
+      get persistObject() {
+        const door = metadataSaveDoor();
+        if (!door) return undefined;
+        return async (name: string, definition: Record<string, unknown>) => {
+          await door.saveMetaItem({ type: 'object', name, item: definition });
+        };
+      },
       /**
        * Where a generated object's `${namespace}_` prefix comes from (ADR-0028).
        *
