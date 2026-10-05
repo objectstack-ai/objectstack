@@ -94,8 +94,10 @@ function createMemoryEngine() {
     },
     async find(name: string, query: MemoryQuery = {}): Promise<MemoryRow[]> {
       let out = rows(name).filter((r) => matches(r, query.where));
-      if (query.offset) out = out.slice(query.offset);
-      if (query.limit) out = out.slice(0, query.limit);
+      // The caller's bounds, applied after the filter and by PRESENCE: a
+      // `limit: 0` is a bound of zero rows, not an absent one.
+      if (typeof query.offset === 'number') out = out.slice(query.offset);
+      if (typeof query.limit === 'number') out = out.slice(0, query.limit);
       return out.map((r) => project(r, query.fields));
     },
     async count(name: string, query: MemoryQuery = {}): Promise<number> {
