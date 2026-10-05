@@ -151,7 +151,13 @@ describe('invite_user — the three mirrors agree (#11544)', () => {
     // survive (pinned in platform-objects.test.ts), so the gate is read from
     // its lowered form. A mirror that lost the gate would render a button that
     // 404s wherever the org capability is off.
-    expect(action(object, 'invite_user').visible?.source).toBe('features.organization != false');
+    // The grade gate composes AHEAD of it (`requiresMembershipReach:
+    // 'invite_member'`), so the three mirrors also agree on WHO is offered
+    // the button: owner, admin and delegated_admin — never a plain member.
+    expect(action(object, 'invite_user').visible?.source).toBe(
+      "('org_owner' in current_user.positions || 'org_admin' in current_user.positions"
+        + " || 'delegated_admin' in current_user.positions) && features.organization != false",
+    );
   });
 
   it.each(MIRRORS)('%s asks for the same two inputs, email and role', (_name, object) => {

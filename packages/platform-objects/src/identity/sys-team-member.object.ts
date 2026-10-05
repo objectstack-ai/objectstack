@@ -59,6 +59,7 @@ export const SysTeamMember = ObjectSchema.create({
       // both mutations so they vanish in single-org (mirrors
       // sys_organization.create_organization).
       requiresFeature: 'organization',
+      requiresMembershipReach: 'add_team_member',
       successMessage: 'Team member added',
       refreshAfter: true,
       params: [
@@ -80,6 +81,7 @@ export const SysTeamMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/remove-team-member',
       requiresFeature: 'organization',
+      requiresMembershipReach: 'remove_team_member',
       // Confirm question on `description`, not `confirmText`: this action collects
       // params, and pairing the two keys opens two dialogs for one decision
       // (#7278 ruling 2026-08-10, swept by #7309).
