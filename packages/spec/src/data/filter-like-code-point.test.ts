@@ -57,7 +57,7 @@ const FAMILY: ReadonlyArray<readonly ['$like' | '$ilike', string, readonly strin
 const answer = (match: (v: string) => boolean): string[] =>
   Object.entries(ROWS).filter(([, v]) => match(v)).map(([label]) => label).sort();
 
-describe('[#20143] matchesLikePattern — `_` is one code point', () => {
+describe('matchesLikePattern — `_` is one code point', () => {
   for (const [op, pattern, codePoint] of FAMILY) {
     it(`${op} ${JSON.stringify(pattern)} answers the code-point rows`, () => {
       expect(answer((v) => matchesLikePattern(v, pattern, op === '$ilike'))).toEqual([...codePoint]);
@@ -90,7 +90,7 @@ describe('[#20143] matchesLikePattern — `_` is one code point', () => {
   });
 });
 
-describe('[#20143] likePatternToRegExp — the one compilation', () => {
+describe('likePatternToRegExp — the one compilation', () => {
   it('carries the `u` flag and nothing else (no `i`: the $ilike fold is in the source)', () => {
     expect(likePatternToRegExp('a_b').flags).toBe('u');
     expect(likePatternToRegExp('a_b', true).flags).toBe('u');
@@ -111,7 +111,7 @@ describe('[#20143] likePatternToRegExp — the one compilation', () => {
   });
 });
 
-describe('[#20143] every ASCII punctuation character is `u`-legal, bare and escaped', () => {
+describe('every ASCII punctuation character is `u`-legal, bare and escaped', () => {
   /** Printable ASCII that is neither a letter nor a digit, space included: 33 characters. */
   const PUNCTUATION = Array.from({ length: 0x7f - 0x20 }, (_, i) => String.fromCharCode(0x20 + i))
     .filter((c) => !/[A-Za-z0-9]/.test(c));
