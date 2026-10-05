@@ -145,7 +145,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
 import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -13686,6 +13686,26 @@ export class ObjectStackProtocolImplementation implements
      * RBAC/RLS is enforced by forwarding the caller's `context` to
      * `engine.find` so users only see records they are entitled to read.
      *
+     * ## An object the caller may not READ is outside the sweep
+     *
+     * The REST door checks authentication only, so the object-level read
+     * admission is decided per object, here: before an object is queried, the
+     * `security` service's `canReadObject` — the engine middleware's own read
+     * gate, arm for arm (`ISecurityService.canReadObject`) — is asked with the
+     * caller's context, and an object it refuses is skipped. Without this, the
+     * middleware's denial on the first unreadable object in scope failed the
+     * WHOLE search with 403, so a member who could not read every object got
+     * no results at all.
+     *
+     * A skipped object leaves nothing behind: it is never queried, never
+     * named, and never counted in `totalObjects`, and the decision is made
+     * before any row is read — so no hit, count or timing depends on what the
+     * object holds. An explicit `objects=` naming an unreadable object answers
+     * exactly as one naming an object that does not exist. A `false` is a
+     * narrowing only; the engine still enforces everything on the objects
+     * that ARE queried, row scope included. If `canReadObject` itself throws,
+     * the search fails rather than answering without that object.
+     *
      * ## [#8896] A swept object that could not be READ fails the search
      *
      * `totalObjects` / `totalHits` / `truncated` describe a COMPLETE sweep of
@@ -13785,6 +13805,21 @@ export class ObjectStackProtocolImplementation implements
         const allObjects = this.engine.registry.getAllObjects();
         const hits: Array<{ object: string; id: string; title: string; snippet?: string; record: any }> = [];
         let objectsScanned = 0;
+
+        // The object-level read admission, asked of the same authority the
+        // engine middleware enforces (see the method doc). Only a caller that
+        // carries a context is asked about: a context-less in-process call
+        // reaches `find` without one, so asking on its behalf would answer a
+        // question its reads never pose. No security service, or one without
+        // `canReadObject`, means no pre-filter — `find` still enforces, so the
+        // absence can only make the answer stricter (a denial propagates, as
+        // before), never wider.
+        const securityService = request.context !== undefined
+            ? this.getServicesRegistry?.().get('security') as Partial<ISecurityService> | undefined
+            : undefined;
+        const canReadObject = typeof securityService?.canReadObject === 'function'
+            ? (object: string) => securityService.canReadObject!(object, request.context)
+            : undefined;
 
         for (const obj of allObjects) {
             if (hits.length >= overallLimit) break;
@@ -13895,6 +13930,13 @@ export class ObjectStackProtocolImplementation implements
             });
             if (searchableFields.length === 0) continue;
 
+            // Skip an object the caller may not read — before any query, so
+            // nothing about its rows can shape the answer, and before the
+            // count, so `totalObjects` covers only what was swept. A throw
+            // propagates: an admission that could not be decided fails the
+            // search rather than quietly shrinking it.
+            if (canReadObject && !(await canReadObject(obj.name))) continue;
+
             objectsScanned++;
 
             try {
@@ -13969,15 +14011,17 @@ export class ObjectStackProtocolImplementation implements
                 // query error or a refused datasource all mean the object's rows
                 // may well match and simply were not seen.
                 //
-                // The comment this replaces named "RBAC denial" as a benign
-                // reason. Measured on this tree, that is not a failure mode of
-                // this seam: object-level authorization is enforced at the REST
-                // door (`enforceAuth`) BEFORE `searchAll` is reached, and
-                // row-level security narrows `find`'s result set rather than
-                // throwing. Nothing in-repo registers a `beforeFind` hook that
-                // denies by throwing. Were one added, the ruling for this family
-                // still applies: a read that could not run must not be answered
-                // "there are no matches here".
+                // A permission denial is NOT swallowed here either. The REST
+                // door (`enforceAuth`) checks authentication only; the
+                // object-level read admission is asked BEFORE this `try`, via
+                // the security service's `canReadObject` (see above), so an
+                // object the caller may not read never reaches `find`. A denial
+                // that still arrives here is a different verdict — a field-level
+                // refusal, a permission subsystem that could not resolve, a
+                // delegator that does not exist — and the ruling for this
+                // family applies to it: a read that could not run must not be
+                // answered "there are no matches here". Row-level security
+                // narrows `find`'s result set rather than throwing.
                 //
                 // No new response field and no new error code — the caller
                 // receives the read's own failure, envelope intact.
