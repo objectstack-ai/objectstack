@@ -97,6 +97,17 @@ export {
  * raw-headers list's value) is carried only when the patch's array equals the
  * served array.
  *
+ * ## Only where the read path would still withhold it
+ *
+ * Whether a position is withheld can depend on its siblings: the `value` of a
+ * `{ name, value }` pair is credential material only while a label names a
+ * credential. A value carried forward beside an EDITED sibling (the label
+ * renamed, deleted, or moved to another label key) could therefore land where
+ * the read path would serve it. So the grafted config is redacted again, and a
+ * graft survives only when the redaction still withholds its landing path —
+ * repeated until nothing more drops. A dropped graft leaves the patch as the
+ * author sent it there.
+ *
  * What this does NOT do is let a patch set a refused key: `assertValidConfig`
  * still runs on the merged record, so a caller that types `password` into the
  * config gets #8078's refusal exactly as it would without this function.
@@ -110,19 +121,47 @@ export function restoreRedactedConfig(
   if (!stored || typeof stored !== 'object') return patch;
 
   const served = redactDatasourceConfig(driver, stored);
-  let out: Record<string, unknown> = patch;
-
+  const grafts: Array<{ landing: string[]; value: unknown }> = [];
   for (const path of served.redactedPaths) {
     const storedLeaf = valueAt(stored, path);
     if (storedLeaf === undefined) continue;
     const landing = landingPath(served.config, patch, path);
-    if (!landing) continue;
-    if (out === patch) out = { ...patch };
-    graftAt(out, landing, storedLeaf);
+    if (landing) grafts.push({ landing, value: storedLeaf });
   }
+  if (grafts.length === 0) return patch;
 
-  return out;
+  const graftAll = (kept: readonly { landing: string[]; value: unknown }[]): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...patch };
+    for (const graft of kept) graftAt(out, graft.landing, graft.value);
+    return out;
+  };
+
+  // An untouched Save — the patch IS the served projection — grafts every
+  // withheld value back onto exactly what it was withheld from, so the merged
+  // config is the stored one and the read path withholds the same positions:
+  // no second walk is owed.
+  if (grafts.length === served.redactedPaths.length && sameValue(patch, served.config)) return graftAll(grafts);
+
+  // Otherwise keep only what the read path would STILL withhold where it
+  // lands. The judgment of a position can depend on its siblings — a pair's
+  // `value` is a credential only while a label names one — so a value carried
+  // under an edited sibling may land where the read path would serve it.
+  // Each pass re-grafts the survivors onto the untouched patch and drops every
+  // graft the merged config's redaction no longer withholds AT its landing
+  // path; the set only shrinks, so this settles within one pass per graft.
+  // Same loop as the `/meta` carry-forward's (#20590).
+  let kept = grafts;
+  for (;;) {
+    const out = graftAll(kept);
+    const withheld = new Set(redactDatasourceConfig(driver, out).redactedPaths.map(pathKey));
+    const next = kept.filter((graft) => withheld.has(pathKey(graft.landing)));
+    if (next.length === kept.length) return next.length === 0 ? patch : out;
+    kept = next;
+  }
 }
+
+/** A path as one comparable string (segments may hold any character, so JSON, not a join). */
+const pathKey = (path: readonly string[]): string => JSON.stringify(path);
 
 /** An array position, as the redactor spells it in a path (its decimal index). */
 const isIndex = (segment: string): boolean => /^(0|[1-9][0-9]*)$/.test(segment);

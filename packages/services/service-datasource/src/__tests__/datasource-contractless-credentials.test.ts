@@ -261,6 +261,60 @@ describe('a withheld array value is carried only onto the element it came from',
   });
 });
 
+describe('a value is carried forward only where the read path would still withhold it', () => {
+  // A pair's `value` is credential material only while a label names a
+  // credential, so an edit to the LABEL changes whether the value beside it is
+  // withheld. The pair sits under a plain (non-credential) record key, so the
+  // array identity rule does not apply and only the re-judgment can decide.
+  const STORED = {
+    host: 'wh.internal',
+    proxyHeader: { name: 'Authorization', value: 'Bearer px-1' },
+    probeHeader: { key: 'X-Api-Key', value: 'pk-2' },
+  };
+  const SERVED = { host: 'wh.internal', proxyHeader: { name: 'Authorization' }, probeHeader: { key: 'X-Api-Key' } };
+  const restore = (patch: Record<string, unknown>) => restoreRedactedConfig(DRIVER, patch, STORED) as Record<string, unknown>;
+
+  it('control: an untouched Save carries both values forward', () => {
+    expect(restore(structuredClone(SERVED))).toEqual(STORED);
+  });
+
+  it('a label renamed to a non-credential name: the value is dropped, not served', () => {
+    const out = restore({ ...structuredClone(SERVED), proxyHeader: { name: 'X-Trace' } });
+    expect(out.proxyHeader).toEqual({ name: 'X-Trace' });
+    expect(out.probeHeader).toEqual(STORED.probeHeader);
+    expect(JSON.stringify(out)).not.toContain('px-1');
+  });
+
+  it('a label deleted: the value is dropped, not served', () => {
+    const out = restore({ ...structuredClone(SERVED), proxyHeader: {} });
+    expect(out.proxyHeader).toEqual({});
+    expect(JSON.stringify(out)).not.toContain('px-1');
+  });
+
+  it('a `key:` label renamed: the value is dropped, not served', () => {
+    const out = restore({ ...structuredClone(SERVED), probeHeader: { key: 'Accept' } });
+    expect(out.probeHeader).toEqual({ key: 'Accept' });
+    expect(out.proxyHeader).toEqual(STORED.proxyHeader);
+    expect(JSON.stringify(out)).not.toContain('pk-2');
+  });
+
+  it('a label renamed to ANOTHER credential name still carries the value (it stays withheld)', () => {
+    const out = restore({ ...structuredClone(SERVED), proxyHeader: { name: 'Proxy-Authorization' } });
+    expect(out.proxyHeader).toEqual({ name: 'Proxy-Authorization', value: 'Bearer px-1' });
+  });
+
+  it('whatever survives the restore is withheld again on the next read', async () => {
+    const { service } = makeService([{ name: 'w', driver: DRIVER, origin: 'runtime', config: structuredClone(STORED) }]);
+    const read = await service.getDatasource('w');
+    const config = structuredClone(read!.config) as Record<string, unknown>;
+    config.proxyHeader = { name: 'X-Trace' };
+    config.probeHeader = {};
+    await service.updateDatasource('w', { config });
+    const again = await service.getDatasource('w');
+    expect(JSON.stringify(again)).not.toMatch(/px-1|pk-2/);
+  });
+});
+
 describe('planCredentialMigration names a contractless row\'s credentials as residue', () => {
   it('refuses with a remedy instead of reporting nothing-to-migrate', () => {
     const plan = planCredentialMigration({
