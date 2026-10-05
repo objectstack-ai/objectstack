@@ -652,7 +652,7 @@
       "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -673,7 +673,7 @@
         "change the dateRange to a custom window and capture the re-queries: invoice widgets carry issued_on bounds, account widgets carry signed_on bounds",
         "confirm the opted-out KPI issued NO re-query and shows the unchanged all-time value",
         "cross-check one re-scoped widget's displayed aggregate against a direct API aggregate with the same filter",
-        "repeat the global-filter check on Delivery Operations: the Task Status select must re-scope the KPI hero tiles, composing with each tile's own per-widget filter",
+        "repeat the global-filter check on Delivery Operations: the Task Status select re-scopes the TASK-bound KPI tile (kpi_awaiting_review), composing with its own per-widget filter; the project-bound tiles (kpi_active_projects / kpi_at_risk / kpi_total_budget) opt out of task_status (#7568) and keep their values",
         "screenshot before/after each filter change",
         "D1 (dirty→Reset): on Revenue Pulse, confirm the filter bar shows NO Reset affordance in its pristine state; change a filter away from its defaultValue and confirm a Reset button (RotateCcw) appears; click it and confirm every filter returns to its default and the widgets re-query back",
         "D3 ({value,label} options): open the region select and confirm its options render as {value,label} pairs (the trigger shows the LABEL, the committed value is the option value); capture the option-source request — a select whose options come from a dataset issues a server GROUP BY (queryDataset) for the distinct value list, not a truncated client dedupe",
@@ -712,10 +712,10 @@
           "evidence": "query comparison"
         },
         {
-          "clause": "on Delivery Operations, the global status filter composes with per-widget filters — an at-risk KPI tile under a global status selection shows the intersection, verified against the API",
+          "clause": "on Delivery Operations a widget bound to the global task_status filter that also carries its own filter (kpi_awaiting_review, status=in_review) shows the intersection, verified against the API; opted-out project tiles (kpi_at_risk) keep their unfiltered value.",
           "oracle": "api",
-          "verify": "tile value equals the aggregate with BOTH filters applied",
-          "evidence": "tile screenshot + query result"
+          "verify": "kpi_awaiting_review's value equals the aggregate with BOTH filters applied (its own status=in_review AND the global task_status selection); kpi_at_risk (project dataset, health=red) declares filterBindings { task_status: false }, so its value is identical before and after the task_status change — pinned by examples/app-showcase/test/dashboard-filter-vocabulary.test.ts",
+          "evidence": "tile screenshots before/after + the API aggregate for kpi_awaiting_review"
         },
         {
           "clause": "D2 — the Studio widget inspector AUTHORS filterBindings that round-trip and drive the widget: a binding authored in the inspector's Filter Bindings section persists into widget.filterBindings and, on reload, re-scopes the widget through the authored field (or opts it out when Apply is unchecked) (objectui#2586)",
@@ -748,7 +748,7 @@
       ],
       "source": [
         "examples/app-showcase/src/ui/dashboards/revenue-pulse.dashboard.ts (framework#2501 / objectui#2578 acceptance fixture)",
-        "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts",
+        "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts (Delivery Operations: the task_status global filter; the project-bound widgets declare filterBindings { task_status: false }, #7568 — pinned by examples/app-showcase/test/dashboard-filter-vocabulary.test.ts)",
         "examples/app-showcase/src/data/seed/index.ts#accounts (sales_region + signed_on seeding, prospects unset by design — re-pointed #18101: both keys are written INLINE in each seed row, which the shared resolver does not read as a declaration, and accounts is the seed constant that declares those rows)",
         "examples/app-showcase/src/coverage.ts (dashboard kind notes: revenue-pulse demonstrates dashboard-level filters)",
         "objectui packages/app-shell/src/views/metadata-admin/inspectors/DashboardWidgetInspector.tsx (Filter Bindings section — Apply toggle writes false for opt-out, field-override combo, data-testid widget-filter-binding-<name>, patches draft.widgets[i].filterBindings; objectui#2586)",
@@ -767,6 +767,12 @@
           "date": "2026-08-08",
           "change": "added the Studio widget-inspector filterBindings AUTHORING round-trip (D2, objectui#2586) plus the D1 dirty→Reset affordance and D3 {value,label} filter-option render clauses",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-05",
+          "change": "clause 6 and step 8 re-pointed (stale, #21782 VF4). The clause composed the global status filter with an at-risk tile, but kpi_at_risk (project dataset, health=red) declares filterBindings { task_status: false } (ops-dashboard.dashboard.ts, #7568: project widgets opt out of the task-status filter; pinned by dashboard-filter-vocabulary.test.ts). That predates 17.6.0. The verifier's wording is used: the composition is read on kpi_awaiting_review (task-bound, status=in_review), and kpi_at_risk keeps its value",
+          "ref": "#21797"
         }
       ]
     },

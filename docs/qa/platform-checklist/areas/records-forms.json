@@ -630,7 +630,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -639,10 +639,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task formViews: edit (simple), tabbed, wizard, split, quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts"
+          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts. The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage, resolveFormViewLayout), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards",
+          "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
         ],
         "knownGaps": [
-          "the spec's 6th form type, 'modal', is not authored anywhere in the showcase (coverage.ts FORM_VIEW_TYPES deliberately lists 5) — record the modal variant blocked(fixture) rather than ticking or silently skipping it"
+          "no form view in the showcase authors the spec's 6th form type, 'modal' (coverage.ts FORM_VIEW_TYPES deliberately lists 5). A modal-PRESENTED form exists on task-desk.page.ts (ObjectForm formType=\"modal\", create), which is where the modal variant is scored; if that page cannot be reached, record the modal variant blocked(fixture) rather than ticking or silently skipping it",
+          "drawer and modal are presentation modes, not page layouts (ADR-0050, Proposed): the metadata record-form page renders an authored type drawer/modal as simple BY DESIGN (RecordFormPage — the form-layout-vs-presentation note on objectstack#1890), and the New/Edit modal maps only tabbed (resolveFormViewLayout — wizard/split degrade to a stacked section list there). So the page-level layouts are walked on the page routes (/new and /record/:id/edit, both RecordFormPage), and the presentations on task-desk.page.ts"
         ]
       },
       "variants": [
@@ -654,20 +656,21 @@
         "modal"
       ],
       "steps": [
-        "open a task record and its 'edit' (simple) form view; screenshot; verify the single 2-column section with the declared field order",
-        "open the tabbed form view; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
-        "open the wizard form view; walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end",
-        "open the split form view; verify primary/secondary panes render their assigned sections side-by-side",
-        "trigger the quick (drawer) form; verify it renders as a side panel over the list with the 3 declared fields",
+        "open a task record's full-page edit form (…/showcase_task/record/<id>/edit — RecordFormPage) on the stock default form (type simple); screenshot; verify the declared section ('Task', 2 columns) and its field order",
+        "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
+        "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
+        "overlay the default form with the split variant; open the page form; verify primary/secondary panes render their assigned sections side-by-side",
+        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. An overlay of the default form with type drawer/modal renders the page form as simple, which is the designed fallback, not a fail",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
-        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>"
+        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>",
+        "revert the default-form overlay so the stock simple form is back, and confirm it with a re-read of the view"
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: each authored form type renders its own layout mechanics (sections / tabs / steps / panes / side panel), with a screenshot per variant; the unauthored 'modal' variant is recorded blocked(fixture), never ticked",
+          "clause": "PER-VARIANT: each authored page-level form layout (simple / tabbed / wizard / split) renders its own layout mechanics, with a screenshot per variant; drawer and modal are presentation modes, not layouts (ADR-0050) — a drawer-presented form is proven on a surface that opens it as a side panel (task-desk.page.ts, a JSX ObjectForm formType=\"drawer\"), and the metadata record-form page falling back to simple for type drawer/modal is by design (#1890); no form view authors type 'modal', so the modal presentation is proven on the same page's formType=\"modal\" dialog, or recorded blocked(fixture) if that page cannot be reached.",
           "oracle": "screenshot",
-          "verify": "one screenshot per variant showing the characteristic layout; wizard shows step chrome, split shows two panes, drawer overlays the list",
-          "evidence": "per-variant screenshots"
+          "verify": "one screenshot per page-level variant, each reached by overlaying the default form: tabbed shows tabs, wizard shows step chrome on the page route, split shows two panes; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots. A page form rendering simple for an overlaid drawer/modal type is the designed fallback, not a fail",
+          "evidence": "per-variant screenshots + the task-desk drawer and modal screenshots"
         },
         {
           "clause": "the wizard enforces step order and issues exactly ONE save at the end (no per-step writes)",
@@ -696,7 +699,7 @@
       ],
       "negative": [
         "a wizard that lets Next past a required title with no named field error — or that silently writes per step — is a FAIL",
-        "counting the modal variant as passed because the other five rendered is a FAIL: it must be recorded blocked(fixture) with this item cited"
+        "counting the drawer or modal variant as passed off the record-form page is a FAIL — that page renders simple for both by design; each presentation is scored only on a surface that opens it as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited"
       ],
       "traps": [
         "hydration-race",
@@ -705,7 +708,9 @@
       "source": [
         "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard|split|drawer|modal)",
         "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 5 authored)",
-        "examples/app-showcase/src/ui/views/task.view.ts#formViews (formViews incl. visibleWhen on notes)"
+        "examples/app-showcase/src/ui/views/task.view.ts#formViews (formViews incl. visibleWhen on notes)",
+        "objectui packages/app-shell/src/views/RecordFormPage.tsx (reads objectDef.form ?? formViews.default; page-level layouts only — drawer/modal fall back to simple, objectstack#1890) + packages/app-shell/src/utils/recordFormNavigation.ts (resolveFormViewLayout — the New/Edit modal maps only tabbed)",
+        "docs/adr/0050-form-layout-vs-presentation.md (Proposed — drawer/modal leave FormView.type; presentation belongs to NavigationMode / addRecord.mode / action type modal) + examples/app-showcase/src/ui/pages/task-desk.page.ts (ObjectForm formType drawer + modal)"
       ],
       "history": [
         {
@@ -713,6 +718,12 @@
           "date": "2026-08-07",
           "change": "initial — deep-test form-view gallery derived from the spec enum; modal recorded as a standing fixture gap",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-05",
+          "change": "clause 1 (drawer variant), steps 1-5, the fixtures, a new revert step, negative 2 and the sources re-pointed (assertion defect, #21782 VF3; VF3 gave no verbatim wording, so the clause is derived). RecordFormPage renders drawer/modal as simple by design ('presentation/open-modes, not record-page layouts', objectstack#1890), and resolveFormViewLayout maps only tabbed. The modelling decision is ADR-0050 (Proposed): drawer/modal leave FormView.type, and presentation belongs to NavigationMode / addRecord.mode / action type 'modal'. Named formViews are reachable from no console door, because every consumer reads objectDef.form ?? formViews.default, so the steps now overlay the default form. Measured differently from the card in two places. (1) The card has the wizard rendering as steps only on /new; RecordFormPage passes the type on the /edit page route as well, and only the New/Edit modal degrades it. (2) task-desk.page.ts hosts BOTH a formType=\"drawer\" and a formType=\"modal\" ObjectForm, so the modal presentation is scorable there, and blocked(fixture) stays only as the fallback. Re-read at objectui 9dfaca6543: unchanged",
+          "ref": "#21797"
         }
       ]
     },
@@ -824,7 +835,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -834,7 +845,7 @@
         "app": "showcase",
         "requires": [
           "showcase_invoice_line rules (examples/app-showcase/src/data/objects/invoice.object.ts): description requiredWhen record.quantity >= 100 (ROW-scoped); product/quantity/unit_price readonlyWhen parent.status == 'paid' (PARENT-scoped); receipt Field.file upload cell (objectui#2360)",
-          "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003)"
+          "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003); for clause 5, INV-1002 must carry a SECOND line with a DISTINCT stored position. The stock INV-1002 ships one line, and a line added through the data API with no position defaults to 0, which collides with the first; seed it with position 1, or any value the first line does not hold. On an invoice whose lines share a stored position the grid legitimately re-emits the sibling's position on save: it stamps row[sortField] = index on every change (GridField), with the sort field deriveDetail picks from the child (position)"
         ],
         "knownGaps": [
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
@@ -843,7 +854,7 @@
       "steps": [
         "open INV-1002 (draft) — the inline Line Items grid renders via inlineEdit: 'grid'",
         "on one line, raise quantity to 120 with description empty; observe the description cell flag required ON THAT ROW; screenshot",
-        "confirm a second line with quantity 1 stays unflagged and editable (per-row evaluation)",
+        "confirm a second line with quantity 1 stays unflagged and editable (per-row evaluation). On INV-1002 this is the seeded second line with a distinct stored position (fixtures.requires); if it is not there, add it over the data API with position 1 before opening the invoice",
         "attempt to save the batch with the flagged description still empty; capture the block; then fill it and save; capture the batch request",
         "server-side negative: submit the same shape directly to the API (line with quantity 120, no description) and capture the refusal",
         "flip the header status to paid and save; observe product/quantity/unit_price cells lock; flip back to sent/draft and observe them unlock (live parent-scope re-evaluation)",
@@ -875,9 +886,9 @@
           "evidence": "line read + fetched file"
         },
         {
-          "clause": "the saved batch persists: reloading the invoice shows the edited lines with their values, and untouched sibling lines byte-identical",
+          "clause": "the saved batch persists: reloading the invoice shows the edited lines with their values, and untouched sibling lines byte-identical — on an invoice whose lines carry distinct stored positions (a sort-field normalisation of colliding positions is by design and is not a sibling rewrite)",
           "oracle": "api",
-          "verify": "diff all lines before/after the save; only the edited line changed",
+          "verify": "diff all lines before/after the save on the invoice whose lines carry distinct stored positions; only the edited line changed (an update op carries the row's dirty fields only — masterDetailTx changedFields). A sibling whose only change is its position, on an invoice seeded with colliding positions, is the fixture, not a FAIL",
           "evidence": "the before/after reads"
         }
       ],
@@ -895,7 +906,8 @@
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (row/parent-scoped rules on the line object; ADR-0036 / #1581)",
-        "objectui: e2e/live/grid-conditional-rules.spec.ts, grid-parent-rules.spec.ts"
+        "objectui: e2e/live/grid-conditional-rules.spec.ts, grid-parent-rules.spec.ts",
+        "objectui packages/fields/src/widgets/GridField.tsx (row[sortField] = index stamped on every change — the key is sortField at objectui 9dfaca6543, sort_field at the run's 2e818d0b51ec) + packages/plugin-form/src/deriveMasterDetail.ts (the sortField producer: the child's position / sort_order / … field) + packages/plugin-form/src/masterDetailTx.ts (changedFields — an update carries dirty fields only)"
       ],
       "history": [
         {
@@ -909,6 +921,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-05",
+          "change": "clause 5, step 3 and the invoice fixture line re-paired (invalid pairing, #21782 VF3; VF3 gave no verbatim wording, so the clause is derived). On stock INV-1001 (positions 0 and 1), editing one line sends only that line, and the sibling stays byte-identical (masterDetailTx changedFields). The position re-emit happens only when sibling lines share a stored position, because the grid stamps row[sortField] = index on every change (GridField). INV-1002 ships one line, and a second line added through the API defaults to position 0, so the run's collision was created by the fixture. The clause now names an invoice whose lines carry distinct positions, and the fixture says how to seed one. Re-read at objectui 9dfaca6543: the mechanism is unchanged. The grid's config key moved from sort_field to sortField at both ends in the #21772 pin range (GridField + MasterDetailForm), so the source cites the new spelling",
+          "ref": "#21797"
         }
       ]
     },
@@ -917,17 +935,18 @@
       "title": "Cascading and gated select options: dependsOn + per-option visibleWhen, client narrows / server rejects",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
-        "seeded admin (admin@objectos.ai / admin123)",
-        "non-admin user (sign one up — sys_user rows cannot be seeded)"
+        "seeded admin (admin@objectos.ai / admin123) — the org OWNER: mapMembershipRole maps owner → org_owner, which does not imply org_admin, so the seeded admin is OUTSIDE the restricted-tier gate",
+        "an org_admin persona: a member invited with role 'admin' who has ACCEPTED the invitation (accept-invitation is what grants the admin membership, mapped to org_admin on current_user.positions)",
+        "non-admin user (invite + sign-up as a plain member — the stock auth posture is invite_only; sys_user rows cannot be seeded)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_cascade (examples/app-showcase/src/data/objects/cascading-select.object.ts): province dependsOn ['country'] with per-option visibleWhen (cn → zj/gd, us → ca/tx); tier option 'restricted' gated on 'admin' in current_user.positions; sharingModel public_read_write",
+          "showcase_cascade (examples/app-showcase/src/data/objects/cascading-select.object.ts): province dependsOn ['country'] with per-option visibleWhen (cn → zj/gd, us → ca/tx); tier option 'restricted' gated on 'org_admin' in current_user.positions — held by an org_admin persona, NOT by the seeded admin, who is org_owner; sharingModel public_read_write",
           "showcase_invoice.contact dependsOn ['account'] — the dependent LOOKUP twin (contact picker scoped to the chosen account's people; seed gives Northwind 26 contacts, Contoso 2, Fabrikam 1)"
         ],
         "knownGaps": [
@@ -938,7 +957,7 @@
         "open a New Cascading Select form (/_console/apps/com.example.showcase/showcase_cascade or its nav entry)",
         "verify province is gated (empty/disabled) until a country is chosen",
         "pick country=cn; enumerate province options (expect exactly Zhejiang, Guangdong); switch to us; re-enumerate (California, Texas) and verify a previously chosen cn province CLEARED",
-        "as admin, enumerate tier options (Standard + Restricted); save a record with tier=restricted",
+        "as the org_admin persona (NOT the seeded admin, who is org_owner and outside the gate), enumerate tier options (Standard + Restricted); save a record with tier=restricted. Record as well that the seeded admin's enumeration lacks Restricted: that is the predicate as authored, not a defect of this item",
         "direct API negative: POST /api/v1/data/showcase_cascade with country 'cn' and province 'ca'; capture the refusal; then POST province 'zj' and capture the success",
         "as the non-admin user: enumerate tier options in the form (Restricted absent), then POST tier='restricted' directly and capture the refusal",
         "on a New Invoice, verify the contact picker is empty-scoped before an account is chosen; pick Northwind and capture the picker's data request (scoped to Northwind's contacts); switch to Contoso and verify the candidate set changes"
@@ -957,10 +976,10 @@
           "evidence": "both responses"
         },
         {
-          "clause": "BOTH sides of the role gate: admin sees and can persist tier='restricted'; the non-admin neither sees it NOR can submit it — the direct non-admin POST is refused server-side",
+          "clause": "BOTH sides of the role gate: a persona holding org_admin (a member invited with role 'admin') sees and persists tier='restricted'; a plain member neither sees nor can submit it (server invalid_option).",
           "oracle": "api",
-          "verify": "admin create re-reads with tier='restricted'; non-admin POST returns the invalid_option refusal (current_user bound from the request on authenticated writes)",
-          "evidence": "admin re-read + non-admin refusal + both option enumerations"
+          "verify": "the org_admin persona's create re-reads with tier='restricted'; the plain member's direct POST returns the invalid_option refusal (current_user bound from the request on authenticated writes)",
+          "evidence": "org_admin re-read + plain-member refusal + both option enumerations"
         },
         {
           "clause": "the dependent LOOKUP twin works: the invoice contact picker issues account-scoped candidate requests, and switching accounts changes the candidate set (26 for Northwind vs 2 for Contoso)",
@@ -1005,6 +1024,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-05",
+          "change": "clause 3, step 4, the personas and the fixture line re-paired (invalid pairing, #21784 VF4). The fixture predicate is 'org_admin' in current_user.positions (cascading-select.object.ts), and mapMembershipRole (spec identity/eval-user.zod.ts) maps owner → org_owner with no implication of org_admin. So the seeded admin, the org owner, is outside the gate. The predicate landed before 17.6.0. The clause uses the verifier's wording: the restricted side is driven by a member invited with role 'admin' who has accepted the invitation. The fixture line read 'admin' in current_user.positions, which is not the predicate's literal. The verifier's alternative, widening the fixture predicate to org_owner as well, is an examples/** change and is reported on #21797, not made here",
+          "ref": "#21797"
         }
       ]
     },
@@ -1505,7 +1530,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1518,7 +1543,8 @@
           "seeded tasks in both done and not-done states for the CEL visibility both-sides check"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "the showcase hosts NO surface for three of the six locations on showcase_task (#21782 VF4; measured at objectui 2e818d0b51ec, re-read at 9dfaca6543). task-detail.page.ts is kind 'full' with no record:header node, and an authored page gets no injected header actions (objectui#7298 ruling), so record_header and record_more have no surface. project-detail.page.ts overrides the tabs slot with an inline record:line_items grid in place of the synthesized related strip, and project (a master-detail) is showcase_task's only parent relation, so record_related has no surface either. The console's renderer half is landed in the pin (objectui#11270, RelatedRecordActionsBridge). Hosting the three needs a showcase_task page that composes a record header and a parent record page that renders the synthesized Tasks related list, which is a showcase fixture change outside this checklist. Until it lands, score record_header / record_more / record_related blocked(fixture), never a missing placement"
         ]
       },
       "variants": [
@@ -1532,7 +1558,7 @@
       ],
       "steps": [
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
-        "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
+        "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar), screenshot AFTER render settles, then read the rendered action buttons from the DOM. A location with no hosting surface at this fixture (record_header / record_more / record_related — fixtures.knownGaps) is recorded blocked(fixture)",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
         "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
@@ -1541,9 +1567,9 @@
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: every location renders at least one action declared for it, in the correct UI slot — the full placement matrix (rendered vs declared) has zero missing placements",
+          "clause": "Per variant, every location the fixture actually HOSTS renders ≥1 action declared for it; record_header/record_more require a showcase_task page that composes a record header and record_related a parent record page that renders the synthesized Tasks related list (fixture must provide both).",
           "oracle": "dom",
-          "verify": "after each surface's screenshot confirms render, the DOM read lists the expected action names in that slot; matrix compiled per variant",
+          "verify": "after each hosted surface's screenshot confirms render, the DOM read lists the expected action names in that slot; matrix compiled per variant. At this fixture record_header, record_more and record_related are not hosted (fixtures.knownGaps): record those three blocked(fixture), never as missing placements",
           "evidence": "per-location screenshots + the placement matrix"
         },
         {
@@ -1553,7 +1579,7 @@
           "evidence": "the same matrix, extra-placement columns"
         },
         {
-          "clause": "each location's sampled action DISPATCHES for real — flow wizard opens and resumes, modal opens, script executes, form opens the declared edit form view, url navigates, api POSTs — and state-changing ones round-trip server-side (mark_done flips done; recalc updates the estimate)",
+          "clause": "each HOSTED location's sampled action DISPATCHES for real — flow wizard opens and resumes, modal opens, script executes, form opens the declared edit form view, url navigates, api POSTs — and state-changing ones round-trip server-side (mark_done flips done; recalc updates the estimate). The url (open_docs) and api (recalc_selection) legs live on record_more and share its fixture gap: record them blocked(fixture) with it, never as dispatch failures",
           "oracle": "network",
           "verify": "one captured dispatch per location + API re-reads for the two state changes",
           "evidence": "the six traces + the two re-reads"
@@ -1628,6 +1654,12 @@
           "date": "2026-09-30",
           "change": "re-worded the record_related variant to the location's placement as the spec's ACTION_LOCATIONS docblock now states it (#20937): a per-row action on each row of a related list inside a parent record, in that parent's context only — so showcase_log_time is expected on the rows of the Tasks related list on a showcase_project record, and on no row of the showcase_task list view. It used to read 'on the related-list section', which a runner could score against the section's toolbar. The console at this repo's objectui pin places no record_related action on related-list rows yet (its related list puts list_item actions on rows and list_toolbar actions in the header; the renderer half is objectui#11270), so a run against that pin records this variant as a missing placement — the correct verdict, not a checklist defect",
           "ref": "#20937"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-05",
+          "change": "clause 1 and step 2 re-paired, plus clause 3 and a fixture knownGap (invalid pairing, #21782 VF4). objectui#11270 is landed in the pin (RelatedRecordActionsBridge ROW_LOCATIONS_IN_RECORD), but the showcase hosts none of the three record surfaces for showcase_task. task-detail.page.ts is kind 'full' with no record:header node, and authored pages get no injected header actions (objectui#7298 ruling). project-detail.page.ts replaces the related strip with record:line_items, and project is showcase_task's only parent relation. All of this predates 17.6.0. The clause uses the verifier's wording, and clause 3's url / api dispatch legs share the record_more gap. The fixture change that would host them belongs in examples/app-showcase and is reported on #21797, not made here",
+          "ref": "#21797"
         }
       ],
       "enumSource": {
@@ -3552,10 +3584,10 @@
     },
     {
       "id": "records-forms.field-group-visible-when",
-      "title": "fieldGroups[].visibleWhen section predicate: CEL accepted + normalized, retired visibleOn refused with the located prescription, derivation carries it verbatim — console section-gating leg EXPECTED-FAIL at the pinned console, where both adapters drop the key",
+      "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console form gates the section; the detail page still drops the key at the pinned console (objectui#11630)",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3569,13 +3601,13 @@
         ],
         "knownGaps": [
           "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qa_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
-          "clauses 4-5 (the console leg) are EXPECTED-FAIL at the sweep pins: at objectui 1e14d70 BOTH console adapters drop the key on the way from the shared spec derivation to the rendered section — see clause 4 for the exact sites. Confirm what the RUNNING console build does before scoring; if its bundle predates even the FormSection section-gating machinery (#6111/#6236/#6237), record blocked(fixture) rather than a defect"
+          "the console leg at objectui 9dfaca6543: the FORM adapter copies the key (plugin-form fieldGroups.ts passes visibleWhen onto the derived section), so the form gates live; the DETAIL adapter still drops it (plugin-detail buildDefaultPageSchema.ts deriveFieldGroupDetailSections maps key / label / icon / description / collapse / columns / fields only), so the detail page renders the section ungated — a product defect filed as objectui#11630, not a checklist gap. Confirm what the RUNNING console build does before scoring; if its bundle predates even the FormSection section-gating machinery (#6111/#6236/#6237), record blocked(fixture) rather than a defect"
         ]
       },
       "steps": [
         "boot showcase isolated; sign in as the seeded admin; keep an API token",
         "author the scratch carrier: install a scratch package, then PUT /api/v1/meta/object/qa_group_gate?package=<id> with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', and fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }] — the same call sequence the area's qa-feeds-disabled recipe grounds",
-        "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the parsed Expression envelope, not the bare string",
+        "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
         "console leg: open a qa_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
@@ -3583,10 +3615,10 @@
       ],
       "acceptance": [
         {
-          "clause": "authoring accepts the canonical spelling and normalizes it: a bare CEL string on fieldGroups[].visibleWhen parses, and reads back as the { dialect: 'cel', source } Expression envelope; the envelope form is accepted verbatim",
+          "clause": "authoring accepts both the bare CEL string and the {dialect:'cel',source} envelope on fieldGroups[].visibleWhen; the schema parse normalizes the string to the envelope (batch20 pin), the meta API serves the body as authored, and either form gates the group identically at render.",
           "oracle": "api",
-          "verify": "PUT + GET round-trip of qa_group_gate shows the normalized envelope (ExpressionInputSchema, packages/spec/src/data/object.zod.ts); pinned by object-strictness-batch20.test.ts",
-          "evidence": "the PUT payload + the GET body's fieldGroups entry"
+          "verify": "PUT + GET round-trip of qa_group_gate with each spelling: the GET body's fieldGroups[0].visibleWhen is what was PUT (every type but view persists the request body verbatim — ADR-0005 appendix (c), metadata-protocol saveMetaItem); the normalization is the parse's (ExpressionInputSchema), pinned by object-strictness-batch20.test.ts's re-opened predicate slot; the render half is read on the form in clause 4",
+          "evidence": "the two PUT payloads + the GET bodies' fieldGroups entries + the pin run"
         },
         {
           "clause": "the retired spelling is refused WITH the prescription: `visibleOn` on a field group rejects at parse (strict object) and the message names `visibleWhen` and states the semantics ('FALSE hides the whole group, header included') — nothing is stored",
@@ -3601,9 +3633,9 @@
           "evidence": "test run output"
         },
         {
-          "clause": "⚠️ EXPECTED-FAIL at the sweep pins (objectstack a286411 / objectui 1e14d70): the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At those pins BOTH adapters drop the key between the shared derivation and the section shape — plugin-form/src/fieldGroups.ts (deriveFieldGroupSections copies key/label/collapse only) and plugin-detail/src/synth/buildDefaultPageSchema.ts (deriveFieldGroupDetailSections likewise) — so an authored predicate is silently INERT in the console: the spec's 'declared = enforced on day one' claim (object.zod.ts) does not hold end-to-end. Record the observed behavior; tick green ONLY on a console build demonstrably carrying the copy (read the adapters at the running build's revision, or observe the gating itself)",
+          "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At objectui 9dfaca6543 the FORM half holds (plugin-form fieldGroups.ts copies visibleWhen onto the derived section); the DETAIL half does not — plugin-detail buildDefaultPageSchema.ts deriveFieldGroupDetailSections drops the key, so the detail page shows the section unconditionally: score that half FAIL and cite objectui#11630 (do not re-file). Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
           "oracle": "dom",
-          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — an unconditionally-rendered section at the pinned revisions is the EXPECTED result and must be recorded as such, not as a pass",
+          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on the form the section gates live; on detail an unconditionally-rendered section is the objectui#11630 defect at this pin, recorded FAIL with that reference",
           "evidence": "the four screenshots + the console revision/adapter reading the verdict rests on"
         },
         {
@@ -3627,7 +3659,7 @@
       "source": [
         "packages/spec/src/data/object.zod.ts#visibleOn (visibleOn tombstone prescription), (visibleWhen, CEL via ExpressionInputSchema — #13030, commit 53dc739, Option-A maintainer ruling 2026-08-28)",
         "packages/spec/src/data/field-group-layout.ts (verbatim passthrough; evaluation ruled the renderer's), field-group-layout.test.ts+ and object-strictness-batch20.test.ts (the pins)",
-        "objectui: packages/plugin-form/src/fieldGroups.ts and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts — the two adapters that DROP the key at objectui 1e14d70 (clause 4's expected-fail); packages/components/src/renderers/form/form.tsx (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections would plug into",
+        "objectui: packages/plugin-form/src/fieldGroups.ts (copies visibleWhen onto the derived form section at 9dfaca6543) and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts (deriveFieldGroupDetailSections still drops it — objectui#11630, clause 4's detail half); packages/components/src/renderers/form/form.tsx (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections plug into",
         "examples/app-showcase/src/data/objects/contact.object.ts#fieldGroups, semantic-zoo.object.ts (stock fieldGroups declarations, none with a predicate)",
         "cross-ref: field-level FormField.visibleWhen is form-view-gallery's; view-section FormSection.visibleWhen is NOT this slot — this item is the object-level fieldGroups predicate #13030 re-introduced"
       ],
@@ -3637,6 +3669,12 @@
           "date": "2026-08-30",
           "change": "initial — 3-angle sweep hit (spec-enums, routes/runtime, docs-claims): fieldGroups[].visibleWhen landed 2026-08-29 (#13030) with no checklist coverage. Authored the spec half as positive clauses (accept+normalize, tombstone prescription, derivation passthrough) and the console half as EXPECTED-FAIL after re-grounding the register against source: the register's renderer citations (ObjectForm.tsx/292, sectionFields.ts) are the VIEW-section FormSection.visibleWhen machinery, and at objectui 1e14d70 the two fieldGroups adapters (fieldGroups.ts, buildDefaultPageSchema.ts) drop the key, so the object-level predicate is inert in the console despite the spec's declared-equals-enforced claim",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-05",
+          "change": "clause 1, step 3, the console knownGap, clause 4, the title and the adapter source re-pointed (assertion defect, #21784 VF4 + FE12). The spec normalizes a bare string to {dialect:'cel',source} (shared/expression.zod.ts ExpressionInputSchema, pinned by object-strictness-batch20.test.ts), but runtime-authored metadata is persisted verbatim and served unparsed (metadata-protocol, ADR-0005 appendix (c)). So the GET reads back what was PUT, and the verifier's wording is used for clause 1. The console text is out of date. It measures differently from FE12, which says both adapters copy the key: at objectui 9dfaca6543, and at the run's 2e818d0b51ec, the FORM adapter (fieldGroups.ts) copies visibleWhen, while the DETAIL adapter (deriveFieldGroupDetailSections) still drops it. That matches the detail page still failing, a product defect at objectui#11630. Clause 4 now scores the form half live and the detail half against that issue",
+          "ref": "#21797"
         }
       ]
     },

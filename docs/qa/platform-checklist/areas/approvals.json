@@ -174,22 +174,23 @@
       "title": "Inbox actions are metadata-driven and gated by the viewer's relationship",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
-      "personas": ["approver who is NOT the submitter", "same user viewing a request they submitted"],
+      "personas": ["an approver who is NOT the submitter and NOT an override actor (no platform-admin or tenant-admin standing), so record.viewer.can_override is false on the request", "the dev admin: the submitter of the invoice request (the own-request case) and an OVERRIDE actor (a platform admin — record.viewer.can_override is true on any PENDING request), for the override half of clause 2"],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "requests with a real (non-null) submitter — seeded since #3411 (invoice submitted by admin, others by a no-position persona)",
-          "seed-approval-demo.ts: the invoice dual sign-off request is submitted BY the admin (their own request, so 我发起的 is non-empty), while EXP-2001 / EXP-DEMO are submitted by Mei Phone (other-submitter requests the admin approves)"
+          "seed-approval-demo.ts: the invoice dual sign-off request is submitted BY the admin (their own request, so 我发起的 is non-empty), while EXP-2001 / EXP-DEMO are submitted by Mei Phone (other-submitter requests the admin approves)",
+          "a non-override approver on an other-submitter PENDING request: the seeded approver of EXP-2001 / EXP-DEMO is the dev admin, an override actor, so invite a plain member and make them an approver of one such request (for example through the request's reassign action as the admin) before step 2"
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "other-submitter case: reach the inbox the way a user does — the Approvals entry in the account app's Inbox group (/_console/apps/com.objectstack.account/component/approvals/inbox), NOT the bare /system/approvals deep link (#7234) — open the EXP-DEMO request from the 待我审批 tab; screenshot, then read the rendered action set from the drawer DOM",
+        "boot showcase isolated (dogfood §0); sign in as the dev admin for the own-request case and the override half, and as the non-override approver (personas) for the other-submitter case",
+        "other-submitter case, as the NON-override approver: reach the inbox the way a user does — the Approvals entry in the account app's Inbox group (/_console/apps/com.objectstack.account/component/approvals/inbox), NOT the bare /system/approvals deep link (#7234) — open the other-submitter request from the 待我审批 tab; screenshot, then read the rendered action set from the drawer DOM. Then open the SAME pending request as the dev admin and read its action set too (the override half)",
         "own-request case: open the invoice request from the 我发起的 tab; screenshot, then read its action set",
-        "GET /api/v1/approvals/requests/:id for both and record the server-computed viewer flags (can_act, is_submitter) and status",
+        "GET /api/v1/approvals/requests/:id for both requests, as each viewer, and record the server-computed viewer flags (can_act, is_submitter, can_override) and status",
         "cross-check each rendered action against the declared metadata actions on sys_approval_request (visibility expressions gate on record.viewer.can_act / record.viewer.is_submitter / record.status)",
         "spot-check an approver action: approve EXP-DEMO from the drawer; capture the POST and re-read the request",
         "spot-check a submitter action: send a reminder on the invoice request; capture POST /api/v1/approvals/requests/:id/remind",
@@ -203,15 +204,15 @@
           "evidence": "screenshot + DOM action list"
         },
         {
-          "clause": "submitter-side actions (send-reminder, recall) appear ONLY on the viewer's own request",
+          "clause": "send-reminder appears only on the viewer's own pending request; Recall appears on the viewer's own pending/returned request and, for an override actor (platform/tenant admin), on any pending request; a non-admin approver sees neither on another submitter's request.",
           "oracle": "dom",
-          "verify": "own-request drawer shows the two extra actions; other-submitter drawer does not",
-          "evidence": "side-by-side action lists for the two requests"
+          "verify": "the own-request drawer shows both; the non-override approver's drawer on the other-submitter request shows neither; the dev admin's drawer on that same pending request shows Recall and NOT send-reminder — approval_recall's second visibility arm is record.viewer.can_override (the #3424 override lever, button added by #12716), and approval_remind stays submitter-only. Read each viewer's flags beside its drawer",
+          "evidence": "action lists for the three (viewer, request) pairs + the viewer flags each was rendered against"
         },
         {
           "clause": "the rendered gating mirrors the server's viewer flags, which are computed on the request read — not a client heuristic",
           "oracle": "api",
-          "verify": "for both requests, the API's viewer flags (can_act / is_submitter) predict exactly which action groups rendered; declared visibility expressions on sys_approval_request gate on those flags plus status",
+          "verify": "for both requests and every viewer, the API's viewer flags (can_act / is_submitter / can_override) predict exactly which action groups rendered; declared visibility expressions on sys_approval_request gate on those flags plus status",
           "evidence": "request reads + the rendered sets"
         },
         {
@@ -233,14 +234,15 @@
       "traps": ["automation-input", "hydration-race"],
       "source": [
         "#3358 §1", "#3411",
-        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (declared actions + viewer-flag visibility expressions)",
+        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (declared actions + viewer-flag visibility expressions — approval_recall's submitter arm OR record.viewer.can_override, #12716; approval_remind submitter-only)",
         "packages/rest/src/rest-route-ledger.ts (the approvals action route family)",
         "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (server-declared actions rendered; 待我审批 / 我发起的 tabs)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (7-action table proven after #3411 stamped real submitters)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is reached through the account app's Approvals nav entry (component route) instead of the bare /system/approvals deep link, so the item exercises the post-#7213 user path", "ref": "#7331" }
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is reached through the account app's Approvals nav entry (component route) instead of the bare /system/approvals deep link, so the item exercises the post-#7213 user path", "ref": "#7331" },
+        { "revision": 4, "date": "2026-10-05", "change": "clause 2 re-pointed, with the personas, steps 1, 2 and 4, the clause-3 verify and a fixtures line (stale, #21782 VF4). In sys-approval-request.object.ts, approval_recall's visible is the submitter arm OR record.viewer.can_override == true (the #3424 override lever, button added by #12716), which platform/tenant admins hold on any pending request (isOverrideActor); approval_remind stays submitter-only. Revision 3 (2026-08-10) predates #12716. The verifier's wording is used for the clause. The run's approver persona was the dev admin, an override actor, so against that persona the old clause also read as an invalid pairing. The personas now name a non-override approver, and the admin's override view is asserted as its own leg", "ref": "#21797" }
       ]
     },
     {
