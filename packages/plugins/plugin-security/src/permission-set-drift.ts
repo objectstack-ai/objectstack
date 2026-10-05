@@ -67,6 +67,7 @@ import {
   logSeedDurabilityFailure,
 } from './per-organization-catalog.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
+import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
 import { buildExistingByName } from './seed-name-lookup.js';
 
 /**
@@ -125,7 +126,27 @@ export async function computePermissionSetDriftDiagnostics(
   const out: PermissionSetDriftDiagnostic[] = [];
   if (!ql || typeof ql.find !== 'function') return out;
 
-  const declared = readDeclared(ql, 'permission').filter((ps) => ps?.name && (ps._packageId ?? ps.packageId));
+  // [#21860] "Package-declared" is the lock's verdict for the NAME — a code
+  // (artifact) package ships it — read through the one classifier the write
+  // doors, the overlay detection reading and the Discard Overlay action ask.
+  // A package id on the item alone is not that answer: a set saved into a
+  // writable runtime package carries one after the first metadata list read,
+  // and this report used to diagnose it as package-declared and name Discard
+  // Overlay as the remedy, an action that deletes its only stored definition.
+  // The per-item test that follows the verdict only picks which bodies of a
+  // code-shipped name are compared, exactly as before.
+  const codeShipped = new Map<string, boolean>();
+  const isCodeShipped = (name: string): boolean => {
+    let shipped = codeShipped.get(name);
+    if (shipped === undefined) {
+      shipped = classifyPackagedPermissionSet(name, ql).status === 'packaged';
+      codeShipped.set(name, shipped);
+    }
+    return shipped;
+  };
+  const declared = readDeclared(ql, 'permission').filter(
+    (ps) => ps?.name && (ps._packageId ?? ps.packageId) && isCodeShipped(String(ps.name)),
+  );
   if (declared.length === 0) return out;
 
   const organizationId = opts.organizationId;

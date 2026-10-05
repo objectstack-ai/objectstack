@@ -1387,6 +1387,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.scoped-list-fallback.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
       "verb": "delete",
       "pinned": 1

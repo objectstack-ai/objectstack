@@ -35,10 +35,9 @@
  *  5. The draft preview: A's draft and a package-less draft, both orders. The
  *     previewed slot is A's draft, as `getMetaItem` with `previewDrafts`.
  *
- * Out of this card: a list scoped to a package (`packageId` on the list
- * request) reads only that package's rows, so a package-less row never
- * reaches its merge. That is the row read, not the merge, and these pins do
- * not cover it.
+ * A list scoped to a package (`packageId` on the list request) is pinned in
+ * `protocol.scoped-list-fallback.test.ts` (#21817): its package-less rows
+ * reach the merge as stand-ins, so its slot takes the same order.
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
