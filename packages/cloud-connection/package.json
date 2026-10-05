@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/spec": "workspace:*",
@@ -32,7 +33,6 @@
   },
   "devDependencies": {
     "@objectstack/lint": "workspace:*",
-    "@objectstack/metadata-core": "workspace:*",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

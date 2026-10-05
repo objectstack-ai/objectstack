@@ -34,6 +34,10 @@
  *            no JSON door carries. The package's job bodies are scheduled on
  *            install and on every rehydrate; on a rehydrate, a hook with no
  *            `body` that an older build installed is warned and NOT bound.
+ *            A manifest whose `engines.protocol` excludes this runtime's major
+ *            answers `OS_PROTOCOL_INCOMPATIBLE` (422) with the handshake's
+ *            diagnostic in `error.details`, the answer `POST /api/v1/packages`
+ *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -57,7 +61,9 @@
  *
  * On `kernel:ready`, the plugin scans the directory and re-registers each
  * cached manifest so installs survive process restarts without further
- * cloud round-trips.
+ * cloud round-trips. An entry whose `engines.protocol` excludes this runtime's
+ * major is not loaded: it is reported at `error`, naming the replay command,
+ * and the boot continues (ADR-0087 D1, #21762).
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -85,6 +91,17 @@ import {
 } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
+// answer both package-install doors give its refusal. Imported from the
+// producer, never restated: `POST /api/v1/packages` answers through the same
+// helper, so the two doors cannot drift apart on the wire.
+import {
+    assertProtocolCompat,
+    checkProtocolCompat,
+    isProtocolIncompatibleError,
+    protocolIncompatibleAnswer,
+    type ProtocolIncompatibleDiagnostic,
+} from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -485,6 +502,23 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         for (const entry of entries) {
             try {
+                // [#21762] ADR-0087 D1: the handshake runs "before loading a
+                // package's metadata", and a rehydrate IS a load. An entry whose
+                // declared range excludes this runtime's major (installed before
+                // the install door checked, or by a runtime of another protocol
+                // sharing this ledger) is NOT loaded: nothing is registered,
+                // synced, bound or seeded for it, and the boot continues with the
+                // rest. Its ledger entry is kept, so DELETE can still remove it
+                // and a compatible version can replace it.
+                //
+                // `checkProtocolCompat` is the handshake's own judge. Only a
+                // positive incompatibility is acted on: an absent or
+                // unrecognised range rehydrates exactly as it did before.
+                const compat = checkProtocolCompat(entry.manifest);
+                if (compat.status === 'incompatible') {
+                    this.reportProtocolIncompatibleEntry(ctx, entry, compat.diagnostic);
+                    continue;
+                }
                 // Awaited: register also bridges the manifest's objects into
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
@@ -1011,7 +1045,38 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
-        // 1c. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
+        // 1c. [#21762] ⭐ ADR-0087 D1'S PROTOCOL HANDSHAKE, before anything is
+        //     registered, written or synced: the same `assertProtocolCompat`
+        //     the other package-install door (`POST /api/v1/packages`) and the
+        //     protocol install primitive run. Before this, a manifest whose
+        //     `engines.protocol` excludes this runtime's major answered 200 here:
+        //     registered, its ledger entry written, its schemas synced, while
+        //     the other door refused the same manifest with a 422.
+        //
+        //     The refusal is that door's answer, from the one shared helper:
+        //     422 `OS_PROTOCOL_INCOMPATIBLE`, the error's own message, and the
+        //     diagnostic's five fields in `error.details`. It is 422 on BOTH
+        //     branches: a package built for another protocol is a body this
+        //     runtime cannot load, not an upstream fault, whichever branch
+        //     supplied it (the unrunnable-code refusal below reasons the same).
+        //
+        //     After the id gate, so the diagnostic names a parsed id. Ahead of
+        //     the unrunnable-code judgement, which reads the package's jobs and
+        //     hooks with THIS runtime's binder: ADR-0087 D1 checks "before
+        //     loading a package's metadata". An absent or unrecognised range is
+        //     admitted with a warning, as at every seam the handshake guards.
+        try {
+            assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+        } catch (err) {
+            if (!isProtocolIncompatibleError(err)) throw err;
+            const refusal = protocolIncompatibleAnswer(err);
+            return c.json({
+                success: false,
+                error: { code: refusal.code, message: refusal.message, details: refusal.details },
+            }, refusal.status);
+        }
+
+        // 1d. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
         //     A job runs on a JSON door only through its sandboxed `body`; its
         //     deprecated `handler` names a `defineStack({ functions })` entry,
         //     which is code and travels only in the artifact's runtime module —
@@ -2542,6 +2607,29 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * they are the two things that turn "an app is missing" into a fix:
      * `.objectstack/installed-packages/<file>` is the thing to repair or delete.
      */
+    /**
+     * [#21762] The one line a rehydrate prints for a ledger entry it refuses to
+     * load under ADR-0087 D1's handshake.
+     *
+     * `error`, not `warn`: the ledger says the package is installed (the GET
+     * listing still serves it) while the running kernel holds none of it, so
+     * persisted and runtime state disagree with nothing else saying so. The
+     * line owes the consequence and the fix, and carries the handshake's own
+     * message, which names the replay command (`objectstack migrate meta`).
+     */
+    private reportProtocolIncompatibleEntry = (
+        ctx: PluginContext,
+        entry: InstalledEntry,
+        diagnostic: ProtocolIncompatibleDiagnostic,
+    ): void => {
+        ctx.logger?.error?.(
+            `[MarketplaceInstallLocal] ${diagnostic.code}: ${entry.manifestId}@${entry.version} is NOT loaded into `
+            + `this runtime, though its ledger entry lists it as installed — none of its objects, data or handlers `
+            + `are available: ${diagnostic.message}. Install a version of the package built for protocol `
+            + `${diagnostic.protocolVersion} (POST ${ROUTE_BASE}), or remove it (DELETE ${ROUTE_BASE}/${entry.manifestId}).`,
+        );
+    };
+
     private warnSkippedLedgerEntries = (ctx: PluginContext, skipped: SkippedManifestEntry[], what: string): void => {
         for (const { file, cause } of skipped) {
             ctx.logger?.warn?.(
