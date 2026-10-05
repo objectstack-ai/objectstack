@@ -11,6 +11,13 @@
  * stayed empty (the "提示成功但没有数据" bug). These tests pin the corrected
  * behaviour: no rows written => failure + flag stays false; rows written =>
  * success + flag flips.
+ *
+ * …and the converse: a reseed over an INTACT baseline — every declared record
+ * already present, so the loader skips all of them — wrote nothing because
+ * there was nothing to write. It used to answer `422 RESEED_NO_ROWS` "The
+ * package declares no seedable records for this runtime" over a package that
+ * declares 28. It is a success carrying `skipped`, and that refusal text is
+ * kept for the run that really processed no record.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -19,8 +26,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 // Controls what the (mocked) seed loader reports back. The handler under test
-// only cares about result.summary.total{Inserted,Updated} + result.errors.
-let seedResult: any = { summary: { totalInserted: 0, totalUpdated: 0 }, errors: [] };
+// only cares about result.summary.total{Inserted,Updated,Skipped} + result.errors.
+let seedResult: any = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
@@ -100,7 +107,7 @@ const MANIFEST = {
 let dir: string;
 beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mil-reseed-'));
-    seedResult = { summary: { totalInserted: 0, totalUpdated: 0 }, errors: [] };
+    seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 
@@ -118,6 +125,10 @@ async function installAndGetRoutes() {
     return rawApp;
 }
 
+const RESEED = 'POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data';
+/** The ledger's install-wide record of sample data, read from the ledger itself. */
+const recordedWithSampleData = () => new LocalManifestSource(dir).read('app.test.proj').entry?.withSampleData;
+
 describe('reseed honest result', () => {
     it('FAILS (422) when the seed run wrote zero rows but errored', async () => {
         const rawApp = await installAndGetRoutes();
@@ -125,55 +136,99 @@ describe('reseed honest result', () => {
             summary: { totalInserted: 0, totalUpdated: 0 },
             errors: [{ message: 'database is locked' }, { message: 'database is locked' }],
         };
-        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!(
-            makeC({}, 'app.test.proj'),
-        );
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
         expect(res.status).toBe(422);
         expect(res.payload?.success).toBe(false);
         expect(res.payload?.error?.code).toBe('RESEED_NO_ROWS');
         // The real failure reason is surfaced, not swallowed.
         expect(res.payload?.error?.message).toContain('database is locked');
-        expect(res.payload?.error?.details).toMatchObject({ inserted: 0, updated: 0, errors: 2 });
+        expect(res.payload?.error?.details).toEqual({ inserted: 0, updated: 0, errors: 2 });
+        expect(recordedWithSampleData()).toBe(false);
     });
 
-    it('FAILS (422) when the package seeds nothing (0 rows, 0 errors)', async () => {
+    it('FAILS (422) unchanged when records errored beside skipped ones and nothing was written', async () => {
         const rawApp = await installAndGetRoutes();
-        seedResult = { summary: { totalInserted: 0, totalUpdated: 0 }, errors: [] };
-        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!(
-            makeC({}, 'app.test.proj'),
-        );
+        seedResult = {
+            summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 1 },
+            errors: [{ message: 'one row rejected' }],
+        };
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
         expect(res.status).toBe(422);
+        expect(res.payload?.success).toBe(false);
         expect(res.payload?.error?.code).toBe('RESEED_NO_ROWS');
+        expect(res.payload?.error?.message).toContain('one row rejected');
+        expect(res.payload?.error?.details).toEqual({ inserted: 0, updated: 0, errors: 1 });
+        expect(recordedWithSampleData()).toBe(false);
+    });
+
+    it('FAILS (422) with its own text when the loader processed no record for this runtime (0 rows, 0 skipped, 0 errors)', async () => {
+        const rawApp = await installAndGetRoutes();
+        seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
+        expect(res.status).toBe(422);
+        expect(res.payload?.success).toBe(false);
+        expect(res.payload?.error?.code).toBe('RESEED_NO_ROWS');
+        expect(res.payload?.error?.message).toBe(
+            'Reseed wrote no rows. The package declares no seedable records for this runtime.',
+        );
+        expect(res.payload?.error?.details).toEqual({ inserted: 0, updated: 0, errors: 0 });
+        expect(recordedWithSampleData()).toBe(false);
+    });
+
+    it('a package with no seed dataset at all never reaches the loader: 400 RESEED_SKIPPED, unchanged', async () => {
+        const rawApp = await installAndGetRoutes();
+        const { data: _none, ...noData } = MANIFEST;
+        const installRes = await rawApp.routes.get('POST /api/v1/marketplace/install-local')!(
+            makeC({ manifest: { ...noData, id: 'app.test.nodata' } }),
+        );
+        expect(installRes.payload?.success).toBe(true);
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.nodata'));
+        expect(res.status).toBe(400);
+        expect(res.payload?.success).toBe(false);
+        expect(res.payload?.error?.code).toBe('RESEED_SKIPPED');
+        expect(res.payload?.error?.message).toContain('no-datasets');
+    });
+
+    it('SUCCEEDS (200) over an intact baseline: every declared record already present, all of them skipped', async () => {
+        const rawApp = await installAndGetRoutes();
+        expect(recordedWithSampleData()).toBe(false);
+        seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 2 }, errors: [] };
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
+        expect(res.status).toBe(200);
+        expect(res.payload).toEqual({
+            success: true,
+            data: { manifestId: 'app.test.proj', inserted: 0, updated: 0, skipped: 2, errors: 0, withSampleData: true },
+        });
+        // The rows are there, so the install-wide record says so.
+        expect(recordedWithSampleData()).toBe(true);
     });
 
     it('SUCCEEDS and flips withSampleData when rows actually land', async () => {
         const rawApp = await installAndGetRoutes();
-        seedResult = { summary: { totalInserted: 2, totalUpdated: 0 }, errors: [] };
-        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!(
-            makeC({}, 'app.test.proj'),
-        );
+        seedResult = { summary: { totalInserted: 2, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
         expect(res.status).toBe(200);
         expect(res.payload?.success).toBe(true);
-        expect(res.payload?.data).toMatchObject({ inserted: 2, updated: 0, withSampleData: true });
+        expect(res.payload?.data).toEqual({
+            manifestId: 'app.test.proj', inserted: 2, updated: 0, skipped: 0, errors: 0, withSampleData: true,
+        });
 
         // The ledger's install-time record flips. Read from the ledger itself:
         // the GET listing no longer serves this record — it answers from the
         // caller's own rows (#21775), and the seed loader here is a stub that
         // writes none.
-        expect(new LocalManifestSource(dir).read('app.test.proj').entry?.withSampleData).toBe(true);
+        expect(recordedWithSampleData()).toBe(true);
     });
 
     it('partial success (some rows + some errors) still reports the error count', async () => {
         const rawApp = await installAndGetRoutes();
         seedResult = {
-            summary: { totalInserted: 1, totalUpdated: 0 },
+            summary: { totalInserted: 1, totalUpdated: 0, totalSkipped: 1 },
             errors: [{ message: 'one row rejected' }],
         };
-        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!(
-            makeC({}, 'app.test.proj'),
-        );
+        const res = await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
         expect(res.status).toBe(200);
         expect(res.payload?.success).toBe(true);
-        expect(res.payload?.data?.errors).toBe(1);
+        expect(res.payload?.data).toMatchObject({ inserted: 1, skipped: 1, errors: 1 });
     });
 });

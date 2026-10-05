@@ -23,6 +23,9 @@ export function baseOptions(): BaseLayoutProps {
         </div>
       ),
     },
+    // Every layout spreads baseOptions() — DocsLayout (docs sidebar), and HomeLayout on
+    // the home page and on /blog — so this one entry is the blog's link on all of them.
+    links: [{ text: 'Blog', url: '/blog', active: 'nested-url' }],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
 }
