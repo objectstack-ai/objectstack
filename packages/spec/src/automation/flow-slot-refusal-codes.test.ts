@@ -39,6 +39,7 @@ import {
 import * as automation from './index.js';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
 import { NotifyConfigSchema } from './io-node-config.zod.js';
+import { ApprovalNodeConfigSchema } from './approval.zod.js';
 import { STORED_METADATA_BODY_PRESCRIPTION } from '../kernel/stored-metadata-body-objects.js';
 
 /** What one refusal says, whichever producer said it. */
@@ -97,6 +98,27 @@ const FAMILY_WRITE = (nodeType: string, verb: string, objectName: string): strin
   `This \`${nodeType}\` node's \`objectName\` is '${objectName}', so it would ${verb} a table that holds stored `
   + 'metadata, and a flow may not write it directly: every run that reaches the node refuses it before anything is '
   + `written, and re-running changes nothing. ${STORED_METADATA_BODY_PRESCRIPTION}`;
+
+/**
+ * [#21850] A key the approval node's declared contract does not declare, or a
+ * value it refuses — the contract's own sentence inside the refusal's, with
+ * the closing instruction only for a plain value finding.
+ */
+const REFUSED_BY_CONTRACT = (nodeType: string, key: string, sentence: string, prescribe: boolean): string =>
+  `This \`${nodeType}\` node's config is refused at \`${key}\` by the ${nodeType} contract: `
+  + `${/[.!?]$/.test(sentence) ? sentence : `${sentence}.`} Its executor parses the config against that contract `
+  + 'before it does anything else and refuses the node on any finding, so every run that reached this node would '
+  + 'fail there; the config is metadata, and re-running changes nothing.'
+  + (prescribe ? ` Write a value the ${nodeType} contract accepts at \`${key}\`.` : '');
+
+/** An approval approver slate the contract accepts — every approval pin carries it. */
+const APPROVERS = [{ type: 'user', value: 'u1' }];
+
+/** The approval contract's own words for one config at one issue path — read, never re-spelled. */
+const approvalSentence = (config: unknown, path: string): string => {
+  const own = ApprovalNodeConfigSchema.safeParse(config);
+  return own.success ? '' : own.error.issues.find((i) => i.path.join('.') === path)?.message ?? '';
+};
 
 /** The notify contract's own words for a node with no content source — read, never re-spelled. */
 const NOTIFY_TITLE_RULE = (() => {
@@ -320,6 +342,41 @@ const PINS: { readonly [C in FlowSlotRefusalCode]: readonly [Pin<C>, ...Pin<C>[]
       source: '',
     },
   ],
+  'node-config-refused-by-contract': [
+    {
+      produce: nodeConfig('approval', { approvers: APPROVERS, escalation: { timeoutHours: 2, bogusKey: 1 } }),
+      params: { nodeType: 'approval', key: 'escalation.bogusKey' },
+      message: REFUSED_BY_CONTRACT(
+        'approval',
+        'escalation.bogusKey',
+        approvalSentence({ approvers: APPROVERS, escalation: { timeoutHours: 2, bogusKey: 1 } }, 'escalation'),
+        false,
+      ),
+      source: '',
+    },
+    {
+      produce: nodeConfig('approval', { approvers: APPROVERS, escalation: { timeoutHours: 0.5 } }),
+      params: { nodeType: 'approval', key: 'escalation.timeoutHours' },
+      message: REFUSED_BY_CONTRACT(
+        'approval',
+        'escalation.timeoutHours',
+        approvalSentence({ approvers: APPROVERS, escalation: { timeoutHours: 0.5 } }, 'escalation.timeoutHours'),
+        true,
+      ),
+      source: '',
+    },
+    {
+      produce: nodeConfig('approval', { approvers: APPROVERS, onEmptyApprovers: 'fail', fallbackApprovers: APPROVERS }),
+      params: { nodeType: 'approval', key: 'onEmptyApprovers' },
+      message: REFUSED_BY_CONTRACT(
+        'approval',
+        'onEmptyApprovers',
+        approvalSentence({ approvers: APPROVERS, onEmptyApprovers: 'fail', fallbackApprovers: APPROVERS }, 'onEmptyApprovers'),
+        false,
+      ),
+      source: '',
+    },
+  ],
 };
 
 describe('flow slot refusal codes — one pin per code (code, params, unchanged message)', () => {
@@ -339,6 +396,14 @@ describe('flow slot refusal codes — one pin per code (code, params, unchanged 
 
   it('the rule-required pin reads a real sentence off the notify contract, not an empty one', () => {
     expect(NOTIFY_TITLE_RULE.length).toBeGreaterThan(40);
+  });
+
+  it('the refused-by-contract pins read real sentences off the approval contract, not empty ones', () => {
+    expect(approvalSentence({ approvers: APPROVERS, escalation: { timeoutHours: 2, bogusKey: 1 } }, 'escalation')).toContain('`bogusKey`');
+    expect(approvalSentence({ approvers: APPROVERS, escalation: { timeoutHours: 0.5 } }, 'escalation.timeoutHours').length).toBeGreaterThan(10);
+    expect(
+      approvalSentence({ approvers: APPROVERS, onEmptyApprovers: 'fail', fallbackApprovers: APPROVERS }, 'onEmptyApprovers'),
+    ).toContain('fallbackApprovers');
   });
 
   it('the structural lead sentence is the published constant, byte for byte', () => {
@@ -390,6 +455,7 @@ const NODE_CONFIG_CODES: ReadonlySet<FlowNodeConfigRefusalCode> = new Set<FlowNo
   'node-config-key-missing',
   'node-config-key-required-by-rule',
   'write-node-stored-metadata-target',
+  'node-config-refused-by-contract',
 ]);
 
 /** Node configs of every shape, per node type — the sweep judges whatever each one provokes. */
@@ -411,6 +477,11 @@ const CONFIG_SWEEP: ReadonlyArray<readonly [string, unknown]> = [
   ...SWEEP.map((value) => ['create_record', { objectName: value }] as const),
   ['update_record', { objectName: 'sys_metadata_history' }],
   ['delete_record', { objectName: 'sys_metadata' }],
+  ['approval', undefined],
+  ['approval', {}],
+  ['approval', { approvers: APPROVERS, notAKey: 1 }],
+  ...SWEEP.map((value) => ['approval', { approvers: APPROVERS, escalation: value }] as const),
+  ...SWEEP.map((value) => ['approval', { approvers: APPROVERS, escalation: { timeoutHours: value } }] as const),
 ];
 
 describe('flow slot refusal codes — the closed set', () => {

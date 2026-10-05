@@ -897,11 +897,16 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     return i18n;
   }
 
+  // [#21878] The object the records below belong to is DECLARED, titled by
+  // `name`: the label is read from the object's ADR-0079 title field, and a
+  // real engine writes only objects its registry holds.
+  const WITH_QUALIFICATION = { ...SINGLE_TENANT, person_qualification: ['id', 'name'] };
+
   function setup(
     locale: string | undefined,
     i18n?: { t: Function },
     objectDefs: Record<string, any> = {},
-    schemas: Record<string, string[] | Record<string, any>> = SINGLE_TENANT,
+    schemas: Record<string, string[] | Record<string, any>> = WITH_QUALIFICATION,
   ) {
     const { engine, fire, created } = makeEngine(schemas, objectDefs);
     let localeCalls = 0;
@@ -965,7 +970,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
   });
 
   it('keeps English summaries without a locale resolver (status quo)', async () => {
-    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
     installAuditWriters(engine as any, 'test.audit', { getI18n: () => undefined });
     await fire('afterInsert', insertCtx());
     expect(created.find((c) => c.object === 'sys_activity')!.row.summary).toBe(

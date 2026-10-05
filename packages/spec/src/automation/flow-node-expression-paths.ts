@@ -555,6 +555,13 @@ export interface FlowSlotRefusalParams {
     readonly nodeType: 'create_record' | 'update_record' | 'delete_record';
     readonly objectName: string;
   };
+  /**
+   * (#21850) A key a WHOLE-judged node contract does not declare, or a value it
+   * refuses, at the key the author wrote — today the `approval` node's, the one
+   * plugin node contract the spec declares. Its message is the contract's own
+   * sentence, inside one naming the node type and the key.
+   */
+  'node-config-refused-by-contract': { readonly nodeType: string; readonly key: string };
 }
 
 /** Every refusal code the three flow slot refusal producers emit. */
@@ -573,7 +580,8 @@ export type FlowNodeConfigRefusalCode =
   | 'decision-branch-label-missing'
   | 'node-config-key-missing'
   | 'node-config-key-required-by-rule'
-  | 'write-node-stored-metadata-target';
+  | 'write-node-stored-metadata-target'
+  | 'node-config-refused-by-contract';
 
 /** One refusal's `code` and `params`, correlated: narrowing on `code` narrows `params`. */
 type FlowSlotRefusalOf<Codes extends FlowSlotRefusalCode> = { message: string; source: string } & {
@@ -618,6 +626,7 @@ const FLOW_SLOT_REFUSAL_CODE_TABLE = {
   'node-config-key-missing': true,
   'node-config-key-required-by-rule': true,
   'write-node-stored-metadata-target': true,
+  'node-config-refused-by-contract': true,
 } as const satisfies Record<FlowSlotRefusalCode, true>;
 
 /**
