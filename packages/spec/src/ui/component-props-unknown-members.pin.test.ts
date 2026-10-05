@@ -593,7 +593,7 @@ describe('§5 `conditionalFormatting` on object-kanban is the list view\'s own m
 // §6 the close-out: no member is staged
 // ───────────────────────────────────────────────────────────────────────────
 
-describe('§6 #21464 is closed out — every renderer-read member is typed, or listed with a standing reason', () => {
+describe('§6 the `z.unknown()` member sweep is closed out — every renderer-read member is typed, or listed with a standing reason', () => {
   it('no stage is declared, and no ledger line is `staged`', () => {
     expect(Object.keys(STAGES)).toEqual([]);
     expect([...LEDGER.entries()].filter(([, reason]) => reason.kind === 'staged').map(([key]) => key)).toEqual([]);

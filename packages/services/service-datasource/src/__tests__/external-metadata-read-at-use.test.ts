@@ -136,10 +136,24 @@ interface Harness {
   services: Map<string, unknown>;
 }
 
-/** A kernel context whose `getService` throws on an unregistered name, as the kernel's does. */
-function harness(): Harness {
+/**
+ * A kernel context whose `getService` throws on an unregistered name, as the kernel's does.
+ *
+ * [#21842] The federated objects live in the engine's object registry on the
+ * `objectql` service, which is where the federation service reads objects
+ * (the registry a runtime save writes through to). The `metadata` fake still
+ * holds its own copy, as the kernel's fallback does after the startup bridge;
+ * the readers this file pins are the ones that stay on the metadata service.
+ */
+function harness(opts: { registry?: boolean } = {}): Harness {
   const services = new Map<string, unknown>();
   services.set('data', { introspectDatasource: vi.fn(async () => remoteSchema()) });
+  if (opts.registry !== false) {
+    const objects = new Map<string, unknown>([[CUSTOMER.name, CUSTOMER], [ORDER.name, ORDER]]);
+    services.set('objectql', {
+      registry: { getObject: (n: string) => objects.get(n), getAllObjects: () => [...objects.values()] },
+    });
+  }
   const ctx = {
     getService: (name: string) => {
       if (!services.has(name)) throw new Error(`Service '${name}' not found`);
@@ -257,18 +271,16 @@ describe('the federation service reads a metadata service registered after init 
 
   it('asks for the service again at each use, never remembering the first answer', async () => {
     const { h, service } = await startOrdering();
-    expect(objectsOf(await service.validateAll())).toEqual(['wh_customer', 'wh_order']);
+    const customerDiffs = async () =>
+      (await service.validateAll()).results.find((r) => r.object === 'wh_customer')?.diffs;
+    expect(await customerDiffs()).toEqual([expect.objectContaining({ kind: 'missing_column', column: 'email' })]);
 
-    const replacement = metadataFake();
-    await replacement.register('object', 'wh_extra', {
-      name: 'wh_extra',
-      datasource: 'warehouse',
-      external: { remoteName: 'orders' },
-      fields: {},
-    });
-    h.services.set('metadata', replacement.service);
+    // [#21842] Objects come from the engine registry, so the replacement is
+    // told apart by the datasource definition it answers: a `managed`
+    // datasource is not compared against its remote at all.
+    h.services.set('metadata', metadataFake({ name: 'warehouse', schemaMode: 'managed' }).service);
 
-    expect(objectsOf(await service.validateAll())).toEqual(['wh_customer', 'wh_extra', 'wh_order']);
+    expect(await customerDiffs()).toEqual([]);
   });
 });
 
@@ -292,7 +304,9 @@ describe('control: a metadata service registered before init (the dev ordering) 
 
 describe('with no metadata service at all, every reader keeps its fallback', () => {
   it('validate and the sweep answer an empty report, the draft a bare name, the catalog an unpersisted snapshot', async () => {
-    const service = await federation(harness());
+    // [#21842] No engine registry either: that is where validate's objects
+    // come from, so with neither service the report has nothing to list.
+    const service = await federation(harness({ registry: false }));
 
     expect(await service.validateAll()).toEqual({ ok: true, results: [] });
     expect((await service.generateObjectDraft('warehouse', 'customers')).name).toBe('customers');

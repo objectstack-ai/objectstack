@@ -60,7 +60,7 @@ const ROWS = {
   'element:repeater': ElementRepeaterPropsSchema,
 } as const;
 
-describe('the six rows exist and are the exported schemas (#20371)', () => {
+describe('the six rows exist and are the exported schemas', () => {
   it.each(Object.entries(ROWS))('`%s` dispatches to its exported schema', (type, schema) => {
     expect(Object.keys(ComponentPropsMap)).toContain(type);
     expect((ComponentPropsMap as Record<string, unknown>)[type]).toBe(schema);

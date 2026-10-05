@@ -125,7 +125,7 @@ function classifierBody(): string {
   return source.slice(open, end);
 }
 
-describe('`ai.requiresConfirmation` docblock states the #7828 signal set (#13865)', () => {
+describe('`ai.requiresConfirmation` docblock names only the declared signals the classifier reads', () => {
   it('anchors on the live docblock and the live classifier', () => {
     // Anti-vacuity for every assertion below: both extractions must have found
     // real text, or "names no retired signal" passes by reading nothing.
@@ -147,7 +147,7 @@ describe('`ai.requiresConfirmation` docblock states the #7828 signal set (#13865
     expect(doc, "the docblock must name `variant:'danger'`").toMatch(/`variant:\s*'danger'`/);
   });
 
-  it('would flag the pre-#13865 sentence as a positive `confirmText` claim (self-test)', () => {
+  it('would flag the retired sentence as a positive `confirmText` claim (self-test)', () => {
     // Verbatim, the sentence this card retired. Without this the assertion
     // below could pass simply because the prose stopped naming `confirmText`.
     const before =
@@ -165,14 +165,14 @@ describe('`ai.requiresConfirmation` docblock states the #7828 signal set (#13865
   it('presents no positive `confirmText` claim', () => {
     expect(
       positiveConfirmTextClaims(flatten(requiresConfirmationDoc())),
-      'a `confirmText` sentence with no negation re-seeds the leg #7828 Option A retired',
+      'a `confirmText` sentence with no negation re-seeds the retired leg — only declared semantics classify',
     ).toEqual([]);
   });
 
-  it('the classifier still does not read `confirmText` (#7828 Option A)', () => {
+  it('the classifier still does not read `confirmText` — only declared semantics classify', () => {
     expect(
       classifierBody(),
-      '`actionLooksDestructive` reads `confirmText` again — reopen #7828 before the docblock '
+      '`actionLooksDestructive` reads `confirmText` again — reopen the declared-semantics ruling before the docblock '
         + 'in `packages/spec/src/ui/action.zod.ts` may name it',
     ).not.toMatch(/confirmText/);
   });

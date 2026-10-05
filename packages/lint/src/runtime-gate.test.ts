@@ -45,7 +45,6 @@ const cleanApprovalFlow = {
       type: 'approval',
       config: {
         approvers: [{ type: 'expression', value: 'current.owner' }],
-        emptyApproverPolicy: 'reject',
       },
     },
   ],
