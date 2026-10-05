@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// A flow node's config VALUES are judged where the flow registers, by the
-// schema its executor parses at run time — through both registration doors
-// an operator has: the package a stack ships (package load) and the admin
-// write door (`POST /automation`).
+// A flow whose node config breaks the node's contract is refused where it
+// registers — through both registration doors an operator has: the package a
+// stack ships (package load) and the admin write door (`POST /automation`) —
+// and a flow refused at load is not left registered.
 //
 // ## What was broken
 //
@@ -13,26 +13,39 @@
 // (the contract says `>= 1`) therefore registered and loaded `active`, every
 // record the trigger matched was created, and every run then failed at the
 // approval node: no approval request opened, so the record existed without
-// the gate it was meant to pass, and the user who saved it saw nothing.
+// the gate it was meant to pass, and the user who saved it saw nothing. The
+// flow parse (`FlowSchema`, which `registerFlow` runs first) now judges an
+// approval node's config against its declared contract, whole.
+//
+// And at package load, a refusal could fail to hold. The boot pull registers a
+// package's flows before a plugin that contributes a node type has registered
+// its executor, so it cannot check that node's config keys; the `kernel:ready`
+// bind re-registers every flow once the executor exists, and when it refused
+// one it only warned — the boot pull's registration stayed `active`.
 //
 // ## What each case pins
 //
-//   - package load: the sub-hour flow is refused (not registered), and the boot
-//     says why with a located error (the flow, the node, the config path);
+//   - package load: an approval node's out-of-range escalation and its
+//     undeclared escalation key are refused (not registered), and the boot names
+//     the flow and the located config path;
 //   - package load, the control: a valid escalation registers and RUNS — a
 //     record of the trigger's object opens a pending approval request;
-//   - the admin door: the sub-hour flow is refused `400 VALIDATION_FAILED` with
-//     the located error, and nothing is registered under its name;
+//   - package load, a plugin node type whose executor registers after the boot
+//     pull: an undeclared config key is refused by the `kernel:ready` bind, and
+//     the flow is not left registered; its valid sibling is;
+//   - the admin door: both approval refusals answer `400 VALIDATION_FAILED`
+//     located at the config path, and nothing is registered under either name;
 //   - the admin door, the control: a valid escalation registers.
 //
 // The fixture is built with `strict: false`, on purpose: the build door judges
-// the same flow on its own, and this file pins the two runtime doors behind it,
-// so the invalid body has to reach them. Everything else about the stack is an
-// ordinary authored package.
+// the same flows on its own, and this file pins the two runtime doors behind
+// it, so the invalid bodies have to reach them. Everything else about the stack
+// is an ordinary authored package.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { defineStack } from '@objectstack/spec';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
@@ -42,9 +55,17 @@ const OBJECT = 'esc_value_request';
 const UNSTAFFED = 'esc_value_unstaffed';
 
 const PACKAGED_SUB_HOUR = 'esc_value_packaged_sub_hour';
+const PACKAGED_UNKNOWN_KEY = 'esc_value_packaged_unknown_key';
 const PACKAGED_VALID = 'esc_value_packaged_valid';
+const PACKAGED_PLUGIN_TYPO = 'esc_value_packaged_plugin_typo';
+const PACKAGED_PLUGIN_VALID = 'esc_value_packaged_plugin_valid';
 const DOOR_SUB_HOUR = 'esc_value_door_sub_hour';
+const DOOR_UNKNOWN_KEY = 'esc_value_door_unknown_key';
 const DOOR_VALID = 'esc_value_door_valid';
+
+/** The config path the flow parse locates, on the approval node (`nodes[1]`). */
+const SUB_HOUR_PATH = 'nodes.1.config.escalation.timeoutHours';
+const UNKNOWN_KEY_PATH = 'nodes.1.config.escalation.bogusKey';
 
 /** An active, record-triggered flow whose one approval node carries `escalation`. */
 function gatedFlow(name: string, escalation: Record<string, unknown>) {
@@ -82,7 +103,60 @@ function gatedFlow(name: string, escalation: Record<string, unknown>) {
 }
 
 const SUB_HOUR = { enabled: true, timeoutHours: 0.5, action: 'notify' };
+const UNKNOWN_KEY = { enabled: true, timeoutHours: 4, action: 'notify', bogusKey: 1 };
 const VALID = { enabled: true, timeoutHours: 4, action: 'notify' };
+
+/**
+ * A plugin node type the spec knows nothing about, contributed the way a
+ * plugin contributes one: its executor (and the descriptor whose
+ * `configSchema` declares `count`) registers from the plugin's own `start()`,
+ * after the automation plugin's boot pull.
+ */
+const STAMP = 'esc_value_stamp';
+
+function stampPlugin() {
+  return {
+    name: 'com.dogfood.esc-value-stamp',
+    version: '0.0.0',
+    async init() {},
+    async start(ctx: { getService<T>(name: string): T }) {
+      ctx.getService<{ registerNodeExecutor(executor: unknown): void }>('automation').registerNodeExecutor({
+        type: STAMP,
+        descriptor: defineActionDescriptor({
+          type: STAMP,
+          version: '0.0.0',
+          name: 'Stamp',
+          category: 'custom',
+          paradigms: ['flow'],
+          source: 'plugin',
+          configSchema: { type: 'object', properties: { count: { type: 'number' } } },
+        }),
+        async execute() {
+          return { success: true };
+        },
+      });
+    },
+  };
+}
+
+/** A flow run by hand whose one node is the plugin node type, carrying `config`. */
+function stampFlow(name: string, config: Record<string, unknown>) {
+  return {
+    name,
+    label: `Stamp ${name}`,
+    type: 'autolaunched',
+    status: 'active',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: {} },
+      { id: 'stamp', type: STAMP, label: 'Stamp', config },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'stamp' },
+      { id: 'e2', source: 'stamp', target: 'end' },
+    ],
+  };
+}
 
 const fixtureStack = defineStack(
   {
@@ -92,7 +166,7 @@ const fixtureStack = defineStack(
       version: '0.0.0',
       type: 'app',
       name: 'Escalation Values Fixture',
-      description: 'One object and two approval flows, one with an escalation value its contract refuses.',
+      description: 'One object, approval flows with escalation values their contract refuses, and plugin-node flows.',
     },
     // ADR-0097: a record-change trigger registers only when the app declares it.
     requires: ['automation', 'triggers'],
@@ -105,7 +179,14 @@ const fixtureStack = defineStack(
         fields: { name: Field.text({ label: 'Name', required: true }) },
       }),
     ],
-    flows: [gatedFlow(PACKAGED_SUB_HOUR, SUB_HOUR), gatedFlow(PACKAGED_VALID, VALID)] as never,
+    flows: [
+      gatedFlow(PACKAGED_SUB_HOUR, SUB_HOUR),
+      gatedFlow(PACKAGED_UNKNOWN_KEY, UNKNOWN_KEY),
+      gatedFlow(PACKAGED_VALID, VALID),
+      // `cuont` is a key the plugin node type's descriptor does not declare.
+      stampFlow(PACKAGED_PLUGIN_TYPO, { cuont: 2 }),
+      stampFlow(PACKAGED_PLUGIN_VALID, { count: 2 }),
+    ] as never,
   },
   { strict: false },
 );
@@ -113,10 +194,14 @@ const fixtureStack = defineStack(
 interface DispatcherEnvelope {
   success?: boolean;
   data?: Record<string, unknown>;
-  error?: { code?: string; message?: string };
+  error?: {
+    code?: string;
+    message?: string;
+    details?: { fields?: Array<{ field?: string; code?: string; message?: string }> };
+  };
 }
 
-describe('a flow node config value its executor refuses is refused at registration', () => {
+describe('a flow node config its contract refuses is refused at registration, and not left registered at load', () => {
   let stack: VerifyStack;
   let token: string;
   /** Everything the platform logger wrote while the stack booted. */
@@ -127,6 +212,10 @@ describe('a flow node config value its executor refuses is refused at registrati
     const json = (await res.json().catch(() => ({}))) as DispatcherEnvelope;
     return { status: res.status, json };
   };
+
+  /** The boot lines that name `flow` and carry `fragment`. */
+  const bootLines = (flow: string, fragment: string) =>
+    bootOutput.split('\n').filter((line) => line.includes(flow) && line.includes(fragment));
 
   beforeAll(async () => {
     // The core logger writes through the process streams, not `console.*`.
@@ -140,7 +229,7 @@ describe('a flow node config value its executor refuses is refused at registrati
     try {
       stack = await bootStack(fixtureStack as unknown as Parameters<typeof bootStack>[0], {
         automation: true,
-        extraPlugins: [new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin()],
+        extraPlugins: [new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin(), stampPlugin()],
       });
     } finally {
       outSpy.mockRestore();
@@ -154,17 +243,18 @@ describe('a flow node config value its executor refuses is refused at registrati
     await stack?.stop();
   });
 
-  it('package load: the sub-hour flow is not registered', async () => {
-    const read = await call('GET', `/automation/${PACKAGED_SUB_HOUR}`);
-    expect(read.status, JSON.stringify(read.json)).toBe(404);
+  it('package load: the sub-hour and the undeclared-key approval flows are not registered', async () => {
+    for (const name of [PACKAGED_SUB_HOUR, PACKAGED_UNKNOWN_KEY]) {
+      const read = await call('GET', `/automation/${name}`);
+      expect(read.status, `${name}: ${JSON.stringify(read.json)}`).toBe(404);
+    }
   });
 
-  it('package load: the boot names the flow, the node and the config path it refused', () => {
-    const refusal = bootOutput
-      .split('\n')
-      .filter((line) => line.includes(PACKAGED_SUB_HOUR) && line.includes('escalation.timeoutHours'));
-    expect(refusal.length, 'no boot line locates the refused value').toBeGreaterThan(0);
-    expect(refusal.some((line) => line.includes("node 'gate'"))).toBe(true);
+  it('package load: the boot names each refused flow and the config path it refused', () => {
+    expect(bootLines(PACKAGED_SUB_HOUR, 'nodes[1].config.escalation.timeoutHours').length, bootOutput.slice(-4000))
+      .toBeGreaterThan(0);
+    expect(bootLines(PACKAGED_UNKNOWN_KEY, 'nodes[1].config.escalation.bogusKey').length, bootOutput.slice(-4000))
+      .toBeGreaterThan(0);
   });
 
   it('package load, the control: a valid escalation registers active and runs', async () => {
@@ -187,17 +277,30 @@ describe('a flow node config value its executor refuses is refused at registrati
     expect(opened[0].pending_approvers).toEqual([`position:${UNSTAFFED}`]);
   });
 
-  it('the admin door: the sub-hour flow is refused with a located error, and nothing registers', async () => {
-    const refused = await call('POST', '/automation', gatedFlow(DOOR_SUB_HOUR, SUB_HOUR));
-    expect(refused.status, JSON.stringify(refused.json)).toBe(400);
-    expect(refused.json.error?.code).toBe('VALIDATION_FAILED');
-    const message = String(refused.json.error?.message ?? '');
-    expect(message).toContain(DOOR_SUB_HOUR);
-    expect(message).toContain("node 'gate'");
-    expect(message).toContain('escalation.timeoutHours');
-
-    const read = await call('GET', `/automation/${DOOR_SUB_HOUR}`);
+  it('package load: a flow the kernel:ready bind refuses is not left registered from the boot pull', async () => {
+    const read = await call('GET', `/automation/${PACKAGED_PLUGIN_TYPO}`);
     expect(read.status, JSON.stringify(read.json)).toBe(404);
+    expect(bootLines(PACKAGED_PLUGIN_TYPO, 'config.cuont').length, bootOutput.slice(-4000)).toBeGreaterThan(0);
+
+    // Only that flow: its valid sibling of the same node type is registered.
+    const sibling = await call('GET', `/automation/${PACKAGED_PLUGIN_VALID}`);
+    expect(sibling.status, JSON.stringify(sibling.json)).toBe(200);
+  });
+
+  it('the admin door: both approval refusals answer 400 VALIDATION_FAILED at the config path, and nothing registers', async () => {
+    for (const [name, escalation, path] of [
+      [DOOR_SUB_HOUR, SUB_HOUR, SUB_HOUR_PATH],
+      [DOOR_UNKNOWN_KEY, UNKNOWN_KEY, UNKNOWN_KEY_PATH],
+    ] as const) {
+      const refused = await call('POST', '/automation', gatedFlow(name, escalation));
+      expect(refused.status, JSON.stringify(refused.json)).toBe(400);
+      expect(refused.json.error?.code).toBe('VALIDATION_FAILED');
+      const fields = refused.json.error?.details?.fields ?? [];
+      expect(fields.map((f) => f.field), JSON.stringify(refused.json)).toContain(path);
+
+      const read = await call('GET', `/automation/${name}`);
+      expect(read.status, JSON.stringify(read.json)).toBe(404);
+    }
   });
 
   it('the admin door, the control: a valid escalation registers', async () => {
