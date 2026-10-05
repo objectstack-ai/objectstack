@@ -24,6 +24,9 @@
  *   - an all-access caller's answer is unchanged;
  *   - every other failure still fails the request: a read error on a readable
  *     object, and an admission check that itself throws;
+ *   - a readable object is searched only on the fields the caller may QUERY
+ *     (`getQueryableFields`), and one left with none is skipped — the engine's
+ *     predicate guard refuses a search over a hidden field with the same 403;
  *   - no context means no pre-filter (the reads pose no principal).
  *
  * The engine double here stands in for the middleware: it THROWS the typed
@@ -39,6 +42,7 @@ interface FixtureObject {
     name: string;
     label: string;
     fields: Record<string, { name: string; label: string; type: string }>;
+    searchableFields?: string[];
 }
 
 const objectFixture = (name: string): FixtureObject => ({
@@ -91,16 +95,20 @@ function harness(opts: {
     withSecurity?: boolean;
     rows?: Record<string, Array<Record<string, unknown>>>;
     canReadObject?: (object: string, context?: unknown) => Promise<boolean>;
+    getQueryableFields?: (object: string, context?: unknown) => Promise<string[] | undefined>;
+    objects?: FixtureObject[];
     failRead?: { object: string; error: unknown };
 }) {
     const rows = opts.rows ?? ROWS;
     const readCalls: string[] = [];
+    const findOptions: Array<[string, Record<string, unknown>]> = [];
     const admits = (o: string) => opts.readable === 'all' || opts.readable.has(o);
     const engine = {
-        registry: fixtureRegistry([acct, lead, secret]),
-        find: vi.fn(async (object: string) => {
+        registry: fixtureRegistry(opts.objects ?? [acct, lead, secret]),
+        find: vi.fn(async (object: string, options: Record<string, unknown>) => {
             if (object === 'sys_metadata') return [];
             readCalls.push(object);
+            findOptions.push([object, options]);
             if (!admits(object)) throw objectReadDenied();
             if (opts.failRead && opts.failRead.object === object) throw opts.failRead.error;
             return rows[object] ?? [];
@@ -112,9 +120,11 @@ function harness(opts: {
     };
     const canReadObject = vi.fn(opts.canReadObject ?? (async (o: string) => admits(o)));
     const services = new Map<string, unknown>();
-    if (opts.withSecurity !== false) services.set('security', { canReadObject });
+    const security: Record<string, unknown> = { canReadObject };
+    if (opts.getQueryableFields) security.getQueryableFields = vi.fn(opts.getQueryableFields);
+    if (opts.withSecurity !== false) services.set('security', security);
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => services as Map<string, any>);
-    return { protocol, readCalls, canReadObject };
+    return { protocol, readCalls, findOptions, canReadObject };
 }
 
 async function rejection(run: () => Promise<unknown>): Promise<Record<string, unknown>> {
@@ -242,5 +252,74 @@ describe('searchAll — an object the caller may not read is skipped, not fatal'
 
         expect(canReadObject).not.toHaveBeenCalled();
         expect(result.totalObjects).toBe(3);
+    });
+});
+
+describe('searchAll — a readable object is searched only on the fields the caller may query', () => {
+    const memo: FixtureObject = {
+        name: 'memo',
+        label: 'memo',
+        fields: {
+            name: { name: 'name', label: 'Name', type: 'text' },
+            hidden_note: { name: 'hidden_note', label: 'Hidden note', type: 'text' },
+        },
+        searchableFields: ['name', 'hidden_note'],
+    };
+    const rows = { memo: [{ id: 'm1', name: 'Acme memo' }] };
+
+    it('a partial queryable set is handed to the engine as searchFields', async () => {
+        const { protocol, findOptions } = harness({
+            readable: 'all', objects: [memo], rows,
+            getQueryableFields: async () => ['id', 'name'],
+        });
+
+        const result = await protocol.searchAll({ q: 'Acme', context: MEMBER });
+
+        expect(findOptions).toHaveLength(1);
+        expect(findOptions[0][1].searchFields).toEqual(['name']);
+        expect(findOptions[0][1].search).toBe('Acme');
+        expect(result.hits.map((h) => [h.object, h.id])).toEqual([['memo', 'm1']]);
+        expect(result.totalObjects).toBe(1);
+    });
+
+    it('an object with NO queryable search field is skipped, unqueried and uncounted', async () => {
+        const { protocol, readCalls } = harness({
+            readable: 'all', objects: [acct, memo], rows: { ...ROWS, ...rows },
+            getQueryableFields: async (o) => (o === 'memo' ? ['id'] : ['id', 'name']),
+        });
+
+        const result = await protocol.searchAll({ q: 'Acme', context: MEMBER });
+
+        expect(readCalls).toEqual(['acct']);
+        expect(result.totalObjects).toBe(1);
+        expect(JSON.stringify(result)).not.toContain('memo');
+    });
+
+    it('a full queryable set, or no answer, leaves the request exactly as before (no searchFields)', async () => {
+        const full = harness({
+            readable: 'all', objects: [memo], rows,
+            getQueryableFields: async () => ['id', 'name', 'hidden_note'],
+        });
+        await full.protocol.searchAll({ q: 'Acme', context: MEMBER });
+        expect('searchFields' in full.findOptions[0][1]).toBe(false);
+
+        const noAnswer = harness({
+            readable: 'all', objects: [memo], rows,
+            getQueryableFields: async () => undefined,
+        });
+        await noAnswer.protocol.searchAll({ q: 'Acme', context: MEMBER });
+        expect('searchFields' in noAnswer.findOptions[0][1]).toBe(false);
+    });
+
+    it('a queryable-fields check that THROWS fails the search', async () => {
+        const injected = new Error('field resolution unavailable');
+        const { protocol, readCalls } = harness({
+            readable: 'all', objects: [memo], rows,
+            getQueryableFields: async () => { throw injected; },
+        });
+
+        const caught = await rejection(() => protocol.searchAll({ q: 'Acme', context: MEMBER }));
+        expect(caught).toBe(injected);
+        expect(readCalls).toEqual([]);
     });
 });

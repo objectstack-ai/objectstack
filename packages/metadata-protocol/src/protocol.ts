@@ -13695,7 +13695,11 @@ export class ObjectStackProtocolImplementation implements
      * caller's context, and an object it refuses is skipped. Without this, the
      * middleware's denial on the first unreadable object in scope failed the
      * WHOLE search with 403, so a member who could not read every object got
-     * no results at all.
+     * no results at all. The field-level half is the same question one axis
+     * down: the engine's predicate guard refuses a search that would match on
+     * a field the caller may not query, so each object's search fields are
+     * narrowed to the security service's `getQueryableFields` answer, and an
+     * object left with none is skipped too.
      *
      * A skipped object leaves nothing behind: it is never queried, never
      * named, and never counted in `totalObjects`, and the decision is made
@@ -13806,19 +13810,25 @@ export class ObjectStackProtocolImplementation implements
         const hits: Array<{ object: string; id: string; title: string; snippet?: string; record: any }> = [];
         let objectsScanned = 0;
 
-        // The object-level read admission, asked of the same authority the
-        // engine middleware enforces (see the method doc). Only a caller that
-        // carries a context is asked about: a context-less in-process call
-        // reaches `find` without one, so asking on its behalf would answer a
-        // question its reads never pose. No security service, or one without
-        // `canReadObject`, means no pre-filter — `find` still enforces, so the
-        // absence can only make the answer stricter (a denial propagates, as
-        // before), never wider.
+        // The caller's read admission, asked of the same authority the engine
+        // middleware enforces (see the method doc): `canReadObject` for the
+        // object, `getQueryableFields` for the fields the search may match on.
+        // Only a caller that carries a context is asked about: a context-less
+        // in-process call reaches `find` without one, so asking on its behalf
+        // would answer a question its reads never pose. No security service,
+        // or one without a method, means no pre-filter on that axis — `find`
+        // still enforces both, so the absence can only make the answer
+        // stricter (a denial propagates, as before), never wider. That is also
+        // why an `undefined` ("no answer") from `getQueryableFields` narrows
+        // nothing here: this sweep never bypasses the middleware's guards.
         const securityService = request.context !== undefined
             ? this.getServicesRegistry?.().get('security') as Partial<ISecurityService> | undefined
             : undefined;
         const canReadObject = typeof securityService?.canReadObject === 'function'
             ? (object: string) => securityService.canReadObject!(object, request.context)
+            : undefined;
+        const getQueryableFields = typeof securityService?.getQueryableFields === 'function'
+            ? (object: string) => securityService.getQueryableFields!(object, request.context)
             : undefined;
 
         for (const obj of allObjects) {
@@ -13919,7 +13929,7 @@ export class ObjectStackProtocolImplementation implements
             // of one helper, which is the stronger form of the same fix.
             const fieldMetaByName: Record<string, any> = {};
             for (const f of fields) if (f?.name) fieldMetaByName[f.name] = f;
-            const { allowed: searchableFields } = resolveSearchFieldResolution({
+            const { allowed: declaredSearchFields } = resolveSearchFieldResolution({
                 fields: fieldMetaByName,
                 searchableFields: obj.searchableFields,
                 // [ADR-0079] `nameField` is the canonical primary-title pointer;
@@ -13928,7 +13938,7 @@ export class ObjectStackProtocolImplementation implements
                 // a third spelling here would re-split what this card merged.
                 displayField: obj.nameField ?? obj.displayNameField,
             });
-            if (searchableFields.length === 0) continue;
+            if (declaredSearchFields.length === 0) continue;
 
             // Skip an object the caller may not read — before any query, so
             // nothing about its rows can shape the answer, and before the
@@ -13936,6 +13946,27 @@ export class ObjectStackProtocolImplementation implements
             // propagates: an admission that could not be decided fails the
             // search rather than quietly shrinking it.
             if (canReadObject && !(await canReadObject(obj.name))) continue;
+
+            // …and match only on the fields the caller may QUERY. The engine's
+            // predicate guard refuses a search whose resolved fields include
+            // one hidden from the caller (the filter oracle: row presence would
+            // disclose the hidden value), and that 403 failed the whole sweep —
+            // `sys_user`'s searchable fields include admin-only columns, so
+            // every member's unscoped search hit it. `searchFields` only ever
+            // NARROWS the server-resolved set (ADR-0061), so handing the engine
+            // the queryable subset searches what the caller could have filtered
+            // on themselves and nothing more. An object left with no queryable
+            // search field is skipped like an unreadable one.
+            let searchableFields = declaredSearchFields;
+            if (getQueryableFields) {
+                const queryable = await getQueryableFields(obj.name);
+                if (queryable !== undefined) {
+                    const allowed = new Set(queryable);
+                    searchableFields = declaredSearchFields.filter((f) => allowed.has(f));
+                    if (searchableFields.length === 0) continue;
+                }
+            }
+            const narrowed = searchableFields.length < declaredSearchFields.length;
 
             objectsScanned++;
 
@@ -13952,10 +13983,12 @@ export class ObjectStackProtocolImplementation implements
                     // and `search` is a declared `find` option
                     // (`EngineQueryOptionsSchema`, `ENGINE_FIND_OPTION_KEYS`) —
                     // so this is the engine's published door, not a private one.
-                    // No `searchFields`: that key only ever NARROWS the resolved
-                    // set (ADR-0061), and the palette wants the object's full
-                    // default reach.
+                    // `searchFields` only when the caller's queryable set is
+                    // narrower than the declared one (see above): that key only
+                    // ever NARROWS the resolved set (ADR-0061), and otherwise
+                    // the palette wants the object's full default reach.
                     search: q,
+                    ...(narrowed ? { searchFields: searchableFields } : {}),
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],
                 };
@@ -14012,13 +14045,15 @@ export class ObjectStackProtocolImplementation implements
                 // may well match and simply were not seen.
                 //
                 // A permission denial is NOT swallowed here either. The REST
-                // door (`enforceAuth`) checks authentication only; the
-                // object-level read admission is asked BEFORE this `try`, via
-                // the security service's `canReadObject` (see above), so an
-                // object the caller may not read never reaches `find`. A denial
-                // that still arrives here is a different verdict — a field-level
-                // refusal, a permission subsystem that could not resolve, a
-                // delegator that does not exist — and the ruling for this
+                // door (`enforceAuth`) checks authentication only; the read
+                // admission is asked BEFORE this `try`, via the security
+                // service's `canReadObject` and `getQueryableFields` (see
+                // above), so an object the caller may not read never reaches
+                // `find`, and one it may read is searched only on fields it may
+                // query. A denial that still arrives here is a verdict those
+                // answers did not foresee — a permission subsystem that could
+                // not resolve, a delegator that does not exist, a security
+                // service without those methods — and the ruling for this
                 // family applies to it: a read that could not run must not be
                 // answered "there are no matches here". Row-level security
                 // narrows `find`'s result set rather than throwing.

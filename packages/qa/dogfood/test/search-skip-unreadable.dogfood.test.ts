@@ -134,7 +134,7 @@ describe('dogfood: global search skips the objects a member cannot read', () => 
   it("the member's UNSCOPED search answers the readable object's hit and never names the walled one", async () => {
     const { status, text, body } = await search(memberToken, `q=${TERM}`);
 
-    expect(status).toBe(200);
+    expect(status, text).toBe(200);
     expect(body.hits.filter((h) => h.object === 'skipsearch_open').map((h) => h.id)).toEqual([openId]);
     expect(body.hits.some((h) => h.object === 'skipsearch_walled')).toBe(false);
     expect(text).not.toContain('skipsearch_walled');
@@ -158,8 +158,8 @@ describe('dogfood: global search skips the objects a member cannot read', () => 
   });
 
   it('negative control: the administrator still gets the hits from both objects', async () => {
-    const { status, body } = await search(adminToken, `q=${TERM}&objects=skipsearch_open,skipsearch_walled`);
-    expect(status).toBe(200);
+    const { status, text, body } = await search(adminToken, `q=${TERM}&objects=skipsearch_open,skipsearch_walled`);
+    expect(status, text).toBe(200);
     expect(body.hits.map((h) => [h.object, h.id]).sort()).toEqual(
       [['skipsearch_open', openId], ['skipsearch_walled', walledId]].sort(),
     );
