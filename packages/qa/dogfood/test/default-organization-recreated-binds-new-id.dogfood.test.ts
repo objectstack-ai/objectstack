@@ -15,6 +15,10 @@
  * delete, is asserted bound to the original organization on the same run, so
  * the memo is warm and the second half measures the revalidation and not a
  * deployment that binds nobody.
+ *
+ * Booted with `orgContext`, the harness's switch for the real single-org
+ * default-organization bootstrap (it is off by default there): that bootstrap
+ * is what creates the original organization and what recreates it.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -52,26 +56,18 @@ describe('the default organization id is revalidated when a user is bound', () =
   let originalOrgId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootStack(showcaseStack, { orgContext: true });
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    // The single-org default organization — reuse the bootstrap's when the
-    // boot made one, otherwise stand it up the way the bootstrap would.
+    // PREMISE: the bootstrap created the default organization and bound the
+    // admin as its owner, which is what lets better-auth delete it below.
     const [existing] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
-    originalOrgId = existing
-      ? String(existing.id)
-      : String((await ql.insert('sys_organization', { name: 'Default Organization', slug: 'default' }, { context: SYSTEM_CTX })).id);
-
-    // The admin must own the organization for better-auth to let it delete it.
+    expect(existing, 'PREMISE: the bootstrap created the default organization').toBeTruthy();
+    originalOrgId = String(existing.id);
     const [adminUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
-    const adminUserId = String(adminUser.id);
-    const adminMembers = await findRows(ql, 'sys_member', { user_id: adminUserId, organization_id: originalOrgId }, 5);
-    if (adminMembers.length > 0) {
-      await ql.update('sys_member', { id: adminMembers[0].id, role: 'owner' }, { context: SYSTEM_CTX });
-    } else {
-      await ql.insert('sys_member', { user_id: adminUserId, organization_id: originalOrgId, role: 'owner' }, { context: SYSTEM_CTX });
-    }
+    const adminMembers = await findRows(ql, 'sys_member', { user_id: String(adminUser.id), organization_id: originalOrgId }, 5);
+    expect(adminMembers.map((m) => m.role), 'PREMISE: the admin owns the default organization').toEqual(['owner']);
   }, 240_000);
 
   afterAll(async () => { await stack?.stop?.(); });
