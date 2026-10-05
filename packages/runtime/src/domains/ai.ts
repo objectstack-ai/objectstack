@@ -286,12 +286,13 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
     }
 
     // [#21806] A method the table does not declare on a path it does declare is
-    // `405` with an `Allow` header, for every verb alike. This exit is the ONE
-    // producer of that answer for `/ai/**`: the dispatcher plugin mounts every
-    // verb on its `/ai/*` wildcards, so the transport's own unmatched-method
-    // `405` (the `IHttpServer` contract in `@objectstack/spec/contracts`) can
-    // never fire for this family, and this table is the only place that knows
-    // which methods a path really declares. Hand-rolled rather than
+    // `405` with an `Allow` header naming exactly the declared methods, for
+    // every verb alike. This exit is the producer of that answer for `/ai/**`:
+    // the dispatcher plugin's `/ai/*` wildcards claim GET, POST, PUT, DELETE and
+    // PATCH, so for those the transport's own unmatched-method `405` (the
+    // `IHttpServer` contract in `@objectstack/spec/contracts`) never fires, and
+    // this table is the only place that knows which methods a path really
+    // declares. Hand-rolled rather than
     // `deps.error(...)` only for the header, as in `domains/meta.ts` and
     // `domains/mcp.ts`; the body goes through the one builder and the code is
     // DERIVED from the status (`METHOD_NOT_ALLOWED`), never spelled here.
