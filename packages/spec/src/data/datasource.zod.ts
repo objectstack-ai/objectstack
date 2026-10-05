@@ -6,11 +6,13 @@ import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import {
   connectionStringCredentialKeys,
+  CREDENTIAL_URL_QUERY_PARAM_NAMES,
   isCredentialShapedConfigKey,
+  urlCredentialQueryParams,
+  urlUserinfoPassword,
   urlUserinfoUsername,
 } from './driver/common.zod';
 import { resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
-import { redactUrlCredentials } from './datasource-credential-redaction';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -527,11 +529,12 @@ const CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED = (path: string, driver: string, 
  *    (the URL composite the read side strips), or a credential segment of a
  *    semicolon-delimited connection string (`Server=h;Password=p`).
  *
- * Bounds, each the read side's own: arrays are off the walk (row-shaped seed
- * data, not configuration); an EMPTY string carries no secret and is accepted
- * (the `user:@host` posture, and the explicit way to clear a stored value); a
- * non-string value under a credential-shaped name (`usePassword: true`) is not
- * credential material.
+ * Bounds: arrays are off the walk (row-shaped seed data, not configuration —
+ * the read side's own boundary); an EMPTY string carries no secret and is
+ * accepted (the `user:@host` posture, and the explicit way to clear a stored
+ * value); a `${…}` environment placeholder is not credential material and is
+ * judged as if absent; a non-string value under a credential-shaped name
+ * (`usePassword: true`) is not credential material.
  *
  * Routing the value into the secret store instead was the other option, and
  * is not taken: for a contractless driver nothing says which key the factory
@@ -555,7 +558,13 @@ function reportContractlessInlineCredentials(
       const dotted = ['config', ...path].join('.');
       const credentialNamed = underCredential || isCredentialShapedConfigKey(key);
       if (typeof value === 'string') {
-        if (value === '') continue;
+        // A `${…}` span is an environment placeholder, not credential
+        // material: judged with every span removed, so `apiKey: '${API_KEY}'`
+        // and `Password=${PW}` stay accepted — this driver's config shape is
+        // unjudged, placeholders included (the #4410 boundary) — while a
+        // literal secret beside a placeholder is still found.
+        const judged = value.replace(/\$\{[^}]*\}/g, '');
+        if (judged.trim() === '') continue;
         if (credentialNamed) {
           ctx.addIssue({
             code: 'custom',
@@ -564,8 +573,9 @@ function reportContractlessInlineCredentials(
           });
           continue;
         }
-        const segments = connectionStringCredentialKeys(value);
-        const what = redactUrlCredentials(value) !== value
+        const segments = connectionStringCredentialKeys(judged);
+        const what = urlUserinfoPassword(judged) !== undefined
+          || urlCredentialQueryParams(judged, CREDENTIAL_URL_QUERY_PARAM_NAMES).length > 0
           ? 'a credential inside a URL (a userinfo password or a credential query parameter)'
           : segments.length > 0
             ? `a credential segment (${segments.map((k) => `\`${k}=\``).join(', ')}) inside a connection string`
