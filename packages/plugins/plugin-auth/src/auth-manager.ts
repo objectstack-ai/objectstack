@@ -4367,9 +4367,8 @@ export class AuthManager {
    * creation's transaction, so the session a sign-up mints is created BEFORE
    * the reconciler has bound anyone. The session seam therefore settles the
    * membership itself — but only for the user this same request is creating.
-   * Any other member-less user signing in is not mid-creation: it is a user
-   * the policy left unbound, or one whose membership was REMOVED, and
-   * membership is decided at creation, never re-decided at sign-in.
+   * Any other member-less user signing in is not mid-creation, and membership
+   * is decided at creation, never re-decided at sign-in.
    *
    * A `WeakMap` because the scope IS the request: the entry dies with the
    * endpoint context, so nothing staged here can outlive the call that staged
@@ -7452,9 +7451,9 @@ export class AuthManager {
         //
         // ⛔ AND IT RUNS ONLY FOR A USER WHOSE CREATION IS IN THIS REQUEST.
         // ADR-0093 D7: membership is decided at creation. A member-less user
-        // signing in later is not a race to close — it is, among others, a
-        // user whose membership an administrator REMOVED, and settling here
-        // put them straight back on their next sign-in. The creation seam
+        // signing in later is not a race to close — whatever left them without
+        // a membership (the policy, or an administrator) has already decided,
+        // and a sign-in must not decide again. The creation seam
         // (`user.create.before`, below) stages the address in the request's
         // endpoint context; only a session minted in that same request for
         // that same user settles here (`isCreatingInThisRequest`).

@@ -1553,7 +1553,7 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_migration.map((r: any) => r.id)).toEqual(['adr-0093-membership-backfill']);
     });
 
-    it('once the pass is recorded, a later trigger binds nobody — a removed member stays removed', async () => {
+    it('once the pass is recorded, a later trigger binds nobody', async () => {
       await boot();
       // Boot: default org created, admin bound as owner, the one-time pass
       // runs and records itself.

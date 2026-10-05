@@ -67,7 +67,7 @@ describe('one-time membership backfill (ADR-0093 D6 + D7)', () => {
     expect(JSON.parse(String(engine.tables.sys_migration[0].details))).toMatchObject({ policy: 'auto', bound: 1 });
   });
 
-  it('a recorded verdict binds nobody — a member-less user (e.g. removed) stays unbound', async () => {
+  it('a recorded verdict binds nobody', async () => {
     const engine = makeEngine({
       sys_user: [{ id: 'u_removed' }],
       sys_migration: [{ id: MEMBERSHIP_BACKFILL_MIGRATION_ID, blocking: 0 }],
@@ -80,7 +80,7 @@ describe('one-time membership backfill (ADR-0093 D6 + D7)', () => {
     expect(engine.find).not.toHaveBeenCalled();
   });
 
-  it('two consecutive passes: the second is a no-op even after a membership is removed', async () => {
+  it('two consecutive passes: the second is a no-op whatever the membership state', async () => {
     const engine = makeEngine({ sys_user: [{ id: 'u_a' }] });
     expect((await runOneTimeMembershipBackfill(engine, auto, logger())).status).toBe('ran');
     engine.tables.sys_member.length = 0; // an administrator removes the membership

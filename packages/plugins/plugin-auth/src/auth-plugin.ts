@@ -1144,8 +1144,9 @@ export class AuthPlugin implements Plugin {
     // multi-organization runtime it does not provide.
     // The one-time ADR-0093 D6 backfill (below) is handed to the bootstrap so
     // the moment the default organization first EXISTS is a moment it runs:
-    // until then the pass has no target and records nothing, and leaving it to
-    // the next boot would let it sweep in members removed during this uptime.
+    // until then the pass has no target and records nothing, and deferring it
+    // to the next boot would let it judge users created during this uptime,
+    // whose membership was already decided at their creation.
     let runBackfillOnDefaultOrg: ((source: string) => Promise<void>) | undefined;
     if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
       const runEnsure = async () => {
@@ -1231,8 +1232,7 @@ export class AuthPlugin implements Plugin {
             // ADR-0093 D7 — membership is decided at creation, so this pass is
             // ONE-TIME per deployment: it runs until it reaches a verdict, the
             // verdict is recorded in the `sys_migration` ledger, and every later
-            // trigger reads the record and binds nobody. Re-run on every boot,
-            // it re-added members an administrator had removed.
+            // trigger reads the record and binds nobody.
             const outcome = await runOneTimeMembershipBackfill(
               ql,
               {

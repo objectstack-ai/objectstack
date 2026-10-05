@@ -13,12 +13,12 @@
  * reconciler — rows created before there was anything to bind them at
  * creation. It is not a lifecycle reconciler.
  *
- * Run on every `kernel:ready` and every `app:seeded`, it was one: a scan that
- * binds every member-less user cannot tell a user who predates the policy from
- * a user whose membership an administrator REMOVED, so every restart put the
- * removed member back. The pass therefore runs until it has reached a verdict
- * once, records that verdict in the deployment ledger, and every later pass
- * reads the record and does nothing.
+ * A scan that binds every member-less user cannot tell a user who predates
+ * the policy from a user whose membership was decided at creation and has
+ * since changed, so the scan may only ever run before any such decision
+ * exists. The pass therefore runs until it has reached a verdict once,
+ * records that verdict in the deployment ledger, and every later pass reads
+ * the record and does nothing.
  *
  * ## Why the record lives in `sys_migration`
  *
@@ -55,8 +55,8 @@
  * ## Failure directions
  *
  * Without a readable ledger the pass does NOT run: a pass that cannot be
- * recorded would run again on the next boot, which is exactly the re-binding
- * this module exists to stop. That is a functional absence (pre-existing
+ * recorded would run again on the next boot and judge users whose
+ * membership was already decided. That is a functional absence (pre-existing
  * member-less users stay unbound until an administrator adds them) and is
  * reported at `warn`. A pass that ran but whose record failed to land is the
  * opposite case — nothing looks wrong, and the next boot silently repeats the
