@@ -2,8 +2,8 @@
   "number": 21878,
   "kind": "issue",
   "title": "plugin-audit's recordLabel guesses from a fixed key list instead of the ADR-0079 resolver, so an object titled by company_name shows its record id on every activity row",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -14,18 +14,21 @@
     "area:records",
     "bug",
     "domain:services",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-05T13:26:40Z",
-  "updated_at": "2026-10-05T13:53:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-05T18:12:34Z",
+  "closed_at": "2026-10-05T18:09:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21878",
   "body": "## Source\n\nobjectstack-ai/cloud acceptance run on 2026-10-05 (cloud main `4b38cd28` · objectstack main `088428fb` · objectui main `76993f8e`). A new free user had the AI build a 客户 object. Its fields are `company_name / phone / status`; it has no `name` field and declares no `nameField`. Every row on the record's discussion feed reads:\n\n```\nCreated 客户 \"RZGAEnis7ms__pjv\"\nUpdated 客户 \"RZGAEnis7ms__pjv\"\n```\n\n`sys_activity.record_label` holds the record id for all 15 rows of that object. The record page header shows 「宁波海晟进出口有限公司」 for the same record, because the renderer resolves the title through ADR-0079.\n\n(The English verb is a separate cause: the workspace has no default locale. That half is tracked on the cloud side, not here.)\n\n## Mechanism\n\n`packages/plugins/plugin-audit/src/audit-writers.ts:299` `recordLabel()` guesses the label from a fixed list of keys and falls back to the id:\n\n```ts\nconst candidates = ['name', 'subject', 'title', 'full_name', 'label', 'first_name', 'company', 'email'];\n```\n\n`company_name` is not in that list. The same file already imports `resolveDisplayField` (line 28) and uses it for referenced-record titles (~line 1303). So the activity label is a second display-name dialect beside the ADR-0079 resolver that every renderer uses.\n\nMeasured against the spec on objectstack main `088428fb`:\n\n- `resolveDisplayField({ fields: { company_name, phone, status } })` → `company_name`\n- `resolveDisplayField({ fields: { visit_title, visit_date, visit_summary, customer } })` → `visit_title`\n\n## Fix direction\n\nResolve the label through `resolveDisplayField(objectDef)`, and keep the id only as the floor when that resolves nothing or the value is empty. Keep the `field` answer that #21081's read-side gating relies on: it becomes the resolved field.\n\n## Acceptance\n\n1. A record of an object titled only by `company_name` gets `record_label` = the company name, and `field` = `company_name`.\n2. Objects that have `name` / `title` / `subject` are labelled exactly as today.\n3. An object whose resolved title value is empty still falls back to the id.\n4. #21081's masking still holds: a reader who is not served the resolved field does not see the label.\n"

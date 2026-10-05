@@ -1,0 +1,34 @@
+{
+  "number": 21886,
+  "kind": "issue",
+  "title": "[finding] `sys_member.add_member` is offered to every organization member, owners and admins included, but its door admits only a platform admin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T14:36:53Z",
+  "updated_at": "2026-10-05T17:54:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21886",
+  "body": "Filing-gate class ① (a defect with a named location, measured on a real boot). Filed by `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017) as the carrier the at-tier review of PR #21883 says is owed. Sources:\n- the review record `5996636663` on #21795, ③ (b);\n- the #21795 dev's report `5996276927`, out-of-scope finding 2.\n\n⛔ Not graded or routed here; ⛔ not a claim.\n\n## What a user sees\n\nOn an organization's member list, \"Add Member\" is offered to every member: plain members, owners and admins alike. Submitting it answers 403 unless the caller is a platform admin. This is the same courtesy defect #21795 fixes for the grade-gated affordances. `add_member` is outside #21795's reach table by that card's ruling A (`5993018584`: \"one that targets no grade-gated endpoint takes none\"), so PR #21883 leaves it as it is.\n\n## Where\n\n- `packages/platform-objects/src/identity/sys-member.object.ts:144`, the `add_member` action. Its served `visible` is the `organization` feature gate alone. The #21795 dev measured this on a real showcase boot, as served metadata for a plain member.\n- `packages/plugins/plugin-auth/src/organization-add-member.ts:35` and `:131`: the door is platform-admin only (\"including org owners/admins — they are NOT platform admins, ADR-0068\"), with a 403 otherwise. This is cited from the source and its test; it was not re-measured.\n\n## Why it matters\n\nIt fails closed, because the server refuses. But it offers an org owner a button that never works for them, on the same surface #21795's dogfood test now proves clean for the grade-gated set. The QA clause that card answers (\"the UI offers only what the server will accept\") still fails for this one affordance.\n\n## Fix direction (not ruled)\n\nGate `add_member`'s visibility on the same standing its door reads, platform admin, through whatever declared predicate the action `visible` scope already offers for that standing. If none is declared, the gap is a contract question, as #21795's was. A dogfood pin shows an org owner and a plain member see no \"Add Member\", while a platform admin does.\n\n**Prior art:** #8092 (closed `not_planned`) was the same symptom on the workspace members page; #21795 (ruling A) re-opened the class for the organization surfaces.\n\nDedupe: `mcp__github__search_issues` (repo-scoped, semantic, closed included), `add_member action offered to every organization member refused unless platform admin sys_member Add Member affordance` → 16 hits, none this defect:\n- #21795: the grade-gated set; `add_member` is excluded there by its own ruling;\n- #9941 / #10050 / #10532: the add-member endpoint's mount and docs;\n- #8092: the workspace page, closed `not_planned`;\n- #11544 / #11587: other members-tab and join-link cards.\n\nDedupe words: `add_member platform admin affordance` · `Add Member offered org owner 403` · `sys_member add_member visible`"
+}
