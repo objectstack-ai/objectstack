@@ -49,7 +49,7 @@ import { FormSelectOptionSchema } from '../ui/view.zod';
 // 1. `rows` — the publish door now accepts what the widgets already read
 // =========================================================================
 
-describe('FieldSchema accepts `rows` on the multiline editor types (objectui#6140, ruled 2026-08-25)', () => {
+describe('FieldSchema accepts `rows` on the multiline editor types — declared because the editor widget reads it', () => {
   // Hardcoded on purpose (not iterated off the module-local set) so this test
   // is an independent measurement of the set, not a tautology — the same
   // discipline as the #11949 bounded-string pins.
@@ -159,7 +159,7 @@ describe('the ruled expansion stops at `rows` — the four inert editor keys sta
 // 2. `options[].description` — the option shape accepts the searched key
 // =========================================================================
 
-describe('SelectOptionSchema accepts `description` (objectui#6153, inherited ruling 2026-08-25)', () => {
+describe('SelectOptionSchema accepts `description` — declared because the lookup widget reads it', () => {
   const OPTION = { label: 'Open', value: 'open', description: 'Still being worked' } as const;
 
   it('accepts and preserves description on the bare option shape', () => {
@@ -189,7 +189,7 @@ describe('SelectOptionSchema accepts `description` (objectui#6153, inherited rul
     if (result.success) expect(result.data.options?.[0]?.description).toBe('Still being worked');
   });
 
-  it('flows into the form-view option face by construction (the #12868 Omit)', () => {
+  it('flows into the form-view option face by construction (that face is the option shape minus `default`)', () => {
     const result = FormSelectOptionSchema.safeParse(OPTION);
     expect(result.success, JSON.stringify((result as { error?: unknown }).error ?? {})).toBe(true);
     if (result.success) {
@@ -259,7 +259,7 @@ describe('SelectOptionSchema accepts `description` (objectui#6153, inherited rul
  * section INVERTS (offer restored, door widened, both halves moving together)
  * rather than being deleted.
  */
-describe('#13671 — the object.form options repeater offers only keys the door accepts', () => {
+describe('the object.form options repeater offers only keys the door accepts', () => {
   type FormSpec = Record<string, unknown>;
 
   /**

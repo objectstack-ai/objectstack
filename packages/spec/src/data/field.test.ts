@@ -80,7 +80,7 @@ describe('CurrencyConfigSchema', () => {
     expect(() => CurrencyConfigSchema.parse(validConfig)).not.toThrow();
   });
 
-  it('should apply default values — and materialize no decimal-places key (#19992)', () => {
+  it('should apply default values — and materialize no decimal-places key', () => {
     const config = CurrencyConfigSchema.parse({});
 
     // Byte-exact: the removed `.overwrite()` used to bake `precision: 2` in
@@ -88,7 +88,7 @@ describe('CurrencyConfigSchema', () => {
     expect(JSON.stringify(config)).toBe('{"currencyMode":"dynamic","defaultCurrency":"CNY"}');
   });
 
-  it('#19992 — refuses `precision` at EVERY value, in range or not: the key was removed, not re-bounded', () => {
+  it('refuses `precision` at EVERY value, in range or not: the key was removed, not re-bounded', () => {
     // Before #19992: 0..10 parsed, and -1 / 11 / 15 / 1.5 were refused by the
     // key's own number bounds (too_small / too_big / invalid_type). Now the
     // key is not on the shape, so every value is refused the same way — as an
@@ -194,7 +194,7 @@ function unrecognizedKeyMessage(value: unknown): string {
   return hit?.message ?? '';
 }
 
-describe('FieldSchema — field-level `currency` key guidance (#8163)', () => {
+describe('FieldSchema — field-level `currency` key guidance, naming `currencyConfig.defaultCurrency`', () => {
   const FIELD = { name: 'amount', label: 'Amount', type: 'currency' } as const;
 
   it('`currency` stays rejected — a prescription is not an acceptance', () => {
@@ -309,7 +309,7 @@ describe('FieldSchema', () => {
      * `scale: 2.5` silently inert. The producer now refuses it at parse
      * (ADR-0078 declared=enforced; `z.number().int().min(0)`).
      */
-    describe('malformed scale/precision declarations are refused at authoring (#8321)', () => {
+    describe('malformed scale/precision declarations are refused at authoring', () => {
       const cases: Array<[key: 'scale' | 'precision', value: number, code: string]> = [
         ['scale', 2.5, 'invalid_type'], // the issue repro: non-integer count
         ['scale', -1, 'too_small'],
@@ -352,7 +352,7 @@ describe('FieldSchema', () => {
         }
       });
 
-      it('does NOT reach under currencyConfig — whose decimal-places spellings are refused as unknown keys there (#19992)', () => {
+      it('does NOT reach under currencyConfig — whose decimal-places spellings are refused as unknown keys there', () => {
         // This card judges the FIELD-level digit counts. `currencyConfig` has
         // its own answer, and since #19992 it is a refusal, not a bound: its
         // `precision` was removed and its `scale` / `decimals` spellings (once
@@ -400,7 +400,7 @@ describe('FieldSchema', () => {
      * this change's dark control — they are asserted in the #8321 block and
      * their codes and reasons are deliberately untouched here.
      */
-    describe('an unrenderable scale is refused at authoring (#18972)', () => {
+    describe('an unrenderable scale is refused at authoring', () => {
       const parseScale = (scale: number) =>
         FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'number', scale });
 
@@ -450,7 +450,7 @@ describe('FieldSchema', () => {
         expect(parseScale(101).success).toBe(false);
       });
 
-      it('leaves the malformed-declaration refusals (#8321) reading exactly as before', () => {
+      it('leaves the malformed-declaration refusals reading exactly as before', () => {
         // The dark control, in one place: narrowing the top of the range must
         // not restate the bottom of it.
         const negative = parseScale(-1);
@@ -496,7 +496,7 @@ describe('FieldSchema', () => {
      * (BOUNDED_STRING_FIELD_TYPES; ten at #11566, `signature`/`qrcode`
      * joined in #11875 when the write seam gained their bound).
      */
-    describe('malformed or misplaced maxLength declarations are refused at authoring (#11566)', () => {
+    describe('malformed or misplaced maxLength declarations are refused at authoring', () => {
       const shapeCases: Array<[value: number, code: string]> = [
         [0, 'too_small'],     // the issue repro: varchar(0) is not a bound
         [-5, 'too_small'],
@@ -586,7 +586,7 @@ describe('FieldSchema', () => {
      * refused loudly at authoring rather than parsing cleanly and asserting
      * nothing.
      */
-    describe('malformed or misplaced minLength declarations are refused at authoring (#11949)', () => {
+    describe('malformed or misplaced minLength declarations are refused at authoring', () => {
       const shapeCases: Array<[value: number, code: string]> = [
         [0, 'too_small'],     // the ruled fork: a vacuous "no minimum" declaration
         [-5, 'too_small'],
@@ -685,7 +685,7 @@ describe('FieldSchema', () => {
      * set's docblock) and refused with a located issue elsewhere. Value: a
      * stranger domain is refused by name at the slot's own path.
      */
-    describe('valueDomain — the closed standard-domain vocabulary on a text field (#14168)', () => {
+    describe('valueDomain — the closed standard-domain vocabulary on a text field', () => {
       it('accepts each of the three ruled domains on a text field, and echoes it', () => {
         for (const domain of ['iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2'] as const) {
           const result = FieldSchema.safeParse({
@@ -779,7 +779,7 @@ describe('FieldSchema', () => {
     });
   });
 
-  describe('useGrouping — number-field digit-grouping presentation hint (#7768)', () => {
+  describe('useGrouping — number-field digit-grouping presentation hint', () => {
     it('accepts an explicit `false` (author opts out of grouping — e.g. a year)', () => {
       const yearField: Field = {
         name: 'founded_year',
@@ -818,7 +818,7 @@ describe('FieldSchema', () => {
       expect(() => FieldSchema.parse({ type: 'text', useGrouping: false })).not.toThrow();
     });
 
-    it('does not disturb FieldSchema unknown-key strictness (#4001)', () => {
+    it('does not disturb FieldSchema unknown-key strictness', () => {
       expect(() => FieldSchema.parse({
         type: 'number',
         useGrouping: false,
@@ -917,7 +917,7 @@ describe('FieldSchema', () => {
     // keep byte-identity with the `.default()` era — that half is pinned
     // here; #9784 (the block below) gates materialization off every
     // NON-reference type.
-    describe('[#9689] deleteBehavior: set_null on master_detail is a parse-time rejection', () => {
+    describe('deleteBehavior: set_null on master_detail is a parse-time rejection', () => {
       const md = (extra: Record<string, unknown> = {}) => ({
         name: 'parent_id',
         label: 'Parent Record',
@@ -994,7 +994,7 @@ describe('FieldSchema', () => {
         expect(FieldSchema.parse({ ...lookup, required: true }).deleteBehavior).toBe('set_null');
       });
 
-      it('keeps non-reference types ACCEPTING the key (installed-base artifact shape, #4447) — materialization moved to the #9784 block below', () => {
+      it('keeps non-reference types ACCEPTING the key (installed-base artifact shape) — materialization moved to the reference-types block below', () => {
         // Verbatim shape from the pre-#9784 examples/app-showcase/dist/
         // objectstack.json — a materialized datetime carrying only FieldSchema
         // defaults. Built artifacts of the materializing era ship this on
@@ -1028,7 +1028,7 @@ describe('FieldSchema', () => {
     // declaration (#4447 mechanism) and read as meaningful to AI authors
     // (ADR-0033 direction). The accept-set is UNTOUCHED: authored values on
     // any type round-trip verbatim (the installed-base test above).
-    describe('[#9784] deleteBehavior materializes only on reference types', () => {
+    describe('deleteBehavior materializes only on reference types', () => {
       const bare = (type: string) => ({ name: 'f1', label: 'F1', type });
 
       it('omits deleteBehavior from bare non-reference fields (text/datetime/number)', () => {
@@ -1171,7 +1171,7 @@ describe('FieldSchema', () => {
     // dialect — is what makes the FILTER-axis schema door (#8793 bare preset
     // comparands) cover this position with NO new wiring. This pin measures
     // that the door really reaches the new key.
-    it('relatedListFilter is judged by the #8793 bare-preset-comparand schema door', () => {
+    it('relatedListFilter is judged by the schema door that refuses a bare date preset as a comparand', () => {
       const r = FieldSchema.safeParse({
         name: 'account',
         label: 'Account',
@@ -1196,7 +1196,7 @@ describe('FieldSchema', () => {
     // from this key reaches them like any other `where`. This pin holds the
     // door PLACEMENT — parse-clean here, so a schema-side refusal (which
     // cannot see the CHILD object's field types) does not creep in.
-    it('relatedListFilter leaves dotted heads to the field-typed engine doors (#8371)', () => {
+    it('relatedListFilter leaves dotted heads to the field-typed engine doors', () => {
       const r = FieldSchema.safeParse({
         name: 'account',
         label: 'Account',
@@ -1431,7 +1431,7 @@ describe('Field Factory Helpers', () => {
       expect(emailField.label).toBe('Email Address');
     });
 
-    it('should create time field (#8656)', () => {
+    it('should create time field — the same literal shape an author could already write', () => {
       const timeField = Field.time({ label: 'Time' });
 
       expect(timeField.type).toBe('time');
@@ -1714,7 +1714,7 @@ describe('Field Factory Helpers', () => {
       expect(result.currencyConfig).toEqual({ currencyMode: 'dynamic', defaultCurrency: 'CNY' });
     });
 
-    it('#19992 — refuses a currencyConfig `precision` of any value as an unknown key, not as a bad number', () => {
+    it('refuses a currencyConfig `precision` of any value as an unknown key, not as a bad number', () => {
       // -1 and 11 used to be refused by the key's own 0..10 bounds; 2 used to
       // parse. All three now meet the same refusal: the key is not declared.
       for (const precision of [-1, 11, 2]) {
@@ -1797,7 +1797,7 @@ describe('Field Factory Helpers', () => {
       expect(currencyField.description).toBe('Total budget for the project');
     });
 
-    it('accepts a cryptocurrency code as a fixed currency — with no decimal-places key to declare (#19992)', () => {
+    it('accepts a cryptocurrency code as a fixed currency — with no decimal-places key to declare', () => {
       // Codes are validated by length only, so BTC is legal under `fixed`.
       // Before #19992 this test declared `precision: 8` for the satoshi; that
       // key was never read by any renderer and is now refused. The field
@@ -1861,7 +1861,7 @@ describe('FieldSchema - group property', () => {
   });
 });
 
-describe('FieldSchema — the `conditionalRequired` alias is REMOVED (#3855)', () => {
+describe('FieldSchema — the `conditionalRequired` alias is REMOVED', () => {
   // #3754 lowered the alias into `requiredWhen` and dropped it from the output.
   // Protocol 17 removes it from the spec entirely.
   //
@@ -1946,7 +1946,7 @@ describe('FieldSchema - conditional field rules (visibleWhen / readonlyWhen / re
     expect(result.requiredWhen).toBeUndefined();
   });
 
-  it('requiredWhen has no alias left to coexist with (#3855)', () => {
+  it('requiredWhen has no alias left to coexist with', () => {
     // The original assertion pinned the two keys as coexisting in the output;
     // #3754 inverted it to "canonical wins, alias dropped"; #3855 removes the
     // alias outright, so the pair is now unrepresentable at the input too — the
@@ -2034,7 +2034,7 @@ describe('ADR-0113 — required is a write contract; storage.notNull is the colu
  * them without a pattern would keep `notNull` green while `not_null` fell
  * through to the edit-distance fallback, and no single-spelling pin would see it.
  */
-describe('ADR-0113 / #16867 — flat `notNull` spellings prescribe `storage.notNull`, never `required`', () => {
+describe('ADR-0113 — flat `notNull` spellings prescribe `storage.notNull`, never `required`', () => {
   const refusalMessage = (field: Record<string, unknown>): string => {
     const r = FieldSchema.safeParse({ type: 'text', label: 'F', ...field });
     expect(r.success).toBe(false);
@@ -2102,7 +2102,7 @@ describe('ADR-0113 / #16867 — flat `notNull` spellings prescribe `storage.notN
   });
 });
 
-describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437, maintainer ruling 2026-08-22 on objectui#4015, Option C)', () => {
+describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (ruled: at the entrance, never rendered as checkboxes)', () => {
   // Option C rejects the contradiction at the entrance: the data layer
   // honoured the flag while the widget rendered a single-value radio group —
   // declared multi, rendered single, zero diagnostics. The other half of the
@@ -2157,7 +2157,7 @@ describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437
     expect(f.multiple).toBe(false);
   });
 
-  it('parse(parse(x)) is stable — the materialized `multiple: false` re-parses cleanly (#9689 class)', () => {
+  it('parse(parse(x)) is stable — the materialized `multiple: false` re-parses cleanly', () => {
     const once = FieldSchema.parse({ name: 'severity', label: 'Severity', type: 'radio', options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] });
     const twice = FieldSchema.parse(once);
     expect(twice).toEqual(once);
@@ -2188,7 +2188,7 @@ describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437
   });
 });
 
-describe('FieldSchema — authored `multiple: true` on a NON-MULTI-CAPABLE type is REFUSED (#17469, maintainer ruling 2026-09-13, decision batch #128 item 5, option 1′)', () => {
+describe('FieldSchema — authored `multiple: true` on a NON-MULTI-CAPABLE type is REFUSED (ruled: one definition of multi-value, the radio rule generalised)', () => {
   // The #11437 radio rule generalised. `multiple` used to parse cleanly on
   // every type: the UI rendered a single value, driver-sql built a JSON ARRAY
   // column (`isJsonField`'s `|| !!field.multiple` clause), and `isMultiValueField`
@@ -2280,7 +2280,7 @@ describe('FieldSchema — authored `multiple: true` on a NON-MULTI-CAPABLE type 
     expect(FieldSchema.parse({ name: 'body', type: 'text', multiple: false }).multiple).toBe(false);
   });
 
-  it('parse(parse(x)) is stable on a non-declarable type — the materialized `false` re-parses cleanly (#9689 class)', () => {
+  it('parse(parse(x)) is stable on a non-declarable type — the materialized `false` re-parses cleanly', () => {
     const once = FieldSchema.parse({ name: 'body', label: 'Body', type: 'text' });
     expect(FieldSchema.parse(once)).toEqual(once);
   });
@@ -2317,7 +2317,7 @@ describe('FieldSchema — authored `multiple: true` on a NON-MULTI-CAPABLE type 
     expect(isMultiValueField({ type: 'tree', multiple: true })).toBe(false);
   });
 });
-describe('FieldSchema — `placeholder` is a DECLARED key (#9019, ruled Option C on objectui#4676)', () => {
+describe('FieldSchema — `placeholder` is a DECLARED key (ruled: the renderers already apply it)', () => {
   // The reverse of the pre-#9019 posture: `placeholder` used to be refused by
   // name via FIELD_KEY_GUIDANCE ("never a FieldSchema key. Author hint text
   // through `inlineHelpText` or `description`."). The 2026-08-16 maintainer
@@ -2358,7 +2358,7 @@ describe('FieldSchema — `placeholder` is a DECLARED key (#9019, ruled Option C
     expect(() => FieldSchema.parse({ type: 'number', placeholder: 'x' })).not.toThrow();
   });
 
-  it('does not disturb FieldSchema unknown-key strictness (#4001)', () => {
+  it('does not disturb FieldSchema unknown-key strictness', () => {
     expect(() => FieldSchema.parse({
       type: 'text',
       placeholder: 'x',
@@ -2390,7 +2390,7 @@ describe('FieldSchema — `placeholder` is a DECLARED key (#9019, ruled Option C
   });
 });
 
-describe('FieldSchema — `maskingRule` is a DECLARED key (#8993, ruled Option A 2026-08-16)', () => {
+describe('FieldSchema — `maskingRule` is a DECLARED key (ruled: partial masking, enforced at runtime)', () => {
   // Re-introduction of the key pruned 2026-06 as dead-in-both-layers — this
   // time landing in the same PR as its runtime consumer (plugin-security's
   // FieldMasker partial masking), the enforce side of ADR-0049. These are the
@@ -2441,7 +2441,7 @@ describe('FieldSchema — `maskingRule` is a DECLARED key (#8993, ruled Option A
     expect(f.requiredPermissions).toEqual(['view_full_pii']);
   });
 
-  it('does not disturb FieldSchema unknown-key strictness (#4001)', () => {
+  it('does not disturb FieldSchema unknown-key strictness', () => {
     expect(() => FieldSchema.parse({
       type: 'text',
       maskingRule: 'phone',
@@ -2473,7 +2473,7 @@ describe('FieldSchema — `maskingRule` is a DECLARED key (#8993, ruled Option A
   });
 });
 
-describe('Polymorphic pointer pair — referenceVia (#11339, ADR-0052 §5)', () => {
+describe('Polymorphic pointer pair — referenceVia names the sibling column that holds the object (ADR-0052 §5)', () => {
   it('accepts referenceVia on a text field (the ActivityPointer id half)', () => {
     const field: Field = {
       name: 'record_id',

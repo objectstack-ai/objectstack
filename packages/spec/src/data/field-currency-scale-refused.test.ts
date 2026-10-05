@@ -54,7 +54,7 @@ function expectRuledRemedy(message: string): void {
   expect(message).not.toMatch(/currencyConfig|precision/);
 }
 
-describe('#19629 — `scale` on a `currency` field is refused at parse', () => {
+describe('`scale` on a `currency` field is refused at parse', () => {
   it('refuses the designer-produced shape, located at `scale`, with the ruled remedy: delete the key, and no other key named', () => {
     const result = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'currency', scale: 3 });
     expect(result.success).toBe(false);
@@ -103,7 +103,7 @@ describe('#19629 — `scale` on a `currency` field is refused at parse', () => {
   });
 });
 
-describe('#19629 — CONTROLS: what the refusal must leave alone', () => {
+describe('CONTROLS: what the refusal must leave alone', () => {
   it('a currency field without `scale` parses, and its parse output re-parses unchanged', () => {
     const once = FieldSchema.parse({ name: 'amount', label: 'Amount', type: 'currency', min: 0 });
     expect('scale' in once).toBe(false);
@@ -204,7 +204,7 @@ function rowsNamed(form: unknown, key: string): Array<{ path: string; row: FormR
   return out;
 }
 
-describe('#19629 — no registered metadata form OFFERS `scale` on a currency field', () => {
+describe('no registered metadata form OFFERS `scale` on a currency field', () => {
   it('CONTROLS: the walk reaches exactly the two `scale` rows the registered forms declare, and the object form is the registered one', () => {
     // A lit roster, so an empty result below is a measured zero rather than a
     // walk that found nothing to judge; a new `scale` row anywhere turns this

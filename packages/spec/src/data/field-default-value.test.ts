@@ -95,7 +95,7 @@ const CASES: Case[] = [
   // while these value contracts were `.strip`: an author's undeclared key on a
   // structured default was admitted silently. Refused by name now.
   {
-    label: 'address + literal carrying an undeclared key (the #13388 seed spelling)',
+    label: 'address + literal carrying an undeclared key (`postal_code`, as the showcase seed once wrote it)',
     field: { type: 'address', defaultValue: { street: '1 Main St', postal_code: '98101' } },
     accepted: false,
     contains: ['`postal_code`', '`postalCode`'],
@@ -113,14 +113,14 @@ const CASES: Case[] = [
   // they never wrote. `notContains` names the half that was shown instead —
   // without it the row cannot see a regression back to the positional read.
   {
-    label: '#16077 location + the RENAMED legacy pair (a missing-member error sorts ahead)',
+    label: 'location + the RENAMED legacy pair (the rename is named over the missing-member error that sorts ahead)',
     field: { type: 'location', defaultValue: { latitude: 37.77, longitude: -122.42 } },
     accepted: false,
     contains: ['`latitude` \u2192 `lat`', '`longitude` \u2192 `lng`'],
     notContains: ['expected number, received undefined'],
   },
   {
-    label: '#16077 address + a renamed key beside a WRONG-TYPED declared one',
+    label: 'address + a renamed key beside a WRONG-TYPED declared one (the rename is named over the type error)',
     field: { type: 'address', defaultValue: { street: 5, postal_code: '98101' } },
     accepted: false,
     contains: ['`postal_code` \u2192 `postalCode`'],
@@ -267,7 +267,7 @@ const CASES: Case[] = [
   },
 ];
 
-describe('#7127 FieldSchema.defaultValue — three shapes, each judged on its own terms', () => {
+describe('FieldSchema.defaultValue — three shapes, each judged on its own terms', () => {
   for (const { label, field, accepted, contains, notContains } of CASES) {
     it(`${accepted ? 'accepts' : 'rejects'}: ${label}`, () => {
       const issue = defaultValueIssue(field);
