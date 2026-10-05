@@ -2062,12 +2062,12 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     // — the missing-record shape, `visible: false` with no decider — wherever
     // enforcement reaches that question: past the capability and object CRUD
     // gates (which answer first, as they do here), for a principal with an
-    // identity, on a record that exists.
+    // identity, on a record that exists. (A system principal reads every row,
+    // so the question cannot change its verdict.)
     if (
       (operation === 'update' || operation === 'delete') &&
       deps.recordAbsentToCaller &&
       context?.userId &&
-      !context?.isSystem &&
       recordVerdict.decidedBy !== 'required_permissions' &&
       recordVerdict.decidedBy !== 'object_crud' &&
       !(recordVerdict.visible === false && recordVerdict.decidedBy === undefined) &&
