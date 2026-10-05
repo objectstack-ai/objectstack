@@ -186,66 +186,88 @@ describe('where the reason is located, and the reason itself', () => {
     });
 });
 
-describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same form at any layer closes it', () => {
+describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same row\'s form at any layer closes it', () => {
     const view = (sharing: unknown, name = 'contact') => ({
         name, object: 'inquiry', viewKind: 'form', config: { sharing },
     });
     const openView = view(OPEN);
     const [candidate] = anonymousFormIntakeCandidates(openView);
 
-    it('the same view, same slot, the link kept with a switch cleared: withdrawn', () => {
+    it('the same row, the link kept with a switch explicitly false: withdrawn', () => {
         expect(anonymousFormIntakeWithdrawnIn([view({ ...OPEN, allowAnonymous: false })], openView, candidate)).toBe(true);
         expect(anonymousFormIntakeWithdrawnIn([view({ ...OPEN, enabled: false })], openView, candidate)).toBe(true);
-        // A raw body with `enabled` absent reads as its parsed default (`false`).
-        expect(anonymousFormIntakeWithdrawnIn(
-            [view({ allowAnonymous: true, publicLink: '/forms/contact-us' })], openView, candidate,
-        )).toBe(true);
     });
 
-    it('two different views sharing a slug do not close each other', () => {
+    it('only an explicit false withdraws: an absent switch is not a withdrawal', () => {
+        // publicLink + enabled:true, allowAnonymous absent: not a withdrawal.
+        expect(anonymousFormIntakeWithdrawnIn(
+            [view({ enabled: true, publicLink: '/forms/contact-us' })], openView, candidate,
+        )).toBe(false);
+        expect(anonymousFormIntakeWithdrawnIn(
+            [view({ allowAnonymous: true, publicLink: '/forms/contact-us' })], openView, candidate,
+        )).toBe(false);
+    });
+
+    it('two different rows sharing a slug do not close each other', () => {
         const other = view({ ...OPEN, enabled: false }, 'legacy_contact');
-        const [otherOpen] = anonymousFormIntakeCandidates(view(OPEN, 'legacy_contact'));
-        // One layer holding both: the open one stays open…
         expect(anonymousFormIntakeWithdrawnIn([openView, other], openView, candidate)).toBe(false);
-        // …and a withdrawal of this view does not close the other view's form.
+        const [otherOpen] = anonymousFormIntakeCandidates(view(OPEN, 'legacy_contact'));
         expect(anonymousFormIntakeWithdrawnIn(
             [view({ ...OPEN, enabled: false }), view(OPEN, 'legacy_contact')], view(OPEN, 'legacy_contact'), otherOpen,
         )).toBe(false);
     });
 
-    it('not a withdrawal: no body of the view, no sharing, the link cleared or changed', () => {
+    it('not a withdrawal: no body of the row, no sharing, the link cleared', () => {
         expect(anonymousFormIntakeWithdrawnIn([openView], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn([], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn([view(undefined)], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn([view({ enabled: false, allowAnonymous: false })], openView, candidate)).toBe(false);
-        expect(anonymousFormIntakeWithdrawnIn(
-            [view({ ...OPEN, enabled: false, publicLink: '/forms/other' })], openView, candidate,
-        )).toBe(false);
+        expect(anonymousFormIntakeWithdrawnIn([view({ ...OPEN, enabled: false, publicLink: '' })], openView, candidate)).toBe(false);
     });
 
     it('a schema-parsed sharing with no public link is not a withdrawal, as its raw body is not', () => {
         for (const raw of [{ password: 'secret' }, { allowedDomains: ['example.com'] }, { enabled: true }]) {
             const parsed = SharingConfigSchema.parse(raw);
-            // The parse fills the switches with their `false` defaults…
             expect(parsed.enabled === true && parsed.allowAnonymous === true).toBe(false);
-            // …and neither shape names the link, so neither withdraws.
             expect(anonymousFormIntakeWithdrawnIn([view(parsed)], openView, candidate)).toBe(false);
             expect(anonymousFormIntakeWithdrawnIn([view(raw)], openView, candidate)).toBe(false);
         }
-        // Control: a parsed sharing that keeps the link and does not open it withdraws.
-        const closed = SharingConfigSchema.parse({ publicLink: '/forms/contact-us', allowAnonymous: true });
-        expect(anonymousFormIntakeWithdrawnIn([view(closed)], openView, candidate)).toBe(true);
     });
 
-    it('slots are matched per shape: a formViews entry is judged against the same key only', () => {
-        const nested = (a: unknown, b: unknown) => ({
-            name: 'multi', object: 'inquiry',
-            formViews: { a: { sharing: a }, b: { sharing: b } },
+    it('the same slot with a new slug (case-only included) is the same form: closed', () => {
+        const withdrawn = [view({ ...OPEN, enabled: false })];
+        for (const link of ['/forms/contact-us-2', '/forms/Contact-Us']) {
+            const moved = view({ ...OPEN, publicLink: link });
+            const [c] = anonymousFormIntakeCandidates(moved);
+            expect(anonymousFormIntakeWithdrawnIn(withdrawn, moved, c)).toBe(true);
+        }
+    });
+
+    describe('a container row: identity survives a key rename, form.name, a slot move and an expansion rename', () => {
+        const LINK_A = { ...OPEN, publicLink: '/forms/a' };
+        const LINK_B = { ...OPEN, publicLink: '/forms/b' };
+        const row = (body: Record<string, unknown>) => ({ name: 'inquiry', object: 'inquiry', ...body });
+        // Env-wide: formViews.a withdrawn, formViews.b open.
+        const envRow = row({ formViews: { a: { sharing: { ...LINK_A, enabled: false } }, b: { sharing: LINK_B } } });
+        const closedIn = (overlay: Record<string, unknown>) =>
+            anonymousFormIntakeCandidates(overlay)
+                .filter((c) => anonymousFormIntakeWithdrawnIn([envRow], overlay, c))
+                .map((c) => c.slug);
+
+        it('a key rename keeps the slug: closed', () => {
+            expect(closedIn(row({ formViews: { a2: { sharing: LINK_A }, b: { sharing: LINK_B } } }))).toEqual(['a']);
         });
-        const opened = nested({ ...OPEN, publicLink: '/forms/a' }, { ...OPEN, publicLink: '/forms/b' });
-        const [ca, cb] = anonymousFormIntakeCandidates(opened);
-        const layer = [nested({ ...OPEN, publicLink: '/forms/a', enabled: false }, { ...OPEN, publicLink: '/forms/b' })];
-        expect(anonymousFormIntakeWithdrawnIn(layer, opened, ca)).toBe(true);
-        expect(anonymousFormIntakeWithdrawnIn(layer, opened, cb)).toBe(false);
+        it('a slot move to the nested form, with a form.name: closed', () => {
+            expect(closedIn(row({ form: { name: 'renamed', sharing: LINK_A }, formViews: { b: { sharing: LINK_B } } })))
+                .toEqual(['a']);
+        });
+        it('a listViews entry that collides with the key (an expansion rename): closed', () => {
+            expect(closedIn(row({ listViews: { a: { type: 'grid' } }, formViews: { a: { sharing: LINK_A } } })))
+                .toEqual(['a']);
+        });
+        it('the sibling form (another slot and another slug) stays independent', () => {
+            expect(closedIn(row({ formViews: { a: { sharing: { ...LINK_A, enabled: false } }, b: { sharing: LINK_B } } })))
+                .toEqual([]);
+        });
     });
 });

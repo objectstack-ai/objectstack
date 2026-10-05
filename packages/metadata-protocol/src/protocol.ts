@@ -15807,9 +15807,22 @@ export class ObjectStackProtocolImplementation implements
         if (open.length === 0) return null;
         const envWide: any = await this.getMetaItems({ type: args.type });
         const layer: unknown[] = Array.isArray(envWide?.items) ? envWide.items : [];
-        const reopened = [...new Set(
+        const closed = new Set(
             open.filter(({ view, c }) => anonymousFormIntakeWithdrawnIn(layer, view, c)).map(({ c }) => c.slug),
-        )].sort();
+        );
+        // The same judgement anchored on the stored ROW this overlay is keyed
+        // by: the env-wide body of row `name`, as stored (a container is not
+        // expanded, so a form moved to another key or slot, renamed through
+        // `form.name`, or renamed by an expansion collision is still matched
+        // against the form it was, by slot or by slug).
+        const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
+        if (envRows.length > 0) {
+            const own = { ...raw, name: args.name };
+            for (const c of anonymousFormIntakeCandidates(own)) {
+                if (anonymousFormIntakeWithdrawnIn(envRows, own, c)) closed.add(c.slug);
+            }
+        }
+        const reopened = [...closed].sort();
         if (reopened.length === 0) return null;
         const list = reopened.map((s) => `'/forms/${s}'`).join(', ');
         const err: any = new Error(
@@ -15829,6 +15842,33 @@ export class ObjectStackProtocolImplementation implements
         err.organizationId = args.organizationId;
         err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
         return err;
+    }
+
+    /**
+     * The env-wide body of the `view` row `name`, as stored: the active
+     * env-wide `sys_metadata` row when there is one (the env-wide overlay is
+     * keyed by its own name, ADR-0005), else the code package's artifact of
+     * that name. Empty when neither exists.
+     *
+     * Read raw, never through the list read: that serves a container only as
+     * its expansion, whose item names and slots the overlay author chooses,
+     * and the kill switch anchors identity on the row instead.
+     */
+    private async envWideRawViewRows(type: string, name: string): Promise<Record<string, unknown>[]> {
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows({ type }, undefined);
+        } catch (error) {
+            // [#5532] Only an unprovisioned store means "no rows".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type }, records)
+            .filter((e) => e.name === name && e.organizationId === null)
+            .map((e) => e.data)
+            .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object' && !Array.isArray(d));
+        if (stored.length > 0) return stored;
+        const artifact = this.lookupArtifactItem(type, name);
+        return artifact && typeof artifact === 'object' ? [artifact as Record<string, unknown>] : [];
     }
 
     /**
@@ -21193,11 +21233,21 @@ export class ObjectStackProtocolImplementation implements
         // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
         // draft saved before that refusal existed must not reach `active`.
         if (draftForGate) {
+            // The binding the promoted row is placed by: the request's, else the
+            // draft row's own (a container's expansion is placed by it).
+            let draftPackageId: string | null | undefined = request.packageId;
+            if (draftPackageId === undefined && singularType === 'view' && orgId) {
+                const draftRow = await this.engine.findOne('sys_metadata', {
+                    where: { type: singularType, name: request.name, organization_id: orgId ?? null, state: 'draft' },
+                });
+                draftPackageId = (draftRow as { package_id?: string | null } | null)?.package_id ?? null;
+            }
             const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
                 type: singularType,
                 name: request.name,
                 organizationId: orgId,
                 body: draftForGate.body,
+                ...(draftPackageId ? { packageId: draftPackageId } : {}),
             });
             if (intakeRefusal) throw intakeRefusal;
         }

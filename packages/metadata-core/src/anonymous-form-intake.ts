@@ -248,8 +248,7 @@ export function anonymousFormIntakeUnavailableMessage(slug: string, u: Anonymous
 
 /**
  * Where a form sits in a `view` body, independent of its content: the nested
- * `form`, one `formViews` entry, or the flattened `config`. Two bodies of the
- * same view (one per metadata layer) carry "the same form" at the same slot.
+ * `form`, one `formViews` entry, or the flattened `config`.
  */
 function anonymousFormSlot(view: Record<string, any>, candidate: AnonymousFormIntakeCandidate): string {
     if (candidate.form === view.form) return 'form';
@@ -259,50 +258,57 @@ function anonymousFormSlot(view: Record<string, any>, candidate: AnonymousFormIn
     return 'config';
 }
 
-/** The `sharing` a `view` body carries at a slot (see {@link anonymousFormSlot}), if any. */
-function anonymousFormSharingAtSlot(view: Record<string, any>, slot: string): unknown {
-    if (slot === 'form') return view.form?.sharing;
-    if (slot.startsWith('formViews:')) return view.formViews?.[slot.slice('formViews:'.length)]?.sharing;
-    return view.viewKind === 'form' ? view.config?.sharing : undefined;
-}
-
 /**
- * Does one sharing EXPLICITLY withdraw a slug? It names the slug in its
- * `publicLink` and does not open it (`enabled` or `allowAnonymous` is not
- * `true`, the spec's defaults of `false` included). A sharing that names no
- * public link withdraws nothing: removing the sharing block or clearing the
- * link is not a withdrawal, and a code-authored, schema-parsed sharing with no
- * link (whose `enabled`/`allowAnonymous` defaults read `false`) answers exactly
- * as its raw body does.
+ * The forms a `view` body EXPLICITLY withdraws, with their slot and slug: a
+ * form `sharing` that keeps a non-empty `publicLink` and sets `enabled ===
+ * false` or `allowAnonymous === false`. Judged on the body as stored: a switch
+ * that is absent is not a withdrawal (only an explicit `false` is), and a
+ * sharing with no public link withdraws nothing — removing the sharing block or
+ * clearing the link is not a withdrawal.
  */
-function sharingWithdrawsSlug(sharing: unknown, slug: string): boolean {
-    if (!sharing || typeof sharing !== 'object') return false;
-    const publicLink = (sharing as Record<string, unknown>).publicLink;
-    if (typeof publicLink !== 'string' || !publicLink) return false;
-    if (publicFormSlug(publicLink) !== slug) return false;
-    return anonymousFormIntakeSlug(sharing) === null;
+function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; slug: string }> {
+    if (!view || typeof view !== 'object') return [];
+    const v = view as Record<string, any>;
+    const forms: Array<{ slot: string; form: unknown }> = [];
+    if (v.form && typeof v.form === 'object') forms.push({ slot: 'form', form: v.form });
+    if (v.formViews && typeof v.formViews === 'object') {
+        for (const [key, fv] of Object.entries(v.formViews)) forms.push({ slot: `formViews:${key}`, form: fv });
+    }
+    if (v.viewKind === 'form' && v.config && typeof v.config === 'object') forms.push({ slot: 'config', form: v.config });
+    const out: Array<{ slot: string; slug: string }> = [];
+    for (const { slot, form } of forms) {
+        const sharing = form && typeof form === 'object' ? (form as Record<string, unknown>).sharing : undefined;
+        if (!sharing || typeof sharing !== 'object') continue;
+        const s = sharing as Record<string, unknown>;
+        if (typeof s.publicLink !== 'string' || !s.publicLink) continue;
+        if (s.enabled !== false && s.allowAnonymous !== false) continue;
+        out.push({ slot, slug: publicFormSlug(s.publicLink) });
+    }
+    return out;
 }
 
 /**
- * Does one metadata layer — the `view` list one read answers — withdraw an
- * open form candidate? A WITHDRAWAL IS A KILL SWITCH: layering may only narrow
- * anonymous intake, never re-open it, so the anonymous form doors serve a
- * candidate only when no layer they read withdraws it (and the
- * organization-scoped write door refuses a save that would leave one open).
+ * Does one metadata layer withdraw an open form candidate? A WITHDRAWAL IS A
+ * KILL SWITCH: layering may only narrow anonymous intake, never re-open it, so
+ * the anonymous form doors serve a candidate only when no layer beneath it
+ * withdraws it, and the organization-scoped write door refuses a save that
+ * would leave one open.
  *
- * A withdrawal closes THE SAME FORM, never another: the layer withdraws the
- * candidate only when its own body of the same view (by `name`) carries, at
- * the same slot (the nested `form`, the same `formViews` key, or the flattened
- * `config`), a sharing that names the candidate's slug and does not open it
- * (`enabled: false` or `allowAnonymous: false` with the link kept). Another
- * view that publishes or withdraws the same slug is a different form and does
- * not close this one.
+ * Identity is the stored row: `layer` holds bodies of rows, and the candidate's
+ * `view` is a body of a row of the same `name` — the row its overlay is keyed
+ * by. The layer withdraws the candidate when its body of that row EXPLICITLY
+ * withdraws a form ({@link anonymousFormExplicitWithdrawals}) that matches the
+ * candidate by slot (the same `form`, `formViews` key or `config`) OR by slug
+ * (the same public link, compared exactly as the doors resolve it). Either
+ * match is enough, so the same form cannot escape a withdrawal by moving to
+ * another slot or key, or by pointing its link at a new slug; only a form that
+ * differs from every withdrawn one in both is a different form (a sibling in
+ * the same container).
  *
- * Only an explicit withdrawal closes. A layer with no body of the view, a body
- * with no sharing at that slot, a sharing with no public link, or one that
- * names another slug withdraws nothing: deleting the view, removing its
- * sharing or clearing (or changing) its public link at a layer is not a
- * withdrawal, so a form published only in an organization stays open there.
+ * Another row that publishes or withdraws the same slug is a different form
+ * and closes nothing. A layer with no body of the row, or whose body has no
+ * explicit withdrawal, withdraws nothing, so a form published only in an
+ * organization stays open there.
  */
 export function anonymousFormIntakeWithdrawnIn(
     layer: ReadonlyArray<unknown>,
@@ -316,9 +322,10 @@ export function anonymousFormIntakeWithdrawnIn(
     const slot = anonymousFormSlot(v, candidate);
     for (const other of layer) {
         if (!other || typeof other !== 'object') continue;
-        const o = other as Record<string, any>;
-        if (o.name !== name) continue;
-        if (sharingWithdrawsSlug(anonymousFormSharingAtSlot(o, slot), candidate.slug)) return true;
+        if ((other as Record<string, unknown>).name !== name) continue;
+        for (const w of anonymousFormExplicitWithdrawals(other)) {
+            if (w.slot === slot || w.slug === candidate.slug) return true;
+        }
     }
     return false;
 }

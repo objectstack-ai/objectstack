@@ -762,6 +762,69 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
         })).success).toBe(true);
     });
 
+    describe('single: identity is the stored row, so moving the form inside its row does not escape', () => {
+        const LINK = '/forms/walled-intake';
+        const open = { enabled: true, allowAnonymous: true, publicLink: LINK };
+        const withdrawnRow = {
+            name: 'task', object: 'task',
+            formViews: { intake_form: { sharing: { ...open, allowAnonymous: false } } },
+        };
+        const overlays: Array<[string, Record<string, unknown>]> = [
+            ['a formViews key rename', { name: 'task', object: 'task', formViews: { intake_v2: { sharing: open } } }],
+            ['a move to the nested form with a form.name rename',
+                { name: 'task', object: 'task', form: { name: 'renamed_intake', sharing: open } }],
+            ['a listViews collision that makes the expansion rename it',
+                { name: 'task', object: 'task', listViews: { intake_form: { type: 'grid' } }, formViews: { intake_form: { sharing: open } } }],
+            ['the same key re-pointed at a new slug',
+                { name: 'task', object: 'task', formViews: { intake_form: { sharing: { ...open, publicLink: '/forms/walled-intake-2' } } } }],
+            ['the same key re-pointed at a case-only variant',
+                { name: 'task', object: 'task', formViews: { intake_form: { sharing: { ...open, publicLink: '/forms/Walled-Intake' } } } }],
+        ];
+        for (const [label, overlay] of overlays) {
+            it(`${label}: refused and nothing is saved`, async () => {
+                const { protocol, rows } = makeTenancyProtocol('org_a');
+                expect((await protocol.saveMetaItem({ type: 'view', name: 'task', item: withdrawnRow })).success).toBe(true);
+                await expect(protocol.saveMetaItem({ type: 'view', name: 'task', item: overlay, organizationId: 'org_a' }))
+                    .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+                expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+            });
+        }
+
+        it('control: a sibling form in another slot with another slug still saves', async () => {
+            const { protocol } = makeTenancyProtocol('org_a');
+            expect((await protocol.saveMetaItem({ type: 'view', name: 'task', item: withdrawnRow })).success).toBe(true);
+            const sibling = {
+                name: 'task', object: 'task',
+                formViews: {
+                    intake_form: { sharing: { ...open, allowAnonymous: false } },
+                    feedback: { sharing: { ...open, publicLink: '/forms/feedback' } },
+                },
+            };
+            expect((await protocol.saveMetaItem({ type: 'view', name: 'task', item: sibling, organizationId: 'org_a' })).success)
+                .toBe(true);
+        });
+    });
+
+    it('single: the same view item re-pointed at a new slug is refused', async () => {
+        const { protocol } = makeTenancyProtocol('org_a');
+        expect((await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: FORM_VIEW(false) })).success).toBe(true);
+        const moved = FORM_VIEW(true);
+        moved.config.sharing.publicLink = '/forms/walled-intake-2';
+        await expect(protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: moved, organizationId: 'org_a',
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    });
+
+    it('control (single): only an explicit false withdraws — allowAnonymous absent env-wide is not a withdrawal', async () => {
+        const { protocol } = makeTenancyProtocol('org_a');
+        const absent = FORM_VIEW(true);
+        delete (absent.config.sharing as any).allowAnonymous;
+        expect((await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: absent })).success).toBe(true);
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
+        })).success).toBe(true);
+    });
+
     it('control (single): a sharing with no public link env-wide is not a withdrawal', async () => {
         const { protocol } = makeTenancyProtocol('org_a');
         const linkless = FORM_VIEW(true);

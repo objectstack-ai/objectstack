@@ -25,8 +25,9 @@
 //   - withdrawn in the organization, open env-wide: both doors refuse;
 //   - open in both: both doors accept;
 //   - a form only the organization has (no env-wide body): it is served;
-//   - not a withdrawal (the link cleared env-wide, or another view sharing the
-//     slug withdrawn): it is served.
+//   - not a withdrawal (the link cleared env-wide, a switch merely absent, or
+//     another view sharing the slug withdrawn): it is served;
+//   - the same view re-pointed at a new slug in the organization: still closed.
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
@@ -138,15 +139,15 @@ function build(setup: Setup) {
   return {
     createData,
     getMetaItems,
-    async get() {
+    async get(slug = 'contact-us') {
       const res = mockRes();
-      await resolve.handler({ params: { slug: 'contact-us' }, query: {}, headers: {} } as any, res);
+      await resolve.handler({ params: { slug }, query: {}, headers: {} } as any, res);
       return res;
     },
-    async post() {
+    async post(slug = 'contact-us') {
       const res = mockRes();
       await submit.handler(
-        { params: { slug: 'contact-us' }, query: {}, headers: {}, body: { name: 'x', email: 'x@example.com' } } as any,
+        { params: { slug }, query: {}, headers: {}, body: { name: 'x', email: 'x@example.com' } } as any,
         res,
       );
       return res;
@@ -292,6 +293,28 @@ describe('a public form withdrawal is a kill switch: layering only narrows intak
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);
   });
+
+  it('only an explicit false withdraws: env-wide link + enabled true with allowAnonymous absent does not close the org\'s open form', async () => {
+    const absent = formView(true, { enabled: true, publicLink: '/forms/contact-us' });
+    const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [absent] });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
+  });
+
+  for (const link of ['/forms/contact-us-2', '/forms/Contact-Us']) {
+    it(`the same view re-pointed at a new slug (${link}) in the organization stays closed`, async () => {
+      const slug = link.replace('/forms/', '');
+      const s = build({
+        envWide: true, inOrg: true, tenancy: 'org', envWideViews: [formView(false)],
+        sharing: { enabled: true, allowAnonymous: true, publicLink: link },
+      });
+      const get = await s.get(slug);
+      expect([get.statusCode, get.body.code]).toEqual([404, 'FORM_NOT_FOUND']);
+      const post = await s.post(slug);
+      expect([post.statusCode, post.body.code]).toEqual([404, 'FORM_NOT_FOUND']);
+      expect(s.createData).not.toHaveBeenCalled();
+    });
+  }
 
   for (const tenancy of ['org', 'no-org'] as const) {
     it(`two different views sharing a slug in one read do not close each other (tenancy ${tenancy})`, async () => {
