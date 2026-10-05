@@ -48,15 +48,13 @@ own `config.<path>`:
 stored), a non-string value under a credential-shaped name, array data, and every
 other key — the config shape itself stays unjudged.
 
-### FROM → TO
-
-| before | what to write instead |
-| --- | --- |
-| `config.apiKey: 'sk-…'` (or any credential-shaped key) on a contractless driver | remove it and bind the secret: the connection form's secret field, or `external.credentialsRef`. The connect path hands the decrypted value to the driver factory as the connection secret, so the plugin driver's factory must read that injected secret. |
-| `config.connectionString: 'Server=h;Password=p'` | `config.connectionString: 'Server=h'`, and bind the password the same way. |
-
-**The one-line fix: delete the inline credential from `config` and bind it as the
-datasource's secret.**
+**What an author sees now, and the remedy it names.** Each refusal is a `custom` issue
+at the value's own `config.<path>`, naming the position and the remedy: remove the
+inline credential from `config` and bind it as the datasource's secret — the
+connection form's secret field, or `external.credentialsRef`. The connect path hands
+the decrypted value to the driver factory as the connection secret, so a plugin
+driver receives it only if its factory reads that injected secret. No key is retired
+or renamed; nothing an author wrote is rewritten.
 
 **Every read door withholds it, rows stored before this release included.** The one
 read-path redactor (`redactDatasourceConfig`) now also drops, for a contractless
