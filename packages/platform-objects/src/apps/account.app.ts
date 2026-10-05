@@ -19,7 +19,6 @@
  * make the experience equivalent to the old account SPA for supported
  * surfaces:
  *   - `sys_oauth_application.create` — one-time client_secret reveal
- *   - `sys_account.link_social` — OAuth redirect URL
  *
  * The same objects also appear (admin-only) in `setup.app.ts`'s
  * Advanced group, gated by `manage_platform_settings`, for tenant-wide

@@ -471,26 +471,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
-      link_social: {
-        label: "Link Social Account",
-        params: {
-          provider: {
-            label: "Provider",
-            options: {
-              google: "Google",
-              github: "GitHub",
-              microsoft: "Microsoft",
-              apple: "Apple",
-              facebook: "Facebook",
-              gitlab: "GitLab",
-              discord: "Discord"
-            }
-          }
-        }
-      },
       unlink_account: {
         label: "Unlink Account",
-        description: "Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.",
+        description: "Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it.",
         successMessage: "Identity link removed"
       }
     }

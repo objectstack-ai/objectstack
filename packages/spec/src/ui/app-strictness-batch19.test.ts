@@ -96,7 +96,7 @@ const MEMBERS: Array<[string, { safeParse: (v: unknown) => { success: boolean; e
   ['group', GroupNavItemSchema, { type: 'group' }],
 ];
 
-describe('#4001 批 19 — the `verify` check on `BaseNavItemSchema`', () => {
+describe('批 19, unknown keys refused — the `verify` check on `BaseNavItemSchema`', () => {
   describe('POSITIVE control — the spread really does deliver the base keys', () => {
     it.each(MEMBERS)('the `%s` branch accepts every key the base contributes', (_name, schema, payload) => {
       const r = schema.safeParse({ ...BASE_KEYS, ...payload });

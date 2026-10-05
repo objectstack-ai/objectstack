@@ -471,26 +471,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
-      link_social: {
-        label: "Vincular cuenta social",
-        params: {
-          provider: {
-            label: "Proveedor",
-            options: {
-              google: "Google",
-              github: "GitHub",
-              microsoft: "Microsoft",
-              apple: "Apple",
-              facebook: "Facebook",
-              gitlab: "GitLab",
-              discord: "Discord"
-            }
-          }
-        }
-      },
       unlink_account: {
         label: "Desvincular cuenta",
-        description: "¿Desvincular este vínculo de identidad? El usuario ya no podrá iniciar sesión con este proveedor hasta que lo vuelva a vincular desde la configuración de su cuenta.",
+        description: "¿Desvincular este vínculo de identidad? El usuario ya no podrá iniciar sesión con este proveedor hasta que lo vuelva a vincular.",
         successMessage: "Vínculo de identidad eliminado"
       }
     }
