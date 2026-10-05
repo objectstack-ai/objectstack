@@ -15,17 +15,18 @@
 // only, and listed the saved one after a restart. The service now reads the
 // engine registry, resolved when validation runs.
 //
-// ## What this file pins, and what it leaves to the seam pins
+// ## What this file pins
 //
-// The listing, through the doors an operator uses: the code-defined objects,
-// an object saved through `PUT /meta/object/:name`, and an object imported
-// through `…/external/tables/:remote/import`. Under this harness the
-// federation service is mounted as an extra plugin and finds no `metadata`
-// service at its `init()`, so it holds no datasource definition and every row
-// it answers is `ok` with no comparison made. The VERDICT on a runtime-saved
-// object is therefore pinned beside the plugin
-// (`packages/services/service-datasource/src/__tests__/external-validate-reads-live-registry.test.ts`),
-// and was measured on `objectstack dev`, where the definition is read.
+// Through the doors an operator uses: the code-defined objects are listed;
+// an object saved through `PUT /meta/object/:name` is listed with a real
+// verdict (it declares a column the remote lacks, and exactly that column is
+// reported); an object imported through `…/external/tables/:remote/import` is
+// listed beside them. The verify harness composes no metadata plugin, so its
+// `metadata` service is the kernel's fallback registered after the
+// federation service's `init()`, as on `objectstack start`; the service reads
+// it when validation runs ([#21876]), so each row here is a real comparison.
+// The seam pins sit beside the plugin
+// (`packages/services/service-datasource/src/__tests__/external-validate-reads-live-registry.test.ts`).
 //
 // The working directory is a temporary one because the showcase's external
 // datasource and its fixture both name a cwd-relative SQLite file: this
@@ -45,15 +46,29 @@ const DATASOURCE = 'showcase_external';
 const CODE_DEFINED = ['showcase_ext_customer', 'showcase_ext_order'];
 /** Saved at runtime through the metadata door, bound to the remote `customers` table. */
 const SAVED = 'dogfood_ext_cust_21842';
+/** A column the saved object declares and the remote `customers` table does not have. */
+const MISSING = 'loyalty_tier';
 /** Imported at runtime from the remote `orders` table. */
 const IMPORTED = 'dogfood_ext_ord_21842';
 
 const validatePath = `/datasources/${DATASOURCE}/external/validate`;
 
-function listedObjects(json: unknown): string[] {
-  const body = json as { data?: { results?: Array<{ object?: unknown }> } } | undefined;
-  return (body?.data?.results ?? []).map((r) => String(r.object)).sort();
+interface Row {
+  object: string;
+  ok: boolean;
+  diffs: Array<{ kind: string; column?: string; severity: string }>;
 }
+
+function rowsOf(json: unknown): Row[] {
+  const body = json as { data?: { results?: Row[] } } | undefined;
+  return body?.data?.results ?? [];
+}
+
+function listedObjects(json: unknown): string[] {
+  return rowsOf(json).map((r) => String(r.object)).sort();
+}
+
+const rowOf = (json: unknown, object: string) => rowsOf(json).find((r) => r.object === object);
 
 describe('external validate lists a federated object saved at runtime, with no restart (showcase)', () => {
   let stack: VerifyStack;
@@ -94,20 +109,30 @@ describe('external validate lists a federated object saved at runtime, with no r
     expect(listedObjects(validated.json)).toEqual(CODE_DEFINED);
   });
 
-  it('lists an object saved through PUT /meta/object/:name, and still the code-defined ones', async () => {
+  it('lists an object saved through PUT /meta/object/:name with a real verdict, and still the code-defined ones', async () => {
     const saved = await call('PUT', `/meta/object/${SAVED}`, {
       name: SAVED,
       label: 'Dogfood External Customer',
       sharingModel: 'public_read_write',
       datasource: DATASOURCE,
       external: { remoteName: 'customers' },
-      fields: { name: { type: 'text', label: 'Name' }, email: { type: 'text', label: 'Email' } },
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        email: { type: 'text', label: 'Email' },
+        [MISSING]: { type: 'text', label: 'Loyalty Tier' },
+      },
     });
     expect(saved.status, JSON.stringify(saved.json)).toBe(200);
 
     const validated = await call('POST', validatePath);
     expect(validated.status, JSON.stringify(validated.json)).toBe(200);
     expect(listedObjects(validated.json)).toEqual([...CODE_DEFINED, SAVED].sort());
+    // Compared, not waved through: exactly the declared column the remote lacks.
+    expect(rowOf(validated.json, SAVED)).toMatchObject({
+      ok: false,
+      diffs: [{ kind: 'missing_column', remoteName: 'customers', column: MISSING, severity: 'error' }],
+    });
+    for (const name of CODE_DEFINED) expect(rowOf(validated.json, name)?.ok, name).toBe(true);
   });
 
   it('lists an object imported from a remote table, beside the saved and code-defined ones', async () => {
@@ -117,5 +142,9 @@ describe('external validate lists a federated object saved at runtime, with no r
     const validated = await call('POST', validatePath);
     expect(validated.status, JSON.stringify(validated.json)).toBe(200);
     expect(listedObjects(validated.json)).toEqual([...CODE_DEFINED, IMPORTED, SAVED].sort());
+    expect(rowOf(validated.json, IMPORTED), JSON.stringify(rowOf(validated.json, IMPORTED))).toMatchObject({
+      ok: true,
+      diffs: [],
+    });
   });
 });
