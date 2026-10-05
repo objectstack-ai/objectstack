@@ -758,6 +758,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../metadata-protocol
@@ -774,9 +777,6 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../metadata-core
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3

@@ -232,7 +232,7 @@ describe('PositionSchema', () => {
 // ADR-0010 protection envelope the #4071 ledger flagged as the known sibling
 // gap (applyProtection stamps EVERY registered metadata type; position could
 // not represent the stamp).
-describe('unknown keys are rejected, not stripped (#4001)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const unknownKeyIssue = (value: unknown) => {
     const result = PositionSchema.safeParse(value);
     expect(result.success).toBe(false);
@@ -253,7 +253,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       .toContain('FLAT');
   });
 
-  it('points `permissions` at permission-set bindings (#9885, ADR-0049 retirement)', () => {
+  it('points `permissions` at permission-set bindings (ADR-0049 retirement)', () => {
     // The sys_position row column of the same name was retired (no producer,
     // no reader); this guidance is the live-authoring half of the
     // prescription — the migrate-meta half is the semantic entry

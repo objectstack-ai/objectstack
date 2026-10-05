@@ -298,6 +298,8 @@ import {
   rowsWithDeclaredColumnsOnly,
   withDeclaredColumnsOnly,
 } from './declared-read-columns.js';
+// [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
+import { isFederatedObject } from './federated-object.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -5483,10 +5485,10 @@ export class ObjectQL implements IObjectQLEngine {
     // of their own and were riding the same wrong connection.
     const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
     const objectSchema = this._registry.getObject(object) as any;
-    // `external != null` is the same predicate `syncObjectSchema` routes a
+    // `isFederatedObject` is the same predicate every schema-sync seam routes a
     // federated object by — one spelling of "this schema is the remote's",
     // not a second reading of it.
-    const isFederated = objectSchema?.external != null;
+    const isFederated = isFederatedObject(objectSchema);
     const hasTenant =
       execCtx?.tenantId !== undefined &&
       !isTenancyDisabled(objectSchema) &&
@@ -5730,7 +5732,7 @@ export class ObjectQL implements IObjectQLEngine {
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
     // `buildDriverOptions` withholds `tenantId` there.
-    if (objectSchema?.external != null) return undefined;
+    if (isFederatedObject(objectSchema)) return undefined;
     const tenantField = resolveTenantFieldName(objectSchema);
     if (!tenantField) return undefined;
     // A row that names its own organization has carried one explicitly. Only a
@@ -8410,7 +8412,7 @@ export class ObjectQL implements IObjectQLEngine {
         // caller that is not SYSTEM its rows are the ones its OWN read returns,
         // through every enforcement layer; any other id is 'unreadable', stored or not.
         let ownRead: Set<string> | undefined;
-        if (bound && (targetSchema?.external != null || resolveTenantFieldName(targetSchema) === null)) {
+        if (bound && (isFederatedObject(targetSchema) || resolveTenantFieldName(targetSchema) === null)) {
           const own = await this.find(target, {
             where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
           }) as Array<Record<string, unknown>>;
@@ -18304,12 +18306,47 @@ export class ObjectQL implements IObjectQLEngine {
    * Call this after dynamically registering new objects at runtime
    * (e.g. after template seeding) to ensure tables/collections exist
    * before inserting seed data.
+   *
+   * A federated object (ADR-0015 `external`) is not a DDL target. It is bound
+   * to its remote table without DDL, the way the boot sync
+   * (`ObjectQLPlugin.syncRegisteredSchemas`) binds it.
    */
   async syncSchemas(): Promise<void> {
     const allObjects = this._registry.getAllObjects();
     for (const obj of allObjects) {
       const driver = this.getDriverForObject(obj.name);
       if (!driver) continue;
+      // [#21777] Same predicate and same treatment as the boot sync. The remote
+      // owns this object's schema, so `syncSchema` would be refused
+      // (`ExternalSchemaModeViolationError` on an external-schema datasource).
+      // Logging that refusal at the #4632 ERROR below was a false durability
+      // alarm, because nothing was meant to be created. The DDL-free binding
+      // still runs, because an object registered at runtime has no other way
+      // to its remote table: without it every read resolves to a table named
+      // after the object.
+      if (isFederatedObject(obj)) {
+        if (typeof (driver as any).registerExternalObject !== 'function') {
+          this.logger.debug('Driver does not support registerExternalObject, skipping external object', {
+            object: obj.name,
+            driver: (driver as any).name,
+          });
+          continue;
+        }
+        try {
+          await (driver as any).registerExternalObject(obj);
+          this.logger.debug('Federated object is not a DDL target — bound to its remote table without DDL', {
+            object: obj.name,
+            driver: (driver as any).name,
+          });
+        } catch (e: unknown) {
+          this.logger.warn('Failed to register external object metadata', {
+            object: obj.name,
+            driver: (driver as any).name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+        continue;
+      }
       const tableName = StorageNameMapping.resolveTableName(obj);
       if (typeof (driver as any).syncSchemasBatch === 'function' && (driver as any).supports?.batchSchemaSync) {
         // Already handled per-driver below; skip individual call
@@ -18358,7 +18395,7 @@ export class ObjectQL implements IObjectQLEngine {
     // (its remote schema is owned externally). This is what an app's onEnable
     // calls after registering a late external driver so coercion maps + the
     // physical-table mapping exist for queries. See SqlDriver.registerExternalObject.
-    if (obj.external != null) {
+    if (isFederatedObject(obj)) {
       if (typeof (driver as any).registerExternalObject === 'function') {
         await (driver as any).registerExternalObject(obj);
       }

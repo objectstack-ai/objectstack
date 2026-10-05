@@ -35,7 +35,9 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metada
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
 // refusal. The install branch asks the predicate ahead of its generic catch,
 // and its no-protocol fallback runs the same handshake.
-import { assertProtocolCompat, isProtocolIncompatibleError, type ProtocolIncompatibleError } from '@objectstack/metadata-core';
+// [#21762] The refusal's answer is the shared one, which the install-local door
+// (`@objectstack/cloud-connection`) gives too: imported, never restated.
+import { assertProtocolCompat, isProtocolIncompatibleError, protocolIncompatibleAnswer } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
@@ -583,40 +585,6 @@ function requireDuplicableSource(
 }
 
 /**
- * [#21727] The HTTP answer for ADR-0087 D1's protocol refusal: the error's
- * declared status (422) with the structured diagnostic in `error.details`.
- *
- * ADR-0087 D1 promises a refusal whose diagnostic "the consumer that must act
- * on this refusal" can read, and that consumer is an agent. This door used to
- * serve the throw through `errorFromThrown`, which answered the 500 fallback
- * and kept the five fields only inside the prose.
- *
- * `details` is a CLOSED shape: exactly these five members of
- * `ProtocolIncompatibleDiagnostic`, named one by one. ⛔ It is not a spread of
- * the diagnostic. `packageId` and `runtimeMajor` stay out (the first is the
- * id the caller sent, the second is derivable from `protocolVersion`), and a
- * member later added to the diagnostic does not reach the wire without a
- * decision here. `code` goes in as the shared envelope builder's promotion
- * slot (`error-envelope.ts`), so it lands in `error.code` and never as
- * `error.details.code` (ADR-0112 D5): the same exit the #9585
- * `FlowActionRefusal` branch uses in `domains/actions.ts`.
- *
- * The message is the error's own prose, unchanged: the CLI and people read
- * it, and its `Run:` command is the same string as `migrateCommand`.
- */
-function protocolIncompatibleAnswer(deps: DomainHandlerDeps, err: ProtocolIncompatibleError) {
-    const d = err.diagnostic;
-    return deps.error(err.message, err.status, {
-        code: err.code,
-        requiredRange: d.requiredRange,
-        rangeSource: d.rangeSource,
-        protocolVersion: d.protocolVersion,
-        targetMajor: d.targetMajor,
-        migrateCommand: d.migrateCommand,
-    });
-}
-
-/**
  * Handles Package Management requests
  *
  * REST Endpoints:
@@ -643,7 +611,8 @@ function protocolIncompatibleAnswer(deps: DomainHandlerDeps, err: ProtocolIncomp
  * helper rather than re-deriving the status here.
  *
  * [#21727] ONE recognised carrier answers ahead of that helper: the install
- * branch's `ProtocolIncompatibleError`, through {@link protocolIncompatibleAnswer}.
+ * branch's `ProtocolIncompatibleError`, through `protocolIncompatibleAnswer`
+ * (`@objectstack/metadata-core`, shared with the install-local door, #21762).
  * It still answers the status the error declares. What it adds is the
  * structured diagnostic, which the shared resolver's closed `details` list
  * drops by design.
@@ -1324,7 +1293,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 // diagnostic itself. Every other throw rethrows to the generic
                 // catch unchanged.
                 if (isProtocolIncompatibleError(err)) {
-                    return { handled: true, response: protocolIncompatibleAnswer(deps, err) };
+                    // [#21762] The shared answer, in this door's envelope:
+                    // `code` rides `details` into the promotion slot, so it
+                    // lands in `error.code` (ADR-0112 D5) and `error.details`
+                    // carries the answer's five members and nothing else.
+                    const refusal = protocolIncompatibleAnswer(err);
+                    return {
+                        handled: true,
+                        response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...refusal.details }),
+                    };
                 }
                 throw err;
             }

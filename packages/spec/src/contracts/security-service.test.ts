@@ -5,6 +5,7 @@ import type {
   ISecurityService,
   AuthoredRowWriteVerdict,
   AuthoredRowWriteOperation,
+  OwnershipFloorAlternate,
 } from './security-service';
 
 /**
@@ -557,5 +558,88 @@ describe('Security Service Contract', () => {
       { userId: 'admin' },
     );
     expect(seen[0]).toEqual({ object: 'deal', operation: 'update', userId: 'u2', recordId: 'r1' });
+  });
+
+  it('discardPermissionSetOverlay is OPTIONAL — absence is typed, and the caller answers it as not implemented', async () => {
+    // A security service without the operator action still satisfies the
+    // contract, and a caller cannot reach the action without handling the
+    // absent case first.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.discardPermissionSetOverlay).toBe('undefined');
+
+    // The unguarded call does not compile. Never invoked: its only job is to
+    // make the COMPILER prove the point.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a caller must feature-detect first
+      withoutIt.discardPermissionSetOverlay({ userId: 'admin' }, 'ps_1');
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The shape the REST route writes: an absent method is a 501, never a
+    // pretended success.
+    const route = async (svc: ISecurityService) =>
+      typeof svc.discardPermissionSetOverlay === 'function'
+        ? { status: 200, data: await svc.discardPermissionSetOverlay({ userId: 'admin' }, 'ps_1') }
+        : { status: 501, data: undefined };
+    await expect(route(withoutIt)).resolves.toEqual({ status: 501, data: undefined });
+
+    const withIt = makeService({
+      discardPermissionSetOverlay: async (_context, id) => ({
+        permissionSet: { id, name: 'sales_user' },
+        healedObjectGrantCount: 3,
+        overlaysDiscarded: 1,
+      }),
+    });
+    await expect(route(withIt)).resolves.toEqual({
+      status: 200,
+      data: { permissionSet: { id: 'ps_1', name: 'sales_user' }, healedObjectGrantCount: 3, overlaysDiscarded: 1 },
+    });
+  });
+
+  it('contributeOwnershipFloorAlternates is OPTIONAL — absence is typed, and an alternate names exactly one floor limb', () => {
+    // A security service without the seam still satisfies the contract.
+    // Absence leaves the floor in force, which is the fail-closed direction:
+    // the contributor's wider rule stays unreachable and nothing is widened.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.contributeOwnershipFloorAlternates).toBe('undefined');
+
+    const alternate: OwnershipFloorAlternate = {
+      name: 'sys_attachment_parent_editor_delete',
+      object: 'sys_attachment',
+      operation: 'delete',
+      using: 'id != null',
+    };
+
+    // The unguarded call does not compile. Never invoked.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a contributor must feature-detect first
+      withoutIt.contributeOwnershipFloorAlternates('com.example.plugin', [alternate]);
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The shape a contributor writes: feature-detect, then contribute; the
+    // absent branch is a defined outcome rather than a crash.
+    const contribute = (svc: ISecurityService) => {
+      if (typeof svc.contributeOwnershipFloorAlternates !== 'function') return 'no-seam';
+      svc.contributeOwnershipFloorAlternates('com.example.plugin', [alternate]);
+      return 'contributed';
+    };
+    expect(contribute(withoutIt)).toBe('no-seam');
+
+    const received: unknown[] = [];
+    const withIt = makeService({
+      contributeOwnershipFloorAlternates: (plugin, alternates) => {
+        received.push([plugin, alternates]);
+      },
+    });
+    expect(contribute(withIt)).toBe('contributed');
+    expect(received).toEqual([['com.example.plugin', [alternate]]]);
+
+    // The operation is ONE floor limb. `all` would relieve both limbs at once,
+    // and each limb is its own decision, so the type does not admit it.
+    const notOneLimb: OwnershipFloorAlternate = {
+      ...alternate,
+      // @ts-expect-error `all` is not one floor limb — contribute `update` or `delete`
+      operation: 'all',
+    };
+    expect(notOneLimb.operation).toBe('all');
   });
 });

@@ -250,7 +250,7 @@ describe('defineTool', () => {
     expect(message).not.toContain('Did you mean');
   });
 
-  it('emission order: which key is wrong → the fix → the history, last (#5955)', () => {
+  it('emission order: which key is wrong → the fix → the history, last', () => {
     // The template's ordering contract, asserted on this surface because the
     // fold is what brings this surface under it. `history` sat in the middle
     // until #5955 and pushed the fix past ~character 220 on the single-line

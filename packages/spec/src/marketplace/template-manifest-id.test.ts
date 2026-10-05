@@ -44,7 +44,7 @@ function createRequest(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('TemplateManifestSchema relaxes manifestId to optional (#7319)', () => {
+describe('TemplateManifestSchema relaxes manifestId to optional', () => {
   it('parses a manifest that declares no manifestId — the shipped shape', () => {
     const result = TemplateManifestSchema.safeParse(templateManifest());
     expect(result.success).toBe(true);
@@ -77,7 +77,7 @@ describe('TemplateManifestSchema relaxes manifestId to optional (#7319)', () => 
   });
 });
 
-describe('CreatePackageRequestSchema keeps manifestId REQUIRED (#7319)', () => {
+describe('CreatePackageRequestSchema keeps manifestId REQUIRED', () => {
   it('rejects a publish request with no manifestId', () => {
     const { manifestId: _dropped, ...withoutId } = createRequest();
     const result = CreatePackageRequestSchema.safeParse(withoutId);

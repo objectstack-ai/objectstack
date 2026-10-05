@@ -47,10 +47,10 @@ export const entry: SemanticMigration = {
     + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
     + 'and its test the only occurrences are the generated rows in '
     + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-    + 'objectui checkout — `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — spells '
+    + 'objectui checkout — `.objectui-sha` = `9dfaca654311cddd81714153c4f82c241d7cdc54` — spells '
     + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-    + 'across its 7579 tracked files, against lit controls `useState` 2477 and `timeout` 1351 on '
-    + 'the same corpus (all four 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+    + 'across its 7632 tracked files, against lit controls `useState` 2477 and `timeout` 1360 on '
+    + 'the same corpus (all four 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
     + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
     + '8303, against 2389 and 1086, at 62597c588).',
   acceptanceCriteria:

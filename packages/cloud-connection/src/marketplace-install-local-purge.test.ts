@@ -426,13 +426,13 @@ describe('POST …/purge-sample-data — through the engine, in the install\'s s
         expect(tables.pg_contact.map((r) => r.id)).toEqual(['d1']);
     });
 
-    it('wall, no active organization: answered the way reseed answers it, and nothing is deleted', async () => {
+    it('wall, no active organization: refused the way reseed refuses it (ADR-0123 D2 / D4), and nothing is deleted', async () => {
         const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme', organization_id: 'org_a' }], pg_contact: [] };
         const { purge, deletes } = await bootWith({ tables, posture: 'isolated' });
         const res = await purge(makeC(MANIFEST.id));
-        expect(res.status).toBe(400);
-        expect(res.payload.error.code).toBe('RESEED_SKIPPED');
-        expect(res.payload.error.message).toContain('multi-tenant-no-active-org');
+        expect(res.status).toBe(403);
+        expect(res.payload.error.code).toBe('PERMISSION_DENIED');
+        expect(res.payload.error.message).toContain('this session has no active organization');
         expect(deletes).toEqual([]);
         expect(tables.pg_account).toHaveLength(1);
         // The install still carries its sample data: the ledger is untouched.

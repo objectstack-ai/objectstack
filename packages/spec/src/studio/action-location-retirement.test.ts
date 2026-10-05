@@ -38,7 +38,7 @@ import {
 // anti-vacuity guards; sabotage-verified in the PR (re-exporting the ui enum
 // from ./studio under the bare name — green to the dual-source gate, a lie to
 // authors — and resurrecting the old 3-value const each turn it red).
-describe('[#4737] studio ActionLocation dual-source retirement', () => {
+describe('studio ActionLocation dual-source retirement', () => {
   it('resolves the export surface: one owner per name, across every public entry', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`

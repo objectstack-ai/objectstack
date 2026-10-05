@@ -218,7 +218,7 @@ describe('FlowBuilderConfigSchema', () => {
     expect(config.undoLimit).toBe(100);
   });
 
-  it('answers `snap.grid` with `gridSize`, and the advice actually parses (#5481)', () => {
+  it('answers `snap.grid` with `gridSize`, and the advice actually parses', () => {
     // A `grid_: 'showGrid'` entry used to sit after `grid: 'gridSize'` in this
     // table; `aliasProbe` strips `_`, so the two shared one index and the later
     // one won. An author writing `grid: 24` — the pixel pitch — was pointed at

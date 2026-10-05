@@ -238,6 +238,58 @@ export type DelegationNarrowing =
     };
 
 /**
+ * What {@link ISecurityService.discardPermissionSetOverlay} resolves with.
+ *
+ * The minimal contract shape. The reference implementation's own result type
+ * (`PermissionSetOverlayDiscardResult` in `@objectstack/plugin-security`) is
+ * plugin-internal and is assignable to this one; it types the row loosely.
+ */
+export interface PermissionSetOverlayDiscardResult {
+  /**
+   * The `sys_permission_set` row as stored once the overlay is gone and the row
+   * has been re-projected from the declared artifact. The column set is owned
+   * by the implementation's backing object rather than this contract, so it
+   * stays open, as {@link AudienceBindingSuggestion} does.
+   */
+  permissionSet: Record<string, unknown>;
+  /**
+   * The object grants the row carries NOW, read back after the re-projection.
+   *
+   * ⚠️ Not always a healed count. When the store refuses the re-projection
+   * write, the row keeps its pre-discard grants and this number equals the
+   * pre-discard count. The call still resolves, because the overlay deletion did
+   * land; the implementation reports the refused write on its audit log, not
+   * here.
+   */
+  healedObjectGrantCount: number;
+  /** How many overlay rows were deleted. At least 1 on any call that resolves. */
+  overlaysDiscarded: number;
+}
+
+/**
+ * One alternate match a plugin contributes to the platform's row-level write
+ * ownership floor, through
+ * {@link ISecurityService.contributeOwnershipFloorAlternates}.
+ *
+ * The minimal contract shape. The reference implementation's own type of the
+ * same name (in `@objectstack/plugin-security`) is plugin-internal and
+ * structurally identical.
+ */
+export interface OwnershipFloorAlternate {
+  /** Policy name (snake_case), as `explain` and the denial logs show it. */
+  readonly name: string;
+  /** The ONE object the floor is relieved on: a named object, never `'*'`. */
+  readonly object: string;
+  /** The ONE floor limb relieved: `update` (the edit floor) or `delete`. */
+  readonly operation: 'update' | 'delete';
+  /**
+   * The rows of `object` the floor stops answering for on that limb, as a
+   * row-level security `using` predicate.
+   */
+  readonly using: string;
+}
+
+/**
  * Public contract for the `security` service.
  *
  * Every method is expected to be derived from the same permission-set
@@ -843,4 +895,88 @@ export interface ISecurityService {
     callerContext: SecurityContext,
     id: string,
   ): Promise<{ suggestion: AudienceBindingSuggestion }>;
+
+  /**
+   * [ADR-0094] Discard the stale environment-wide `sys_metadata` overlay that
+   * shadows a PACKAGE-DECLARED permission set, then re-project the
+   * `sys_permission_set` row from the declared artifact before resolving. This
+   * is the audited operator action behind the set's "Discard Overlay" Setup
+   * action (`POST …/security/permission-sets/:id/discard-overlay`). `id` is the
+   * `sys_permission_set` row id, looked up in the caller's organization.
+   *
+   * One set at a time, and never a provenance change: it removes the overlay
+   * and lets the row converge to its artifact. It does not touch `managed_by`
+   * or `package_id`.
+   *
+   * **Refuses by throwing.** Each refusal carries a registered `code` and an
+   * HTTP status, which the REST route serves as they are:
+   * - `PERMISSION_DENIED` (403): the caller is not an authenticated tenant-level
+   *   administrator (a system context bypasses this check), OR no installed
+   *   package currently declares the set. That second refusal protects an
+   *   environment-authored set: discarding its overlay would destroy that work
+   *   with no trace and no way back.
+   * - `NOT_FOUND` (404): no `sys_permission_set` row has this id.
+   * - `INVALID_STATE` (409): the set has no active environment-wide overlay to
+   *   discard.
+   * `NOT_FOUND` and `INVALID_STATE` are listed for this emitter under
+   * `ERROR_CODE_LEDGER['@objectstack/plugin-security']`. Any other throw is an
+   * unexpected fault (a failed overlay delete is rethrown as it is).
+   *
+   * A refused re-projection write is NOT a refusal: the overlay is already gone,
+   * so the call resolves. See
+   * {@link PermissionSetOverlayDiscardResult.healedObjectGrantCount}.
+   *
+   * **OPTIONAL, and absence is a defined state, not a bug.** A security service
+   * without this action omits it. Callers feature-detect
+   * (`typeof svc.discardPermissionSetOverlay === 'function'`), and the REST route
+   * answers `501 NOT_IMPLEMENTED` when the method is absent. Declaring it
+   * optional makes that degradation a property of the type: the unguarded call
+   * does not compile.
+   */
+  discardPermissionSetOverlay?(
+    callerContext: SecurityContext,
+    id: string,
+  ): Promise<PermissionSetOverlayDiscardResult>;
+
+  /**
+   * Contribute alternate matches to the platform's row-level write ownership
+   * floor. The floor is the `created_by == current_user.id` update and delete
+   * policies `member_default` ships. A plugin that installs a tighter row gate
+   * for an object calls this, beside that gate, so the parent-blind floor stops
+   * pre-empting the gate on that object. Where the gate is not installed,
+   * nobody contributes, and the floor stays the last word.
+   *
+   * The contributor says WHAT is relieved: one object, one limb, which rows.
+   * The implementation decides WHERE. It places each alternate beside every
+   * ENABLED floor policy of the same limb, in that policy's own `positions`
+   * domain. So an alternate cannot reach a principal the floor does not bind,
+   * and where no floor policy of that limb is present, it adds nothing.
+   *
+   * Keyed by `plugin`, the contributing plugin's id: a second call REPLACES the
+   * same plugin's first, and an empty list withdraws it. Synchronous; meant to
+   * be called at boot.
+   *
+   * **Refuses by throwing a plain `Error`**, with no registered `code`: this is
+   * a boot-time refusal, never a wire answer. A refused call changes nothing,
+   * and the plugin's earlier contribution stays in force. It refuses when:
+   * - `plugin` is empty, or `alternates` is not an array;
+   * - an alternate names no object, or names `'*'` (that would withdraw the
+   *   floor on every object instead of relieving it on one);
+   * - its `operation` is not exactly one limb, `update` or `delete` (`all`
+   *   would relieve both limbs at once, and each limb is its own decision);
+   * - it carries no `using` predicate, or it does not parse as a
+   *   `RowLevelSecurityPolicySchema` (snake_case `name`, closed keys).
+   *
+   * **OPTIONAL, and absence is a defined state, not a bug.** A security service
+   * without the seam omits it. Contributors feature-detect
+   * (`typeof svc.contributeOwnershipFloorAlternates === 'function'`). Absence
+   * and a refusal both leave the floor in force, which fails CLOSED: the gate's
+   * wider rule stays unreachable, and nothing is widened. Declaring it optional
+   * makes that degradation a property of the type: the unguarded call does not
+   * compile.
+   */
+  contributeOwnershipFloorAlternates?(
+    plugin: string,
+    alternates: readonly OwnershipFloorAlternate[],
+  ): void;
 }

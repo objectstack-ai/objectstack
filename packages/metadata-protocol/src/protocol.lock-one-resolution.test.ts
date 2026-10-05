@@ -37,12 +37,29 @@
  * canonical layers give. Each such row asserts that difference, by name, and
  * flips the day the reads' fallback is retired.
  *
- * ## Not an axis here
+ * ## [#21761] The address is an input column: the package axis
  *
- * A request naming a package (`?package=`, ADR-0048 prefer-local) selects the
- * stored row by package on the reads while the gate asks package-agnostic.
- * That is the row SELECTION, not the resolution, and is recorded on the PR as
- * an acceptance note; this table names no package.
+ * The `overlay` layer is selected from the item's ADDRESS
+ * (`ITEM_ADDRESS_FIELDS`: type, name, organization, package) by one function,
+ * `resolveOverlayLockLayer`, which the reads and the door both call: the
+ * strictest lock among the item's stored rows in scope, whichever package each
+ * is bound to. So the table's overlay axes are the rows that exist (a
+ * package-less row, and a row bound to the request's package) and the address
+ * (organization present or absent, `packageId` present or absent), and every
+ * address field has an axis, checked by name. Every row runs under both
+ * orders the store can return the two stored rows in, so no answer depends on
+ * which row `findOne` returns first.
+ *
+ *  4. Arrangement 1, named: a package-less `'none'` row and the package's
+ *     `'full'` row. Both orders: the reads and the door agree on `'full'`.
+ *  5. Arrangement 2, named: the package's `'none'` row and a package-less
+ *     `'full'` row. Both orders: the reads and the door agree on `'full'`,
+ *     never `'none'` (an explicit `'none'` is not a grant over a stored lock).
+ *  6. The #5706 outage: when the rows in scope cannot be read, the door still
+ *     refuses with 503, with or without a package in the address.
+ *  7. A third package's row of the same name is in scope too: before #21761
+ *     the gate asked with no package and could bind it, so leaving it out
+ *     would admit writes the gate refused under some row order.
  *
  * `@objectstack/objectql` cannot be imported here: it depends on this package.
  */
@@ -50,7 +67,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MetadataLockSchema, evaluateLockForDelete, evaluateLockForWrite } from '@objectstack/spec/kernel';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { ITEM_LOCK_LAYERS, resolveItemLock, type ItemLockLayer } from './item-lock.js';
+import {
+    ITEM_ADDRESS_FIELDS,
+    ITEM_LOCK_LAYERS,
+    resolveItemLock,
+    resolveOverlayLockLayer,
+    type ItemAddressField,
+    type ItemLockLayer,
+} from './item-lock.js';
 
 const ENV_ID = 'env_1';
 const ORG = 'org_a';
@@ -78,7 +102,7 @@ const ARTIFACT_VALUES: readonly ArtifactAxis[] = [
     ...MetadataLockSchema.options.map((lock) => ({ artifact: 'declared' as const, lock })),
 ];
 
-/** The one stored row in the table: none, or env-wide / org-scoped, declaring each level, under either spelling. */
+/** The package-less stored row: none, or env-wide / org-scoped, declaring each level, under either spelling. */
 type StoredRowAxis =
     | { row: 'none' }
     | { row: 'stored'; scope: 'env-wide' | 'org-scoped'; lock: Lock; spelling: 'canonical' | 'other (residue)' };
@@ -88,10 +112,19 @@ const STORED_ROW_VALUES: readonly StoredRowAxis[] = [
         (['canonical', 'other (residue)'] as const).map((spelling) => ({ row: 'stored' as const, scope, lock, spelling })))),
 ];
 
+/** [#21761] The row bound to the package (ADR-0048): none, or an env-wide canonical row declaring each level. */
+type PackageRowAxis = { row: 'none' } | { row: 'stored'; lock: Lock };
+const PACKAGE_ROW_VALUES: readonly PackageRowAxis[] = [
+    { row: 'none' },
+    ...MetadataLockSchema.options.map((lock) => ({ row: 'stored' as const, lock })),
+];
+
 const AXIS_VALUES = {
     artifact: ARTIFACT_VALUES,
     storedRow: STORED_ROW_VALUES,
+    packageRow: PACKAGE_ROW_VALUES,
     requestScope: [undefined, ORG] as const,
+    requestPackage: [undefined, PACKAGE_ID] as const,
     topology: [{ kernel: 'environment', environmentId: ENV_ID }, { kernel: 'host-config', environmentId: undefined }] as const,
     requestSpelling: ['view', 'views'] as const,
     operation: ['save', 'delete'] as const,
@@ -106,25 +139,42 @@ type AxisName = keyof typeof AXIS_VALUES;
  */
 const LAYER_AXES: { readonly [L in ItemLockLayer]: readonly AxisName[] } = {
     artifact: ['artifact'],
-    overlay: ['storedRow', 'requestScope'],
+    overlay: ['storedRow', 'packageRow', 'requestScope', 'requestPackage'],
 };
 /** The caller's own axes: which kernel, how the request spells the type, which verb. */
 const CALLER_AXES: readonly AxisName[] = ['topology', 'requestSpelling', 'operation'];
 
+/**
+ * [#21761] Per field of the item's address (`ITEM_ADDRESS_FIELDS`), the axis
+ * that varies it, or `'one item'` for the name every row addresses. Keyed by
+ * `ItemAddressField`, so a field added to the address without an entry here
+ * fails the typecheck, and the completeness check below fails the run, naming
+ * it.
+ */
+const ADDRESS_AXES: { readonly [F in ItemAddressField]: AxisName | 'one item' } = {
+    type: 'requestSpelling',
+    name: 'one item',
+    organizationId: 'requestScope',
+    packageId: 'requestPackage',
+};
+
 interface Row {
     artifact: ArtifactAxis;
     storedRow: StoredRowAxis;
+    packageRow: PackageRowAxis;
     requestScope: string | undefined;
+    requestPackage: string | undefined;
     topology: (typeof AXIS_VALUES.topology)[number];
     requestSpelling: (typeof AXIS_VALUES.requestSpelling)[number];
     operation: (typeof AXIS_VALUES.operation)[number];
 }
 
 const TABLE: Row[] = AXIS_VALUES.artifact.flatMap((artifact) => AXIS_VALUES.storedRow.flatMap((storedRow) =>
-    AXIS_VALUES.requestScope.flatMap((requestScope) => AXIS_VALUES.topology.flatMap((topology) =>
-        AXIS_VALUES.requestSpelling.flatMap((requestSpelling) => AXIS_VALUES.operation.map((operation) => ({
-            artifact, storedRow, requestScope, topology, requestSpelling, operation,
-        })))))));
+    AXIS_VALUES.packageRow.flatMap((packageRow) => AXIS_VALUES.requestScope.flatMap((requestScope) =>
+        AXIS_VALUES.requestPackage.flatMap((requestPackage) => AXIS_VALUES.topology.flatMap((topology) =>
+            AXIS_VALUES.requestSpelling.flatMap((requestSpelling) => AXIS_VALUES.operation.map((operation) => ({
+                artifact, storedRow, packageRow, requestScope, requestPackage, topology, requestSpelling, operation,
+            })))))))));
 
 function describeArtifact(a: ArtifactAxis): string {
     return a.artifact === 'declared' ? `artifact _lock=${a.lock}` : `artifact ${a.artifact}`;
@@ -132,36 +182,67 @@ function describeArtifact(a: ArtifactAxis): string {
 function describeRow(r: StoredRowAxis): string {
     return r.row === 'none' ? 'no stored row' : `${r.scope} row _lock=${r.lock} (${r.spelling} spelling)`;
 }
+function describePackageRow(r: PackageRowAxis): string {
+    return r.row === 'none' ? '' : `env-wide package row _lock=${r.lock}`;
+}
 function titleOf(row: Row): string {
     return [
         `${row.topology.kernel} kernel`,
         describeArtifact(row.artifact),
         describeRow(row.storedRow),
-        `request: ${row.requestScope ? `organization ${row.requestScope}` : 'no organization'}`,
+        describePackageRow(row.packageRow),
+        `request: ${row.requestScope ? `organization ${row.requestScope}` : 'no organization'}`
+            + (row.requestPackage ? `, package ${row.requestPackage}` : ''),
         `/meta/${row.requestSpelling}`,
         row.operation,
-    ].join(' · ');
+    ].filter((part) => part !== '').join(' · ');
 }
 
 // ── The oracle: the declared rule, per layer, in the resolution's own order ──
 
-/** Is the stored row served for this request scope? (ADR-0005: org row to its organization, env-wide row to every request.) */
-function rowServed(row: Row): boolean {
-    if (row.storedRow.row === 'none') return false;
-    return row.storedRow.scope === 'env-wide' || row.requestScope === ORG;
+/** The stored rows of the row's arrangement, as the oracle reads them. */
+interface OracleRow { scope: 'env-wide' | 'org-scoped'; spelling: 'canonical' | 'other (residue)'; lock: Lock }
+function oracleRows(row: Row): OracleRow[] {
+    const rows: OracleRow[] = [];
+    if (row.storedRow.row === 'stored') {
+        rows.push({ scope: row.storedRow.scope, spelling: row.storedRow.spelling, lock: row.storedRow.lock });
+    }
+    if (row.packageRow.row === 'stored') rows.push({ scope: 'env-wide', spelling: 'canonical', lock: row.packageRow.lock });
+    return rows;
 }
 
 /**
- * The lock each layer declares for `side` — the reads, or the door. The door
- * differs on exactly one input: it does not see a row stored under the other
- * spelling.
+ * The strictest of `locks`, written from the rule: a write is refused when any
+ * of them refuses it, a delete likewise, and the lock is the state with exactly
+ * those two refusals.
+ */
+function strictestOf(locks: readonly Lock[]): Lock {
+    const refusesWrite = locks.some((l) => evaluateLockForWrite(l) !== null);
+    const refusesDelete = locks.some((l) => evaluateLockForDelete(l) !== null);
+    return MetadataLockSchema.options.find((state) =>
+        (evaluateLockForWrite(state) !== null) === refusesWrite
+        && (evaluateLockForDelete(state) !== null) === refusesDelete)!;
+}
+
+/**
+ * The lock each layer declares for `side` — the reads, or the door. The
+ * overlay layer is the strictest lock among the rows in scope (ADR-0005: the
+ * organization's rows when it holds any, else the env-wide rows; any package).
+ * The door differs on exactly one input: it does not see a row stored under
+ * the other spelling, which the reads see only when no canonical row is in
+ * that scope. The request's package selects nothing here.
  */
 const DECLARED: { readonly [L in ItemLockLayer]: (row: Row, side: 'reads' | 'door') => Lock } = {
     artifact: (row) => (row.artifact.artifact === 'declared' ? row.artifact.lock : 'none'),
     overlay: (row, side) => {
-        if (!rowServed(row) || row.storedRow.row === 'none') return 'none';
-        if (side === 'door' && row.storedRow.spelling !== 'canonical') return 'none';
-        return row.storedRow.lock;
+        const scopes: Array<OracleRow['scope']> = row.requestScope === ORG ? ['org-scoped', 'env-wide'] : ['env-wide'];
+        for (const scope of scopes) {
+            const inScope = oracleRows(row).filter((r) => r.scope === scope);
+            let visible = inScope.filter((r) => r.spelling === 'canonical');
+            if (visible.length === 0 && side === 'reads') visible = inScope;
+            if (visible.length > 0) return strictestOf(visible.map((r) => r.lock));
+        }
+        return 'none';
     },
 };
 
@@ -176,13 +257,15 @@ function expectedLock(row: Row, side: 'reads' | 'door'): Lock {
 
 // ── The harness ──────────────────────────────────────────────────────────────
 
-function storedRow(type: string, organizationId: string | null, lock: Lock, label: string, name = NAME): StoredRow {
+function storedRow(
+    type: string, organizationId: string | null, lock: Lock, label: string, name = NAME, packageId: string | null = null,
+): StoredRow {
     return {
-        id: `r_${type}_${organizationId ?? 'env'}`,
+        id: `r_${type}_${organizationId ?? 'env'}_${packageId ?? 'pkgless'}`,
         type,
         name,
         organization_id: organizationId,
-        package_id: null,
+        package_id: packageId,
         state: 'active',
         metadata: JSON.stringify({
             name,
@@ -262,16 +345,24 @@ function harness(environmentId: string | undefined, rows: StoredRow[], artifact?
     return new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId);
 }
 
-function harnessFor(row: Row) {
-    const rows = row.storedRow.row === 'none'
-        ? []
-        : [storedRow(
+/**
+ * [#21761] The row's stored rows, in each order the store can return them: one
+ * order when there is at most one row, both when there are two.
+ */
+function rowOrdersFor(row: Row): StoredRow[][] {
+    const rows: StoredRow[] = [];
+    if (row.storedRow.row === 'stored') {
+        rows.push(storedRow(
             row.storedRow.spelling === 'canonical' ? 'view' : 'views',
             row.storedRow.scope === 'env-wide' ? null : ORG,
             row.storedRow.lock,
             `${row.storedRow.scope} row`,
-        )];
-    return harness(row.topology.environmentId, rows, packagedView(row.artifact));
+        ));
+    }
+    if (row.packageRow.row === 'stored') {
+        rows.push(storedRow('view', null, row.packageRow.lock, 'package row', NAME, PACKAGE_ID));
+    }
+    return rows.length < 2 ? [rows] : [rows, [...rows].reverse()];
 }
 
 const settle = (run: Promise<unknown>) => run.then(() => null, (e: unknown) => e);
@@ -286,13 +377,17 @@ const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
  */
 async function door(
     protocol: ObjectStackProtocolImplementation, type: string, operation: 'save' | 'delete', organizationId?: string,
-    name = NAME,
+    name = NAME, packageId?: string,
 ): Promise<Verdict> {
     const gate = vi.spyOn(protocol as any, operation === 'save' ? 'assertLockAllowsWrite' : 'assertLockAllowsDelete');
     try {
         const scope = organizationId ? { organizationId } : {};
+        // [#21761] A save carries the request's package (`?package=`); a delete
+        // has none to carry (`DeleteMetaItemRequest` declares no package).
         const outcome: any = await settle(operation === 'save'
-            ? protocol.saveMetaItem({ type, name, item: { name, label: name, object: 'account' }, ...scope })
+            ? protocol.saveMetaItem({
+                type, name, item: { name, label: name, object: 'account' }, ...scope, ...(packageId ? { packageId } : {}),
+            })
             : protocol.deleteMetaItem({ type, name, ...scope }));
         if (outcome instanceof Error && (outcome as any).code === 'ITEM_LOCKED') {
             return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
@@ -306,8 +401,10 @@ async function door(
 }
 
 /** Both reads' envelopes for one request; they must agree with each other first. */
-async function envelope(protocol: ObjectStackProtocolImplementation, type: string, organizationId?: string, name = NAME) {
-    const scope = organizationId ? { organizationId } : {};
+async function envelope(
+    protocol: ObjectStackProtocolImplementation, type: string, organizationId?: string, name = NAME, packageId?: string,
+) {
+    const scope = { ...(organizationId ? { organizationId } : {}), ...(packageId ? { packageId } : {}) };
     const byName: any = await protocol.getMetaItem({ type, name, ...scope });
     const layered: any = await protocol.getMetaItemLayered({ type, name, ...scope });
     const pick = (r: any) => ({ lock: r.lock, editable: r.editable, deletable: r.deletable });
@@ -343,6 +440,23 @@ describe('[#21738] pin 1 — generated from the resolution\'s inputs: getMetaIte
         expect(new Set(TABLE.map(titleOf)).size, 'row titles are unique').toBe(TABLE.length);
         // Every lock level is an axis value on both layers (read off the schema itself).
         expect(MetadataLockSchema.options).toEqual(['none', 'no-overlay', 'no-delete', 'full']);
+        // [#21761] Every field of the item's ADDRESS has an axis, by name, and
+        // each such axis is an input of the overlay layer (or the caller's
+        // spelling). The selection takes the address, a row reader and its
+        // spelling option, and nothing else.
+        const unaddressed = ITEM_ADDRESS_FIELDS.filter((field) => !Object.prototype.hasOwnProperty.call(ADDRESS_AXES, field));
+        expect(unaddressed, 'address fields with no axis in this table').toEqual([]);
+        const staleAddress = Object.keys(ADDRESS_AXES).filter((field) => !(ITEM_ADDRESS_FIELDS as readonly string[]).includes(field));
+        expect(staleAddress, 'axes for an address field the selection no longer takes').toEqual([]);
+        for (const field of ITEM_ADDRESS_FIELDS) {
+            const axis = ADDRESS_AXES[field];
+            if (axis === 'one item') continue;
+            expect([...LAYER_AXES.overlay, ...CALLER_AXES], `address field ${field}'s axis ${axis}`).toContain(axis);
+        }
+        expect(resolveOverlayLockLayer.length, 'resolveOverlayLockLayer takes (address, rowsIn, options)').toBe(3);
+        expect(AXIS_VALUES.requestPackage, 'packageId present and absent').toEqual([undefined, PACKAGE_ID]);
+        expect(PACKAGE_ROW_VALUES.filter((v) => v.row === 'stored').map((v) => (v as { lock: Lock }).lock))
+            .toEqual(MetadataLockSchema.options);
     });
 
     it('PR #21737\'s 64-row enumeration (topology × row scope × request scope × lock × operation) is a subset of this table', () => {
@@ -354,7 +468,10 @@ describe('[#21738] pin 1 — generated from the resolution\'s inputs: getMetaIte
                     folded.push(titleOf({
                         artifact: { artifact: 'absent' },
                         storedRow: { row: 'stored', scope, lock, spelling: 'canonical' },
-                        requestScope, topology, requestSpelling: 'view', operation,
+                        packageRow: { row: 'none' },
+                        requestScope,
+                        requestPackage: undefined,
+                        topology, requestSpelling: 'view', operation,
                     }));
                 }
         expect(folded).toHaveLength(64);
@@ -364,28 +481,35 @@ describe('[#21738] pin 1 — generated from the resolution\'s inputs: getMetaIte
     for (const row of TABLE) {
         const title = titleOf(row);
         it(title, async () => {
-            const protocol = harnessFor(row);
-            const read = await envelope(protocol, row.requestSpelling, row.requestScope);
-            // Both reads report the declared rule's lock.
-            expect({ lock: read.lock, editable: read.editable, deletable: read.deletable }, `${title}: the reads`)
-                .toEqual(flagsOf(expectedLock(row, 'reads')));
-            // The door binds the rule's lock over the layers IT sees.
-            const verdict = await door(protocol, row.requestSpelling, row.operation, row.requestScope);
-            const doorAllows = row.operation === 'save'
-                ? evaluateLockForWrite(expectedLock(row, 'door')) === null
-                : evaluateLockForDelete(expectedLock(row, 'door')) === null;
-            expect(verdict, `${title}: the door`).toEqual(doorAllows ? 'admitted' : ITEM_LOCKED);
-            // …and the two agree: the door admits exactly when the envelope says
-            // it may. Except on the one declared difference
-            // (`findServedOverlayRow`'s `otherSpelling`): a row stored under the
-            // other spelling is served by the reads and not seen by the door,
-            // which the two oracle assertions above already state row by row —
-            // so those rows flip, by name, the day the reads' fallback retires.
-            const residue = row.storedRow.row === 'stored' && row.storedRow.spelling !== 'canonical';
-            if (!residue) {
-                const readAllows = row.operation === 'save' ? read.editable : read.deletable;
-                expect(verdict, `${title}: the door and the read envelope (lock ${read.lock}) disagree`)
-                    .toEqual(readAllows ? 'admitted' : ITEM_LOCKED);
+            // [#21761] Under every order the store can return the rows in.
+            for (const [order, rows] of rowOrdersFor(row).entries()) {
+                const at = `${title} (row order ${order + 1})`;
+                const protocol = harness(row.topology.environmentId, rows, packagedView(row.artifact));
+                const read = await envelope(protocol, row.requestSpelling, row.requestScope, NAME, row.requestPackage);
+                // Both reads report the declared rule's lock.
+                expect({ lock: read.lock, editable: read.editable, deletable: read.deletable }, `${at}: the reads`)
+                    .toEqual(flagsOf(expectedLock(row, 'reads')));
+                // The door binds the rule's lock over the layers IT sees.
+                const verdict = await door(
+                    protocol, row.requestSpelling, row.operation, row.requestScope, NAME, row.requestPackage,
+                );
+                const doorAllows = row.operation === 'save'
+                    ? evaluateLockForWrite(expectedLock(row, 'door')) === null
+                    : evaluateLockForDelete(expectedLock(row, 'door')) === null;
+                expect(verdict, `${at}: the door`).toEqual(doorAllows ? 'admitted' : ITEM_LOCKED);
+                // …and the two agree: the door admits exactly when the envelope
+                // says it may. Except on the one declared difference
+                // (`overlayLockLayerAt`'s `otherSpelling`): a row stored under
+                // the other spelling is in the reads' scope and not the door's,
+                // which the two oracle assertions above already state row by
+                // row — so those rows flip, by name, the day the reads'
+                // fallback retires.
+                const residue = expectedLock(row, 'reads') !== expectedLock(row, 'door');
+                if (!residue) {
+                    const readAllows = row.operation === 'save' ? read.editable : read.deletable;
+                    expect(verdict, `${at}: the door and the read envelope (lock ${read.lock}) disagree`)
+                        .toEqual(readAllows ? 'admitted' : ITEM_LOCKED);
+                }
             }
         });
     }
@@ -401,6 +525,26 @@ describe('[#21738] pin 1 — generated from the resolution\'s inputs: getMetaIte
         expect(locks.some((l) => l.row.artifact.artifact === 'declared' && l.row.artifact.lock === 'none' && l.reads === 'full')).toBe(true);
         expect(locks.some((l) => l.row.artifact.artifact === 'no _lock' && l.reads === 'full')).toBe(true);
         expect(locks.filter((l) => l.reads !== l.door).length).toBeGreaterThan(0);
+        // The residue difference is the ONLY one: a row whose reads and door
+        // differ always holds a row stored under the other spelling.
+        expect(locks.filter((l) => l.reads !== l.door
+            && !(l.row.storedRow.row === 'stored' && l.row.storedRow.spelling !== 'canonical'))).toEqual([]);
+        // [#21761] The package axis reaches both directions: the package row
+        // binds over a looser package-less row (arrangement 1's shape), and a
+        // package-less row binds over the package row's explicit 'none'
+        // (arrangement 2's), with the package named and not.
+        for (const requestPackage of AXIS_VALUES.requestPackage) {
+            expect(locks.some((l) => l.row.requestPackage === requestPackage && l.row.artifact.artifact === 'absent'
+                && l.row.storedRow.row === 'stored' && l.row.storedRow.lock === 'none'
+                && l.row.packageRow.row === 'stored' && l.row.packageRow.lock === 'full' && l.door === 'full')).toBe(true);
+            expect(locks.some((l) => l.row.requestPackage === requestPackage && l.row.artifact.artifact === 'absent'
+                && l.row.storedRow.row === 'stored' && l.row.storedRow.lock === 'full'
+                && l.row.packageRow.row === 'stored' && l.row.packageRow.lock === 'none' && l.door === 'full')).toBe(true);
+        }
+        // Two rows refusing different verbs join to 'full'.
+        expect(locks.some((l) => l.row.storedRow.row === 'stored' && l.row.storedRow.lock === 'no-overlay'
+            && l.row.packageRow.row === 'stored' && l.row.packageRow.lock === 'no-delete'
+            && l.row.artifact.artifact === 'absent' && l.door === 'full')).toBe(true);
     });
 
     it('lit control: an org-scoped request is served the env-wide row and reads its lock; an org-scoped row is never served to a request naming none', async () => {
@@ -477,4 +621,175 @@ describe('[#21738] pin 3 — position 2: getMetaItemLayered reads a stored lock 
             expect(await door(protocol, 'view', 'delete', undefined, 'v_pos2')).toEqual(ITEM_LOCKED);
         });
     }
+});
+
+// ── 4–7. [#21761] The package axis, named ───────────────────────────────────
+
+/** The two stored rows of an arrangement, package-less first, in both orders. */
+function bothOrders(pkgless: Lock, ofPackage: Lock, name: string): Array<{ order: string; rows: StoredRow[] }> {
+    const rows = [
+        storedRow('view', null, pkgless, 'package-less row', name),
+        storedRow('view', null, ofPackage, 'package row', name, PACKAGE_ID),
+    ];
+    return [
+        { order: 'package-less row returned first', rows },
+        { order: 'package row returned first', rows: [...rows].reverse() },
+    ];
+}
+
+/** The reads and the door for `request`, on one protocol instance. */
+async function readsAndDoor(protocol: ObjectStackProtocolImplementation, name: string, packageId: string | undefined) {
+    const read = await envelope(protocol, 'view', undefined, name, packageId);
+    return {
+        reads: { lock: read.lock, editable: read.editable, deletable: read.deletable },
+        servedLabel: read.byName.item?.label,
+        bodyLock: read.byName.item?._lock,
+        effectiveLock: read.layered.effective?._lock,
+        save: await door(protocol, 'view', 'save', undefined, name, packageId),
+        delete: await door(protocol, 'view', 'delete', undefined, name, packageId),
+    };
+}
+
+describe('[#21761] pin 4 — arrangement 1: a package-less \'none\' row and the package\'s \'full\' row', () => {
+    for (const { order, rows } of bothOrders('none', 'full', 'v_arr1')) {
+        for (const packageId of [PACKAGE_ID, undefined]) {
+            it(`${order} · request ${packageId ? `naming package ${packageId}` : 'naming no package'}: the reads and the door agree on 'full'`, async () => {
+                const protocol = harness(ENV_ID, rows);
+                const got = await readsAndDoor(protocol, 'v_arr1', packageId);
+                expect(got.reads).toEqual({ lock: 'full', editable: false, deletable: false });
+                expect(got.save).toEqual(ITEM_LOCKED);
+                expect(got.delete).toEqual(ITEM_LOCKED);
+                // The served body states the lock the envelope reports, and
+                // the layered read's `effective` (what getMetaItem returns) too.
+                expect(got.bodyLock).toBe('full');
+                expect(got.effectiveLock).toBe('full');
+                // Content stays prefer-local (ADR-0048): a request naming the
+                // package is served the package's own row.
+                if (packageId) expect(got.servedLabel).toBe('package row');
+            });
+        }
+    }
+});
+
+describe('[#21761] pin 5 — arrangement 2: the package\'s \'none\' row and a package-less \'full\' row', () => {
+    for (const { order, rows } of bothOrders('full', 'none', 'v_arr2')) {
+        for (const packageId of [PACKAGE_ID, undefined]) {
+            it(`${order} · request ${packageId ? `naming package ${packageId}` : 'naming no package'}: the reads and the door agree on 'full', never 'none'`, async () => {
+                const protocol = harness(ENV_ID, rows);
+                const got = await readsAndDoor(protocol, 'v_arr2', packageId);
+                // The package row's explicit 'none' is not a grant over the
+                // package-less row's lock: the strictest in scope binds.
+                expect(got.reads.lock).not.toBe('none');
+                expect(got.reads).toEqual({ lock: 'full', editable: false, deletable: false });
+                expect(got.save).toEqual(ITEM_LOCKED);
+                expect(got.delete).toEqual(ITEM_LOCKED);
+                expect(got.bodyLock).toBe('full');
+                expect(got.effectiveLock).toBe('full');
+                // The served CONTENT is still the package's own row, and its
+                // envelope reports the binding row's prose.
+                if (packageId) expect(got.servedLabel).toBe('package row');
+                const read: any = await protocol.getMetaItem({ type: 'view', name: 'v_arr2', ...(packageId ? { packageId } : {}) });
+                expect(read.lockReason).toBe('Stored lock (full).');
+            });
+        }
+    }
+
+    it('the refusal names the binding lock and is audited, with the package named', async () => {
+        const protocol = harness(ENV_ID, bothOrders('full', 'none', 'v_arr2')[1]!.rows);
+        const err: any = await settle(protocol.saveMetaItem({
+            type: 'view', name: 'v_arr2', item: { name: 'v_arr2', label: 'x', object: 'account' }, packageId: PACKAGE_ID,
+        }));
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status, lock: err.lock }).toEqual({ code: 'ITEM_LOCKED', status: 403, lock: 'full' });
+        expect(err.lockReason).toBe('Stored lock (full).');
+    });
+});
+
+describe('[#21761] pin 6 — the #5706 outage: a failing row read in scope still refuses', () => {
+    /** The rows of arrangement 2, behind a store whose `sys_metadata` reads all fail. */
+    function failingHarness() {
+        const protocol = harness(ENV_ID, bothOrders('full', 'none', 'v_out')[0]!.rows);
+        const engine = (protocol as any).engine;
+        const outage = () => Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { code: 'ECONNREFUSED' });
+        engine.find = async (table: string) => {
+            if (table === 'sys_metadata') throw outage();
+            return [];
+        };
+        engine.findOne = async (table: string) => {
+            if (table === 'sys_metadata') throw outage();
+            return null;
+        };
+        return protocol;
+    }
+
+    for (const packageId of [PACKAGE_ID, undefined]) {
+        it(`save ${packageId ? 'naming the package' : 'naming no package'} and delete answer 503, never an admission from 'none'`, async () => {
+            const protocol = failingHarness();
+            const gateLock = vi.spyOn(protocol as any, 'getEffectiveLock');
+            for (const operation of ['save', 'delete'] as const) {
+                const err: any = await settle(operation === 'save'
+                    ? protocol.saveMetaItem({
+                        type: 'view', name: 'v_out', item: { name: 'v_out', label: 'x', object: 'account' },
+                        ...(packageId ? { packageId } : {}),
+                    })
+                    : protocol.deleteMetaItem({ type: 'view', name: 'v_out' }));
+                expect(err, operation).toBeInstanceOf(Error);
+                expect({ code: err.code, status: err.status }, operation).toEqual({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+            }
+            // It was the gate's own read that refused, not a later layer.
+            expect(gateLock).toHaveBeenCalledTimes(2);
+            for (const result of gateLock.mock.results) {
+                await expect(result.value).rejects.toMatchObject({ status: 503 });
+            }
+        });
+    }
+});
+
+describe('[#21761] pin 7 — a third package\'s row is in scope: no write the gate refused before is admitted', () => {
+    const OTHER = 'com.example.other';
+    const rows = () => [
+        storedRow('view', null, 'none', 'package row', 'v_third', PACKAGE_ID),
+        storedRow('view', null, 'full', 'other package row', 'v_third', OTHER),
+    ];
+
+    for (const reversed of [false, true]) {
+        it(`${reversed ? 'the other package\'s row returned first' : 'the package\'s row returned first'}: a save naming the package is refused, and the reads say so`, async () => {
+            const protocol = harness(ENV_ID, reversed ? rows().reverse() : rows());
+            const got = await readsAndDoor(protocol, 'v_third', PACKAGE_ID);
+            // Before #21761 the gate asked with no package, so under the second
+            // order it bound the other package's 'full' and refused, while the
+            // reads said 'none'. Leaving that row out of scope would admit it.
+            expect(got.reads).toEqual({ lock: 'full', editable: false, deletable: false });
+            expect(got.save).toEqual(ITEM_LOCKED);
+            expect(got.delete).toEqual(ITEM_LOCKED);
+            expect(got.servedLabel).toBe('package row');
+        });
+    }
+
+    it('an organization holding only another package\'s row: its rows are the scope, for the reads and the door alike', async () => {
+        const protocol = harness(ENV_ID, [
+            storedRow('view', ORG, 'full', 'org row of the other package', 'v_org', OTHER),
+            storedRow('view', null, 'none', 'env-wide package row', 'v_org', PACKAGE_ID),
+        ]);
+        const read = await envelope(protocol, 'view', ORG, 'v_org', PACKAGE_ID);
+        expect({ lock: read.lock, editable: read.editable, deletable: read.deletable })
+            .toEqual({ lock: 'full', editable: false, deletable: false });
+        // Content stays prefer-local: the organization holds no row of the
+        // package or package-less, so the env-wide package row is served.
+        expect(read.byName.item?.label).toBe('env-wide package row');
+        expect(await door(protocol, 'view', 'save', ORG, 'v_org', PACKAGE_ID)).toEqual(ITEM_LOCKED);
+        expect(await door(protocol, 'view', 'delete', ORG, 'v_org')).toEqual(ITEM_LOCKED);
+    });
+
+    it('the list item and the directory tile report the same lock as the item\'s envelope', async () => {
+        const protocol = harness(ENV_ID, bothOrders('full', 'none', 'v_list')[1]!.rows);
+        for (const packageId of [PACKAGE_ID, undefined]) {
+            const listed: any = await protocol.getMetaItems({ type: 'view', ...(packageId ? { packageId } : {}) });
+            const items = listed.items.filter((i: any) => i.name === 'v_list');
+            expect(items.length, `list ${packageId ?? 'unscoped'}`).toBeGreaterThan(0);
+            for (const item of items) expect(item._lock, `list ${packageId ?? 'unscoped'}`).toBe('full');
+            const diag: any = await protocol.getMetaDiagnostics({ type: 'view', severity: 'warning', ...(packageId ? { packageId } : {}) } as any);
+            expect(diag.stats.view.locked, `tile ${packageId ?? 'unscoped'}`).toBe(diag.stats.view.count);
+        }
+    });
 });

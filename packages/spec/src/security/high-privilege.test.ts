@@ -27,7 +27,7 @@ const PLATFORM_TOKEN = 'manage_users';
  */
 const DOTTED_PLATFORM_TOKEN = 'setup.access';
 
-describe('describeHighPrivilegeBits — app-declared capability vs platform system permission (#17189)', () => {
+describe('describeHighPrivilegeBits — an app-declared capability is not a platform system permission', () => {
   it('pins the platform names this suite reasons about (else the floor tests nothing)', () => {
     expect(PLATFORM_CAPABILITY_NAMES.has(PLATFORM_TOKEN)).toBe(true);
     expect(PLATFORM_CAPABILITY_NAMES.has(DOTTED_PLATFORM_TOKEN)).toBe(true);
@@ -105,7 +105,7 @@ describe('describeHighPrivilegeBits — app-declared capability vs platform syst
     ).toMatch(/system permissions/);
   });
 
-  it('[#21260] puts the ledger audit capability on the floor with no list of its own: an app cannot launder it onto an anchor', () => {
+  it('puts the ledger audit capability on the floor with no list of its own: an app cannot launder it onto an anchor', () => {
     // It unlocks the ledger rows the parent-record read gate otherwise
     // withholds, so it must never reach `everyone` / `guest` wholesale. The
     // floor is `PLATFORM_CAPABILITY_NAMES` itself, so declaring it there is the

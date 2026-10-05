@@ -150,7 +150,7 @@ function typescriptBlocks(markdown: string): string[] {
  */
 const ELISION = /\.\.\.\s*[,}\]]/;
 
-describe('[#5515] SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
+describe('SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
   const markdown = readFileSync(SYNC_ARCHITECTURE, 'utf8');
   const allBlocks = typescriptBlocks(markdown);
   const connectorBlocks = allBlocks.filter((b) => b.includes('Connector'));
@@ -214,7 +214,7 @@ describe('[#5515] SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
   });
 });
 
-describe('[#5515] the spellings the example used to carry are rejected', () => {
+describe('the spellings the example used to carry are rejected', () => {
   // Reverse verification, direction stated BEFORE running: each probe below
   // restores one retired key into an otherwise-valid literal, and each must go
   // RED with a named diagnostic. Not "some diagnostic" — a bare non-empty check
@@ -290,7 +290,7 @@ describe('[#5515] the spellings the example used to carry are rejected', () => {
   });
 });
 
-describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', () => {
+describe('the schema rejects them at RUNTIME too, and how it says so', () => {
   // The compile probes above guard the TYPE surface. These guard the PARSE
   // surface, and they are not redundant with it: what an author is told when
   // they get it wrong is the difference between a fixable mistake and a
@@ -337,7 +337,7 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
   });
 });
 
-describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is the parse result', () => {
+describe('the bare `Connector` is the author shape; `ConnectorParsed` is the parse result', () => {
   // The fourth diagnostic, pinned as an ANNOTATION fact rather than fixed by
   // renaming this file's aliases. Direction stated before running: the SAME
   // literal is green under the bare `Connector` and red under `ConnectorParsed`,

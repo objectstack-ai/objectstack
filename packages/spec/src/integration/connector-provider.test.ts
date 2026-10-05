@@ -88,7 +88,7 @@ describe('ADR-0097 connector schema evolution', () => {
             ).not.toThrow();
         });
 
-        it('rejects inline `authentication` secrets on a catalog descriptor (#7990)', () => {
+        it('rejects inline `authentication` secrets on a catalog descriptor', () => {
             const result = DeclarativeConnectorEntrySchema.safeParse({
                 name: 'legacy',
                 label: 'Legacy',

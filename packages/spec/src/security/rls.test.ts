@@ -167,7 +167,7 @@ describe('Row-Level Security (RLS) Protocol', () => {
       expect(result.positions).toEqual(['sales_rep', 'sales_manager']);
     });
 
-    it('refuses the retired `tags` at its path, with the prescription (#20321)', () => {
+    it('refuses the retired `tags` at its path, with the prescription', () => {
       // This case used to pin `tags` round-tripping; that branch is retired
       // (ADR-0049 enforce-or-remove — nothing ever read a policy's tags). The
       // full pin set, door by door, is `rls-tags-retirement.test.ts`.
@@ -519,7 +519,7 @@ describe('Row-Level Security (RLS) Protocol', () => {
 // #4001 step 2 — the authorable RLS policy is `.strict()`: an undeclared key
 // used to be dropped by zod's default `.strip`, so a row-level restriction the
 // author wrote was never compiled into the filter and nothing failed.
-describe('unknown keys are rejected, not stripped (#4001)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const policy = {
     name: 'p', object: 'account', operation: 'select' as const,
     using: 'owner_id == current_user.id',
@@ -701,7 +701,7 @@ describe('RowLevelSecurityPolicySchema — a check on a policy that writes no ro
 // so the non-empty check is what makes this pin fail on an emptied string
 // rather than only on changed wording.
 // ---------------------------------------------------------------------------
-describe('RowLevelSecurityPolicySchema.using — the published description (#6762)', () => {
+describe('RowLevelSecurityPolicySchema.using — the published description advertises what the compiler lowers', () => {
   const description = RowLevelSecurityPolicySchema.shape.using.description ?? '';
 
   it('is present and non-empty, so the generated reference row is not blank', () => {

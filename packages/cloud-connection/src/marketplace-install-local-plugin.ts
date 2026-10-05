@@ -34,6 +34,10 @@
  *            no JSON door carries. The package's job bodies are scheduled on
  *            install and on every rehydrate; on a rehydrate, a hook with no
  *            `body` that an older build installed is warned and NOT bound.
+ *            A manifest whose `engines.protocol` excludes this runtime's major
+ *            answers `OS_PROTOCOL_INCOMPATIBLE` (422) with the handshake's
+ *            diagnostic in `error.details`, the answer `POST /api/v1/packages`
+ *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -57,7 +61,9 @@
  *
  * On `kernel:ready`, the plugin scans the directory and re-registers each
  * cached manifest so installs survive process restarts without further
- * cloud round-trips.
+ * cloud round-trips. An entry whose `engines.protocol` excludes this runtime's
+ * major is not loaded: it is reported at `error`, naming the replay command,
+ * and the boot continues (ADR-0087 D1, #21762).
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -85,6 +91,17 @@ import {
 } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
+// answer both package-install doors give its refusal. Imported from the
+// producer, never restated: `POST /api/v1/packages` answers through the same
+// helper, so the two doors cannot drift apart on the wire.
+import {
+    assertProtocolCompat,
+    checkProtocolCompat,
+    isProtocolIncompatibleError,
+    protocolIncompatibleAnswer,
+    type ProtocolIncompatibleDiagnostic,
+} from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -313,6 +330,47 @@ function organizationWallActive(ctx: PluginContext): boolean {
     return postureEnforcesWall(resolveTenancyPosture());
 }
 
+/**
+ * [ADR-0123 D2 / D4] The answer every sample-data door gives a walled session
+ * with NO active organization: the standard catalog's `PERMISSION_DENIED` / 403,
+ * and one sentence, built here, that names the missing active organization and
+ * the remedy.
+ *
+ * ADR-0123 D1 declares "authenticated, with no active organization" a legal,
+ * named state that every subsystem inherits instead of inventing a fourth
+ * semantics for it. Sample rows on a walled deployment are tenant-scoped writes,
+ * so D2 refuses them loudly, with the catalog code rather than a registered
+ * synonym, and D4 requires the message to say what is missing, so the reader
+ * does not go looking at permissions, which are fine.
+ *
+ * Three doors read it: the install's `seeded` report (`mode: 'refused'`, the
+ * sentence in `reason`: the package itself is installed, its rows are not),
+ * and the reseed and purge refusals (the code, the status and the sentence as
+ * the error envelope). The platform's other D2 sentences, the security layer's
+ * write wall and the sharing-rule service's, are built inline for one object
+ * and one operation; this door's subject is a package's sample data across
+ * several objects, so the sentence is this file's own, in the same words.
+ */
+const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
+const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/** The sample-data doors that seed or purge under the caller's active organization. */
+type SampleDataDoor = 'install' | 'reseed' | 'purge';
+
+function noActiveOrganizationRefusal(door: SampleDataDoor): string {
+    const subject = door === 'purge' ? 'Purging sample data'
+        : door === 'reseed' ? 'Reseeding sample data'
+        : 'Seeding the sample data';
+    const consequence = door === 'purge'
+        ? 'there is no organization to remove its rows from'
+        : 'there is no organization to place its rows in';
+    const remedy = door === 'install'
+        ? 'The package itself is installed. Join or select an active organization, then reseed the sample data.'
+        : 'Join or select an active organization and retry.';
+    return `${subject} was refused: sample data is scoped to an organization, and this session has no active `
+        + `organization, so ${consequence}. ${remedy}`;
+}
+
 export interface MarketplaceInstallLocalPluginConfig {
     /** Cloud control-plane base URL. When unset, falls back to OS_CLOUD_URL
      *  and then to the public ObjectStack cloud so a fresh `objectstack dev`
@@ -444,6 +502,23 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         for (const entry of entries) {
             try {
+                // [#21762] ADR-0087 D1: the handshake runs "before loading a
+                // package's metadata", and a rehydrate IS a load. An entry whose
+                // declared range excludes this runtime's major (installed before
+                // the install door checked, or by a runtime of another protocol
+                // sharing this ledger) is NOT loaded: nothing is registered,
+                // synced, bound or seeded for it, and the boot continues with the
+                // rest. Its ledger entry is kept, so DELETE can still remove it
+                // and a compatible version can replace it.
+                //
+                // `checkProtocolCompat` is the handshake's own judge. Only a
+                // positive incompatibility is acted on: an absent or
+                // unrecognised range rehydrates exactly as it did before.
+                const compat = checkProtocolCompat(entry.manifest);
+                if (compat.status === 'incompatible') {
+                    this.reportProtocolIncompatibleEntry(ctx, entry, compat.diagnostic);
+                    continue;
+                }
                 // Awaited: register also bridges the manifest's objects into
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
@@ -970,7 +1045,38 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
-        // 1c. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
+        // 1c. [#21762] ⭐ ADR-0087 D1'S PROTOCOL HANDSHAKE, before anything is
+        //     registered, written or synced: the same `assertProtocolCompat`
+        //     the other package-install door (`POST /api/v1/packages`) and the
+        //     protocol install primitive run. Before this, a manifest whose
+        //     `engines.protocol` excludes this runtime's major answered 200 here:
+        //     registered, its ledger entry written, its schemas synced, while
+        //     the other door refused the same manifest with a 422.
+        //
+        //     The refusal is that door's answer, from the one shared helper:
+        //     422 `OS_PROTOCOL_INCOMPATIBLE`, the error's own message, and the
+        //     diagnostic's five fields in `error.details`. It is 422 on BOTH
+        //     branches: a package built for another protocol is a body this
+        //     runtime cannot load, not an upstream fault, whichever branch
+        //     supplied it (the unrunnable-code refusal below reasons the same).
+        //
+        //     After the id gate, so the diagnostic names a parsed id. Ahead of
+        //     the unrunnable-code judgement, which reads the package's jobs and
+        //     hooks with THIS runtime's binder: ADR-0087 D1 checks "before
+        //     loading a package's metadata". An absent or unrecognised range is
+        //     admitted with a warning, as at every seam the handshake guards.
+        try {
+            assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+        } catch (err) {
+            if (!isProtocolIncompatibleError(err)) throw err;
+            const refusal = protocolIncompatibleAnswer(err);
+            return c.json({
+                success: false,
+                error: { code: refusal.code, message: refusal.message, details: refusal.details },
+            }, refusal.status);
+        }
+
+        // 1d. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
         //     A job runs on a JSON door only through its sandboxed `body`; its
         //     deprecated `handler` names a `defineStack({ functions })` entry,
         //     which is code and travels only in the artifact's runtime module —
@@ -1607,7 +1713,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   • The user wants a clean baseline back after editing demo rows
      *
      * Multi-tenant: requires an active organization on the session (same
-     * rule as install seed path).
+     * rule as install seed path). A walled session with none is refused with
+     * ADR-0123 D2 / D4's answer ({@link noActiveOrganizationRefusal}); the
+     * reseed's other declines (no seed datasets, no data engine or metadata
+     * service, a seed run that threw) stay `400 RESEED_SKIPPED`.
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
@@ -1627,7 +1736,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'reseed sample data');
         }
 
-        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c });
+        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c, door: 'reseed' });
+        // [ADR-0123 D2 / D4] A walled session with no active organization: the
+        // reseed is a tenant-scoped write with no organization to write under.
+        if (summary.seeded.mode === 'refused') {
+            return c.json({
+                success: false,
+                error: { code: NO_ACTIVE_ORGANIZATION_CODE, message: summary.seeded.reason },
+            }, NO_ACTIVE_ORGANIZATION_STATUS);
+        }
         if (summary.seeded.mode === 'skipped') {
             return c.json({
                 success: false,
@@ -1697,7 +1814,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   • Scope is the install's: under an organization wall, the caller's
      *     active organization (the same `organizationWallActive` +
      *     `resolveActiveOrgId` the install and reseed seed under), and a session
-     *     with none is answered the way reseed answers it. Without a wall the
+     *     with none is refused the way reseed refuses it: ADR-0123 D2 / D4's
+     *     `403 PERMISSION_DENIED` naming the missing active organization
+     *     ({@link noActiveOrganizationRefusal}). Without a wall the
      *     deployment is one logical tenant and the match is table-wide, as the
      *     loader's upsert match is.
      *   • Children are deleted before parents — the reverse of the loader's own
@@ -1759,12 +1878,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (!resolved) {
                 return c.json({
                     success: false,
-                    error: {
-                        code: 'RESEED_SKIPPED',
-                        message: 'Purge did not run: multi-tenant-no-active-org. A purge removes the sample rows of the '
-                            + "caller's active organization only, and this session has none — set an active organization and retry.",
-                    },
-                }, 400);
+                    error: { code: NO_ACTIVE_ORGANIZATION_CODE, message: noActiveOrganizationRefusal('purge') },
+                }, NO_ACTIVE_ORGANIZATION_STATUS);
             }
             organizationId = resolved;
         }
@@ -1990,7 +2105,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *        • single-tenant: run SeedLoaderService inline (mirrors
      *          AppPlugin single-tenant branch)
      *        • multi-tenant: invoke `seed-replayer` for the caller's
-     *          active org (resolved from the request session)
+     *          active org (resolved from the request session); a session
+     *          with none reports `mode: 'refused'`, ADR-0123 D2 / D4's
+     *          sentence for `opts.door` in `reason`, and seeds nothing
      *
      * Errors are logged but never thrown — install succeeds even if
      * post-register side-effects partially fail (the manifest itself is
@@ -2000,8 +2117,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private applySideEffects = async (
         ctx: PluginContext,
         manifest: any,
-        opts: { seedNow: boolean; c?: any },
-    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
+        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'> },
+    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
         const appId = String(manifest?.id ?? 'unknown');
         let translationsLoaded = 0;
         let seedSummary: any = { mode: 'skipped', reason: 'no-datasets' };
@@ -2110,8 +2227,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         const resolved = await this.resolveActiveOrgId(opts.c, ctx);
                         if (resolved) organizationId = resolved;
                         else {
-                            seedSummary = { mode: 'skipped', reason: 'multi-tenant-no-active-org' };
-                            ctx.logger?.warn?.('[MarketplaceInstallLocal] multi-tenant: no active org on request — data not seeded');
+                            // [ADR-0123 D2 / D4] Refused, not skipped: the rows are
+                            // tenant-scoped writes and this session names no tenant.
+                            const reason = noActiveOrganizationRefusal(opts.door ?? 'install');
+                            seedSummary = { mode: 'refused', reason };
+                            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: ${reason}`);
                         }
                     }
                     if (!multiTenant || organizationId) {
@@ -2182,8 +2302,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     /**
      * Best-effort active-org resolution. Reads the better-auth session directly
-     * and returns `session.activeOrganizationId`, falling back to the user's
-     * first org membership.
+     * and returns `session.activeOrganizationId`, or `null` when it has none.
+     *
+     * [ADR-0123 D1] `null` is an answer, not a gap to fill: "authenticated, with
+     * no active organization" is a declared state, and every caller of this read
+     * refuses the tenant-scoped write it would scope ({@link noActiveOrganizationRefusal}).
+     * ⛔ No membership fallback. Guessing from the user's memberships would be a
+     * fourth semantics for that state, and for a user in several organizations it
+     * would write into one the caller never chose. The fallback this once carried
+     * read an object no package defines, so it threw, was swallowed, and never
+     * answered once.
      *
      * ⚠️ [#8976] This is a SCOPING read, not an authorization one — which org's
      * rows a seed lands in, asked only after {@link requireInstallCapability}
@@ -2203,17 +2331,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const session = await api.getSession({ headers: c.req.raw.headers });
             const direct = session?.session?.activeOrganizationId ?? session?.activeOrganizationId ?? null;
             if (direct) return String(direct);
-            // Fall back to the user's first membership row.
-            const userId = session?.user?.id;
-            if (!userId) return null;
-            try {
-                const ql: any = ctx.getService('objectql');
-                if (ql?.find) {
-                    const rows = await ql.find('sys_organization_member', { where: { user_id: userId }, limit: 1, context: { isSystem: true } } as any);
-                    const row = Array.isArray(rows) ? rows[0] : (rows?.items?.[0] ?? null);
-                    return row?.organization_id ? String(row.organization_id) : null;
-                }
-            } catch { /* ignore */ }
         } catch { /* ignore */ }
         return null;
     };
@@ -2490,6 +2607,29 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * they are the two things that turn "an app is missing" into a fix:
      * `.objectstack/installed-packages/<file>` is the thing to repair or delete.
      */
+    /**
+     * [#21762] The one line a rehydrate prints for a ledger entry it refuses to
+     * load under ADR-0087 D1's handshake.
+     *
+     * `error`, not `warn`: the ledger says the package is installed (the GET
+     * listing still serves it) while the running kernel holds none of it, so
+     * persisted and runtime state disagree with nothing else saying so. The
+     * line owes the consequence and the fix, and carries the handshake's own
+     * message, which names the replay command (`objectstack migrate meta`).
+     */
+    private reportProtocolIncompatibleEntry = (
+        ctx: PluginContext,
+        entry: InstalledEntry,
+        diagnostic: ProtocolIncompatibleDiagnostic,
+    ): void => {
+        ctx.logger?.error?.(
+            `[MarketplaceInstallLocal] ${diagnostic.code}: ${entry.manifestId}@${entry.version} is NOT loaded into `
+            + `this runtime, though its ledger entry lists it as installed — none of its objects, data or handlers `
+            + `are available: ${diagnostic.message}. Install a version of the package built for protocol `
+            + `${diagnostic.protocolVersion} (POST ${ROUTE_BASE}), or remove it (DELETE ${ROUTE_BASE}/${entry.manifestId}).`,
+        );
+    };
+
     private warnSkippedLedgerEntries = (ctx: PluginContext, skipped: SkippedManifestEntry[], what: string): void => {
         for (const { file, cause } of skipped) {
             ctx.logger?.warn?.(

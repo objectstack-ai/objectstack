@@ -85,7 +85,7 @@ describe('UserSchema', () => {
  * drop of `.url()` (which would start admitting `''` and `'not-a-url'`) goes
  * red here rather than passing as "still accepts null".
  */
-describe('[#18509] UserSchema.image accept set', () => {
+describe('UserSchema.image accept set — null, the shape better-auth serves', () => {
   const base = {
     id: 'user_123',
     email: 'test@example.com',
@@ -199,7 +199,7 @@ describe('AccountSchema', () => {
   });
 });
 
-describe('Session is not declared here (#4641)', () => {
+describe('Session is not declared here', () => {
   // Pin: this module no longer declares the bare `SessionSchema` name. The pin is
   // compile-time (`typeof import` is type-level only — no runtime barrel load):
   // if the name is re-added here, the conditional type flips to `true` and the

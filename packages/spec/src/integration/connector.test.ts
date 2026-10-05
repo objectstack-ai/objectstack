@@ -241,7 +241,7 @@ describe('RetryConfigSchema', () => {
 // Connector Action Effect (#4395)
 // ============================================================================
 
-describe('ConnectorActionSchema.effect (#4395)', () => {
+describe('ConnectorActionSchema.effect — declares whether an action reads or writes', () => {
   it('declares exactly read | write — the two countable answers', () => {
     expect(ConnectorActionEffectSchema.options).toEqual(['read', 'write']);
   });
@@ -389,7 +389,7 @@ describe('ConnectorSchema', () => {
 // tempting wrong fix — pointing `connector.rateLimitConfig` at the shared inbound
 // schema — would throttle the opposite direction, so the absence assertions below
 // are as load-bearing as the presence ones.
-describe('[#4911] `./integration` no longer publishes an outbound rate-limit shape', () => {
+describe('`./integration` no longer publishes an outbound rate-limit shape', () => {
   it('every retired name is absent from the entry — no alias, no re-export', async () => {
     const integrationEntry = await import('./index');
 
@@ -591,7 +591,7 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
 // declarations remain, and the pins below now hold the base against the import
 // mapping alone — plus the fact that the connector name is GONE rather than
 // folded into either survivor.
-describe('[#4703] FieldMapping no longer names three declarations', () => {
+describe('FieldMapping no longer names three declarations', () => {
   it('each entry exposes exactly one field-mapping name, and not the others’', async () => {
     const integrationEntry = await import('./index');
     const dataEntry = await import('../data/index');
@@ -843,7 +843,7 @@ const STAMPED_CONNECTOR = {
   ...STAMPED_ENVELOPE,
 } as const;
 
-describe('ADR-0010 protection envelope (#6362)', () => {
+describe('ADR-0010 protection envelope — preserved, never silently stripped', () => {
   it('ConnectorSchema PRESERVES every stamped envelope key through a parse', () => {
     const parsed = ConnectorSchema.parse(STAMPED_CONNECTOR);
 
@@ -990,7 +990,7 @@ const AUTHORED_ERROR_MAPPING = {
 
 const ERROR_MAPPING_PRESCRIPTION = /`connector\.errorMapping`.*was removed.*17/s;
 
-describe('[#14676] connector.errorMapping retirement', () => {
+describe('connector.errorMapping retirement', () => {
   it('REJECTS an authored `errorMapping` at path `errorMapping`, carrying the prescription', () => {
     const result = ConnectorSchema.safeParse({
       ...ERROR_MAPPING_WELL_FORMED,
@@ -1138,7 +1138,7 @@ describe('[#14676] connector.errorMapping retirement', () => {
   });
 });
 
-describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + ConnectorErrorCategory def retirement', () => {
+describe('integration/ErrorMappingConfig + ErrorMappingRule + ConnectorErrorCategory def retirement', () => {
   /** The 7 names the three retired defs exported (3 schema consts + 4 types). */
   const RETIRED_NAMES = [
     'ErrorMappingConfigSchema',
@@ -1160,7 +1160,7 @@ describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + Connector
 
     // ── ABSENCE (every entry, not just ./integration) ─────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #14676`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after the errorMapping retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -1192,7 +1192,7 @@ describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + Connector
   });
 });
 
-describe('[#14676] ADR-0087 registration', () => {
+describe('the errorMapping retirement is registered under ADR-0087', () => {
   it('declares both carrier keys and the three removed defs under major 18, with the D2 conversion in the step-18 chain', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('integration/Connector:errorMapping');
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('integration/DeclarativeConnectorEntry:errorMapping');

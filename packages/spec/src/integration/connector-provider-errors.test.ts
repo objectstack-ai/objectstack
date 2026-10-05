@@ -10,7 +10,7 @@ import {
   isConnectorUpstreamUnavailable,
 } from './connector-provider-errors';
 
-describe('#3017 — connector provider upstream-unavailable classification', () => {
+describe('connector provider upstream-unavailable classification — an unreachable upstream degrades instead of aborting boot', () => {
   it('the error carries the marker code, a stable name, and the cause', () => {
     const cause = new Error('connect ECONNREFUSED 127.0.0.1:9999');
     const err = new ConnectorUpstreamUnavailableError('mcp server unreachable', { cause });
