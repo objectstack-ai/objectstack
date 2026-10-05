@@ -82,7 +82,7 @@ describe('dogfood: the install-local listing answers withSampleData per organiza
   let installSeeded: unknown;
   let reseedB: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
   let purgeA: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let recordAfterPurge: { withSampleData?: boolean; sampleDataPurged?: boolean } | undefined;
+  let recordAfterPurge: { withSampleData?: boolean; sampleDataPurged?: boolean } | null | undefined;
   const beforeRestart: Record<'A' | 'B', View> = {} as never;
   const afterRestart: Record<'A' | 'B', View> = {} as never;
 
