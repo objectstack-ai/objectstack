@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-security': minor
+"@objectstack/spec": patch
 ---
 
 fix(plugin-security)!: on the write doors, a row the caller cannot read answers what a nonexistent id answers
