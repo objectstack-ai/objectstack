@@ -639,7 +639,9 @@ describe('SysMetadataRepository — a declared ordered map: object `fields` (#21
     expect(published.version).toBe(hashSpec(body(MOVED), 'object'));
     expect(storedOrder(engine)).toEqual(MOVED);
     expect(Object.keys((await repo.get(ref))!.body.fields as object)).toEqual(MOVED);
-    expect(engine.historyRows().map((r) => r.operation_type)).toEqual(['create', 'publish']);
+    // The active create, the draft's own row, and the publish — the write the
+    // order-blind hash used to skip.
+    expect(engine.historyRows().map((r) => r.operation_type)).toEqual(['create', 'create', 'publish']);
   });
 
   it('…while an identical re-save is still the no-op it was', async () => {
@@ -705,8 +707,8 @@ describe('SysMetadataRepository — a declared ordered map: object `fields` (#21
       await repo.promoteDraft(ref, { actor: 't', intent });
 
       expect(storedOrder(engine)).toEqual(MOVED);
-      const [publish] = engine.historyRows();
-      expect(publish).toMatchObject({ operation_type: 'publish', previous_checksum: stamp });
+      const publish = engine.historyRows().find((r) => r.operation_type === 'publish');
+      expect(publish).toMatchObject({ previous_checksum: stamp });
     });
 
     it('a reorder INTO sorted order is written, though its hash IS the stale stamp', async () => {
@@ -719,7 +721,8 @@ describe('SysMetadataRepository — a declared ordered map: object `fields` (#21
       await repo.promoteDraft(ref, { actor: 't', intent });
 
       expect(storedOrder(engine)).toEqual(SORTED);
-      expect(engine.historyRows().map((r) => r.operation_type)).toEqual(['publish']);
+      // The draft's own row, then the publish the stale stamp would have skipped.
+      expect(engine.historyRows().map((r) => r.operation_type)).toEqual(['create', 'publish']);
     });
   });
 });
