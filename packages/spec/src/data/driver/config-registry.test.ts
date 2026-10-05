@@ -68,7 +68,7 @@ describe('driver config registry', () => {
   });
 });
 
-describe('DatasourceSchema × driver config (#4410)', () => {
+describe('DatasourceSchema × driver config — parsed against the contract its driver ships', () => {
   const base = { name: 'warehouse', driver: 'postgres' };
 
   /**
@@ -175,7 +175,7 @@ describe('DatasourceSchema × driver config (#4410)', () => {
  * the first one is the way that actually matters — reading the CONFIG-CONTRACT
  * column instead of the SELECTION column silently widens every boot host's flag.
  */
-describe('DATABASE_DRIVER_SELECTION_IDS — what a boot flag may offer (#6969)', () => {
+describe('DATABASE_DRIVER_SELECTION_IDS — what a boot flag may offer, derived from the one driver table', () => {
   it('offers no contract-only spelling, whatever the derivation is rewritten to read', () => {
     // The wrong-column guard. `sqlite3` / `better-sqlite3` / `mariadb` /
     // `inmemory` resolve a config CONTRACT and are refused as a SELECTION, so a
@@ -285,7 +285,7 @@ describe('the `memory` row: contract face kept, selection face withdrawn', () =>
  * alone would be green before and after the guard and would prove nothing, so
  * the population is the point of this describe.
  */
-describe('driver lookups — an OFF-vocabulary id is refused, never answered with a non-schema (#16903)', () => {
+describe('driver lookups — an OFF-vocabulary id is refused, never answered with a non-schema', () => {
   /**
    * The consumer that actually reaches these, spelled as the cast it is.
    * `getDriverConfigJsonSchemaById` and both resolvers are published

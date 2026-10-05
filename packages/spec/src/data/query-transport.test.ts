@@ -35,7 +35,7 @@ import {
 import { QuerySchema } from './query.zod';
 import type { QueryAST } from './query.zod';
 
-describe('[#16066] §1 what the transport declares', () => {
+describe('§1 what the transport declares — a flattened spelling of the AST, never a second semantics', () => {
   /** Every spelling the two tables touch — both halves of each `$` pair. */
   const foldedSpellings = (): Set<string> => new Set<string>([
     ...QUERY_TRANSPORT_ALIAS_SLOTS.flatMap((slot) => slot.aliases),
@@ -93,7 +93,7 @@ describe('[#16066] §1 what the transport declares', () => {
   });
 });
 
-describe('[#16066] §2 every alias parses to its canonical slot', () => {
+describe('§2 every alias parses to its canonical slot', () => {
   const parse = (query: Record<string, unknown>) => QueryWithTransportSchema.parse(query);
 
   const CASES: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
@@ -156,7 +156,7 @@ describe('[#16066] §2 every alias parses to its canonical slot', () => {
   });
 });
 
-describe('[#16066] §3 the fold is TOTAL — every admitted value shape lowers, or the parse fails', () => {
+describe('§3 the fold is TOTAL — every admitted value shape lowers, or the parse fails', () => {
   /**
    * THE LOAD-BEARING SECTION, and every assertion in it reads the OUTPUT.
    *
@@ -328,7 +328,7 @@ describe('[#16066] §3 the fold is TOTAL — every admitted value shape lowers, 
   });
 });
 
-describe('[#16066] §4 `QuerySchema` did not grow the dialect', () => {
+describe('§4 `QuerySchema` did not grow the dialect', () => {
   /**
    * The ruling's Prime Directive #12 half: the transport form is declared as a
    * SPELLING of the AST, never admitted into the AST. A `$` key handed to
@@ -350,7 +350,7 @@ describe('[#16066] §4 `QuerySchema` did not grow the dialect', () => {
   });
 });
 
-describe('[#16066] §5 the declared OUTPUT type, pinned where a runtime test cannot reach', () => {
+describe('§5 the declared OUTPUT type, pinned where a runtime test cannot reach', () => {
   /**
    * `z.infer` of this slot is the canonical AST plus the `count` flag — and
    * nothing else. The slot used to claim the bare `QueryAST` through a cast

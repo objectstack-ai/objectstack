@@ -157,7 +157,7 @@ describe('SeedSchema', () => {
     });
   });
 
-  it('should accept a composite externalId (join-table natural key, #3434)', () => {
+  it('should accept a composite externalId (join-table natural key)', () => {
     const dataset = SeedSchema.parse({
       object: 'team_project_membership',
       externalId: ['team', 'project'],
