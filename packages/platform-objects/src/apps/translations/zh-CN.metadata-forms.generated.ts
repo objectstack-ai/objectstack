@@ -60,6 +60,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "记录标题字段",
         helpText: "用作每条记录标题的字段（例如 \"name\"、\"subject\"）。ADR-0079 规定的规范指针——记录展示、ObjectQL 搜索和关联记录预览都读它。"
       },
+      imageField: {
+        label: "记录图片字段",
+        helpText: "用作每条记录图片的字段，显示在记录页头的标题旁。必须是本对象中类型为 image 或 avatar 的字段，其他名称会在保存对象时被拒绝。留空则不显示记录图片，也不画占位图。"
+      },
       isSystem: {
         label: "系统内置",
         helpText: "系统对象（受保护，不可删除；共享默认为公开）"
