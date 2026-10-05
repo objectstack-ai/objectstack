@@ -66,7 +66,11 @@ resolve the filter fails closed (deny-all).
 
 Deleting a `sys_attachment` is allowed when the caller is **the uploader** OR
 **can edit the parent record** (`sharing.canEdit` — public-model parents are
-editable by design). A multi-delete requires *every* matched row to pass.
+editable by design). A multi-delete (`multi: true`) matches only attachments
+the caller can read: an attachment whose parent is out of the caller's sight is
+not matched, not removed and not counted, so a predicate that reaches only such
+attachments answers exactly what a predicate that matches nothing answers. Every
+matched row must then pass.
 
 | Code | Status | When |
 | --- | --- | --- |
@@ -76,7 +80,8 @@ editable by design). A multi-delete requires *every* matched row to pass.
 
 An update of another user's attachment follows the same rule — the uploader or
 a parent editor — and a by-id update of an attachment the caller cannot read
-gets the same not-found answer.
+gets the same not-found answer. A multi-update matches only attachments the
+caller can read, as a multi-delete does.
 
 The platform baseline also ships a parent-blind row-level delete floor
 (`owner_only_deletes`: you may delete only the rows you created, for members
