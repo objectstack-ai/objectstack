@@ -19,7 +19,10 @@ function makeEngine() {
   const tables: Record<string, any[]> = { sys_user: [], sys_member: [] };
   let seq = 0;
   const match = (r: any, where: any = {}) =>
-    Object.entries(where).every(([k, v]) => r[k] === v);
+    Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${k}`);
+      return r[k] === v;
+    });
   return {
     tables,
     insert: vi.fn(async (object: string, data: any) => {
