@@ -222,8 +222,11 @@ describe('GET install-local after a restart whose rehydrate refused an entry', (
         expect(listing.status).toBe(200);
         // Control: the double sees the listing's reads; the loadable entry's rows were read.
         expect(h.reads).toContain('qa_cur_account');
-        expect(h.reads).not.toContain('qa_old_account');
-        expect(seedWarnings(h.logger)).toEqual([]);
+        // One expectation, so a regression shows both facts at once.
+        expect({
+            readsOfMarkedEntry: h.reads.filter((object) => object === 'qa_old_account'),
+            seedWarnings: seedWarnings(h.logger),
+        }).toEqual({ readsOfMarkedEntry: [], seedWarnings: [] });
     });
 
     it('a loadable entry is unchanged: its rows answer withSampleData, and its item is the one served without the refused entry', async () => {
