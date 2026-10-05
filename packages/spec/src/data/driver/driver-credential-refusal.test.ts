@@ -77,7 +77,7 @@ const FAMILY = [
   },
 ] as const;
 
-describe.each(FAMILY)('$driver — inline credential refusal (#7990)', (f) => {
+describe.each(FAMILY)('$driver — inline credential refusal', (f) => {
   it(`refuses an inline \`${f.key}\`, naming the key's replacement mechanisms`, () => {
     const result = f.schema.safeParse({ ...f.valid, [f.key]: 'hunter2' });
     expect(result.success).toBe(false);
@@ -136,7 +136,7 @@ describe.each(FAMILY)('$driver — inline credential refusal (#7990)', (f) => {
   });
 });
 
-describe('DatasourceSchema — the refusal reaches the authored artefact (#7990)', () => {
+describe('DatasourceSchema — the refusal reaches the authored artefact', () => {
   it('re-paths the refusal under `config.<key>` for the author', () => {
     const result = DatasourceSchema.safeParse({
       name: 'prod',
@@ -170,7 +170,7 @@ describe('DatasourceSchema — the refusal reaches the authored artefact (#7990)
     expect(DatasourceSchema.parse(refBased)).toEqual(result.data);
   });
 
-  it('query-parameter credentials are REFUSED at `config.url` too (#8337 — the authored artefact door)', () => {
+  it('query-parameter credentials are REFUSED at `config.url` too — at the authored artefact door', () => {
     // Same envelope note as the #8082 pin below: the zod issue's `code` and
     // re-pathed location are the whole envelope at this layer; the publish
     // door wraps every schema refusal uniformly (`422 INVALID_METADATA`).
@@ -187,7 +187,7 @@ describe('DatasourceSchema — the refusal reaches the authored artefact (#7990)
     expect(issue!.message).toContain('external.credentialsRef');
   });
 
-  it('embedded-in-URL credentials are REFUSED at `config.url` (#8082 — the inverted #8078 pin)', () => {
+  it('embedded-in-URL credentials are REFUSED at `config.url` — the pin that once recorded them as accepted, inverted', () => {
     // This test used to pin the ACCEPTANCE of exactly this input as a measured
     // fact (#7990 open question). The 2026-08-12 #8082 ruling (Option A)
     // closed the door, so the pin inverts rather than disappears: same input,
@@ -258,7 +258,7 @@ const URL_FAMILY = [
   },
 ] as const;
 
-describe.each(URL_FAMILY)('$name — URL-embedded credential refusal (#8082)', (f) => {
+describe.each(URL_FAMILY)('$name — URL-embedded credential refusal', (f) => {
   const refusalAt = (config: Record<string, unknown>) => {
     const result = f.schema.safeParse(config);
     if (result.success) return undefined;
@@ -299,7 +299,7 @@ describe.each(URL_FAMILY)('$name — URL-embedded credential refusal (#8082)', (
     expect(refusalAt(f.make(`${scheme}://[2001:db8::1]:6543/prod`))).toBeUndefined();
   });
 
-  it('accepts a bare username (`user@host`) — `username` is a writable key, only the secret is refused (#7990 posture)', () => {
+  it('accepts a bare username (`user@host`) — `username` is a writable key, only the secret is refused', () => {
     const config = f.make(f.sample('svc@'));
     expect(refusalAt(config)).toBeUndefined();
     const parsed = f.schema.safeParse(config);
@@ -356,7 +356,7 @@ const QUERY_FAMILY = [
   },
 ] as const;
 
-describe.each(QUERY_FAMILY)('$name — URL query-parameter credential refusal (#8337)', (f) => {
+describe.each(QUERY_FAMILY)('$name — URL query-parameter credential refusal', (f) => {
   const refusalAt = (config: Record<string, unknown>) => {
     const result = f.schema.safeParse(config);
     if (result.success) return undefined;
@@ -428,7 +428,7 @@ describe.each(QUERY_FAMILY)('$name — URL query-parameter credential refusal (#
   });
 });
 
-describe('the deliberately-absent entries (#8337) — measured as NOT read, so not refused', () => {
+describe('the deliberately-absent entries — measured as NOT read, so not refused', () => {
   it('mysql `?password=` stays accepted: mysql2 seeds `password` from userinfo and skips the query key', () => {
     // `mysql2`'s `parseUrl` runs `if (key in options) continue;` over the
     // query, and `password` is always pre-set from userinfo — the parameter
@@ -445,7 +445,7 @@ describe('the deliberately-absent entries (#8337) — measured as NOT read, so n
   });
 });
 
-describe('urlCredentialQueryParams — the shared value-level parse (#8337)', () => {
+describe('urlCredentialQueryParams — the shared value-level parse', () => {
   const TURSO = CREDENTIAL_URL_QUERY_PARAMS.turso;
 
   it('finds the declared parameter with a non-empty value, at any position, once', () => {
@@ -495,7 +495,7 @@ describe('urlCredentialQueryParams — the shared value-level parse (#8337)', ()
   });
 });
 
-describe('urlUserinfoPassword — the shared value-level parse (#8082)', () => {
+describe('urlUserinfoPassword — the shared value-level parse', () => {
   it('judges the DSN forms real drivers take, which `new URL()` rejects or mangles', () => {
     // postgres/mongo multi-host DSNs are not WHATWG URLs; the detector must
     // judge them rather than fail open on a parse error.
@@ -536,8 +536,8 @@ describe('urlUserinfoPassword — the shared value-level parse (#8082)', () => {
   });
 });
 
-describe('urlUserinfoUsername — the username half of the same grammar (#8876)', () => {
-  it('judges the multi-host DSN forms `new URL()` rejects — the reason this helper exists (#8696)', () => {
+describe('urlUserinfoUsername — the username half of the same grammar', () => {
+  it('judges the multi-host DSN forms `new URL()` rejects — the reason this helper exists', () => {
     // `new URL('mongodb://app@h1:27017,h2:27017/app')` throws ERR_INVALID_URL
     // (measured in the filing); the accessor must judge it, not fail open.
     expect(urlUserinfoUsername('mongodb://app@h1:27017,h2:27017/app')).toBe('app');
@@ -609,7 +609,7 @@ describe('urlUserinfoUsername — the username half of the same grammar (#8876)'
  * is wrapped uniformly by the publish door (metadata-protocol's
  * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
  */
-describe('mongo options passthrough — credential refusal (#9040)', () => {
+describe('mongo options passthrough — credential refusal', () => {
   const VALID = { database: 'events', host: 'mongo.internal', username: 'svc' } as const;
   const refusalAt = (options: Record<string, unknown>) => {
     const result = MongoConfigSchema.safeParse({ ...VALID, options });
@@ -666,7 +666,7 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
     expect(issue!.message).toContain('external.credentialsRef');
   });
 
-  it('`auth.username` alone is NOT credential material (#8876 asymmetry) — stays accepted', () => {
+  it('`auth.username` alone is NOT credential material — stays accepted', () => {
     // The schema's question is "is a secret being persisted?", and a username
     // is not one. (The client separately refuses a username-only `auth` block
     // at construction — `credentials must be an object with 'username' and
@@ -675,7 +675,7 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
     expect(refusalAt({ auth: { username: 'app' } })).toBeUndefined();
   });
 
-  it('an EMPTY `auth.password` carries no secret — the passthrough twin of `user:@host` (#8082)', () => {
+  it('an EMPTY `auth.password` carries no secret — the passthrough twin of `user:@host`', () => {
     expect(refusalAt({ auth: { username: 'app', password: '' } })).toBeUndefined();
   });
 
@@ -799,7 +799,7 @@ describe('mongo options passthrough — nested credential-SPELLED keys refused a
  * refusal is wrapped uniformly by the publish door (metadata-protocol's
  * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
  */
-describe('datasource — bound credentialsRef + user-less mongo url refused (#9041)', () => {
+describe('datasource — bound credentialsRef + user-less mongo url refused', () => {
   const BOUND = { credentialsRef: 'sys_secret:01J9ZK4T2N' } as const;
   const parse = (ds: Record<string, unknown>) => DatasourceSchema.safeParse(ds);
   const refusalOf = (ds: Record<string, unknown>) => {
@@ -828,7 +828,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(issue!.message).toContain('silent no-op');
   });
 
-  it('judges a legacy `driver: mongo` row identically (alias-resolved, like the #9040 read path)', () => {
+  it('judges a legacy `driver: mongo` row identically (alias-resolved, like the passthrough read-path redaction)', () => {
     const issue = refusalOf({
       name: 'events',
       driver: 'mongo',
@@ -848,7 +848,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(issue).toBeDefined();
   });
 
-  it('accepts the blessed shape byte-identically: bare-username URL + bound secret (#8155)', () => {
+  it('accepts the blessed shape byte-identically: bare-username URL + bound secret, what the stored-credential remedy prescribes', () => {
     const ds = {
       name: 'events',
       driver: 'mongodb',
@@ -892,7 +892,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     }
   });
 
-  it('the COMPOSED branch is #9147\'s arm, never this one — a composed config reports neither #9041 nor a `config.url` path', () => {
+  it('the COMPOSED branch belongs to the no-username arm, never this one — a composed config reports neither the user-less URL refusal nor a `config.url` path', () => {
     // With no `url` the discrete `username` is live and the factory
     // interpolates the bound secret into the URI it composes (the branch
     // beside commit 90a12fb18's DSN one), so a composed config that NAMES a
@@ -955,7 +955,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 
-  it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
+  it('composes with the options-passthrough credential refusal — one artefact, both findings, own paths', () => {
     // The PM-mechanism composition pin: the datasource-level commit d491625c1 refinement
     // and the config-level commit 24206416a `credentialFreeMongoOptions` judge the same
     // artefact independently — an input violating both reports both.
@@ -992,7 +992,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
   });
 
-  it('composes with the #8082 userinfo refusal the other way: a password-bearing URL has a USER', () => {
+  it('composes with the URL userinfo refusal the other way: a password-bearing URL has a USER', () => {
     // `user:password@host` violates #8082, but its userinfo NAMES a user — so
     // this refusal correctly stays out and the author gets exactly the #8082
     // prescription (bind the secret), not a contradictory second message.
@@ -1030,7 +1030,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
  * schema refusal is wrapped uniformly by the publish door (metadata-protocol's
  * `422 INVALID_METADATA`, whose `issues[]` carry these codes verbatim).
  */
-describe('datasource — bound credentialsRef + composed mongo config naming no username refused (#9147)', () => {
+describe('datasource — bound credentialsRef + composed mongo config naming no username refused', () => {
   const BOUND = { credentialsRef: 'sys_secret:01J9ZK4T2N' } as const;
   /** The composed branch's minimum viable target — no `url`, so the URI is built. */
   const COMPOSED = { database: 'events', host: 'mongo.internal' } as const;
@@ -1067,7 +1067,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(issue!.message).not.toContain('add the username to the URL');
   });
 
-  it('judges a legacy `driver: mongo` row identically (alias-resolved, like #9041 and the #9040 read path)', () => {
+  it('judges a legacy `driver: mongo` row identically (alias-resolved, like the user-less URL arm and the passthrough read path)', () => {
     expect(refusalOf({
       name: 'events',
       driver: 'mongo',
@@ -1092,7 +1092,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     })).toBeDefined();
   });
 
-  it('an empty `config.url` routes HERE, not to #9041 — the arms split on the factory\'s own branch test', () => {
+  it('an empty `config.url` routes HERE, not to the user-less URL arm — the arms split on the factory\'s own branch test', () => {
     const result = parse({
       name: 'events',
       driver: 'mongodb',
@@ -1119,7 +1119,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(DatasourceSchema.parse(ds)).toEqual(result.data);
   });
 
-  it('near-miss ① `url` present naming NO user — exactly ONE refusal fires, and it is #9041\'s', () => {
+  it('near-miss ① `url` present naming NO user — exactly ONE refusal fires, and it is the user-less URL arm\'s', () => {
     // The arms partition the input: the author must never receive two messages
     // prescribing different fixes for one datasource.
     const result = parse({
@@ -1133,7 +1133,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(false);
   });
 
-  it('near-miss ② a discrete `username` present — the branch where the bound secret is LIVE (#8696)', () => {
+  it('near-miss ② a discrete `username` present — the branch where the bound secret is LIVE', () => {
     const ds = {
       name: 'events',
       driver: 'mongodb',
@@ -1192,7 +1192,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(false);
   });
 
-  it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
+  it('composes with the options-passthrough credential refusal — one artefact, both findings, own paths', () => {
     const result = parse({
       name: 'events',
       driver: 'mongodb',

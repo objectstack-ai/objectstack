@@ -1117,7 +1117,7 @@ describe('ValidationRule - priority property', () => {
   });
 });
 
-describe('ValidationRule - events property (#3184)', () => {
+describe('ValidationRule - events property — insert and update only; a delete guard is a beforeDelete hook', () => {
   it('should accept insert / update events', () => {
     const rule = ScriptValidationSchema.parse({
       type: 'script',

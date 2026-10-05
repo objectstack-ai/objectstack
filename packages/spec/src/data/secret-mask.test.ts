@@ -37,7 +37,7 @@ import { SECRET_MASK } from './secret-mask';
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SOURCE = path.resolve(HERE, 'secret-mask.ts');
 
-describe('SECRET_MASK — the credential read mask (ADR-0100 / #7572)', () => {
+describe('SECRET_MASK — the credential read mask (ADR-0100), declared once for every masked read', () => {
   it('is exactly eight U+2022 BULLET characters', () => {
     // Restated on purpose — see the module header.
     expect(SECRET_MASK).toBe('••••••••');

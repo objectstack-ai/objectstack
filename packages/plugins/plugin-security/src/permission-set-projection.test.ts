@@ -110,21 +110,30 @@ function makeQl() {
  * Mock metadata protocol over the ql's sys_metadata table: env-scope active
  * overlays, layered read (overlay-wins over `declared`), and the ADR-0094
  * awaited mutation-projector seam.
+ *
+ * [#21861] The package dimension of a row is modelled, because the defect it
+ * hid lives there. A save targets the ONE row keyed by its `packageId` (absent
+ * = the package-less row), as `SysMetadataRepository.put` does, so a save that
+ * names no package beside a package-bound row mints a second row instead of
+ * quietly overwriting the only one. The reads serve the first env-wide row of
+ * the name in any package (`findServedOverlayRow` with no package), and the
+ * single-item read states that row's `package_id` on the item as `_packageId`,
+ * as `getMetaItem` does.
  */
 function makeProtocol(ql: any, declared: Record<string, any> = {}) {
   let projector: ((evt: any) => Promise<void>) | null = null;
-  const overlayFor = (name: string) =>
-    ql.metaRows.find(
-      (r: any) =>
-        r.type === 'permission' && r.name === name && r.state === 'active' && (r.organization_id ?? null) === null,
-    );
+  const isActiveEnvRow = (r: any, name: string) =>
+    r.type === 'permission' && r.name === name && r.state === 'active' && (r.organization_id ?? null) === null;
+  const overlayFor = (name: string) => ql.metaRows.find((r: any) => isActiveEnvRow(r, name));
+  const rowAt = (name: string, packageId: string | null) =>
+    ql.metaRows.find((r: any) => isActiveEnvRow(r, name) && (r.package_id ?? null) === packageId);
   const protocol = {
     saves: [] as any[],
     deletes: [] as any[],
     registerMutationProjector(_type: string, fn: (evt: any) => Promise<void>) {
       projector = fn;
     },
-    async saveMetaItem(req: { type: string; name: string; item: any; actor?: string }) {
+    async saveMetaItem(req: { type: string; name: string; item: any; actor?: string; packageId?: string | null }) {
       // [#6858 / ADR-0094 D5-R] ADR-0005's tier gate, first — ahead of schema
       // validation, exactly as `protocol.ts` orders it. `declared` IS this
       // stub's artifact registry, so `declared[name] !== undefined` is the
@@ -165,12 +174,15 @@ function makeProtocol(ql: any, declared: Record<string, any> = {}) {
         err.status = 422;
         throw err;
       }
-      const existing = overlayFor(req.name);
+      const packageId = req.packageId ?? null;
+      const existing = rowAt(req.name, packageId);
       if (existing) existing.metadata = JSON.stringify(req.item);
       else {
         ql.metaRows.push({
-          id: `meta_${req.name}`, type: 'permission', name: req.name, state: 'active',
-          organization_id: null, metadata: JSON.stringify(req.item),
+          id: packageId === null ? `meta_${req.name}` : `meta_${req.name}@${packageId}`,
+          type: 'permission', name: req.name, state: 'active',
+          organization_id: null, ...(packageId === null ? {} : { package_id: packageId }),
+          metadata: JSON.stringify(req.item),
         });
       }
       protocol.saves.push({ ...req });
@@ -194,6 +206,20 @@ function makeProtocol(ql: any, declared: Record<string, any> = {}) {
         type: 'permission', name: req.name, code, overlay,
         overlayScope: overlay ? 'env' : null, effective: overlay ?? code,
       };
+    },
+    getMetaItemCalls: 0,
+    async getMetaItem(req: { type: string; name: string }) {
+      protocol.getMetaItemCalls += 1;
+      const o = overlayFor(req.name);
+      const item = o
+        ? { ...JSON.parse(o.metadata), ...(o.package_id ? { _packageId: o.package_id } : {}) }
+        : declared[req.name];
+      if (item === undefined) {
+        const err: any = new Error(`permission/${req.name} not found`);
+        err.status = 404;
+        throw err;
+      }
+      return { type: 'permission', name: req.name, item };
     },
   };
   return protocol;
@@ -1068,6 +1094,111 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     const mw = makeMiddleware(ql, makeProtocol(ql));
     expect(await run(mw, { object: 'sys_user', operation: 'insert', data: {}, context: { userId: 'u' } })).toBe(true);
     expect(await run(mw, { object: 'sys_permission_set', operation: 'find', context: { userId: 'u' } })).toBe(true);
+  });
+});
+
+// ── [#21861] The update leg writes back into the row it edits ──────────────
+
+describe('[#21861] a data-door UPDATE writes back into the stored row it edits — no package-less fork', () => {
+  const userCtx = { userId: 'usr_admin' };
+  const PKG = 'com.acme.runtime';
+
+  /** Every active stored row of `name`, as its scope, its binding and the description its body carries. */
+  const activeRows = (ql: any, name: string) =>
+    ql.metaRows
+      .filter((r: any) => r.name === name && r.state === 'active')
+      .map((r: any) => ({
+        organization_id: r.organization_id ?? null,
+        package_id: r.package_id ?? null,
+        description: JSON.parse(r.metadata).description,
+      }));
+
+  /** A stored set (one row, optionally package-bound) with its projected record. */
+  async function storedSet(packageId?: string) {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    registerPermissionSetProjection(protocol, { ql });
+    await protocol.saveMetaItem({
+      type: 'permission', name: 'support_agent', item: envBody({ name: 'support_agent' }),
+      ...(packageId ? { packageId } : {}),
+    });
+    protocol.saves.length = 0;
+    return { ql, protocol, rowId: ql.permRows[0].id as string };
+  }
+
+  it('a set stored in a writable runtime package: the edit lands on that row, which stays bound', async () => {
+    const { ql, protocol, rowId } = await storedSet(PKG);
+    expect(activeRows(ql, 'support_agent'), 'before').toEqual([{ organization_id: null, package_id: PKG, description: undefined }]);
+
+    const opCtx: any = {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { id: rowId, description: 'edited at the data door' },
+    };
+    expect(await run(makeMiddleware(ql, protocol), opCtx)).toBe(false);
+
+    expect(activeRows(ql, 'support_agent'), 'after: still one row, same binding, carrying the edit')
+      .toEqual([{ organization_id: null, package_id: PKG, description: 'edited at the data door' }]);
+    expect(protocol.saves.map((s: any) => s.packageId), 'the save names the row\'s own package').toEqual([PKG]);
+    expect(opCtx.result?.description, 'the projected record follows').toBe('edited at the data door');
+  });
+
+  it('a package-less set: the save still names no package, and its one row carries the edit', async () => {
+    const { ql, protocol, rowId } = await storedSet();
+    expect(activeRows(ql, 'support_agent'), 'before').toEqual([{ organization_id: null, package_id: null, description: undefined }]);
+
+    await run(makeMiddleware(ql, protocol), {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { id: rowId, description: 'edited' },
+    });
+
+    expect(protocol.saves).toHaveLength(1);
+    expect(protocol.saves[0], 'no binding is invented for a set that has none').not.toHaveProperty('packageId');
+    expect(activeRows(ql, 'support_agent'), 'after')
+      .toEqual([{ organization_id: null, package_id: null, description: 'edited' }]);
+  });
+
+  it('a filtered edit spanning a package-bound and a package-less set writes each back into its own row', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    registerPermissionSetProjection(protocol, { ql });
+    await protocol.saveMetaItem({ type: 'permission', name: 'pkg_set', item: envBody({ name: 'pkg_set' }), packageId: PKG });
+    await protocol.saveMetaItem({ type: 'permission', name: 'org_set', item: envBody({ name: 'org_set' }) });
+    protocol.saves.length = 0;
+    const before = { pkg: activeRows(ql, 'pkg_set'), org: activeRows(ql, 'org_set') };
+    expect(before).toEqual({
+      pkg: [{ organization_id: null, package_id: PKG, description: undefined }],
+      org: [{ organization_id: null, package_id: null, description: undefined }],
+    });
+
+    await run(makeMiddleware(ql, protocol), {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { description: 'bulk' }, options: { where: { name: { $in: ['pkg_set', 'org_set'] } } },
+    });
+
+    expect({ pkg: activeRows(ql, 'pkg_set'), org: activeRows(ql, 'org_set') }, 'after').toEqual({
+      pkg: [{ organization_id: null, package_id: PKG, description: 'bulk' }],
+      org: [{ organization_id: null, package_id: null, description: 'bulk' }],
+    });
+    expect(protocol.saves.map((s: any) => [s.name, s.packageId ?? null]))
+      .toEqual([['pkg_set', PKG], ['org_set', null]]);
+  });
+
+  it('a set a code package ships is still refused by the lock (403 NOT_OVERRIDABLE) before any binding read or save', async () => {
+    const ql = makeQl();
+    const declaredBody = { ...envBody({ name: 'crm_rep' }), _packageId: 'com.example.crm' };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
+    const before = activeRows(ql, 'crm_rep');
+
+    await expect(run(makeMiddleware(ql, protocol), {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { id: 'ps_pkg', description: 'customized' },
+    })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+
+    expect(activeRows(ql, 'crm_rep'), 'the refused edit stored nothing').toEqual(before);
+    expect(protocol.saves).toHaveLength(0);
+    expect(protocol.getMetaItemCalls, 'the binding is never read for a refused edit').toBe(0);
   });
 });
 

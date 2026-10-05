@@ -68,7 +68,21 @@ export class ExternalDatasourceServicePlugin implements Plugin {
 
   async init(ctx: PluginContext): Promise<void> {
     const engine = safeGetService<IDataEngine>(ctx, 'data');
-    const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
+
+    /**
+     * [#21876] The `'metadata'` service: every datasource, package and object
+     * read below, and the catalog write, go through it.
+     *
+     * Resolved where it is used, never at `init()`, like `metadataSaveDoor`.
+     * `objectstack start` composes no metadata plugin: its `'metadata'`
+     * service is the kernel's in-memory fallback, which the kernel registers
+     * after every plugin's `init()`, just before the start phase. Read here,
+     * it was absent for the life of the process, so `external/validate`
+     * answered no rows and the boot gate checked zero federated objects
+     * (AGENTS.md, "Startup registry reads"). Each reader keeps its own answer
+     * for a deployment that has no metadata service at all.
+     */
+    const metadata = (): MetadataServiceLike | undefined => safeGetService<MetadataServiceLike>(ctx, 'metadata');
 
     const introspect: ExternalDatasourceServiceConfig['introspect'] =
       this.options.introspect ??
@@ -97,23 +111,33 @@ export class ExternalDatasourceServicePlugin implements Plugin {
 
     const config: ExternalDatasourceServiceConfig = {
       introspect,
-      getDatasource: async (n) => (await metadata?.get('datasource', n)) as DatasourceLike | undefined,
-      getObject: async (n) =>
-        (metadata?.getObject ? await metadata.getObject(n) : await metadata?.get('object', n)) as ObjectLike | undefined,
-      listObjects: async () =>
-        ((metadata?.listObjects
-          ? await metadata.listObjects()
-          : await metadata?.list?.('object')) ?? []) as ObjectLike[],
+      getDatasource: async (n) => (await metadata()?.get('datasource', n)) as DatasourceLike | undefined,
+      getObject: async (n) => {
+        const service = metadata();
+        return (service?.getObject ? await service.getObject(n) : await service?.get('object', n)) as
+          | ObjectLike
+          | undefined;
+      },
+      listObjects: async () => {
+        const service = metadata();
+        return ((service?.listObjects ? await service.listObjects() : await service?.list?.('object')) ??
+          []) as ObjectLike[];
+      },
       // Persist the refreshed snapshot as an `external_catalog` metadata record
       // so the boot gate + Studio's schema browser can read it without
       // re-introspecting. No-op when the metadata service can't write.
-      ...(metadata?.register
-        ? {
-            persistCatalog: async (catalog) => {
-              await metadata.register!('external_catalog', catalog.name, catalog);
-            },
-          }
-        : {}),
+      //
+      // [#21876] A GETTER, for the reason `persistObject` below is one: the
+      // service reads this slot when a refresh runs, so the metadata service
+      // registered by then is the one written to. ⛔ Not a spread: a spread
+      // decided at `init()` whether the slot existed at all.
+      get persistCatalog(): ExternalDatasourceServiceConfig['persistCatalog'] {
+        const service = metadata();
+        if (!service?.register) return undefined;
+        return async (catalog) => {
+          await service.register!('external_catalog', catalog.name, catalog);
+        };
+      },
       /**
        * Runtime "Import as Object" (ADR-0015 Addendum): save the federated
        * object through the metadata door's own save, so it is exactly what a
@@ -186,12 +210,13 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        */
       getNamespace: async (datasource: string) => {
         try {
-          const ds = (await metadata?.get('datasource', datasource)) as
+          const service = metadata();
+          const ds = (await service?.get('datasource', datasource)) as
             | { _packageId?: unknown }
             | undefined;
           const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
           if (!pkgId || pkgId === 'sys_metadata') return undefined;
-          const pkg = (await metadata?.get('package', pkgId)) as
+          const pkg = (await service?.get('package', pkgId)) as
             | { manifest?: { namespace?: unknown } }
             | undefined;
           const ns = pkg?.manifest?.namespace;
