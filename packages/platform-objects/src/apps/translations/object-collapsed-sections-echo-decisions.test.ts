@@ -938,7 +938,10 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 114 since #19332 flight G2a gave `basics` the `fieldGroups` repeater — the
     // row and its six declared sub-rows, fourteen leaves, their forty-two
     // translated leaves authored by that flight, so `openEchoes` stays at zero.
-    expect(OPEN_LEAVES.length).toBe(114);
+    // 116 since #21765 gave `basics` the `imageField` row beside `nameField` —
+    // the record-picture pointer, now live — whose label and help text are
+    // authored in all three locales by that card, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(116);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {
