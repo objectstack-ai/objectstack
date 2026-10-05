@@ -4143,7 +4143,7 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
   const metric = ComponentPropsMap['object-metric'];
 
   it('accepts an icon on the metric tile — the value objectui resolves via getLazyIcon', () => {
-    // objectui `plugin-dashboard/src/index.tsx:204` publishes the input
+    // objectui `plugin-dashboard/src/index.tsx:299` publishes the input
     // (this read `:161` until the `a472b0716` re-measure: wrong since written,
     // not shifted — that line is a sentence in the registry shell's docblock,
     // not the `object-metric` registration's `icon` input, and the file is
