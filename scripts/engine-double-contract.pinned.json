@@ -107,6 +107,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/get-meta-item-cached-etag-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
       "verb": "delete",
       "pinned": 1

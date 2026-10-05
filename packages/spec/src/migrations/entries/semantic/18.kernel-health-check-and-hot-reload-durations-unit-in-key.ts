@@ -52,13 +52,13 @@ export const entry: SemanticMigration = {
     + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
     + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
     + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-    + 'against, `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — names '
+    + 'against, `.objectui-sha` = `9dfaca654311cddd81714153c4f82c241d7cdc54` — names '
     + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-    + 'the string debounceDelay each occur 0 times across its 7579 tracked files (0 across the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+    + 'the string debounceDelay each occur 0 times across its 7632 tracked files (0 across the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
     + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
     + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
     + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-    + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721 and to 17227 and 7134 at this pin (git grep -o -F, the method that reproduces '
+    + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5 and to 17313 and 7186 at this pin (git grep -o -F, the method that reproduces '
     + 'every earlier count).',
   acceptanceCriteria:
     'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '

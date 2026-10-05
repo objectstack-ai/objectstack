@@ -65,7 +65,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { organizationIdForMetaRead } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, organizationIdForMetaRead } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -108,34 +108,44 @@ const storedRow = (
 });
 
 /**
- * The engine double: `findOne` over a row table, plus the registry surface the
- * single-item read path touches on its way past the overlay.
+ * The engine double: `findOne` and `find` over a row table, plus the registry
+ * surface the single-item read path touches on its way past the overlay.
  *
- * ⛔ No `find` / `insert` / `update` / `delete`, deliberately — the read path
- * under test issues exactly one verb, and a double declaring verbs no case
- * exercises would owe `check:engine-double-contract` a dispatch contract that
- * protects nothing. Same shape the sibling org-read-gate pin drives.
+ * ⛔ No `insert` / `update` / `delete`, deliberately — the read path under test
+ * issues two read verbs (`findOne` for the served row, and since #21761 `find`
+ * for the rows its lock is selected from), and a double declaring verbs no
+ * case exercises would owe `check:engine-double-contract` a dispatch contract
+ * that protects nothing. Same shape the sibling org-read-gate pin drives.
  */
 function makeHarness(rows: StoredRow[]) {
+    const matching = (table: string, opts?: { where?: Record<string, unknown> }): StoredRow[] => {
+        if (table !== 'sys_metadata') return [];
+        const where = opts?.where ?? {};
+        // `check:where-matcher` — a hand-written matcher with no combinator
+        // branch reads `$and` as a field name and answers the wrong
+        // question rather than failing. Refuse the shape this double does
+        // not implement, matching the sibling doubles' convention.
+        for (const k of Object.keys(where)) {
+            if (k.startsWith('$')) {
+                throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
+            }
+        }
+        return rows.filter((r) =>
+            Object.entries(where).every(([k, v]) => {
+                if (v === undefined) return true;
+                return (r as unknown as Record<string, unknown>)[k] === v;
+            }),
+        );
+    };
     const engine: any = {
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            // `check:engine-double-contract` — refuses what the real engine refuses.
+            assertEngineFindOnePredicate(table, opts);
             if (table !== 'sys_metadata') return undefined;
-            const where = opts?.where ?? {};
-            // `check:where-matcher` — a hand-written matcher with no combinator
-            // branch reads `$and` as a field name and answers the wrong
-            // question rather than failing. Refuse the shape this double does
-            // not implement, matching the sibling doubles' convention.
-            for (const k of Object.keys(where)) {
-                if (k.startsWith('$')) {
-                    throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
-                }
-            }
-            return rows.find((r) =>
-                Object.entries(where).every(([k, v]) => {
-                    if (v === undefined) return true;
-                    return (r as unknown as Record<string, unknown>)[k] === v;
-                }),
-            );
+            return matching(table, opts)[0];
+        },
+        async find(table: string, opts?: { where?: Record<string, unknown> }) {
+            return matching(table, opts);
         },
         registry: {
             registerItem: () => undefined,

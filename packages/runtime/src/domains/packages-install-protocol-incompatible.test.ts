@@ -22,9 +22,11 @@
  * `.fields`) and drops a thrown `.diagnostic`. The list is closed by the
  * maintainer's #9585 ruling, so the install branch recognises the typed
  * refusal ahead of its generic catch, which is the `FlowActionRefusal` idiom.
- * This is the only HTTP door that reaches `assertProtocolCompat`. The other
- * caller, `AppPlugin.init`, is a boot seam, and `app-plugin.test.ts` pins its
- * thrown value.
+ * The answer is `protocolIncompatibleAnswer` (`@objectstack/metadata-core`),
+ * shared with the other HTTP door that reaches `assertProtocolCompat`,
+ * `POST /api/v1/marketplace/install-local` (#21762), whose suite holds the two
+ * doors' answers byte-equal. The boot seam, `AppPlugin.init`, has no HTTP
+ * answer, and `app-plugin.test.ts` pins its thrown value.
  *
  * ## The harness
  *

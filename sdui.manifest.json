@@ -7,7 +7,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this grid lists. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline `data` rows, the grid shows an error saying an object name is required and fetches nothing."
         },
         {
           "name": "columns",
@@ -183,7 +183,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this list view lists. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline `data`, the list shows a hint naming this key instead of an empty list."
         },
         {
           "name": "viewType",
@@ -258,7 +258,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this form creates or edits. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline fields (non-empty `customFields`, or `sections` whose every field is inline), the form shows a hint naming this key instead of a form with no fields."
         },
         {
           "name": "fields",
@@ -518,7 +518,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object the form creates a record in. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the form shows a hint naming this key instead of a form that cannot submit."
         },
         {
           "name": "title",
@@ -552,7 +552,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "The PARENT object this form creates or edits. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the form shows a hint naming this key instead of an empty parent form."
         },
         {
           "name": "mode",
@@ -588,7 +588,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names; NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
+          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its NAMED members (a bare name, or the `{ field }` entry) against that pool, so such a member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. An inline field entry (`{ name, type, … }`) names nothing to resolve and is drawn whatever this key lists, as on every form type (objectui#11615). Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names; NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
         },
         {
           "name": "title",
@@ -648,7 +648,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this board lists. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no rows from `data`, `bind` or a parent view, the board shows a hint naming this key instead of an empty board."
         },
         {
           "name": "columns",
@@ -1086,7 +1086,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this metric aggregates. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no `fallbackValue`, the tile shows a hint naming this key instead of a value."
         },
         {
           "name": "label",
@@ -1210,7 +1210,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this chart aggregates. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline `data`, the chart shows a hint naming this key instead of an empty frame."
         },
         {
           "name": "data",
@@ -1305,7 +1305,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this pivot table cross-tabulates. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the table shows a hint naming this key and fetches nothing."
         },
         {
           "name": "title",
@@ -1506,8 +1506,7 @@
           "name": "columns",
           "type": "array",
           "of": "string",
-          "required": true,
-          "description": "Fields to display in the related list"
+          "description": "Fields to display in the related list. Optional: without it, a `dataSource` binding that names a view supplies that view's columns, and with neither the list derives its columns from the related object (its `highlightFields`, otherwise its listable fields). Authored columns win over both."
         },
         {
           "name": "sort",
@@ -1597,7 +1596,7 @@
         {
           "name": "childObject",
           "type": "string",
-          "required": true
+          "description": "The child object whose records the panel lists, edits and saves. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the panel shows a configuration hint naming this key and loads nothing."
         },
         {
           "name": "relationshipField",

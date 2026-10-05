@@ -445,9 +445,12 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // [#21694] The first read a save makes is the ADR-0010 `_lock`
             // gate's, on this kernel as on an environment-bound one, and it
             // fails CLOSED (#5706): a 503 that carries the driver error on
-            // `cause`, before anything is written.
+            // `cause`, before anything is written. [#21761] The gate reads
+            // every row of the item in scope (`find`), so the outage is the
+            // whole read side, not `findOne` alone.
             const outage = new Error('Connection refused');
             mockEngine.findOne.mockRejectedValue(outage);
+            mockEngine.find.mockRejectedValue(outage);
 
             const err: any = await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
                 .then(() => null, (e: unknown) => e);

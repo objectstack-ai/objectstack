@@ -6,6 +6,7 @@ import {
   checkProtocolCompat,
   isProtocolIncompatibleError,
   ProtocolIncompatibleError,
+  protocolIncompatibleAnswer,
   rangeAdmitsMajor,
 } from './protocol-handshake.js';
 
@@ -263,5 +264,55 @@ describe('assertProtocolCompat', () => {
     assertProtocolCompat({ id: 'p', engines: { protocol: '???' } }, RT, warn);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toContain('unrecognized');
+  });
+});
+
+describe('[#21762] protocolIncompatibleAnswer: the one answer every HTTP door gives the refusal', () => {
+  function refusalFor(range: string): ProtocolIncompatibleError {
+    try {
+      assertProtocolCompat({ id: 'com.acme.crm', engines: { protocol: range } }, RT, () => {});
+    } catch (e) {
+      if (isProtocolIncompatibleError(e)) return e;
+      throw e;
+    }
+    throw new Error(`'${range}' was admitted under ${RT}`);
+  }
+
+  it('carries the declared status, the code and the error\'s own message', () => {
+    const err = refusalFor('^10');
+    const answer = protocolIncompatibleAnswer(err);
+    expect(answer.status).toBe(422);
+    expect(answer.status).toBe(err.status);
+    expect(answer.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(answer.message).toBe(err.message);
+    expect(answer.message.endsWith(`Run: ${answer.details.migrateCommand}`)).toBe(true);
+  });
+
+  it('details are exactly the five diagnostic members, valued from the diagnostic', () => {
+    const answer = protocolIncompatibleAnswer(refusalFor('^10'));
+    expect(Object.keys(answer.details).sort()).toEqual(
+      ['migrateCommand', 'protocolVersion', 'rangeSource', 'requiredRange', 'targetMajor'],
+    );
+    expect(answer.details).toEqual({
+      requiredRange: '^10',
+      rangeSource: 'engines.protocol',
+      protocolVersion: RT,
+      targetMajor: 10,
+      migrateCommand: 'objectstack migrate meta --from 10',
+    });
+  });
+
+  it('is a CLOSED shape, not a spread: a member the diagnostic gains does not reach details', () => {
+    const err = refusalFor('^10');
+    const widened = new ProtocolIncompatibleError({
+      ...err.diagnostic,
+      ...({ internalNote: 'must not reach the wire' } as object),
+    });
+    const { details } = protocolIncompatibleAnswer(widened);
+    expect(details).not.toHaveProperty('internalNote');
+    expect(details).not.toHaveProperty('packageId');
+    expect(details).not.toHaveProperty('runtimeMajor');
+    expect(details).not.toHaveProperty('code');
+    expect(details).not.toHaveProperty('message');
   });
 });

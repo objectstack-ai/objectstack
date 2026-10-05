@@ -107,12 +107,13 @@ const PROTOCOL_INCOMPATIBLE_BRAND = Symbol.for('objectstack.metadata-core.protoc
  *
  * The shared resolver (`resolveThrownHttpError` in `@objectstack/types`)
  * builds `details` from a closed list that deliberately drops a thrown
- * `.diagnostic` (#8016, #9106, #9585). So the one HTTP door that reaches this
- * throw (the install branch of `POST /api/v1/packages`) recognises the error
- * with {@link isProtocolIncompatibleError} ahead of its generic catch. It
- * answers the declared status and puts the diagnostic's five fields in
- * `error.details`. A caller that does not recognise the error still answers
- * the right status, without `details`.
+ * `.diagnostic` (#8016, #9106, #9585). So each HTTP door that reaches this
+ * throw recognises the error with {@link isProtocolIncompatibleError} ahead of
+ * its generic catch and answers through {@link protocolIncompatibleAnswer}: the
+ * declared status, with the diagnostic's five fields in `error.details`. Two
+ * doors do today, the install branch of `POST /api/v1/packages` and
+ * `POST /api/v1/marketplace/install-local` (#21762). A caller that does not
+ * recognise the error still answers the right status, without `details`.
  */
 export class ProtocolIncompatibleError extends MetadataError {
   readonly code = 'OS_PROTOCOL_INCOMPATIBLE' as const;
@@ -135,6 +136,58 @@ export class ProtocolIncompatibleError extends MetadataError {
 export function isProtocolIncompatibleError(e: unknown): e is ProtocolIncompatibleError {
   return typeof e === 'object' && e !== null
     && (e as Record<PropertyKey, unknown>)[PROTOCOL_INCOMPATIBLE_BRAND] === true;
+}
+
+/**
+ * What an HTTP door answers for a {@link ProtocolIncompatibleError}: the status,
+ * the code and the message the error declares, and the structured diagnostic
+ * for `error.details`. Each door wraps it in its own envelope.
+ */
+export interface ProtocolIncompatibleAnswer {
+  status: ProtocolIncompatibleError['status'];
+  code: ProtocolIncompatibleError['code'];
+  /** The error's own prose, unchanged. Its `Run:` command is `details.migrateCommand`. */
+  message: string;
+  details: Pick<
+    ProtocolIncompatibleDiagnostic,
+    'requiredRange' | 'rangeSource' | 'protocolVersion' | 'targetMajor' | 'migrateCommand'
+  >;
+}
+
+/**
+ * The ONE answer every HTTP door gives ADR-0087 D1's protocol refusal (#21727,
+ * #21762). A door asks {@link isProtocolIncompatibleError} ahead of its generic
+ * catch, then answers through this. ⛔ No door restates the shape: two package
+ * install doors reach the throw, and a second copy is where they drift.
+ *
+ * ADR-0087 D1 promises a refusal whose diagnostic "the consumer that must act
+ * on this refusal" can read, and that consumer is an agent. Served through the
+ * shared resolver instead, the five fields survive only inside the prose.
+ *
+ * `details` is a CLOSED shape: exactly these five members of
+ * {@link ProtocolIncompatibleDiagnostic}, named one by one. ⛔ It is not a
+ * spread of the diagnostic. `packageId` and `runtimeMajor` stay out (the first
+ * is the id the caller sent, the second is derivable from `protocolVersion`),
+ * `code` is the answer's own member (an envelope puts it in `error.code`, never
+ * in `error.details.code`, ADR-0112 D5), and a member later added to the
+ * diagnostic does not reach the wire without a decision here.
+ *
+ * The message is the error's own prose: the CLI and people read it.
+ */
+export function protocolIncompatibleAnswer(err: ProtocolIncompatibleError): ProtocolIncompatibleAnswer {
+  const d = err.diagnostic;
+  return {
+    status: err.status,
+    code: err.code,
+    message: err.message,
+    details: {
+      requiredRange: d.requiredRange,
+      rangeSource: d.rangeSource,
+      protocolVersion: d.protocolVersion,
+      targetMajor: d.targetMajor,
+      migrateCommand: d.migrateCommand,
+    },
+  };
 }
 
 /**
