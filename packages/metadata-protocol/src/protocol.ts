@@ -6329,8 +6329,10 @@ export class ObjectStackProtocolImplementation implements
         try {
             const scopes: (string | null)[] = organizationId ? [null, organizationId] : [null];
             const read = async (type: string, oid: string | null): Promise<Record<string, unknown>[]> => {
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const rs = await this.engine.find('sys_metadata', {
                     where: { type, state: 'active', organization_id: oid },
+                    context: { isSystem: true },
                 });
                 return (rs ?? []) as Record<string, unknown>[];
             };
@@ -9125,13 +9127,14 @@ export class ObjectStackProtocolImplementation implements
                 const queryDrafts = async (oid: string | null, pkg: string | undefined): Promise<any[]> => {
                     const whereClause: Record<string, unknown> = { type: request.type, state: 'draft', organization_id: oid };
                     if (pkg) whereClause.package_id = pkg;
-                    let rs = await this.engine.find('sys_metadata', { where: whereClause });
+                    // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                    let rs = await this.engine.find('sys_metadata', { where: whereClause, context: { isSystem: true } });
                     if (!rs || rs.length === 0) {
                         const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                         if (alt) {
                             const altWhere: Record<string, unknown> = { type: alt, state: 'draft', organization_id: oid };
                             if (pkg) altWhere.package_id = pkg;
-                            rs = await this.engine.find('sys_metadata', { where: altWhere });
+                            rs = await this.engine.find('sys_metadata', { where: altWhere, context: { isSystem: true } });
                         }
                     }
                     return rs ?? [];
@@ -9449,13 +9452,14 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: oid,
             };
             if (packageId) whereClause.package_id = packageId;
-            let rs = await this.engine.find('sys_metadata', { where: whereClause });
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            let rs = await this.engine.find('sys_metadata', { where: whereClause, context: { isSystem: true } });
             if ((!rs || rs.length === 0)) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) {
                     const altWhere: Record<string, unknown> = { type: alt, state: 'active', organization_id: oid };
                     if (packageId) altWhere.package_id = packageId;
-                    rs = await this.engine.find('sys_metadata', { where: altWhere });
+                    rs = await this.engine.find('sys_metadata', { where: altWhere, context: { isSystem: true } });
                 }
             }
             return rs ?? [];
@@ -9742,7 +9746,12 @@ export class ObjectStackProtocolImplementation implements
                 type, name: args.name, state: args.state, organization_id: candidate.organizationId,
             };
             if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
-            const row = await this.engine.findOne('sys_metadata', { where });
+            // [#21911, ADR-0096] The explicit system opt-in: a platform store
+            // read, which no caller's grants scope — the door that asked
+            // already authorized the caller, and the protocol scopes the row
+            // itself (`organization_id` above). It no longer reaches the data
+            // engine as a principal-less context.
+            const row = await this.engine.findOne('sys_metadata', { where, context: { isSystem: true } });
             if (row) return { row, scope: candidate.scope };
         }
         return undefined;
@@ -9777,8 +9786,10 @@ export class ObjectStackProtocolImplementation implements
         return resolveOverlayLockLayer(address, async (organizationId, spelling) => {
             const type = spelling === 'canonical' ? address.type : other;
             if (type === undefined) return [];
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
             const rows: StoredOverlayRow[] | null | undefined = await this.engine.find('sys_metadata', {
                 where: { type, name: address.name, state: 'active', organization_id: organizationId },
+                context: { isSystem: true },
             });
             return rows ?? [];
         }, options);
@@ -16485,8 +16496,10 @@ export class ObjectStackProtocolImplementation implements
      */
     private async storedFlowBindingAgrees(name: string, packageId: string): Promise<boolean> {
         try {
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
             const row = await this.engine.findOne('sys_metadata', {
                 where: { type: 'flow', name, package_id: packageId },
+                context: { isSystem: true },
             });
             return row != null;
         } catch (error) {
@@ -17152,7 +17165,11 @@ export class ObjectStackProtocolImplementation implements
                 lock_overridden: entry.lockOverridden ?? false,
                 request_id: entry.requestId ?? null,
                 note: entry.note ?? null,
-            } as any);
+            } as any, {
+                // [#21911] The explicit system opt-in: the platform writes its
+                // own trail row; the `actor` column above names who acted.
+                context: { isSystem: true },
+            });
         } catch (err: any) {
             // Don't promote audit-table failures to API errors. Log so
             // operators can spot a misconfigured deployment.
@@ -18645,6 +18662,7 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         organizationId: string | null,
     ): Promise<string | null> {
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const row = await this.engine.findOne('sys_metadata', {
             where: {
                 type,
@@ -18652,6 +18670,7 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: organizationId,
                 state: 'active',
             },
+            context: { isSystem: true },
         });
         return (row as { package_id?: string | null } | null)?.package_id ?? null;
     }
@@ -22303,8 +22322,10 @@ export class ObjectStackProtocolImplementation implements
                 // (env-wide drafts have env-wide active rows). Using the
                 // request's active org here would miss an env-wide edit and
                 // mis-record it as a create in the revert plan (#3115).
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const activeRow = (await this.engine.findOne('sys_metadata', {
                     where: { organization_id: d.organizationId ?? null, type: d.type, name: d.name, state: 'active' },
+                    context: { isSystem: true },
                 })) as { version?: number } | null;
                 commitItems.push({
                     type: d.type,
@@ -23086,7 +23107,8 @@ export class ObjectStackProtocolImplementation implements
         // changes.
         let rows: any[];
         try {
-            rows = (await this.engine.find('sys_metadata', { where })) as any[];
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
         } catch (e) {
             // [#12536] …through the classifier: a marked application refusal
             // is not a store fault. See {@link metadataReadFailureError}.
@@ -23418,7 +23440,8 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const scanned = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
+        const scanned = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
         // [#7819 tier 2] ADR-0005 overlay precedence — the caller's OWN org
         // shadows env-wide ({@link resolveMetaItemOrgScope} states the same rule
@@ -23763,7 +23786,8 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
+        const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
         const orphans = rows.filter(
             (r) => r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata',
         );
@@ -23796,7 +23820,7 @@ export class ObjectStackProtocolImplementation implements
                 await this.engine.update(
                     'sys_metadata',
                     { package_id: request.targetPackageId },
-                    { where: { id: row.id } },
+                    { where: { id: row.id }, context: { isSystem: true } },
                 );
                 reassigned.push({ type: row.type, name: row.name });
             } catch (e: any) {
@@ -23874,7 +23898,8 @@ export class ObjectStackProtocolImplementation implements
      * again — which is precisely how the seam this repairs was born.
      */
     private async persistPackageCommitRow(row: Record<string, unknown>): Promise<void> {
-        await this.engine.insert('sys_metadata_commit', row);
+        // [#21911] The explicit system opt-in — see recordMetadataAudit.
+        await this.engine.insert('sys_metadata_commit', row, { context: { isSystem: true } });
     }
 
     /**
