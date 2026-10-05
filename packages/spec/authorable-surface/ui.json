@@ -43,6 +43,7 @@
     "ui/Action:refreshAfter",
     "ui/Action:requiredPermissions",
     "ui/Action:requiresFeature",
+    "ui/Action:requiresMembershipReach",
     "ui/Action:resultDialog",
     "ui/Action:shortcut [RETIRED]",
     "ui/Action:successMessage",

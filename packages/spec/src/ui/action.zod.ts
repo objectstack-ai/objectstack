@@ -2230,9 +2230,10 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   .superRefine(refuseInertOutcomeMessages)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final
-  // term — the convention the platform-objects feature-gate guard reads.
-  .transform((data, ctx) => lowerRequiresMembershipReach(data, ctx))
-  .transform((data, ctx) => lowerRequiresFeature(data, ctx)));
+  // term — the convention the platform-objects feature-gate guard reads. One
+  // transform, not two: a second pipe stage would move every refinement this
+  // chain carries one level deeper in the emitted schema graph.
+  .transform((data, ctx) => lowerRequiresFeature(lowerRequiresMembershipReach(data, ctx), ctx)));
 
 export type Action = z.input<typeof ActionSchema>;
 /** Post-parse shape of {@link Action} — defaults applied, transforms run (ADR-0122). */
