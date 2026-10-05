@@ -1721,6 +1721,16 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
 }
 
 /**
+ * [#21803] The packages that can ship an item of one type, read once from the
+ * registry's listings: per name, and the ones probed for every name. See
+ * `ObjectStackProtocolImplementation.shippingPackagesOf`.
+ */
+type ShippingPackages = {
+    readonly byName: ReadonlyMap<string, ReadonlySet<string>>;
+    readonly anyName: ReadonlySet<string>;
+};
+
+/**
  * ADR-0010 §3.3 — Overlay the artifact's metadata-protection envelope
  * onto a returned item so artifact-level lock/packageId/provenance
  * always wins over whatever was persisted in the `sys_metadata` overlay
@@ -7949,7 +7959,7 @@ export class ObjectStackProtocolImplementation implements
                     : [];
             const pkgSet = new Set<string>();
             let lockedCount = 0;
-            let shippingPackageIds: ReadonlySet<string> | undefined;
+            let shipping: ShippingPackages | undefined;
             for (const item of items) {
                 scannedItems += 1;
                 const pkg = (item?._packageId ?? null) as string | null;
@@ -7965,14 +7975,14 @@ export class ObjectStackProtocolImplementation implements
                 // the address the list's own merge used (ADR-0048 package
                 // scope) — and the document the list serves for it.
                 const itemName = typeof item?.name === 'string' ? item.name : '';
-                shippingPackageIds ??= this.artifactPackageIds(t);
+                shipping ??= this.shippingPackagesOf(t);
                 const itemLock = resolveItemLock({
                     artifact: this.artifactLockLayerAt({
                         type: t,
                         name: itemName,
                         organizationId: request.organizationId,
                         packageId: request.packageId ?? (item?._packageId as string | undefined),
-                    }, shippingPackageIds),
+                    }, shipping),
                     overlay: item,
                 });
                 const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName), itemLock);
@@ -9241,7 +9251,7 @@ export class ObjectStackProtocolImplementation implements
             if (list) list.push(row);
             else lockRowsByName.set(name, [row]);
         }
-        let shippingPackageIds: ReadonlySet<string> | undefined;
+        let shipping: ShippingPackages | undefined;
         const governed: any[] = [];
         for (const it of items as any[]) {
             const itemName = (it as any)?.name;
@@ -9260,9 +9270,9 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: orgId,
                     packageId: itemPackageId,
                 };
-                shippingPackageIds ??= this.artifactPackageIds(request.type);
+                shipping ??= this.shippingPackagesOf(request.type);
                 itemLock = resolveItemLock({
-                    artifact: this.artifactLockLayerAt(address, shippingPackageIds),
+                    artifact: this.artifactLockLayerAt(address, shipping),
                     overlay: await resolveOverlayLockLayer(address, (organizationId, spelling) =>
                         (lockRowsByName.get(itemName) ?? []).filter((row) =>
                             (row.organization_id ?? null) === organizationId
@@ -16485,42 +16495,43 @@ export class ObjectStackProtocolImplementation implements
      * here: each of them still serves the address's own package's artifact
      * ({@link lookupArtifactItem} with the request's package).
      *
-     * `packageIds` is {@link artifactPackageIds} for the type, computed once
-     * by a caller that asks about many items of one type.
+     * `shipping` is {@link shippingPackagesOf} for the type, read once by a
+     * caller that asks about many items of one type.
      */
-    private artifactLockLayerAt(address: ItemAddress, packageIds?: ReadonlySet<string>): readonly unknown[] {
-        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, packageIds));
+    private artifactLockLayerAt(address: ItemAddress, shipping?: ShippingPackages): readonly unknown[] {
+        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, shipping));
     }
 
     /**
      * [#21803] Every artifact an installed code package registered under
      * `(type, name)`: what the registry's artifact-only lookup
-     * ({@link lookupArtifactItem}) answers for each package that could ship
-     * it, kept when it is that package's own (`_packageId` equal to the
-     * package asked for, the prefer-local hit), plus what it answers with no
-     * package at all.
+     * ({@link lookupArtifactItem}) answers for each package that can ship the
+     * name ({@link shippingPackagesOf}), kept when it is that package's own
+     * (`_packageId` equal to the package asked for, the prefer-local hit), plus
+     * what it answers with no package at all.
      *
      * The registry has no enumeration of its own for this, so the reader asks
-     * its existing lookups per package ({@link artifactPackageIds} names
-     * them). The package-less lookup is always in the set. It is the one the
-     * `_lock` gate made before #21803 (the first package registered), so the
-     * resolution over this set never answers looser than the gate did under
-     * any registration order; with no composite entry at all it is also the
-     * only way to reach an artifact registered under the plain key.
+     * its existing lookups per package. The package-less lookup is always in
+     * the set. It is the one the `_lock` gate made before #21803 (the first
+     * package registered), so the resolution over this set never answers
+     * looser than the gate did under any registration order; with no composite
+     * entry at all it is also the only way to reach an artifact registered
+     * under the plain key.
      *
      * An `object` has one owner (`SchemaRegistry.registerObject` refuses a
      * second code package's claim on the name, ADR-0029 D3), and its artifact
      * lookup reads the owner's layer whatever package is asked for, so the
      * owner is the whole set.
      */
-    private shippedArtifactsOf(type: string, name: string, packageIds?: ReadonlySet<string>): unknown[] {
+    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
         const shipped: unknown[] = [];
         const add = (artifact: unknown): void => {
             if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
         };
         add(this.lookupArtifactItem(type, name));
         if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
-        for (const packageId of packageIds ?? this.artifactPackageIds(type)) {
+        const packages = shipping ?? this.shippingPackagesOf(type);
+        for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
             const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
             if (own?._packageId === packageId) add(own);
         }
@@ -16528,12 +16539,19 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#21803] Every package that can ship an item of `type`: the package of
-     * every entry the registry lists for the type (both spellings), and every
-     * installed package. The listing hides a DISABLED package's entries, and
-     * the artifact lookup does not (the `_lock` gate bound a disabled
-     * package's artifact before #21803 when it was registered first), so the
-     * installed packages are read too: a disabled package is still installed.
+     * [#21803] The packages that can ship an item of `type`, read off the
+     * registry's own listings:
+     *
+     *  - `byName`: per name, the package of every entry the registry lists for
+     *    the type under that name (both spellings);
+     *  - `anyName`: the packages the listing cannot attribute to a name, probed
+     *    for every name. The listing hides a DISABLED package's entries and the
+     *    artifact lookup does not (the `_lock` gate bound a disabled package's
+     *    artifact before #21803 when it was registered first), so every
+     *    installed package the registry reports disabled is here (every
+     *    installed package, when the registry cannot say which are disabled); so
+     *    is the package of a listed entry that carries no `name`.
+     *
      * A registry without either listing, or whose listing throws (a
      * metadata-only host's partial registry: listing there is best-effort
      * context, never the reason a write fails), contributes nothing here, and
@@ -16541,32 +16559,44 @@ export class ObjectStackProtocolImplementation implements
      * whatever could be listed: never looser than the `_lock` gate before
      * #21803, which asked that lookup alone.
      */
-    private artifactPackageIds(type: string): Set<string> {
+    private shippingPackagesOf(type: string): ShippingPackages {
         const registry = (this.engine as any)?.registry;
-        const ids = new Set<string>();
-        if (!registry) return ids;
-        const addIds = (read: () => unknown, idOf: (entry: any) => unknown): void => {
-            let listed: unknown;
+        const byName = new Map<string, Set<string>>();
+        const anyName = new Set<string>();
+        if (!registry) return { byName, anyName };
+        const isPackage = (id: unknown): id is string => typeof id === 'string' && id !== '' && id !== 'sys_metadata';
+        const listing = (read: () => unknown): readonly unknown[] => {
             try {
-                listed = read();
+                const listed = read();
+                return Array.isArray(listed) ? listed : [];
             } catch {
-                return; // See this method's header: the package-less lookup still answers.
-            }
-            if (!Array.isArray(listed)) return;
-            for (const entry of listed) {
-                const id = idOf(entry);
-                if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') ids.add(id);
+                return []; // See this method's header: the package-less lookup still answers.
             }
         };
         if (typeof registry.listItems === 'function') {
             for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
-                addIds(() => registry.listItems(spelling), (entry) => entry?._packageId);
+                for (const entry of listing(() => registry.listItems(spelling))) {
+                    const { _packageId: id, name } = (entry ?? {}) as { _packageId?: unknown; name?: unknown };
+                    if (!isPackage(id)) continue;
+                    if (typeof name !== 'string') {
+                        anyName.add(id);
+                        continue;
+                    }
+                    const ids = byName.get(name);
+                    if (ids) ids.add(id);
+                    else byName.set(name, new Set([id]));
+                }
             }
         }
         if (typeof registry.getAllPackages === 'function') {
-            addIds(() => registry.getAllPackages(), (record) => record?.manifest?.id ?? record?.id);
+            const canTell = typeof registry.isPackageDisabled === 'function';
+            for (const record of listing(() => registry.getAllPackages())) {
+                const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
+                const id = r?.manifest?.id ?? r?.id;
+                if (isPackage(id) && (!canTell || registry.isPackageDisabled(id))) anyName.add(id);
+            }
         }
-        return ids;
+        return { byName, anyName };
     }
 
     /**
