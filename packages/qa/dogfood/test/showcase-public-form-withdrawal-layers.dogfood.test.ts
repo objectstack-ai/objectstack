@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // A public form withdrawal is a kill switch, on a real showcase boot: any
-// metadata layer that withdraws a public form's intake closes it, and layering
-// may only narrow intake, never re-open it.
+// metadata layer whose body of the same view explicitly withdraws the form's
+// intake (the link kept, a switch cleared) closes it, and layering may only
+// narrow intake, never re-open it.
 //
 // The showcase ships `showcase_inquiry.contact`, a FormView open to anonymous
 // intake at `/forms/contact-us`. The administrator saves it the way the editor
@@ -13,7 +14,8 @@
 //   - an organization overlay that keeps the form open does not survive an
 //     env-wide withdrawal: both anonymous doors answer `404 FORM_NOT_FOUND`
 //     and nothing lands;
-//   - an organization-scoped save that would re-open it is refused
+//   - an organization-scoped save that would leave it open (a re-save of
+//     the overlay open from before, or a re-open) is refused
 //     (`403 NOT_OVERRIDABLE`) and the doors stay closed;
 //   - withdrawn in the organization while open env-wide: closed;
 //   - open at both layers (control): both doors accept.
@@ -107,10 +109,14 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     expect(await probe()).toEqual(CLOSED);
   });
 
-  it('an organization-scoped save that would re-open it is refused, and the doors stay closed', async () => {
+  it('an organization-scoped save that would leave it open is refused, and the doors stay closed', async () => {
     await scope(organizationId);
-    // The organization overlay is still open, so withdraw it there first; the
-    // re-open is then this write's own doing.
+    // The organization overlay is still open from before the withdrawal:
+    // re-saving it as it is would leave open a withdrawn form.
+    const resave = await save(true);
+    expect(resave.status, JSON.stringify(resave.json)).toBe(403);
+    expect(resave.json.code ?? resave.json.error?.code).toBe('NOT_OVERRIDABLE');
+    // Withdrawing it there is accepted; re-opening it is refused again.
     expect((await save(false)).status).toBe(200);
     const reopen = await save(true);
     expect(reopen.status, JSON.stringify(reopen.json)).toBe(403);
