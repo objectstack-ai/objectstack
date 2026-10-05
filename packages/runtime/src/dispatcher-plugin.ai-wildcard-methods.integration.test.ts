@@ -25,8 +25,9 @@
  * miss exit). Mounting `patch` alone would therefore have moved an undeclared
  * `PATCH` from the adapter's `405` to the table's `404` — so the table now
  * tells the two misses apart, for every verb alike: a path declared under
- * other methods answers `405 METHOD_NOT_ALLOWED` with an `Allow` header, and a
- * path declared under none stays `404 ROUTE_NOT_FOUND`.
+ * other methods answers `405 METHOD_NOT_ALLOWED` with an `Allow` header naming
+ * exactly the methods the table declares for it, and a path declared under
+ * none stays `404 ROUTE_NOT_FOUND`.
  *
  * ## The composition, and why the route table is installed AFTER boot
  *
@@ -171,7 +172,7 @@ describe.each(BASES)('#21806 — /ai/* method wildcards at the %s base', (_label
         expect(r.status, JSON.stringify(r.body)).toBe(405);
         expect(r.body?.success).toBe(false);
         expect(r.body?.error?.code).toBe('METHOD_NOT_ALLOWED');
-        expect(r.allow).toBe('GET, HEAD');
+        expect(r.allow).toBe('GET');
         expect(calls).toEqual([]);
     }, 60_000);
 
@@ -181,7 +182,7 @@ describe.each(BASES)('#21806 — /ai/* method wildcards at the %s base', (_label
         expect(r.status, JSON.stringify(r.body)).toBe(405);
         expect(r.body?.success).toBe(false);
         expect(r.body?.error?.code).toBe('METHOD_NOT_ALLOWED');
-        expect(r.allow).toBe('GET, HEAD, PATCH');
+        expect(r.allow).toBe('GET, PATCH');
         expect(calls).toEqual([]);
     }, 60_000);
 

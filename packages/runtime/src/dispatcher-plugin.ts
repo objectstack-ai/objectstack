@@ -1682,14 +1682,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // swap and then routes via `handleAI`, which looks up the
             // AI service on the current (project) kernel.
             //
-            // [#21806] Every verb the AI route table can declare is mounted —
-            // `patch` included, which the SDK's `ai.conversations.update`
-            // sends. The wildcard decides nothing per route: `handleAIRequest`
-            // matches the table, answering an undeclared method on a declared
-            // path `405` and an undeclared path `404`. A verb missing here is
-            // a route the table declares and no request can reach, because on
-            // a host where these wildcards are the only door the adapter
-            // answers its own `405` before the table is ever consulted.
+            // [#21806] `patch` is mounted beside the other four: the SDK's
+            // `ai.conversations.update` sends it. The wildcard decides nothing
+            // per route — `handleAIRequest` matches the table, answering an
+            // undeclared method on a declared path `405` and an undeclared path
+            // `404`. A verb missing here makes every route the table declares
+            // under it unreachable: on a host where these wildcards are the
+            // only door into `/ai/**`, the adapter answers its own `405` before
+            // the table is ever consulted.
             const registerAIRoutes = (base: string) => {
                 const wildcards: Array<['get'|'post'|'delete'|'put'|'patch', string]> = [
                     ['get', `${base}/ai/*`],
