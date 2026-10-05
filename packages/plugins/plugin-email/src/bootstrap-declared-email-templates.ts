@@ -367,11 +367,9 @@ export async function deactivateDeclaredEmailTemplate(
  * ObjectQL registry (falling back to the metadata service). Idempotent and safe
  * to run on every boot.
  *
- * The published signature, unchanged. It delegates to
- * {@link bootstrapEffectiveEmailTemplates} with no sources, so an external
- * caller reads the registry exactly as before — the declarations plus the
- * env-wide overlays boot hydration registered. The plugin's own boot wiring
- * calls the effective form directly.
+ * The published signature, unchanged: an external caller reads the registry
+ * exactly as before — the declarations plus the env-wide overlays boot
+ * hydration registered.
  */
 export async function bootstrapDeclaredEmailTemplates(
   engine: IDataEngine,
@@ -379,6 +377,10 @@ export async function bootstrapDeclaredEmailTemplates(
   logger?: Logger,
   object = EMAIL_TEMPLATE_OBJECT,
 ): Promise<BootstrapDeclaredEmailTemplatesResult> {
+  // [#21785] The one sweep body, with no sources. The plugin's own boot wiring
+  // calls the effective form directly. Said here, not in the docblock above:
+  // the docblock ships in the published `.d.ts`, and the module-internal name
+  // is not part of that surface.
   return bootstrapEffectiveEmailTemplates(engine, metadataService, undefined, logger, object);
 }
 
