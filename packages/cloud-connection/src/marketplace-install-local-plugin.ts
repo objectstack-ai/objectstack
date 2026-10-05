@@ -313,6 +313,47 @@ function organizationWallActive(ctx: PluginContext): boolean {
     return postureEnforcesWall(resolveTenancyPosture());
 }
 
+/**
+ * [ADR-0123 D2 / D4] The answer every sample-data door gives a walled session
+ * with NO active organization: the standard catalog's `PERMISSION_DENIED` / 403,
+ * and one sentence, built here, that names the missing active organization and
+ * the remedy.
+ *
+ * ADR-0123 D1 declares "authenticated, with no active organization" a legal,
+ * named state that every subsystem inherits instead of inventing a fourth
+ * semantics for it. Sample rows on a walled deployment are tenant-scoped writes,
+ * so D2 refuses them loudly, with the catalog code rather than a registered
+ * synonym, and D4 requires the message to say what is missing, so the reader
+ * does not go looking at permissions, which are fine.
+ *
+ * Three doors read it: the install's `seeded` report (`mode: 'refused'`, the
+ * sentence in `reason`: the package itself is installed, its rows are not),
+ * and the reseed and purge refusals (the code, the status and the sentence as
+ * the error envelope). The platform's other D2 sentences, the security layer's
+ * write wall and the sharing-rule service's, are built inline for one object
+ * and one operation; this door's subject is a package's sample data across
+ * several objects, so the sentence is this file's own, in the same words.
+ */
+const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
+const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/** The sample-data doors that seed or purge under the caller's active organization. */
+type SampleDataDoor = 'install' | 'reseed' | 'purge';
+
+function noActiveOrganizationRefusal(door: SampleDataDoor): string {
+    const subject = door === 'purge' ? 'Purging sample data'
+        : door === 'reseed' ? 'Reseeding sample data'
+        : 'Seeding the sample data';
+    const consequence = door === 'purge'
+        ? 'there is no organization to remove its rows from'
+        : 'there is no organization to place its rows in';
+    const remedy = door === 'install'
+        ? 'The package itself is installed. Join or select an active organization, then reseed the sample data.'
+        : 'Join or select an active organization and retry.';
+    return `${subject} was refused: sample data is scoped to an organization, and this session has no active `
+        + `organization, so ${consequence}. ${remedy}`;
+}
+
 export interface MarketplaceInstallLocalPluginConfig {
     /** Cloud control-plane base URL. When unset, falls back to OS_CLOUD_URL
      *  and then to the public ObjectStack cloud so a fresh `objectstack dev`
@@ -1607,7 +1648,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   • The user wants a clean baseline back after editing demo rows
      *
      * Multi-tenant: requires an active organization on the session (same
-     * rule as install seed path).
+     * rule as install seed path). A walled session with none is refused with
+     * ADR-0123 D2 / D4's answer ({@link noActiveOrganizationRefusal}); the
+     * reseed's other declines (no seed datasets, no data engine or metadata
+     * service, a seed run that threw) stay `400 RESEED_SKIPPED`.
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
@@ -1627,7 +1671,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'reseed sample data');
         }
 
-        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c });
+        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c, door: 'reseed' });
+        // [ADR-0123 D2 / D4] A walled session with no active organization: the
+        // reseed is a tenant-scoped write with no organization to write under.
+        if (summary.seeded.mode === 'refused') {
+            return c.json({
+                success: false,
+                error: { code: NO_ACTIVE_ORGANIZATION_CODE, message: summary.seeded.reason },
+            }, NO_ACTIVE_ORGANIZATION_STATUS);
+        }
         if (summary.seeded.mode === 'skipped') {
             return c.json({
                 success: false,
@@ -1697,7 +1749,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   • Scope is the install's: under an organization wall, the caller's
      *     active organization (the same `organizationWallActive` +
      *     `resolveActiveOrgId` the install and reseed seed under), and a session
-     *     with none is answered the way reseed answers it. Without a wall the
+     *     with none is refused the way reseed refuses it: ADR-0123 D2 / D4's
+     *     `403 PERMISSION_DENIED` naming the missing active organization
+     *     ({@link noActiveOrganizationRefusal}). Without a wall the
      *     deployment is one logical tenant and the match is table-wide, as the
      *     loader's upsert match is.
      *   • Children are deleted before parents — the reverse of the loader's own
@@ -1759,12 +1813,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (!resolved) {
                 return c.json({
                     success: false,
-                    error: {
-                        code: 'RESEED_SKIPPED',
-                        message: 'Purge did not run: multi-tenant-no-active-org. A purge removes the sample rows of the '
-                            + "caller's active organization only, and this session has none — set an active organization and retry.",
-                    },
-                }, 400);
+                    error: { code: NO_ACTIVE_ORGANIZATION_CODE, message: noActiveOrganizationRefusal('purge') },
+                }, NO_ACTIVE_ORGANIZATION_STATUS);
             }
             organizationId = resolved;
         }
@@ -1990,7 +2040,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *        • single-tenant: run SeedLoaderService inline (mirrors
      *          AppPlugin single-tenant branch)
      *        • multi-tenant: invoke `seed-replayer` for the caller's
-     *          active org (resolved from the request session)
+     *          active org (resolved from the request session); a session
+     *          with none reports `mode: 'refused'`, ADR-0123 D2 / D4's
+     *          sentence for `opts.door` in `reason`, and seeds nothing
      *
      * Errors are logged but never thrown — install succeeds even if
      * post-register side-effects partially fail (the manifest itself is
@@ -2000,8 +2052,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private applySideEffects = async (
         ctx: PluginContext,
         manifest: any,
-        opts: { seedNow: boolean; c?: any },
-    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
+        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'> },
+    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
         const appId = String(manifest?.id ?? 'unknown');
         let translationsLoaded = 0;
         let seedSummary: any = { mode: 'skipped', reason: 'no-datasets' };
@@ -2110,8 +2162,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         const resolved = await this.resolveActiveOrgId(opts.c, ctx);
                         if (resolved) organizationId = resolved;
                         else {
-                            seedSummary = { mode: 'skipped', reason: 'multi-tenant-no-active-org' };
-                            ctx.logger?.warn?.('[MarketplaceInstallLocal] multi-tenant: no active org on request — data not seeded');
+                            // [ADR-0123 D2 / D4] Refused, not skipped: the rows are
+                            // tenant-scoped writes and this session names no tenant.
+                            const reason = noActiveOrganizationRefusal(opts.door ?? 'install');
+                            seedSummary = { mode: 'refused', reason };
+                            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: ${reason}`);
                         }
                     }
                     if (!multiTenant || organizationId) {
@@ -2182,8 +2237,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     /**
      * Best-effort active-org resolution. Reads the better-auth session directly
-     * and returns `session.activeOrganizationId`, falling back to the user's
-     * first org membership.
+     * and returns `session.activeOrganizationId`, or `null` when it has none.
+     *
+     * [ADR-0123 D1] `null` is an answer, not a gap to fill: "authenticated, with
+     * no active organization" is a declared state, and every caller of this read
+     * refuses the tenant-scoped write it would scope ({@link noActiveOrganizationRefusal}).
+     * ⛔ No membership fallback. Guessing from the user's memberships would be a
+     * fourth semantics for that state, and for a user in several organizations it
+     * would write into one the caller never chose. The fallback this once carried
+     * read an object no package defines, so it threw, was swallowed, and never
+     * answered once.
      *
      * ⚠️ [#8976] This is a SCOPING read, not an authorization one — which org's
      * rows a seed lands in, asked only after {@link requireInstallCapability}
@@ -2203,17 +2266,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const session = await api.getSession({ headers: c.req.raw.headers });
             const direct = session?.session?.activeOrganizationId ?? session?.activeOrganizationId ?? null;
             if (direct) return String(direct);
-            // Fall back to the user's first membership row.
-            const userId = session?.user?.id;
-            if (!userId) return null;
-            try {
-                const ql: any = ctx.getService('objectql');
-                if (ql?.find) {
-                    const rows = await ql.find('sys_organization_member', { where: { user_id: userId }, limit: 1, context: { isSystem: true } } as any);
-                    const row = Array.isArray(rows) ? rows[0] : (rows?.items?.[0] ?? null);
-                    return row?.organization_id ? String(row.organization_id) : null;
-                }
-            } catch { /* ignore */ }
         } catch { /* ignore */ }
         return null;
     };
