@@ -22,3 +22,4 @@ Clause-②: no (narrowing)
 
 - A user refused this way signs in with their existing method, then links the provider from account settings, or verifies their email first.
 - To let unverified local users link implicitly again, set `account.accountLinking.requireLocalEmailVerified: false`. Before you do, read the library's warning about account takeover.
+- If you pass `secondaryStorage`: verification values written to the cache alone before the upgrade (password-reset links, one-time codes, magic links and email-verification links that were in flight at deploy time) can no longer be consumed afterwards. Users who hit this request a fresh link or code once.
