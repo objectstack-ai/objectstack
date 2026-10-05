@@ -120,7 +120,13 @@ async function restartWith(manifests: Array<{ id: string; version: string }>, di
             reads.push(object);
             if (!objects.has(object)) throw new Error(`Object '${object}' not found`);
             const where: Record<string, unknown> = query?.where ?? {};
-            const rows = (tables[object] ?? []).filter((row) => Object.entries(where).every(([k, v]) => row[k] === v));
+            const rows = (tables[object] ?? []).filter((row) => Object.entries(where).every(([k, v]) => {
+                // Scalar equality only; anything else is refused, never guessed.
+                if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+                    throw new Error(`only scalar equality is implemented here (got '${k}')`);
+                }
+                return row[k] === v;
+            }));
             return (typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows).map((row) => ({ ...row }));
         },
     };
