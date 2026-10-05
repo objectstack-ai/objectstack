@@ -1474,15 +1474,19 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    node against at run time, so a flow carrying one used to register and
   //    then fail every run that reached the node (`loop` with a `body` and no
   //    `collection`, `map` with no `collection`, a CRUD node with no
-  //    `objectName`, …). Only ABSENCE is judged: a present value of the wrong
-  //    type, or an undeclared key, stays where it is judged today;
+  //    `objectName`, …). For a builtin only ABSENCE is judged: a present value
+  //    of the wrong type, or an undeclared key, stays where it is judged today.
+  //    The one plugin node contract the spec declares, `approval` (#21850), is
+  //    judged WHOLE — its executor refuses the node on any contract finding —
+  //    so its undeclared keys and refused values are refused here too;
   //  - a `decision` branch list the executor cannot read — `conditions` not an
   //    array, a branch that is not an object, and a branch whose `label` is
   //    absent, blank or not text. The last one never failed a run at all: the
   //    matched branch reported no label, and traversal took EVERY out-edge.
   //
-  // A PRESENCE rule, never a key-set closure: the node `config` stays the open
-  // record the header of this module describes. Walked with
+  // A PRESENCE rule for a builtin, never a key-set closure: the node `config`
+  // stays the open record the header of this module describes, and only the
+  // approval node's declared contract closes its key set. Walked with
   // `collectFlowGraphs`, so a node inside an ADR-0031 region body is judged at
   // the path the author wrote; a container's own judgement skips its regions'
   // insides, which this same walk reaches as graphs of their own.

@@ -50,6 +50,9 @@ const pausingNode = (type: string, id = 'pauser'): FlowNode => ({
   ...(type === 'wait' ? { waitEventConfig: { eventType: 'timer' as const, timerDuration: 'PT1H' } } : {}),
   ...(type === 'map' ? { config: { collection: '{items}', flowName: 'per_item' } } : {}),
   ...(type === 'subflow' ? { config: { flowName: 'child' } } : {}),
+  // The approval node's declared contract is judged whole at parse, so its
+  // fixture carries the one key that contract requires.
+  ...(type === 'approval' ? { config: { approvers: [{ type: 'user', value: 'u1' }] } } : {}),
 });
 
 const step = (id: string): FlowNode => ({ id, type: 'assignment', label: id });

@@ -287,9 +287,16 @@ describe('SecurityPlugin', () => {
     // `ql.findOne(object, { where: { $and: [{ id }, writeFilter] }, … })`.
     // `findOneImpl` lets a test decide whether that row is "visible" (owned /
     // in-tenant) or filtered out (someone else's row → null → deny).
-    const findOne = vi.fn(async (_object: string, query: any) =>
-      overrides.findOneImpl ? overrides.findOneImpl(query) : null,
-    );
+    // [#21829] With `find` beside it this is an engine double, so its `findOne`
+    // refuses what the real engine refuses (`check:engine-double-contract`).
+    const findOne = vi.fn(async (object: string, query: any) => {
+      assertEngineFindOnePredicate(object, query as EngineFindOneQueryInput);
+      return overrides.findOneImpl ? overrides.findOneImpl(query) : null;
+    });
+    // [#21829] A predicate update or delete asks the read door which matched
+    // rows the caller can read, and a `ql` that cannot answer refuses the
+    // write. This double holds no rows, so the read answers none.
+    const find = vi.fn(async (_object: string, _query: any) => [] as Record<string, unknown>[]);
     const ql = {
       registerMiddleware: (mw: any) => {
         // Capture only the FIRST middleware (the security CRUD one);
@@ -299,6 +306,7 @@ describe('SecurityPlugin', () => {
       },
       getSchema: () => baseSchema,
       findOne,
+      find,
     };
     const metadata = {
       get: async () => baseSchema,

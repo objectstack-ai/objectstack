@@ -289,21 +289,33 @@ function activityTypeFor(action: 'create' | 'update' | 'delete'): 'created' | 'u
 }
 
 /**
- * Compute the human-readable record label from a record by trying common
- * label fields. Falls back to record id.
+ * The human-readable record label: the value of the object's TITLE field, with
+ * the record id as the floor.
+ *
+ * [#21878] Which field that is, is not decided here. The caller hands in the
+ * field ADR-0079's resolver answered for the object (`titleFieldOf` in the
+ * writer factory, the same answer referenced-record titles use), so the label
+ * an activity row records names the field every renderer titles the record by.
+ * An object titled by a field no fixed key list anticipated (`company_name`)
+ * gets its title rather than its id; an empty title value gets the id, never a
+ * guess at some other field.
  *
  * [#21081] Also answers WHICH field the label was read from (`null` for the id
- * fallback), so the activity row can declare it: the label is a field value,
- * and the read side serves it only to a reader served that field.
+ * floor), so the activity row can declare it: the label is a field value, and
+ * the read side serves it only to a reader served that field.
  */
-function recordLabel(record: any, id: string): { text: string; field: string | null } {
-  if (!record || typeof record !== 'object') return { text: id, field: null };
-  const candidates = ['name', 'subject', 'title', 'full_name', 'label', 'first_name', 'company', 'email'];
-  for (const k of candidates) {
-    const v = record[k];
-    if (typeof v === 'string' && v.trim()) return { text: v.trim(), field: k };
-  }
-  return { text: id, field: null };
+function recordLabel(
+  record: any,
+  titleField: string | undefined,
+  id: string,
+): { text: string; field: string | null } {
+  if (!titleField || !record || typeof record !== 'object') return { text: id, field: null };
+  const value = record[titleField];
+  // A structured value has no text face; it floors to the id rather than
+  // rendering as a serialised object.
+  if (value === null || value === undefined || typeof value === 'object') return { text: id, field: null };
+  const text = String(value).trim();
+  return text ? { text, field: titleField } : { text: id, field: null };
 }
 
 /**
@@ -1210,6 +1222,32 @@ export function installAuditWriters(
     return def;
   };
 
+  /**
+   * [#7230, #21878] The field whose value titles a record of `objectName` in
+   * an activity row — ADR-0079's `resolveDisplayField` over the registered
+   * definition, or `undefined` when the row must name the record by its id.
+   *
+   * ONE answer for both places a title is written: the record's own label
+   * (`recordLabel`) and a referenced record's title inside a summary
+   * (`resolveLookupTitles`). Three answers floor to the id:
+   *
+   *  - nothing resolves, or the resolver lands on the primary key itself (a
+   *    title-less object is designated `id`);
+   *  - the title field is a credential (`collectMaskedReadFields`, the
+   *    predicate `ledgerView` masks with): an explicit `nameField` is honoured
+   *    even at a title-INELIGIBLE type, and a masked value is no title;
+   *  - [#21197] the title field is declared `internal`, which `ledgerView`
+   *    omits by the same declaration.
+   */
+  const titleFieldOf = (objectName: string): string | undefined => {
+    const def = getObjectDef(objectName);
+    const titleField = resolveDisplayField(def as any);
+    if (!titleField || titleField === 'id') return undefined;
+    if (collectMaskedReadFields(def).includes(titleField)) return undefined;
+    if (collectInternalReadFields(def).includes(titleField)) return undefined;
+    return titleField;
+  };
+
   // [commit 1408fe385 / #10101] The object's own organization COLUMN and value, through
   // the SHARED platform-row resolver (`@objectstack/metadata-core`) — one
   // memoized instance per installation, the same instance shape the approval
@@ -1285,7 +1323,10 @@ export function installAuditWriters(
    * rather than trusted to mask downstream: `collectMaskedReadFields` is the
    * same contract predicate `ledgerView` masks with, so "no credential value
    * reaches a user-facing activity summary" holds on this path by the same
-   * definition, not by a second one.
+   * definition, not by a second one. [#21197] An `internal` title column is
+   * withheld the same way, by the declaration rather than by the engine strip
+   * happening to answer `undefined`. Both skips live in {@link titleFieldOf},
+   * which the record's own label asks too.
    *
    * Best-effort throughout: an unregistered object, an unreadable row or a
    * failing driver leaves the id unresolved, and `displayFieldValue` renders the
@@ -1299,14 +1340,8 @@ export function installAuditWriters(
     const sys = api.sudo();
     const out = new Map<string, Map<string, string>>();
     for (const [objectName, idSet] of plan) {
-      const def = getObjectDef(objectName);
-      const titleField = resolveDisplayField(def as any);
-      if (!titleField || titleField === 'id') continue;
-      if (collectMaskedReadFields(def).includes(titleField)) continue;
-      // [#21197] Same composition `ledgerView` records by: an `internal` title
-      // column is withheld here too, by the declaration rather than by the
-      // engine strip happening to answer `undefined`.
-      if (collectInternalReadFields(def).includes(titleField)) continue;
+      const titleField = titleFieldOf(objectName);
+      if (!titleField) continue;
       const ids = Array.from(idSet);
       try {
         const rows: any[] = await sys.object(objectName).find({
@@ -1723,14 +1758,17 @@ export function installAuditWriters(
       });
     }
 
-    // [#6656] Masked, but computed fields KEPT: `recordLabel` reads
-    // `name`/`title`/… and an object whose label field is a formula would
+    // [#6656] Masked, but computed fields KEPT: `recordLabel` reads the
+    // object's title field, and an object titled by a text formula would
     // otherwise degrade to the bare id (#5504 names that exact symptom). The
     // mask still applies, so no credential value can reach a user-facing
     // activity summary through the label.
+    // [#21878] The title field is ADR-0079's answer for the object — the field
+    // every renderer titles this record by — not a guess from a key list.
     const { text: label, field: labelField } = recordLabel(
       ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType }) ??
         ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType }),
+      titleFieldOf(ctx.object),
       recordId ?? '',
     );
     // [#21081] Which parent fields each text column carries a value of — the
