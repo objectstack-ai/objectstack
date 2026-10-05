@@ -287,7 +287,7 @@ describe('IDataDriver', () => {
   // unused directive is itself an error, so `pnpm --filter @objectstack/spec
   // typecheck` goes red on regression in either direction.
 
-  describe('introspectSchema (#11493)', () => {
+  describe('introspectSchema — an optional driver member at the spec shape', () => {
     /** The declared return type, read off the CONTRACT rather than re-spelled. */
     type DriverIntrospection = Awaited<ReturnType<NonNullable<IDataDriver['introspectSchema']>>>;
 

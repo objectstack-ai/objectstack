@@ -180,7 +180,7 @@ describe('HTTP Server Contract', () => {
       await expect(server.close!()).resolves.toBeUndefined();
     });
 
-    describe('optional setFallbackHandler (#5040 E1)', () => {
+    describe('optional setFallbackHandler — a not-found hook, not a wildcard route', () => {
       /** A server with only the REQUIRED members. */
       const baseServer = (): IHttpServer => ({
         get: () => {},
@@ -313,7 +313,7 @@ describe('HTTP Server Contract', () => {
       });
     });
 
-    describe('optional afterResponse (#9835)', () => {
+    describe('optional afterResponse — a transport-agnostic response observer', () => {
       /** A server with only the REQUIRED members. */
       const baseServer = (): IHttpServer => ({
         get: () => {},
@@ -344,7 +344,7 @@ describe('HTTP Server Contract', () => {
         expect(typeof server.afterResponse).toBe('function');
       });
 
-      it('a delegating wrapper that forwards only required members ERASES detection (#5122 shape)', () => {
+      it('a delegating wrapper that forwards only required members ERASES detection', () => {
         const underlying: IHttpServer = {
           ...baseServer(),
           afterResponse: (_observer) => {},

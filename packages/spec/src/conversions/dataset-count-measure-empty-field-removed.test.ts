@@ -48,7 +48,7 @@ function fieldIssuePaths(row: unknown): string[] {
   return r.success ? [] : r.error.issues.map((i) => i.path.join('.')).filter((p) => p.endsWith('field'));
 }
 
-describe('[#21220] dataset-count-measure-empty-field-removed (ADR-0087 D2)', () => {
+describe('dataset-count-measure-empty-field-removed (ADR-0087 D2)', () => {
   it('is registered for protocol 18, retired from the authoring load path, and linked from its D3 entry', () => {
     const entry = ALL_CONVERSIONS.find((c) => c.id === ID);
     expect(entry, 'the conversion is registered').toBeDefined();

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from './app-plugin';
 import { PluginContext } from '@objectstack/core';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
+import { ProtocolIncompatibleError, isProtocolIncompatibleError } from '@objectstack/metadata-core';
 
 describe('AppPlugin', () => {
     let mockContext: PluginContext;
@@ -496,6 +497,30 @@ describe('AppPlugin', () => {
                     migrateCommand: `objectstack migrate meta --from ${PROTOCOL_MAJOR - 5}`,
                 }),
             });
+            expect(mockManifest.register).not.toHaveBeenCalled();
+        });
+
+        it('[#21727] the boot seam throws the same ProtocolIncompatibleError, declaring 422', async () => {
+            // The one other caller of `assertProtocolCompat` has no HTTP
+            // answer, so its THROWN VALUE is the boundary. It must be the
+            // class the packages door recognises (by brand) and must carry the
+            // declared 422, so any caller that resolves it answers the
+            // caller-fault status rather than the 500 fallback.
+            const plugin = new AppPlugin({
+                manifest: {
+                    id: 'com.test.stale422',
+                    version: '1.0.0',
+                    engines: { protocol: `^${PROTOCOL_MAJOR - 1}` },
+                },
+                objects: [],
+            });
+            const thrown = await plugin.init(mockContext).then(
+                () => { throw new Error('expected AppPlugin.init to refuse'); },
+                (e: unknown) => e,
+            );
+            expect(thrown).toBeInstanceOf(ProtocolIncompatibleError);
+            expect(isProtocolIncompatibleError(thrown)).toBe(true);
+            expect(thrown).toMatchObject({ code: 'OS_PROTOCOL_INCOMPATIBLE', status: 422, statusCode: 422 });
             expect(mockManifest.register).not.toHaveBeenCalled();
         });
 

@@ -52,7 +52,7 @@ function replayStored(page: Record<string, unknown>) {
   };
 }
 
-describe('[#21005] action-block-endpoint-to-target (ADR-0087 D2)', () => {
+describe('action-block-endpoint-to-target (ADR-0087 D2)', () => {
   it('is registered for protocol 18 and retired from the authoring load path', () => {
     const entry = ALL_CONVERSIONS.find((c) => c.id === ID);
     expect(entry, 'the conversion is registered').toBeDefined();

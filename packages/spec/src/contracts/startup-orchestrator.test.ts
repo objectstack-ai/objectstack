@@ -34,7 +34,7 @@ describe('Startup Orchestrator Contract — the surviving result shape', () => {
     expect(result.durationMs).toBeUndefined();
   });
 
-  it('types a timed-out startup with a SERIALIZABLE error (#4538)', () => {
+  it('types a timed-out startup with a SERIALIZABLE error', () => {
     const result: PluginStartupResult = {
       pluginName: 'broken-plugin',
       success: false,
@@ -67,7 +67,7 @@ describe('Startup Orchestrator Contract — the surviving result shape', () => {
     expect(result.error!.name).toBe('Error');
   });
 
-  it('is the SAME declaration the kernel entry exports (#4538)', () => {
+  it('is the SAME declaration the kernel entry exports', () => {
     const value: PluginStartupResult = { pluginName: 'x', success: true };
     const parsed = PluginStartupResultSchema.safeParse(value);
     expect(parsed.success).toBe(true);

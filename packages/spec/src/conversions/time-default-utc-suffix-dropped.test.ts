@@ -41,7 +41,7 @@ function defaultValueIssuePaths(row: unknown): string[] {
   return r.success ? [] : r.error.issues.map((i) => i.path.join('.')).filter((p) => p.endsWith('defaultValue'));
 }
 
-describe('[#20740] time-default-utc-suffix-dropped (ADR-0087 D2)', () => {
+describe('time-default-utc-suffix-dropped (ADR-0087 D2)', () => {
   it('is registered for protocol 18 and retired from the authoring load path', () => {
     const entry = ALL_CONVERSIONS.find((c) => c.id === ID);
     expect(entry, 'the conversion is registered').toBeDefined();

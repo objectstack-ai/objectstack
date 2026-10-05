@@ -46,7 +46,7 @@ export const contextSupplyingSubject: AutomationContext = {
 // @ts-expect-error — a per-key boolean map is not the shape: the key lists names.
 export const contextWithAMap: AutomationContext = { params: { subject: 'x' }, callerParamKeys: { subject: true } };
 
-describe('[#19846] AutomationContext.callerParamKeys', () => {
+describe('AutomationContext.callerParamKeys — the keys the caller supplied', () => {
   it('reads back absent, empty and populated as three different values', () => {
     expect('callerParamKeys' in contextWithoutTheKey).toBe(false);
     expect(contextSupplyingNothing.callerParamKeys).toEqual([]);

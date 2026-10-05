@@ -302,7 +302,7 @@ describe('Automation Service Contract', () => {
   // `verb(runId)` shorthand), and their docblocks carry the ruling's
   // persistent-face statement. The type-level identities are the exported
   // aliases above the suite; the compile of the literals below is the rest.
-  describe('[#16495] cancelRun / restoreConsumedSuspension — the operator verbs, declared', () => {
+  describe('cancelRun / restoreConsumedSuspension — the operator verbs, declared', () => {
     it('are optional: the minimal implementation still conforms and has no operator door', () => {
       const service: IAutomationService = {
         execute: async () => ({ success: true }),
@@ -419,7 +419,7 @@ describe('Automation Service Contract', () => {
  * passes these rows to Studio verbatim, so a shape with no reason field made a
  * policy-disabled flow indistinguishable from a broken binding on the wire.
  */
-describe('FlowRuntimeState — the unbound reason (#18235)', () => {
+describe('FlowRuntimeState — carries the reason a flow is unbound', () => {
   it('a row that explains itself and one that does not both satisfy the contract', () => {
     // PROBE: the reason-carrying row, in the shape the engine emits for a flow
     // the deployment switch refused.

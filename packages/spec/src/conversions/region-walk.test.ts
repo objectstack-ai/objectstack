@@ -24,7 +24,7 @@ const httpNode = (id: string) => ({ id, type: 'http', label: id, config: { url: 
 
 const region = (...nodes: unknown[]) => ({ nodes, edges: [] });
 
-describe('#4347 — conversions reach nodes inside structured regions', () => {
+describe('conversions reach nodes inside structured regions', () => {
   it('converts a node in a `loop` body exactly as it converts its top-level twin', () => {
     const { stack, notices } = collectConversionNotices({
       flows: [{
@@ -151,7 +151,7 @@ describe('#4347 — conversions reach nodes inside structured regions', () => {
   });
 });
 
-describe('#4347 — the region walk stays copy-on-write and shape-gated', () => {
+describe('the region walk stays copy-on-write and shape-gated', () => {
   it('returns the identical reference when nothing inside a region converts', () => {
     const clean = {
       flows: [{
@@ -222,7 +222,7 @@ describe('#4347 — the region walk stays copy-on-write and shape-gated', () => 
  * covers every declared container, so a fourth construct added to the shared
  * table cannot land while the conversion pass keeps skipping it.
  */
-describe('#4401 — the conversion walk descends into every declared container', () => {
+describe('the conversion walk descends into every declared container', () => {
   it('reaches a region node under each container type in the shared table', () => {
     for (const nodeType of FLOW_REGION_SLOTS_BY_TYPE.keys()) {
       for (const { key, arity } of FLOW_REGION_SLOTS_BY_TYPE.get(nodeType)!) {
