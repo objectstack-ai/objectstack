@@ -101,7 +101,7 @@ describe('DriverCapabilitiesSchema', () => {
 // Retired capability bits (#4634, ADR-0049 enforce-or-remove)
 // ===========================================================================
 
-describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', () => {
+describe('the 31 inert capability bits are tombstoned, not stripped', () => {
   it.each(RETIRED_BITS)('REJECTS an authored `%s`, with the prescription in the message', (bit) => {
     const value = bit === 'isolationLevels' ? ['read-committed'] : true;
     expect(() => DriverCapabilitiesSchema.parse({ [bit]: value })).toThrow(
@@ -109,7 +109,7 @@ describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', ()
     );
   });
 
-  it('the streaming prescription carries the #4484 findStream story and the paged-find fix', () => {
+  it('the streaming prescription names the removed findStream and the paged-find fix', () => {
     expect(() => DriverCapabilitiesSchema.parse({ streaming: true })).toThrow(
       /DriverCapabilities\.streaming.*removed.*findStream.*`find\(\)` with `limit`\/`offset`.*Delete the key/s,
     );
@@ -163,7 +163,7 @@ describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', ()
 // so the load-bearing tsc-channel proof is the compiler-API test below, with
 // anti-vacuity guards; sabotage-verified in the PR (S1: re-adding a live
 // `streaming: z.boolean()` turns it red).
-describe('[#4634] tsc channel: the retired bits are unwritable in DriverCapabilities', () => {
+describe('tsc channel: the retired bits are unwritable in DriverCapabilities', () => {
   it('types every retired bit as authored-unwritable and every live bit as writable', async () => {
     const ts = (await import('typescript')).default;
     const { resolve, dirname } = await import('node:path');
@@ -396,7 +396,7 @@ describe('DriverInterfaceSchema', () => {
 // else; the unit now lives in the key name. Tombstoned (the shape is not
 // strict, so a bare deletion would strip the old key in silence) and
 // registered as `data/DriverOptions:timeout` under protocol 18.
-describe('DriverOptions.timeout → DriverOptions.timeoutMs (#14478)', () => {
+describe('DriverOptions.timeout → DriverOptions.timeoutMs: the key carries its unit', () => {
   it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
     const result = DriverOptionsSchema.safeParse({ timeout: 5000 });
     expect(result.success).toBe(false);
@@ -425,7 +425,7 @@ describe('DriverOptions.timeout → DriverOptions.timeoutMs (#14478)', () => {
 // [#18063] driverSupportsTransactions — the one definition of the gate
 // ===========================================================================
 
-describe('[#18063] driverSupportsTransactions', () => {
+describe('driverSupportsTransactions — a driver that cannot honour transactions says so', () => {
   const withMethod = { beginTransaction: async () => ({}) };
 
   it('is false for a driver with no beginTransaction — the pre-existing gate, unchanged', () => {

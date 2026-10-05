@@ -22,7 +22,7 @@ import {
 } from './default-value-shape';
 import { DEFAULT_VALUE_TOKENS } from './default-value-tokens';
 
-describe('#7127 discriminateDefaultValueShape — engine-parity classification', () => {
+describe('discriminateDefaultValueShape — engine-parity classification', () => {
   const CASES: Array<{ label: string; dv: unknown; shape: DefaultValueShape }> = [
     // ── Expression envelopes: the engine's structural predicate, verbatim ────
     { label: 'canonical CEL envelope', dv: { dialect: 'cel', source: 'today()' }, shape: 'expression' },
@@ -87,7 +87,7 @@ describe('#7127 discriminateDefaultValueShape — engine-parity classification',
   });
 });
 
-describe('#7127 checkLiteralDefaultValue — the shared stored-form literal check', () => {
+describe('checkLiteralDefaultValue — the shared stored-form literal check', () => {
   it('refuses a literal that cannot satisfy the stored contract, with the contract\'s own detail', () => {
     const v = checkLiteralDefaultValue({ type: 'number' }, 'abc');
     expect(v.ok).toBe(false);
@@ -130,7 +130,7 @@ describe('#7127 checkLiteralDefaultValue — the shared stored-form literal chec
   // also be wrong. Each case below asserts BOTH halves: the prescription is
   // present, AND the half that was being shown instead is gone. Without the
   // second the pin cannot see a regression back to the positional read.
-  it('#16077 prefers the rename over a MISSING-member type error (location)', () => {
+  it('prefers the rename over a MISSING-member type error (location)', () => {
     const v = checkLiteralDefaultValue({ type: 'location' }, { latitude: 1, longitude: 2 });
     expect(v.ok).toBe(false);
     // Positionally this rejection reads
@@ -148,7 +148,7 @@ describe('#7127 checkLiteralDefaultValue — the shared stored-form literal chec
     // discarding it cost the author the whole thing.
   });
 
-  it('#16077 prefers the rename over a WRONG-TYPED-member error (address)', () => {
+  it('prefers the rename over a WRONG-TYPED-member error (address)', () => {
     const v = checkLiteralDefaultValue({ type: 'address' }, { street: 5, postal_code: '98101' });
     expect(v.ok).toBe(false);
     // Every member of `address` is optional, which rules out a MISSING-member
@@ -158,7 +158,7 @@ describe('#7127 checkLiteralDefaultValue — the shared stored-form literal chec
     expect(v.detail).not.toContain('expected string, received number');
   });
 
-  it('#16077 leaves the already-correct case exactly as it was (the asymmetry is gone)', () => {
+  it('leaves the already-correct case exactly as it was (the asymmetry is gone)', () => {
     // No member error to sort ahead, so this one was always right. Pinning it
     // beside the two above is what states the property: the diagnosis no
     // longer depends on whether an unrelated member happened to also be wrong.
@@ -169,7 +169,7 @@ describe('#7127 checkLiteralDefaultValue — the shared stored-form literal chec
     expect(unlucky.detail).toContain('`postal_code` \u2192 `postalCode`');
   });
 
-  it('#16077 is a NO-OP for a class that cannot emit `unrecognized_keys`', () => {
+  it('the rename preference is a NO-OP for a class that cannot emit `unrecognized_keys`', () => {
     // The sweep over all sixteen classes `valueSchemaFor(def, 'stored')`
     // covers found only `location` and `address` backed by a `strictObject`,
     // so only they can emit the issue the preference looks for. For the other

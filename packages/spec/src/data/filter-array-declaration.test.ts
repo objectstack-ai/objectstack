@@ -139,7 +139,7 @@ describe('FilterArray is INPUT-ONLY — it is not part of the wire contract', ()
   it('a query `where` does NOT accept the array dialect', () => {
     for (const { label, value } of PRODUCED) {
       const result = QuerySchema.safeParse({ object: 'showcase_project', where: value });
-      expect(result.success, `where accepted a FilterArray (${label}) — see #5158`).toBe(false);
+      expect(result.success, `where accepted a FilterArray (${label}) — the array form is input-only sugar, lowered before any driver sees it`).toBe(false);
     }
   });
 
@@ -230,7 +230,7 @@ describe('the authoring gate is stricter than the runtime detector, in exactly t
  * this declaration adds. A green `pnpm test` is still not evidence for this
  * block; `pnpm typecheck` now is.
  */
-describe('FilterArray type-level declaration (type-checked since #5286 — see above)', () => {
+describe('FilterArray type-level declaration (type-checked since the test layer got its own tsc program — see above)', () => {
   it('narrows the operator position to the canonical vocabulary', () => {
     const canonical: FilterArrayOperator = 'starts_with';
     const comparison: FilterArray = ['name', canonical, 'A'];

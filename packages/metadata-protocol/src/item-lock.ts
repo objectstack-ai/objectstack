@@ -11,8 +11,10 @@
  *  - Both item reads' protection envelope (`getMetaItem`,
  *    `getMetaItemLayered`, through `servedLockState`) and the per-type
  *    `locked` count of `getMetaDiagnostics` call {@link resolveItemLock}.
- *  - The lock family a served body carries (`mergeArtifactProtection`) calls
- *    it too, so a body never states a lock the envelope does not report.
+ *  - The lock family a served body carries is that resolution's answer
+ *    ({@link withItemLockFamily}, through `mergeArtifactProtection` and the
+ *    layered read's `effective`), so a body never states a lock the envelope
+ *    does not report.
  *
  * Before this module the reads took their lock from two derivations of their
  * own, and neither was the door's:
@@ -76,8 +78,54 @@
  *    across the rows in scope. The served document is still the row the
  *    address prefers, and its lock family is the binding layer's.
  *
- * ⛔ Not a policy of its own. Which artifact a caller hands the `artifact`
- * layer is still the caller's lookup.
+ * ## [#21803] The artifact layer is every installed package that ships the name
+ *
+ * The `artifact` layer is not an artifact a caller picks either. Two installed
+ * code packages may ship one `(type, name)` (ADR-0048 §3.4), and before this
+ * rule the `_lock` gate looked the artifact up with no package (the first
+ * package registered) while both reads looked it up with the request's
+ * package (prefer-local). One item had two lock answers, and which one the
+ * door gave depended on registration order: with package B shipping
+ * `_lock: 'full'` and package A shipping no lock, a read naming A reported
+ * `'none'` while the door refused (B registered first), and a read naming B
+ * reported `'full'` while the door admitted (A registered first).
+ *
+ * Every caller now hands {@link resolveArtifactLockLayer} the item's address
+ * and a reader of every artifact the installed packages ship under the name,
+ * and gets the layer: those artifacts, the address's own package first. The
+ * resolution then reads the layers once per shipping package and takes the
+ * strictest answer:
+ *
+ *  - **Per package, the rule above.** Each package's artifact over the
+ *    overlay layer, first binding layer wins, so a package's answer is
+ *    exactly what the door gave when that package's artifact was the one it
+ *    looked up.
+ *  - **The lock is the strictest of those answers** ({@link strictestLock}).
+ *    So the lock is never looser than the door's answer under ANY
+ *    registration order, and it no longer depends on one. Taking the
+ *    strictest artifact alone, and then the first binding layer, would not
+ *    hold that: with A shipping no lock, B shipping `'no-delete'` and the
+ *    stored row declaring `'no-overlay'`, the door refused the save when A was
+ *    registered first (A's artifact does not bind, the row does), and B's
+ *    `'no-delete'` binding as the whole artifact layer would admit it.
+ *  - **Prose** is the answer of the first package, in the layer's order,
+ *    whose answer is the strictest one: the address's own package, then the
+ *    others by package id, so it does not depend on registration order
+ *    either. When no single package's answer is the strictest (one refuses
+ *    the write, another the delete), the lock carries no prose and no layer.
+ *  - **Content stays prefer-local** (ADR-0048). The served document and its
+ *    provenance are still the address's own package's artifact.
+ *
+ * With one package shipping the name, or none, the answer is exactly what it
+ * was: one per-package answer is the strictest of one.
+ *
+ * ## The served body carries the resolution's answer
+ *
+ * {@link withItemLockFamily} writes the answer's lock family onto a served
+ * body and removes any `_lock*` key the answer does not carry. A body is often
+ * not the document a layer binds from (the address's own package's artifact,
+ * a row served by content precedence outside the lock's scope), so a family
+ * left in place could state a lock the envelope does not report.
  */
 import {
     MetadataLockSchema,
@@ -91,8 +139,10 @@ import {
 /**
  * The layers an item's lock can come from, in precedence order:
  *
- *  - `artifact`: the item a code package's loader registered (ADR-0010 §3.3,
- *    "an overlay cannot loosen a packaged lock");
+ *  - `artifact`: the items the code packages' loaders registered (ADR-0010
+ *    §3.3, "an overlay cannot loosen a packaged lock"), one per installed
+ *    package that ships the name, as {@link resolveArtifactLockLayer} selects
+ *    them from the item's address;
  *  - `overlay`: the stored `sys_metadata` rows in the item's scope (ADR-0005),
  *    as {@link resolveOverlayLockLayer} selects them from the item's address.
  */
@@ -101,8 +151,18 @@ export const ITEM_LOCK_LAYERS = Object.freeze(['artifact', 'overlay'] as const);
 /** One of {@link ITEM_LOCK_LAYERS}. */
 export type ItemLockLayer = (typeof ITEM_LOCK_LAYERS)[number];
 
-/** Per layer, the document that layer contributes, or `undefined` when it has none. */
-export type ItemLockLayers = { readonly [L in ItemLockLayer]: unknown };
+/**
+ * Per layer, what that layer contributes:
+ *
+ *  - `artifact`: [#21803] the artifact of every installed package that ships
+ *    the item, in {@link resolveArtifactLockLayer}'s order (empty when none
+ *    does);
+ *  - `overlay`: the overlay layer's document, or `undefined` when it has none.
+ */
+export type ItemLockLayers = {
+    readonly artifact: readonly unknown[];
+    readonly overlay: unknown;
+} & { readonly [L in ItemLockLayer]: unknown };
 
 /** The resolution's answer. */
 export interface ItemLock {
@@ -127,12 +187,25 @@ const UNLOCKED: ItemLock = Object.freeze({
 });
 
 /**
- * Resolve the item's lock from the documents its layers contribute.
- * See this module's header for the rule.
+ * Resolve the item's lock from what its layers contribute. See this module's
+ * header for the rule: per shipping package, the first layer whose declared
+ * `_lock` is not `'none'` binds; [#21803] the item's lock is the strictest of
+ * those answers.
  */
 export function resolveItemLock(layers: ItemLockLayers): ItemLock {
+    const shipped: readonly unknown[] = layers.artifact.length > 0 ? layers.artifact : [undefined];
+    const perPackage = shipped.map((artifact) => firstBindingLayer({ artifact, overlay: layers.overlay }));
+    const lock = strictestLock(perPackage.map((answer) => answer.lock));
+    if (lock === 'none') return UNLOCKED;
+    // The first package, in the layer's order, whose answer is the strictest.
+    // None is when the strictest joins two answers that refuse different verbs.
+    return perPackage.find((answer) => answer.lock === lock) ?? { ...UNLOCKED, lock };
+}
+
+/** The rule for ONE package's artifact over the overlay layer: the first binding layer. */
+function firstBindingLayer(documents: { readonly [L in ItemLockLayer]: unknown }): ItemLock {
     for (const layer of ITEM_LOCK_LAYERS) {
-        const declared = extractProtection(layers[layer]);
+        const declared = extractProtection(documents[layer]);
         if (declared.lock !== 'none') {
             return {
                 lock: declared.lock,
@@ -147,25 +220,26 @@ export function resolveItemLock(layers: ItemLockLayers): ItemLock {
 }
 
 /**
- * {@link resolveItemLock}, reading each layer only when no layer above it
- * binds. The answer is the same; what this saves is the reads below a binding
- * layer. The write doors use it, so a packaged lock is answered without a
- * `sys_metadata` read, and a store that cannot be read never turns a packaged
- * lock's `ITEM_LOCKED` into a 503.
+ * {@link resolveItemLock}, reading the `overlay` layer only when it can bind
+ * for some shipping package: when no package ships the item, or one of them
+ * ships an artifact that declares no lock. The answer is the same; what this
+ * saves is the `sys_metadata` read when every shipping package's own lock
+ * binds. The write doors use it, so such a packaged lock is answered without a
+ * store read, and a store that cannot be read never turns its `ITEM_LOCKED`
+ * into a 503.
  *
  * A reader's failure propagates: each caller owns its #5532 / #5706
  * discrimination.
  */
 export async function resolveItemLockLazily(read: {
-    readonly [L in ItemLockLayer]: () => unknown | Promise<unknown>;
+    readonly artifact: () => readonly unknown[] | Promise<readonly unknown[]>;
+    readonly overlay: () => unknown | Promise<unknown>;
 }): Promise<ItemLock> {
-    const layers = Object.fromEntries(ITEM_LOCK_LAYERS.map((layer) => [layer, undefined])) as Record<ItemLockLayer, unknown>;
-    for (const layer of ITEM_LOCK_LAYERS) {
-        layers[layer] = await read[layer]();
-        const answer = resolveItemLock(layers);
-        if (answer.layer !== undefined) return answer;
-    }
-    return UNLOCKED;
+    const artifact = await read.artifact();
+    const everyPackageBinds = artifact.length > 0
+        && artifact.every((document) => extractProtection(document).lock !== 'none');
+    if (everyPackageBinds) return resolveItemLock({ artifact, overlay: undefined });
+    return resolveItemLock({ artifact, overlay: await read.overlay() });
 }
 
 // ── [#21761] The overlay layer, selected from the item's address ─────────────
@@ -313,20 +387,60 @@ function strictestRowLockDocument(rows: readonly StoredOverlayRow[], packageId: 
     return family;
 }
 
+// ── [#21803] The artifact layer, selected from the item's address ────────────
+
 /**
- * [#21761] `document` with the lock family of the `overlay` layer
- * ({@link resolveOverlayLockLayer}) when that layer binds, so a served body
- * states the lock the envelope reports even when the rows in scope that bind
- * are not the row the body was served from. A key that layer's document does
- * not declare is removed. Returns `document` itself when the overlay layer does
- * not bind or nothing changes (the binding row is the served row), and a copy
- * otherwise. The `artifact` layer's family is `mergeArtifactProtection`'s to
- * put, as before.
+ * Every artifact the installed code packages registered under the addressed
+ * item's name: one per package that ships it, whichever package that is. Each
+ * caller reads its own registry; the protocol's reader is
+ * `ObjectStackProtocolImplementation.shippedArtifactsOf`.
  */
-export function withOverlayLockFamily(document: unknown, layers: ItemLockLayers): unknown {
+export type ShippedArtifactReader = () => readonly unknown[];
+
+/**
+ * [#21803] THE artifact layer's selection. What the `artifact` layer of
+ * {@link resolveItemLock} gets for `address`: every artifact `artifactsOf`
+ * reads, each once, the address's own package's first, then the others by
+ * package id, so the order (and with it the prose of the answer) does not
+ * depend on registration order. See this module's header for the rule.
+ *
+ * Every caller that enforces or reports an item's lock passes its address
+ * here: the `_lock` gate, both item reads, the list and the diagnostics tile.
+ * `packageId` orders the layer; it never decides which packages are in it.
+ */
+export function resolveArtifactLockLayer(address: ItemAddress, artifactsOf: ShippedArtifactReader): readonly unknown[] {
+    const shipped = [...new Set(artifactsOf())].filter((artifact) => artifact !== undefined && artifact !== null);
+    const packageOf = (artifact: unknown): string => {
+        const id = (artifact as { _packageId?: unknown })._packageId;
+        return typeof id === 'string' ? id : '';
+    };
+    const rank = (artifact: unknown): number =>
+        address.packageId !== undefined && packageOf(artifact) === address.packageId ? 0 : 1;
+    // `sort` is stable: one package's two entries keep the reader's order.
+    return shipped.sort((a, b) => rank(a) - rank(b) || packageOf(a).localeCompare(packageOf(b)));
+}
+
+/**
+ * [#21761, #21803] `document` carrying the lock family of `itemLock`, the
+ * one item-lock resolution's answer: `_lock` and the prose the answer carries,
+ * and no `_lock*` key it does not. So a served body states exactly the lock the
+ * envelope reports, whichever document it was served from: a row the address
+ * prefers for content while other rows in scope bind ([#21761]), the address's
+ * own package's artifact while another package's lock binds ([#21803]), or a
+ * row served by content precedence from a scope the lock is not read from (a
+ * family the answer does not carry is removed). Returns `document` itself when
+ * nothing changes, and a copy otherwise.
+ */
+export function withItemLockFamily(document: unknown, itemLock: ItemLock): unknown {
     if (!document || typeof document !== 'object' || Array.isArray(document)) return document;
-    if (resolveItemLock(layers).layer !== 'overlay') return document;
-    const family = layers.overlay as Record<string, unknown>;
+    const family: Record<string, unknown> = itemLock.lock === 'none'
+        ? {}
+        : {
+            _lock: itemLock.lock,
+            _lockReason: itemLock.lockReason,
+            _lockDocsUrl: itemLock.lockDocsUrl,
+            _lockSource: itemLock.lockSource,
+        };
     const current = document as Record<string, unknown>;
     if (LOCK_FAMILY_KEYS.every((key) => current[key] === family[key])) return document;
     const out: Record<string, unknown> = { ...current };

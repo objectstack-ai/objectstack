@@ -19,7 +19,7 @@ describe('FeedItemType', () => {
   });
 });
 
-describe('SYS_ACTIVITY_BUILTIN_TYPES (#11807)', () => {
+describe('SYS_ACTIVITY_BUILTIN_TYPES — the built-in activity types, published by the spec', () => {
   /**
    * Mechanical invariants only. The semantic pin — every entry has a recorded
    * writer disposition — lives with the object that declares the column:

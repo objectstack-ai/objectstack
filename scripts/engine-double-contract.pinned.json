@@ -2112,6 +2112,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-lock-artifact-package-axis.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-meta-effective-schema.test.ts",
       "verb": "delete",
       "pinned": 1
