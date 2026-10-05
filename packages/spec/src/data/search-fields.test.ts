@@ -23,7 +23,7 @@ import { FieldType } from './field.zod';
 // registration, and on a table whose only textual column is the primary key it
 // designates `id`, turning `$search` into a substring scan over the PK.
 // ---------------------------------------------------------------------------
-describe('[#4483] $search auto field set — lead orders, never admits', () => {
+describe('$search auto field set — lead orders, never admits', () => {
   const pkOnly = {
     id: { type: 'text' },
     amount: { type: 'number' },
@@ -117,7 +117,7 @@ describe('[#4483] $search auto field set — lead orders, never admits', () => {
     ).toEqual({ allowed: ['id'], source: 'declared' });
   });
 
-  it('the #4254 ingress gate no longer admits `$searchFields=id`', () => {
+  it('the ingress gate that refuses an unsearchable `$searchFields` entry no longer admits `$searchFields=id`', () => {
     // `resolveSearchFields` intersects the override with `allowed`; with `id`
     // out of `allowed` the override matches nothing and cannot widen the scan.
     expect(resolveSearchFields({ fields: pkOnly, displayField: 'id', requestedFields: 'id' }))
@@ -160,7 +160,7 @@ describe('[#4483] $search auto field set — lead orders, never admits', () => {
 // (`SEARCH_AUTO_EXCLUDED_FIELDS` is deliberately absent — its members are
 // field NAMES, not types.)
 // ---------------------------------------------------------------------------
-describe('[#13695] search type vocabularies ⊆ FieldType', () => {
+describe('search type vocabularies ⊆ FieldType', () => {
   const validTypes: ReadonlySet<string> = new Set(FieldType.options);
   const vocabularies: ReadonlyArray<[string, ReadonlySet<string>]> = [
     ['SEARCHABLE_TEXTUAL_TYPES', SEARCHABLE_TEXTUAL_TYPES],
@@ -191,7 +191,7 @@ describe('[#13695] search type vocabularies ⊆ FieldType', () => {
   });
 });
 
-describe('[#6934] search type vocabularies are pairwise disjoint', () => {
+describe('search type vocabularies are pairwise disjoint', () => {
   const overlap = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
     [...a].filter((t) => b.has(t)).sort();
 
@@ -254,7 +254,7 @@ describe('[#6934] search type vocabularies are pairwise disjoint', () => {
 // gate and the linter), which read `isVirtualSearchField` to word their refusal
 // from this same judgment.
 // ---------------------------------------------------------------------------
-describe('[#6674] a virtual field declared in searchableFields', () => {
+describe('a virtual field declared in searchableFields — not admitted, since no driver stores it', () => {
   const fields = {
     id: { type: 'text' },
     name: { type: 'text' },
@@ -326,7 +326,7 @@ describe('[#6674] a virtual field declared in searchableFields', () => {
   });
 });
 
-describe('[#6674] SEARCH_VIRTUAL_TYPES is a storage fact', () => {
+describe('SEARCH_VIRTUAL_TYPES is a storage fact', () => {
   it('is exactly the driver-virtual set', () => {
     // Mirrors `fieldHasColumn` (driver-sql/src/schema-drift.ts) and
     // driver-turso's "Virtual — no column" skips. A driver growing a second
