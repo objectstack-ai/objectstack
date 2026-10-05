@@ -1,0 +1,262 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * Implicit account linking — when an external sign-in may attach itself to a
+ * pre-existing local user.
+ *
+ * "Implicit" linking is better-auth's behaviour on an OAuth / OIDC / SSO
+ * sign-in whose identity is not yet linked to anyone but whose email matches
+ * an existing local user: the library links the identity to that user and
+ * signs the caller in as them. It is the opposite of an EXPLICIT link, which a
+ * signed-in user starts themselves (`POST /link-social`) and which is
+ * therefore authenticated by the user's own session.
+ *
+ * ## The rules (maintainer ruling recorded on the card: 「算漏洞，收紧」)
+ *
+ *  1. **Every provider meets the library's standard local-ownership
+ *     requirement** before an implicit link: the existing local row must be
+ *     `emailVerified: true`. Without it, anyone who can register an
+ *     UNVERIFIED local row at a victim's address (open self-registration)
+ *     gets the victim's external identity linked into the row they control —
+ *     and the link then flips that row to verified. better-auth names this
+ *     exact case as the reason `requireLocalEmailVerified` defaults to `true`.
+ *  2. **The platform's own cloud identity provider keeps its documented
+ *     exception** ({@link PLATFORM_IDP_PROVIDER_ID}). The cloud is the IdP
+ *     for every environment, and the environment's owner row is seeded by the
+ *     cloud itself with `emailVerified: false` (no mailbox round-trip ever
+ *     runs in that IdP-mediated flow). Requiring local verification there
+ *     would lock every owner out of their own environment.
+ *  3. **A user's unlink is honoured.** After a user unlinks provider P, an
+ *     implicit sign-in through P must not quietly re-create the link — that
+ *     would make unlinking decorative. The unlink is recorded
+ *     ({@link unlinkTombstoneIdentifier}); implicit linking for that
+ *     user + provider is refused while the record stands; an EXPLICIT,
+ *     session-authenticated link-social is still allowed and clears it.
+ *     This applies to every provider, the cloud one included: the cloud
+ *     exception is about rule 1's verification precondition, not about
+ *     overriding what the user asked for.
+ *
+ * ## Why the enforcement point is `user.validateUserInfo`
+ *
+ * Measured against the installed better-auth `1.7.3`
+ * (`dist/oauth2/link-account.mjs`, `handleOAuthUserInfo`):
+ *
+ *  - The library's own gate refuses an implicit link when
+ *    `(!trusted && !idp.emailVerified) || (requireLocalEmailVerified &&
+ *    !local.emailVerified) || enabled === false || disableImplicitLinking`.
+ *    `requireLocalEmailVerified` is ONE global boolean: there is no
+ *    per-provider form of it, and `trustedProviders` does not relax it. So
+ *    the vendor flag cannot express rule 2 — `true` locks the cloud owner
+ *    out, `false` (what this platform used to ship) drops rule 1 for every
+ *    provider.
+ *  - Immediately after that gate, and BEFORE `internalAdapter.linkAccount`
+ *    and the `emailVerified: true` flip, the same function calls
+ *    `assertValidUserInfo` with `source.action: 'link-account'` and the
+ *    provider id. A refusal there aborts the link (the error is an
+ *    `APIError`, rethrown; the OAuth callback turns it into the error
+ *    redirect). That is the narrowest seam the library offers that sees the
+ *    provider id: one call site per implicit link, on every entry that links
+ *    implicitly (`/callback/:id`, `/sign-in/social` with an id token,
+ *    one-tap, oauth-proxy, and the SSO plugin, which share the function).
+ *  - The EXPLICIT link (`/link-social` → `/callback/:id` with `link` in the
+ *    OAuth state) passes the same `action: 'link-account'`. It is told apart
+ *    by the OAuth state the callback parsed (`getOAuthState().link`), which
+ *    the server writes from the session at `/link-social`; `generateState`
+ *    places `link` AFTER the client-supplied `additionalData`, so a client
+ *    cannot forge it.
+ *
+ * So the vendor flag is pinned `false` (it would otherwise refuse the cloud
+ * owner before our gate runs) and rule 1 is enforced here for everyone else.
+ * ⛔ better-auth marks `requireLocalEmailVerified` deprecated, "the gate will
+ * become unconditional" on its next minor. When that lands the vendor gate
+ * refuses the cloud owner row on its own, and rule 2 needs a different
+ * carrier (the owner seed); the cloud-exception test in
+ * `implicit-account-linking.test.ts` goes red on that upgrade, on purpose.
+ *
+ * ## Operator override
+ *
+ * `config.account.accountLinking.requireLocalEmailVerified`:
+ *  - unset (default) → rules 1 + 2 as above;
+ *  - `true` → handed to better-auth as well: the vendor gate applies to EVERY
+ *    provider, the cloud one included (the operator asked for the strict
+ *    form);
+ *  - `false` → rule 1 is switched off (the pre-tightening behaviour, which
+ *    the library documents as a takeover risk). Rule 3 still applies.
+ */
+
+/**
+ * The provider id of the platform's own identity provider (cloud-as-IdP).
+ * Always in `trustedProviders`, and the one provider exempt from the
+ * local-verification precondition — see the module header, rule 2.
+ */
+export const PLATFORM_IDP_PROVIDER_ID = 'objectstack-cloud';
+
+/**
+ * The refusal code. Byte-identical to the code better-auth's own implicit-link
+ * refusal produces on the OAuth callback redirect (`handleOAuthUserInfo`
+ * answers `"account not linked"`, which the callback rewrites to
+ * `error=account_not_linked`), so a sign-in page cannot tell the library's
+ * refusal and this one apart — they ARE the same rule.
+ */
+export const IMPLICIT_LINK_REFUSED = 'account_not_linked';
+
+/** The `sys_verification.identifier` namespace for unlink records. */
+const UNLINK_TOMBSTONE_PREFIX = 'account-unlinked';
+
+/**
+ * The unlink record's lifetime. A record must outlive any realistic gap
+ * between an unlink and the next sign-in; it ends earlier only when the user
+ * re-links explicitly. better-auth's verification store sweeps rows by
+ * `expiresAt`, so the value has to be finite.
+ */
+const UNLINK_TOMBSTONE_TTL_MS = 100 * 365 * 24 * 60 * 60 * 1000;
+
+/** The provider that never takes part in linking (email + password). */
+const CREDENTIAL_PROVIDER_ID = 'credential';
+
+export function unlinkTombstoneIdentifier(userId: string, providerId: string): string {
+  return `${UNLINK_TOMBSTONE_PREFIX}:${userId}:${providerId}`;
+}
+
+export interface ImplicitLinkInput {
+  providerId: string;
+  /** The EXISTING local user row's `emailVerified`. */
+  localEmailVerified: boolean;
+  /** The effective local-verification requirement (default `true`). */
+  requireLocalEmailVerified: boolean;
+  /** Whether the user unlinked this provider and has not re-linked it explicitly. */
+  unlinkedByUser: boolean;
+}
+
+export type ImplicitLinkVerdict =
+  | { allow: true }
+  | { allow: false; reason: 'unlinked-by-user' | 'local-email-unverified' };
+
+/** Pure decision for one implicit link. See the module header for the rules. */
+export function decideImplicitLink(input: ImplicitLinkInput): ImplicitLinkVerdict {
+  if (input.unlinkedByUser) return { allow: false, reason: 'unlinked-by-user' };
+  if (
+    input.requireLocalEmailVerified &&
+    !input.localEmailVerified &&
+    input.providerId !== PLATFORM_IDP_PROVIDER_ID
+  ) {
+    return { allow: false, reason: 'local-email-unverified' };
+  }
+  return { allow: true };
+}
+
+/** The provider id a `validateUserInfo` source names, for any linking method. */
+export function linkSourceProviderId(source: unknown): string | undefined {
+  const s = source as { oauth?: { providerId?: unknown }; sso?: { providerId?: unknown } } | undefined;
+  const id = s?.oauth?.providerId ?? s?.sso?.providerId;
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+/** The slice of better-auth's `internalAdapter` this module uses. */
+interface LinkingInternalAdapter {
+  findUserById(id: string): Promise<{ emailVerified?: boolean } | null>;
+  findVerificationValue(identifier: string): Promise<unknown | null>;
+  createVerificationValue(data: { identifier: string; value: string; expiresAt: Date }): Promise<unknown>;
+  deleteVerificationByIdentifier(identifier: string): Promise<void>;
+}
+
+const internalAdapterOf = (ctx: unknown): LinkingInternalAdapter | undefined =>
+  (ctx as { context?: { internalAdapter?: LinkingInternalAdapter } } | undefined)?.context?.internalAdapter;
+
+/**
+ * Is the current request the callback of an EXPLICIT link (`/link-social`)?
+ * Reads the OAuth state the callback parsed; see the module header for why
+ * `link` cannot be supplied by the client.
+ */
+async function isExplicitLinkFlow(): Promise<boolean> {
+  try {
+    const { getOAuthState } = await import('better-auth/api');
+    const state = (await getOAuthState()) as { link?: { userId?: unknown } } | null;
+    return typeof state?.link?.userId === 'string';
+  } catch {
+    // No request state (not inside an OAuth flow) ⇒ not an explicit link.
+    return false;
+  }
+}
+
+export interface ImplicitLinkGateOptions {
+  requireLocalEmailVerified: boolean;
+  logInfo?: (message: string, meta?: Record<string, unknown>) => void;
+}
+
+/**
+ * The `validateUserInfo` half: answers a refusal for an implicit link the
+ * rules forbid, `undefined` otherwise (including for every action that is not
+ * `link-account`, and for an explicit link). Throws — and better-auth's
+ * `assertValidUserInfo` turns a throw into a FORBIDDEN refusal, failing closed
+ * — when the store cannot answer.
+ */
+export async function refuseImplicitAccountLink(
+  data: { user?: Record<string, unknown>; source?: { action?: string } } | undefined,
+  ctx: unknown,
+  options: ImplicitLinkGateOptions,
+): Promise<{ error: string; errorDescription: string } | undefined> {
+  if (data?.source?.action !== 'link-account') return undefined;
+  if (await isExplicitLinkFlow()) return undefined;
+  const providerId = linkSourceProviderId(data.source);
+  const userId = typeof data.user?.id === 'string' ? (data.user.id as string) : undefined;
+  const adapter = internalAdapterOf(ctx);
+  if (!providerId || !userId || !adapter) {
+    throw new Error('implicit account link: provider, user or store unavailable — refusing');
+  }
+  const tombstone = await adapter.findVerificationValue(unlinkTombstoneIdentifier(userId, providerId));
+  const local = await adapter.findUserById(userId);
+  if (!local) throw new Error('implicit account link: local user not found — refusing');
+  const verdict = decideImplicitLink({
+    providerId,
+    localEmailVerified: local.emailVerified === true,
+    requireLocalEmailVerified: options.requireLocalEmailVerified,
+    unlinkedByUser: tombstone != null,
+  });
+  if (verdict.allow) return undefined;
+  options.logInfo?.('[auth] implicit account link refused', { providerId, reason: verdict.reason });
+  return {
+    error: IMPLICIT_LINK_REFUSED,
+    errorDescription:
+      verdict.reason === 'unlinked-by-user'
+        ? 'This sign-in method was unlinked from the account. Sign in another way and link it again from your account settings.'
+        : 'An account with this email already exists and its email address is not verified. Sign in to that account and link this sign-in method from your account settings.',
+  };
+}
+
+/**
+ * `account.delete.after` half: a user's own unlink (`/unlink-account`)
+ * leaves a record that keeps the provider from re-linking implicitly. Other
+ * deletions (user removal, admin tooling) leave none.
+ */
+export async function recordUnlinkTombstone(account: unknown, ctx: unknown): Promise<void> {
+  const a = account as { userId?: unknown; providerId?: unknown } | null;
+  const path = (ctx as { path?: unknown } | undefined)?.path;
+  if (path !== '/unlink-account') return;
+  if (typeof a?.userId !== 'string' || typeof a?.providerId !== 'string') return;
+  if (a.providerId === CREDENTIAL_PROVIDER_ID) return;
+  const adapter = internalAdapterOf(ctx);
+  if (!adapter) throw new Error('unlink record: store unavailable');
+  const identifier = unlinkTombstoneIdentifier(a.userId, a.providerId);
+  await adapter.deleteVerificationByIdentifier(identifier);
+  await adapter.createVerificationValue({
+    identifier,
+    value: JSON.stringify({ userId: a.userId, providerId: a.providerId, unlinkedAt: new Date().toISOString() }),
+    expiresAt: new Date(Date.now() + UNLINK_TOMBSTONE_TTL_MS),
+  });
+}
+
+/**
+ * `account.create.after` half: a link that lands clears the unlink record.
+ * While the record stands an implicit link is refused, so a link that lands
+ * is an explicit one (or an operator act) — exactly the "until the user
+ * re-links" end the ruling sets.
+ */
+export async function clearUnlinkTombstone(account: unknown, ctx: unknown): Promise<void> {
+  const a = account as { userId?: unknown; providerId?: unknown } | null;
+  if (typeof a?.userId !== 'string' || typeof a?.providerId !== 'string') return;
+  if (a.providerId === CREDENTIAL_PROVIDER_ID) return;
+  const adapter = internalAdapterOf(ctx);
+  if (!adapter) return;
+  await adapter.deleteVerificationByIdentifier(unlinkTombstoneIdentifier(a.userId, a.providerId));
+}
