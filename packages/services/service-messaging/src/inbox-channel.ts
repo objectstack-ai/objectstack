@@ -86,11 +86,11 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
         userId: string,
     ): Promise<unknown> {
         try {
-            const user = await data.findOne(userObject, {
-                where: { id: userId },
-                fields: [RECIPIENT_LOCALE_FIELD],
-                context: FAN_OUT_SYSTEM_CONTEXT,
-            });
+            const user = await data.findOne(
+                userObject,
+                { where: { id: userId }, fields: [RECIPIENT_LOCALE_FIELD] },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
             return user?.[RECIPIENT_LOCALE_FIELD];
         } catch (err) {
             ctx.logger.warn(

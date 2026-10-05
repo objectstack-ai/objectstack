@@ -388,10 +388,11 @@ export class AutoEnqueuer {
     private async doRefresh(): Promise<void> {
         let rows: any[];
         try {
-            rows = await this.engine.find(this.subscriptionsObject, {
-                where: { active: true },
-                context: SYSTEM_CTX,
-            });
+            rows = await this.engine.find(
+                this.subscriptionsObject,
+                { where: { active: true } },
+                { context: SYSTEM_CTX },
+            );
         } catch (err) {
             this.logger?.warn?.(
                 `[webhook-auto-enqueuer] failed to load ${this.subscriptionsObject}`,

@@ -91,10 +91,11 @@ export function createWebhookRedeliverGuard(
     return async (row) => {
         if (row.source !== 'webhook') return undefined;
 
-        const subscription = (await engine.findOne(subscriptionsObject, {
-            where: { id: row.refId },
-            context: SYSTEM_CTX,
-        })) as Record<string, unknown> | null;
+        const subscription = (await engine.findOne(
+            subscriptionsObject,
+            { where: { id: row.refId } },
+            { context: SYSTEM_CTX },
+        )) as Record<string, unknown> | null;
 
         if (!subscription) {
             return (

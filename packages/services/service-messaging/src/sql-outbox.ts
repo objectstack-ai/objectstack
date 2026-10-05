@@ -153,8 +153,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             },
             fields: ['id'],
             limit: opts.limit,
-            context: DISPATCHER_SYSTEM_CONTEXT,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (!candidates.length) return [];
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
 
@@ -173,8 +172,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         //    cast, and states nothing the query did not already establish.
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-            context: DISPATCHER_SYSTEM_CONTEXT,
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
         return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
@@ -196,8 +194,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             },
             fields: ['id'],
             limit: 10000,
-            context: DISPATCHER_SYSTEM_CONTEXT,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (!candidates.length) return [];
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
 
@@ -213,8 +210,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // 4. Read back the rows we own — same credential stamp as claim().
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-            context: DISPATCHER_SYSTEM_CONTEXT,
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
         return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 

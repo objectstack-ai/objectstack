@@ -182,8 +182,8 @@ export class PreferenceResolver {
         // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
         // the recipients' preferences, read on their behalf, not the emitter's.
         const [specific, wildcard] = await Promise.all([
-            data.find(this.objectName, { where: { ...base, topic: ctx.topic }, limit: 10000, context: FAN_OUT_SYSTEM_CONTEXT }),
-            data.find(this.objectName, { where: { ...base, topic: WILDCARD }, limit: 10000, context: FAN_OUT_SYSTEM_CONTEXT }),
+            data.find(this.objectName, { where: { ...base, topic: ctx.topic }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
+            data.find(this.objectName, { where: { ...base, topic: WILDCARD }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
         ]);
         return [...(specific ?? []), ...(wildcard ?? [])];
     }

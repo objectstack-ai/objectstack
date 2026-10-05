@@ -235,8 +235,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
             },
             fields: ['id'],
             limit: opts.limit,
-            context: DISPATCHER_SYSTEM_CONTEXT,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (candidates.length === 0) return [];
 
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
@@ -253,8 +252,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // 4. Read back the rows we actually own.
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-            context: DISPATCHER_SYSTEM_CONTEXT,
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
 
         // 5. [#8118] Recover the redacted header column for the rows this
         // claim now owns — the one read that must see the authored map.

@@ -102,10 +102,11 @@ function newMetaId(): string {
 async function persistDatasourceRow(engine: DataEngineLike | undefined, record: { name: string }): Promise<void> {
   if (!engine?.insert || !engine.findOne) return; // no durable store — in-memory only
   const now = new Date().toISOString();
-  const existing = await engine.findOne(SYS_METADATA, {
-    where: { type: DS_META_TYPE, name: record.name, state: 'active' },
-    context: SYSTEM_CTX,
-  });
+  const existing = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name: record.name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   if (existing) {
     await engine.update?.(
       SYS_METADATA,
@@ -129,10 +130,11 @@ async function persistDatasourceRow(engine: DataEngineLike | undefined, record: 
 
 async function deleteDatasourceRow(engine: DataEngineLike | undefined, name: string): Promise<void> {
   if (!engine?.findOne) return;
-  const existing = await engine.findOne(SYS_METADATA, {
-    where: { type: DS_META_TYPE, name, state: 'active' },
-    context: SYSTEM_CTX,
-  });
+  const existing = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   if (!existing) return;
   if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id }, context: SYSTEM_CTX });
   else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id }, context: SYSTEM_CTX });
@@ -140,7 +142,7 @@ async function deleteDatasourceRow(engine: DataEngineLike | undefined, name: str
 
 async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<Array<Record<string, unknown>>> {
   if (!engine?.find) return [];
-  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' }, context: SYSTEM_CTX });
+  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } }, { context: SYSTEM_CTX });
   const out: Array<Record<string, unknown>> = [];
   for (const r of rows ?? []) {
     const raw = (r as { metadata?: unknown }).metadata;
@@ -178,10 +180,11 @@ async function loadDatasourceRow(
   name: string,
 ): Promise<StoredDatasource | undefined> {
   if (!engine?.findOne) return undefined;
-  const row = await engine.findOne(SYS_METADATA, {
-    where: { type: DS_META_TYPE, name, state: 'active' },
-    context: SYSTEM_CTX,
-  });
+  const row = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   const raw = (row as { metadata?: unknown } | null | undefined)?.metadata;
   if (raw == null) return undefined;
   let parsed: Record<string, unknown>;
