@@ -360,7 +360,7 @@ flowchart TD
 | 7 | **Field-Level Security** | Which fields is the user allowed to see/edit? |
 
 <Callout type="tip">
-**Performance:** For reads, steps 2–6 are compiled into a query filter (owner-match ∪ materialized shares, AND-ed with RLS) at query time, not evaluated record-by-record. By-id writes are verified with a pre-image check: the target row is re-read through the write-scope filter before the mutation. This keeps security checks efficient even on tables with millions of rows.
+**Performance:** For reads, steps 2–6 are compiled into a query filter (owner-match ∪ materialized shares, AND-ed with RLS) at query time, not evaluated record-by-record. By-id writes are verified with a pre-image check: the target row is re-read through the write-scope filter before the mutation, and a row the caller cannot read answers exactly what a missing id answers (`404 RECORD_NOT_FOUND`). This keeps security checks efficient even on tables with millions of rows.
 </Callout>
 
 ## See also

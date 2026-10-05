@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   bootstrapDeclaredEmailTemplates,
+  bootstrapEffectiveEmailTemplates,
   upsertDeclaredEmailTemplate,
   deactivateDeclaredEmailTemplate,
   mapTemplateToRow,
@@ -436,5 +437,139 @@ describe('declared email templates carrying the `content` alias spelling (#8378)
     expect(result).toEqual({ seeded: 0, skipped: 1 });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][1].name).toBe('ops.digest');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#21785] The boot sweep projects the EFFECTIVE template
+// ---------------------------------------------------------------------------
+
+/**
+ * A `protocol.getMetaItems` stand-in that answers the way the layered list
+ * does for ONE org-scoped overlay: read in the overlay's organization, the
+ * overlay wins its slot; read env-wide (no organization), the declaration is
+ * served. Each item carries the `_diagnostics` read decoration the real
+ * served list carries, which the strict schema refuses unless it is stripped.
+ * Every request is recorded, so the organization the sweep read in is
+ * asserted rather than assumed.
+ */
+function layeredProtocol(declared: any[], overlay?: { organizationId: string; items: any[] }) {
+  const requests: Array<{ type: string; organizationId?: string }> = [];
+  return {
+    requests,
+    async getMetaItems(request: { type: string; organizationId?: string }) {
+      requests.push({ ...request });
+      const items = overlay && request.organizationId === overlay.organizationId ? overlay.items : declared;
+      return { type: request.type, items: items.map((i) => ({ ...i, _diagnostics: { valid: true } })) };
+    },
+  };
+}
+
+const ORG = 'org_default';
+const PACKAGE_WORDING = 'Reset your password, {{user.name}}';
+const OVERLAY_WORDING = 'Admin reworded: reset for {{user.name}}';
+
+/** The row as the live path leaves it after `PUT /meta`: package provenance, overlay wording, NOT customized. */
+function rowProjectedFromOverlay(over: Record<string, any> = {}): any {
+  return {
+    id: 'etpl_seeded',
+    name: 'auth.password_reset',
+    locale: 'en-US',
+    subject: OVERLAY_WORDING,
+    managed_by: 'package',
+    customized: false,
+    ...over,
+  };
+}
+
+describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', () => {
+  it('projects the org-scoped overlay the metadata door serves, read in the default organization', async () => {
+    // The registry holds ONLY the declaration: boot hydration leaves an
+    // org-scoped overlay out of it. Reading it is the reverted-on-restart defect.
+    const engine = new FakeEngine({
+      rows: { [TABLE]: [rowProjectedFromOverlay()] },
+      declared: { email_template: [declaredTemplate()] },
+    });
+    const protocol = layeredProtocol(
+      [declaredTemplate()],
+      { organizationId: ORG, items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
+    );
+
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
+      protocol,
+      tenancy: { defaultOrgId: async () => ORG },
+    });
+
+    expect(protocol.requests).toEqual([{ type: 'email_template', organizationId: ORG }]);
+    expect(result).toEqual({ seeded: 1, skipped: 0 });
+    expect(rowsOf(engine)).toHaveLength(1);
+    expect(rowsOf(engine)[0].subject).toBe(OVERLAY_WORDING);
+  });
+
+  it('reads env-wide when the tenancy service names no organization (a walled posture never guesses one)', async () => {
+    const engine = new FakeEngine({ rows: { [TABLE]: [rowProjectedFromOverlay()] } });
+    const protocol = layeredProtocol(
+      [declaredTemplate()],
+      { organizationId: ORG, items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
+    );
+
+    await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
+      protocol,
+      tenancy: { defaultOrgId: async () => null },
+    });
+
+    // No organization on the request: the tenancy contract named none, so the
+    // read is env-wide and the declaration is what the row carries.
+    expect(protocol.requests).toEqual([{ type: 'email_template' }]);
+    expect(rowsOf(engine)[0].subject).toBe(PACKAGE_WORDING);
+  });
+
+  it('projects nothing on a failed effective read, never the package layer in its place', async () => {
+    const engine = new FakeEngine({
+      rows: { [TABLE]: [rowProjectedFromOverlay()] },
+      declared: { email_template: [declaredTemplate()] },
+    });
+    const warn = vi.fn();
+    const protocol = {
+      async getMetaItems(): Promise<never> { throw new Error('sys_metadata read failed'); },
+    };
+
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
+      protocol,
+      tenancy: { defaultOrgId: async () => ORG },
+    }, { warn });
+
+    expect(result).toEqual({ seeded: 0, skipped: 0 });
+    expect(rowsOf(engine)[0].subject).toBe(OVERLAY_WORDING);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1]).toEqual({ error: 'sys_metadata read failed' });
+  });
+
+  it('keeps seed-not-clobber over the effective read: admin-authored and customized rows are skipped', async () => {
+    const engine = new FakeEngine({
+      rows: {
+        [TABLE]: [
+          { id: 'a', name: 'ops.digest', locale: 'en-US', subject: 'Admin original', managed_by: 'admin' },
+          rowProjectedFromOverlay({ subject: 'Data-door wording', customized: true }),
+        ],
+      },
+    });
+    const warn = vi.fn();
+    const protocol = layeredProtocol([], {
+      organizationId: ORG,
+      items: [
+        declaredTemplate({ name: 'ops.digest', category: 'notification', subject: 'Overlay digest' }),
+        declaredTemplate({ subject: OVERLAY_WORDING }),
+      ],
+    });
+
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
+      protocol,
+      tenancy: { defaultOrgId: async () => ORG },
+    }, { warn });
+
+    expect(result).toEqual({ seeded: 0, skipped: 2 });
+    expect(rowsOf(engine).map((r) => r.subject)).toEqual(['Admin original', 'Data-door wording']);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

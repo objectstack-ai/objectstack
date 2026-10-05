@@ -35,6 +35,7 @@
 // nothing), and a master the caller owns.
 
 import { describe, it, expect, vi } from 'vitest';
+import { recordNotFoundError } from '@objectstack/core';
 import { SecurityPlugin } from './security-plugin.js';
 import { SharingService, type SharingEngine } from '@objectstack/plugin-sharing';
 import { matchesFilterCondition } from '@objectstack/formula';
@@ -784,7 +785,10 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     const err = await refusalOf(h.updateContact('ct_deleted_concurrently'));
     expect(err.code).toBe('RECORD_NOT_FOUND');
     expect(err.status).toBe(404);
-    expect(err.statusCode).toBe(404);
+    // [#21771] The addressed by-id write now asks the read door first, so a
+    // missing id gets the READ door's own not-found producer — which spells
+    // the status once — rather than the master gate's detail copy.
+    expect(err.message).toBe(recordNotFoundError('crm_contact', 'ct_deleted_concurrently').message);
     expect(err.message).toContain('ct_deleted_concurrently');
     expect(err.message).not.toContain('requires edit access to its master record');
   });

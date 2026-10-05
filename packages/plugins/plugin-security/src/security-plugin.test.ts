@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import { recordNotFoundError } from '@objectstack/core';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
@@ -502,12 +503,14 @@ describe('SecurityPlugin', () => {
     });
 
     it('update without owner_id in the change-set is untouched by the guard', async () => {
-      const harness = await boot([memberSet]);
+      // [#21771] The addressed by-id update now asks the read door whether the
+      // caller can read `t1`, so the double answers that read with the row.
+      const harness = await boot([memberSet], () => ({ id: 't1', owner_id: 'u1' }));
       const opCtx: any = {
         object: 'task', operation: 'update', data: { id: 't1', name: 'renamed' },
         context: memberCtx(),
       };
-      await harness.run(opCtx); // must not throw, no pre-image read needed
+      await harness.run(opCtx); // must not throw — the guard reads no owner here
     });
 
     it('update disowning via owner_id:undefined is denied (mongo $set null hazard)', async () => {
@@ -548,7 +551,8 @@ describe('SecurityPlugin', () => {
     });
 
     it('a prototype-chain owner_id (not own property) does not trip the guard', async () => {
-      const harness = await boot([memberSet]);
+      // [#21771] The double answers the addressed write's read question with the row.
+      const harness = await boot([memberSet], () => ({ id: 't1', owner_id: 'u1' }));
       const proto = { owner_id: 'attacker' };
       const data: any = Object.create(proto);
       data.id = 't1';
@@ -873,7 +877,9 @@ describe('SecurityPlugin', () => {
       const harness = makeMiddlewareCtx({
         permissionSets: [ownerPolicySet],
         objectFields: ownerFields,
-        findOneImpl: () => null, // row exists but filtered out by created_by → not visible
+        // The owner policies are WRITE-only (`update` / `delete`): the row is
+        // readable, and filtered out only by `created_by` on the write re-read.
+        findOneImpl: (q: any) => (q?.where?.$and ? null : { id: 'r1', created_by: 'u2', name: 'theirs' }),
       });
       await plugin.init(harness.ctx);
       await plugin.start(harness.ctx);
@@ -883,10 +889,36 @@ describe('SecurityPlugin', () => {
         context: memberCtx,
       };
       await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
-      expect(harness.findOne).toHaveBeenCalledTimes(1);
+      // [#21771] Two reads: the write re-read, then — the row being refused —
+      // the read question that keeps this caller's 403 (they can read it).
+      expect(harness.findOne).toHaveBeenCalledTimes(2);
       // the re-read ANDs the row id with the owner write filter
       const [, query] = harness.findOne.mock.calls[0];
       expect(query.where.$and[0]).toEqual({ id: 'r1' });
+      expect(harness.findOne.mock.calls[1][1].where).toEqual({ id: 'r1' });
+    });
+
+    it('[#21771] a row the caller cannot READ answers what a nonexistent id answers, not 403', async () => {
+      // Every read of `r1` under the caller's context comes back empty: the
+      // row is hidden from this caller, so the write door says what the read
+      // door says — the shared not-found producer, never the 403.
+      for (const operation of ['update', 'delete'] as const) {
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({ permissionSets: [ownerPolicySet], objectFields: ownerFields, findOneImpl: () => null });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+        const opCtx: any = {
+          object: 'task', operation,
+          ...(operation === 'update' ? { data: { id: 'r1', name: 'hijack' } } : {}),
+          options: { where: { id: 'r1' } },
+          context: memberCtx,
+        };
+        const err: any = await harness.run(opCtx).then(() => null, (e: unknown) => e);
+        const missing: any = recordNotFoundError('task', 'r1');
+        expect({ code: err?.code, status: err?.status, message: err?.message }, operation)
+          .toEqual({ code: 'RECORD_NOT_FOUND', status: 404, message: missing.message });
+        expect(err?.name, operation).not.toBe('PermissionDeniedError');
+      }
     });
 
     it('ALLOWS an update when the target row IS visible under the write filter (the owner)', async () => {
@@ -941,14 +973,18 @@ describe('SecurityPlugin', () => {
       expect(harness.findOne).toHaveBeenCalledTimes(0);
     });
 
-    it('SKIPS the check when no RLS policy applies (e.g. modifyAllRecords / admin) — no extra read', async () => {
+    it('SKIPS the write-class re-read when no RLS policy applies (e.g. modifyAllRecords / admin) — the read question only', async () => {
       const adminSet: PermissionSet = {
         name: 'admin_full_access', label: 'Admin',
         objects: { '*': { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true, viewAllRecords: true } },
         // no rowLevelSecurity
       } as any;
       const plugin = new SecurityPlugin({ fallbackPermissionSet: 'admin_full_access' });
-      const harness = makeMiddlewareCtx({ permissionSets: [adminSet], objectFields: ownerFields });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [adminSet],
+        objectFields: ownerFields,
+        findOneImpl: (q: any) => (q?.where?.$and ? null : { id: 'r1', name: 'x' }),
+      });
       await plugin.init(harness.ctx);
       await plugin.start(harness.ctx);
       const opCtx: any = {
@@ -957,7 +993,10 @@ describe('SecurityPlugin', () => {
         context: { userId: 'admin', roles: ['admin_full_access'], permissions: [] },
       };
       await expect(harness.run(opCtx)).resolves.toBeDefined();
-      expect(harness.findOne).not.toHaveBeenCalled();
+      // [#21771] Ruling A asks every principal class whether it can read the
+      // addressed row — one plain by-id read, and still no write-class re-read.
+      expect(harness.findOne).toHaveBeenCalledTimes(1);
+      expect(harness.findOne.mock.calls[0][1].where).toEqual({ id: 'r1' });
     });
 
     it('SKIPS the check for a multi-row predicate id ({$in}) — only single-id by-pk writes are guarded', async () => {
@@ -1243,7 +1282,9 @@ describe('SecurityPlugin', () => {
         objectFields: ['id', 'organization_id', 'signed_token'],
         schemaExtra: { access: { default: 'private' }, requiredPermissions: ['manage_platform_settings'] },
         orgScoping: true,
-        findOneImpl: () => null, // would DENY if the pre-image check ran
+        // The write-class re-read would DENY if it ran; the read question
+        // (#21771) finds the row the admin reads.
+        findOneImpl: (q: any) => (q?.where?.$and ? null : { id: 'r1', signed_token: 'old' }),
       });
       await plugin.init(harness.ctx);
       await plugin.start(harness.ctx);
@@ -1253,7 +1294,8 @@ describe('SecurityPlugin', () => {
         context: { userId: 'admin', tenantId: 'org-1', roles: ['admin_full_access'], permissions: [] },
       };
       await expect(harness.run(opCtx)).resolves.toBeDefined();
-      expect(harness.findOne).not.toHaveBeenCalled();
+      expect(harness.findOne).toHaveBeenCalledTimes(1);
+      expect(harness.findOne.mock.calls[0][1].where).toEqual({ id: 'r1' });
     });
 
     // ADR-0135 D4 / cloud#551 — `managedBy: 'better-auth'` identity tables get the

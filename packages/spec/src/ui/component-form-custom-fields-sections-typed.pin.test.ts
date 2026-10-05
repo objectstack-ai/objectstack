@@ -33,6 +33,16 @@
  *   both rows share one section instance, and the section's inline arm is the
  *   one runtime field `customFields` takes.
  * - §4 THE REGISTRATION: the ADR-0087 D3 entries step 18 carries.
+ * - §5 THE GRID WIDGET'S CAMELCASE KEYS (#21768): objectstack-ai/objectui#11610
+ *   renamed the `grid` widget's eight field-level keys to camelCase, and the
+ *   `.objectui-sha` pin `9dfaca654311` carries it, so the runtime field declares
+ *   `minRows`, `maxRows`, `allowAdd`, `allowDelete`, `allowReorder`,
+ *   `totalField`, `addLabel` and `sortField` with the widget's value types. The
+ *   writer shape parses (§1); each snake_case spelling is refused by name with
+ *   its own camelCase key; and `totalField`'s describe says it is the grid's
+ *   CHILD column — the opposite of the same spelling on `record:line_items` and
+ *   a master-detail detail entry, which names the PARENT field the sum is saved
+ *   to. A widening: nothing that parsed before is refused now.
  *
  * The enumeration pin (`component-props-unknown-members.pin.test.ts`) holds the
  * other half: the `customFields` and both `sections[]` fork lines left its
@@ -46,6 +56,7 @@ import {
   ComponentPropsMap,
   ObjectFormPropsSchema,
   ObjectMasterDetailFormPropsSchema,
+  RecordLineItemsProps,
 } from './component.zod';
 import { FormFieldSchema, FormSectionSchema, FormSelectOptionSchema } from './view.zod';
 import { SelectOptionSchema } from '../data/field.zod';
@@ -201,6 +212,29 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
         { name: 'rest', label: 'Rest', columns: 1, pane: 'secondary', fields: ['note'] },
       ],
     }],
+    // §5 — objectui `examples/schema-catalog/src/schemas/fields-grid/line-items-grid.json` at the
+    // `.objectui-sha` pin `9dfaca654311`: the one `fields[]` entry, a `grid` field carrying all eight
+    // camelCase keys, the shape objectui's grid-field guide (`content/docs/fields/grid.mdx`) teaches.
+    ['the grid widget\'s camelCase keys on an inline grid field', 'object-form', {
+      customFields: [{
+        name: 'line_items', label: 'Line Items', type: 'grid',
+        columns: [
+          { name: 'product', label: 'Product', type: 'text' },
+          { name: 'quantity', label: 'Qty', type: 'number' },
+          { name: 'amount', label: 'Amount', type: 'currency' },
+        ],
+        minRows: 1, maxRows: 10, allowAdd: true, allowDelete: true, allowReorder: true,
+        totalField: 'amount', addLabel: 'Add line item', sortField: 'position',
+      }],
+    }],
+    // Lit control: the same keys on a section's inline entry (the one runtime field), the three
+    // switches off, on both rows that take the section.
+    ['the grid widget\'s camelCase keys on a section\'s inline entry', 'object-form', {
+      sections: [{ label: 'Lines', fields: [{ name: 'lines', type: 'grid', columns: [{ name: 'qty', type: 'number' }], minRows: 0, maxRows: 3, allowAdd: false, allowDelete: false, allowReorder: false, addLabel: 'Add', sortField: 'line_no' }] }],
+    }],
+    ['the grid widget\'s camelCase keys on a master-detail section\'s inline entry', 'object-master-detail-form', {
+      sections: [{ label: 'Lines', fields: [{ name: 'lines', type: 'grid', columns: [{ name: 'amount', type: 'currency' }], totalField: 'amount' }] }],
+    }],
     ['no sections', 'object-form', { sections: [] }],
     // objectui `plugin-form/src/masterDetailFormTypeVocabulary.test.tsx:109` — the parent half's sections.
     ['the parent half\'s sections', 'object-master-detail-form', {
@@ -342,7 +376,7 @@ describe('§2 off-shape values are refused with the code and the path', () => {
     expect(say({ defaultValue: 'X' })).toMatch(/block's\s+`initialValues`/);
     expect(say({ id: 'a1' })).toMatch(/identified by its `name`/);
     expect(say({ fields: ['b'] })).toMatch(/Group fields with the block's `sections`/);
-    expect(say({ min_rows: 1 })).toMatch(/snake_case field-level keys/);
+    expect(say({ min_rows: 1 })).toMatch(/^ {2}• .*`min_rows`.*`minRows`/m);
     expect(say({ helpText: 'x' })).toMatch(/`helpText` → `description`/);
     expect(say({ validation: { required: true } })).toMatch(/the MESSAGE a required field shows/);
     expect(say({ validation: { pattern: { value: '^a', message: 'x' } } })).toMatch(/field's own `pattern` string/);
@@ -381,10 +415,11 @@ describe('§2 off-shape values are refused with the code and the path', () => {
 describe('§3 the declared members, and one shape for both rows', () => {
   it('the runtime form field declares exactly the members the form draws', () => {
     expect(Object.keys(runtimeField().shape).sort()).toEqual([
-      'accept', 'colSpan', 'columns', 'dependsOn', 'description', 'dimensions', 'disabled', 'group', 'hidden',
-      'inputType', 'label', 'max', 'maxLength', 'min', 'minLength', 'multiple', 'name', 'options', 'pattern',
-      'placeholder', 'readonly', 'readonlyWhen', 'reference', 'required', 'requiredWhen', 'returnType', 'rows',
-      'span', 'summaryOperations', 'type', 'validation', 'visibleWhen', 'widget',
+      'accept', 'addLabel', 'allowAdd', 'allowDelete', 'allowReorder', 'colSpan', 'columns', 'dependsOn',
+      'description', 'dimensions', 'disabled', 'group', 'hidden', 'inputType', 'label', 'max', 'maxLength',
+      'maxRows', 'min', 'minLength', 'minRows', 'multiple', 'name', 'options', 'pattern', 'placeholder',
+      'readonly', 'readonlyWhen', 'reference', 'required', 'requiredWhen', 'returnType', 'rows', 'sortField',
+      'span', 'summaryOperations', 'totalField', 'type', 'validation', 'visibleWhen', 'widget',
     ]);
   });
 
@@ -451,5 +486,92 @@ describe('§4 each narrowing is registered as the ADR-0087 D3 entry step 18 carr
     'ui-object-form-sections-typed',
   ])('%s', (id) => {
     expect(ids).toContain(id);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// §5 the grid widget's camelCase keys (#21768)
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('§5 the grid widget\'s eight field-level keys, camelCase since objectstack-ai/objectui#11610', () => {
+  // The rename, as objectui's `GRID_FIELD_RETIRED_KEYS` pairs it (`types/src/field-types.ts:1159` at the
+  // `.objectui-sha` pin `9dfaca654311`), with each key's value type as `GridFieldMetadata` declares it.
+  const GRID_KEYS = [
+    ['min_rows', 'minRows', 1, 'one'],
+    ['max_rows', 'maxRows', 10, '10'],
+    ['allow_add', 'allowAdd', false, 'no'],
+    ['allow_delete', 'allowDelete', false, 0],
+    ['allow_reorder', 'allowReorder', true, 'true'],
+    ['total_field', 'totalField', 'amount', 5],
+    ['add_label', 'addLabel', 'Add line', { en: 'Add line' }],
+    ['sort_field', 'sortField', 'position', ['position']],
+  ] as const;
+  const field = (member: Record<string, unknown>) =>
+    parse('object-form', { customFields: [{ name: 'items', type: 'grid', ...member }] });
+
+  /** The prescription bullets of a refusal (`strictUnknownKeyError` renders each as one `  • ` line). */
+  const bullets = (message: string): string[] => message.split('\n').filter((line) => line.startsWith('  • '));
+
+  it.each(GRID_KEYS)('`%s` is refused by name, its prescription naming `%s`', (snake, camel, value) => {
+    const r = field({ [snake]: value });
+    expect(issues(r)).toEqual([{ code: 'unrecognized_keys', path: 'customFields.0' }]);
+    const message = firstMessage(r);
+    // Named subjects, not copy: the first line names the written key, and the one bullet names it and its
+    // camelCase replacement.
+    expect(message.split('\n')[0]).toContain(`\`${snake}\``);
+    const [bullet, ...rest] = bullets(message);
+    expect(rest).toEqual([]);
+    expect(bullet).toContain(`\`${snake}\``);
+    expect(bullet).toContain(`\`${camel}\``);
+    // The key the prescription names is one the field accepts, with the very value written.
+    const renamed = field({ [camel]: value });
+    expect(issues(renamed)).toEqual([]);
+    expect(renamed.success && (renamed.data as { customFields: Record<string, unknown>[] }).customFields[0]![camel]).toBe(value);
+  });
+
+  it('two retired spellings on one field get one bullet each, each naming its own camelCase key', () => {
+    const lines = bullets(firstMessage(field({ allow_add: false, sort_field: 'position' })));
+    expect(lines).toHaveLength(2);
+    expect(lines.filter((l) => l.includes('`allow_add`') && l.includes('`allowAdd`'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('`sort_field`') && l.includes('`sortField`'))).toHaveLength(1);
+  });
+
+  it('a section\'s inline entry refuses a retired spelling with the same prescription', () => {
+    const r = parse('object-form', { sections: [{ fields: [{ name: 'items', type: 'grid', total_field: 'amount' }] }] });
+    expect(issues(r)).toEqual([{ code: 'invalid_union', path: 'sections.0.fields.0' }]);
+    expect(messages(r)).toMatch(/^ {2}• .*`total_field`.*`totalField`/m);
+  });
+
+  it.each(GRID_KEYS)('`%s` → `%s` takes the widget\'s value type and refuses another', (_snake, camel, _value, wrong) => {
+    expect(issues(field({ [camel]: wrong }))).toEqual([{ code: 'invalid_type', path: `customFields.0.${camel}` }]);
+  });
+
+  it('each of the eight describes names the one reader', () => {
+    for (const [, camel] of GRID_KEYS) {
+      const member = runtimeField().shape[camel] as { description?: string };
+      expect(member.description, camel).toMatch(/Read only by the `grid` widget$/);
+    }
+  });
+
+  // Two keys spelled alike across siblings with opposite meanings is how a writer goes wrong: the grid's
+  // `totalField` names the CHILD column it sums, the child-collection blocks' names the PARENT field the
+  // sum is saved to (their child column is `amountField`, which their renderers hand the grid AS its
+  // `totalField` — `LineItemsPanel.tsx:710`, `MasterDetailForm.tsx:876` at the pin).
+  it('`totalField` on the inline grid field is the CHILD column summed, the opposite of the same spelling on the child-collection blocks', () => {
+    const description = (schema: unknown) => (schema as { description?: string }).description ?? '';
+    const grid = description(runtimeField().shape.totalField);
+    // The first sentence is the contract: the CHILD column, summed into the footer.
+    expect(grid).toMatch(/^The CHILD column [^.]*\bfooter\b/);
+    // And it names the homonym it is not, and the sibling key that IS this value.
+    expect(grid).toMatch(/\bNot the PARENT field\b/);
+    expect(grid).toContain('`amountField`');
+
+    const lineItems = description((RecordLineItemsProps as unknown as { shape: Record<string, unknown> }).shape.totalField);
+    const detailEntry = description(objectOf(ObjectMasterDetailFormPropsSchema.shape.details).shape.totalField);
+    for (const [label, sibling] of [['record:line_items', lineItems], ['master-detail detail entry', detailEntry]] as const) {
+      expect(sibling, label).toMatch(/^Parent field to receive the rolled-up sum/);
+      expect(sibling, label).not.toMatch(/CHILD|footer/);
+    }
+    expect(grid).not.toMatch(/^Parent field/);
   });
 });

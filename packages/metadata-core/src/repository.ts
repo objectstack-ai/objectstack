@@ -21,7 +21,12 @@
  *    scoped to a single org may treat the entire repo as one log.)
  * 3. **Optimistic locking.** `put` and `delete` throw `ConflictError`
  *    when `parentVersion` does not match the current HEAD.
- * 4. **Canonical hashing.** `item.hash === hashSpec(item.body)` — always.
+ * 4. **Canonical hashing.** `item.hash === hashSpec(item.body, item.ref.type)`
+ *    — always. The type decides which maps keep their key order
+ *    (`canonicalize` guarantee 8). One stated exception, owned by
+ *    `SysMetadataRepository`: a row stamped before its type's canonical form
+ *    changed keeps the stamp it was written with until its content next
+ *    changes — that stamp is its version token.
  * 5. **Event ordering.** Subscribers to `watch()` receive events in
  *    monotonically-increasing `seq` order with no gaps.
  * 6. **Resumability, and where it stops.** `watch(_, since)` called with a

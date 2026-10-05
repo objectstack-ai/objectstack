@@ -125,7 +125,9 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     // The failure is the RLS refusal on the note, named node-first — not a
     // generic "flow failed", which would pass while the run died of anything.
     expect(body.error?.message).toContain(`Node '${failingNodeId}' failed`);
-    expect(body.error?.message).toMatch(/do not have access to this record/i);
+    // The member cannot READ the note, so the by-id write answers the read
+    // door's not-found (the write doors' ruling A), named node-first.
+    expect(body.error?.message).toMatch(/not found in runas_note/i);
     // Which node failed survives the envelope change — the reason `summary`
     // rides in `details` at all.
     const failed = body.error?.details?.summary?.nodes?.find((n) => n?.nodeId === failingNodeId);

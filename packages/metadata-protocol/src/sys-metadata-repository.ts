@@ -22,9 +22,9 @@
  *     entry has `allowOrgOverride: false` (Prime Directive #8)
  *   - **M1**: every successful put/delete appends a durable row to
  *     `sys_metadata_history` inside the same engine.transaction() as the
- *     parent `sys_metadata` write. No-op puts (identical hash) skip the
- *     history write. Failed optimistic-lock checks abort before any
- *     write reaches the database.
+ *     parent `sys_metadata` write. No-op puts (identical content — see
+ *     `storedBodyUnchanged`) skip the history write. Failed optimistic-lock
+ *     checks abort before any write reaches the database.
  *   - **M1**: history() yields events from the durable log, ordered by
  *     per-(org,type,name) `version` ASC.
  *
@@ -52,7 +52,7 @@
  * switch.
  */
 
-import { hashSpec, ConflictError } from '@objectstack/metadata-core';
+import { hashSpec, orderedMapKeys, ConflictError } from '@objectstack/metadata-core';
 // #4867 — the SAME discriminator `DatabaseLoader` uses (#4825), imported, not
 // re-implemented. A second hand-rolled "which driver errors are benign?" here
 // would be two vocabularies for one question, which is the dual-source debt
@@ -534,7 +534,9 @@ export class SysMetadataRepository implements MetadataRepository {
 
     const state: OverlayState = opts.state ?? 'active';
     const body = (spec ?? {}) as Record<string, unknown>;
-    const hash = hashSpec(body);
+    // [#21790] Hashed AS ITS TYPE: a map the spec declares ordered (an
+    // object's `fields`) keeps its key order, so a pure reorder is a change.
+    const hash = hashSpec(body, ref.type);
 
     // ADR-0048 — the ONE row this write targets. A write is not a search: it
     // upserts exactly one `(org, type, name, package_id)` row, so its scope is
@@ -617,9 +619,17 @@ export class SysMetadataRepository implements MetadataRepository {
       // No-op short-circuit: identical body → no write, no history row,
       // no event. We re-yield the existing item so callers see the
       // canonical hash but the seqCounter is unchanged.
-      if (existing && existingHash === hash) {
+      //
+      // [#21790] The version handed back is the row's STORED stamp, not this
+      // write's hash. The two are one value except on a row stamped before
+      // its type's canonical form changed (see `storedBodyUnchanged`), where
+      // the stored stamp is the version every reader was given and the one
+      // the next write's optimistic lock compares against — answering with
+      // the re-derived hash instead would turn the caller's next save into a
+      // conflict with a row nobody touched.
+      if (existing && this.storedBodyUnchanged(ref, existing, existingHash, hash)) {
         const item = this.rowToItem(ref, existing);
-        return { skipped: true as const, version: hash, seq: item.seq, item };
+        return { skipped: true as const, version: item.hash, seq: item.seq, item };
       }
 
       const now = new Date().toISOString();
@@ -1942,7 +1952,7 @@ export class SysMetadataRepository implements MetadataRepository {
   private rowToItem(ref: Pick<MetaRef, 'type' | 'name'>, row: any): MetadataItem {
     const body: Record<string, unknown> =
       typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
-    const hash: string = row.checksum ?? hashSpec(body);
+    const hash: string = row.checksum ?? hashSpec(body, ref.type);
     return {
       ref: this.fullRef(ref),
       body,
@@ -1957,6 +1967,49 @@ export class SysMetadataRepository implements MetadataRepository {
       message: undefined,
       seq: this.seqCounter,
     };
+  }
+
+  /**
+   * [#21790] Does `row` already store the body this write hashes to `hash`?
+   * The question `put`'s no-op short-circuit asks — about CONTENT.
+   *
+   * For a type with no declared ordered map the stored stamp answers it, as it
+   * always has: those types' canonical form never changed, so a stamp equals
+   * the hash of the bytes beside it.
+   *
+   * A type WITH one (`orderedMapKeys`) is answered by re-hashing the stored
+   * body under the current rule, because its stored stamp may predate that
+   * rule — every row written before the canonical form started keeping the
+   * map's order carries the order-blind stamp. Trusting that stamp misfires
+   * BOTH ways:
+   *   - an identical re-save looks changed (current hash ≠ old stamp) and
+   *     writes a history row recording no change — so the stamp is not the
+   *     arbiter of "unchanged";
+   *   - a reorder INTO sorted key order looks unchanged, because the old
+   *     stamp IS the sorted form's hash — the very drop #21790 fixed,
+   *     surviving on exactly the rows stored before the fix.
+   * Re-hashing the stored bytes is exact in both directions. The stamp itself
+   * is left as written: it is the row's version token (see `put`).
+   *
+   * Stored bytes that do not parse are not the incoming body, so the answer is
+   * "changed" and the write goes ahead — which is also what lets a save repair
+   * such a row, exactly as it could before this comparison read the bytes.
+   */
+  private storedBodyUnchanged(
+    ref: Pick<MetaRef, 'type'>,
+    row: any,
+    storedHash: string | null,
+    hash: string,
+  ): boolean {
+    if (orderedMapKeys(ref.type).length === 0) return storedHash === hash;
+    let storedBody: unknown;
+    try {
+      storedBody =
+        typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
+    } catch {
+      return false;
+    }
+    return hashSpec(storedBody, ref.type) === hash;
   }
 
   private broadcast(evt: MetadataEvent): void {

@@ -36,10 +36,11 @@ import type {
   SettingsUnsubscribe,
 } from '@objectstack/spec/system';
 import {
-  bootstrapDeclaredEmailTemplates,
+  bootstrapEffectiveEmailTemplates,
   upsertDeclaredEmailTemplate,
   deactivateDeclaredEmailTemplate,
   mapTemplateToRow,
+  type EffectiveEmailTemplateSources,
 } from './bootstrap-declared-email-templates.js';
 import {
   bindEmailTemplateProvenanceStamp,
@@ -1091,8 +1092,17 @@ export class EmailServicePlugin implements Plugin {
     let metadataService: IMetadataService | undefined;
     try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
 
+    // [#21785] The sweep projects the EFFECTIVE template — what `GET /meta`
+    // serves, an org-scoped Studio overlay included — through the protocol's
+    // layered list, read in `tenancy.defaultOrgId()`'s organization. Both are
+    // optional: a host without them has no metadata door to overlay through.
+    let protocol: EffectiveEmailTemplateSources['protocol'];
+    try { protocol = ctx.getService('protocol'); } catch { /* optional */ }
+    let tenancy: EffectiveEmailTemplateSources['tenancy'];
+    try { tenancy = ctx.getService('tenancy'); } catch { /* optional */ }
+
     try {
-      await bootstrapDeclaredEmailTemplates(engine, metadataService, ctx.logger as any);
+      await bootstrapEffectiveEmailTemplates(engine, metadataService, { protocol, tenancy }, ctx.logger as any);
     } catch (err: any) {
       ctx.logger.warn(
         'EmailServicePlugin: declared email-template bootstrap failed (built-in templates still serve): '

@@ -206,17 +206,19 @@ describe('#8053: a member revokes their OWN sys_api_key', () => {
 
   // ── the "Not affected" list: still not affected ───────────────────────────
 
-  it('[cross-owner] a member may NOT revoke the admin\'s key — 403, row unchanged, key still live', async () => {
+  it('[cross-owner] a member may NOT revoke the admin\'s key — refused as not found, row unchanged, key still live', async () => {
     // The row scope is the pre-existing `sys_api_key_self` RLS carve-out. This
     // is the assertion that proves the new grant is OWNER-scoped and not a
     // table-wide `update` on a credential table.
     const { id, raw } = await mintKey(adminToken, 'admins-key');
     expect(await keyStillAuthenticates(raw)).toBe(true);
 
+    // The member cannot READ the admin's key either, and on the write doors a
+    // row the caller cannot read answers what a nonexistent id answers.
     const res = await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${id}`, { revoked: true });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const body: any = await res.json();
-    expect(body.code ?? body.error?.code).toBe('PERMISSION_DENIED');
+    expect(body.code ?? body.error?.code).toBe('RECORD_NOT_FOUND');
 
     // Refused, not merely reported as refused: the admin's key is untouched.
     const { row } = await readKey(adminToken, id);
