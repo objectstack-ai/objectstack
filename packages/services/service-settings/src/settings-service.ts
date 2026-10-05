@@ -555,6 +555,11 @@ export class SettingsService {
    */
   private readonly reportedCryptoRefusals = new Set<string>();
   /**
+   * `<namespace>.<key>` pairs whose missing secret audit fingerprint has
+   * already been reported. See {@link secretAuditDigest}.
+   */
+  private readonly reportedUnkeyedAuditDigests = new Set<string>();
+  /**
    * Namespaces whose pre-bind READ has already been reported (#10250). Deduped
    * for the same reason the two sets above are, and keyed by NAMESPACE rather
    * than by key: `getNamespace()` resolves every specifier in the namespace
@@ -1575,6 +1580,55 @@ export class SettingsService {
     throw err;
   }
 
+  /**
+   * The audit fingerprint of a secret-valued setting: the crypto provider's
+   * KEYED digest (`ICryptoProvider.keyedDigest`), never an unkeyed one.
+   *
+   * Both ledgers (`sys_audit_log` via {@link SettingsAuditSink} and
+   * `sys_setting_audit` via {@link SettingsAuditWriter}) are readable by
+   * people who must not be able to learn a secret. An unkeyed content hash
+   * lets any such reader confirm a guessed value offline — and for the short,
+   * low-entropy secrets settings carry (passwords, tokens of a known format),
+   * guessing is the attack. Under the provider's server-held key the
+   * fingerprint still answers "did this value change, and back to what it was
+   * before?" (stable per key for equal input) without answering "is it X?".
+   *
+   * When no keyed digest can be had — no provider is wired (the legacy
+   * inline-adapter path on a host that supplies none), or the provider
+   * rejects — the ledgers record NO fingerprint (`null`), reported once per
+   * key. Falling back to an unkeyed digest would be the exposure this method
+   * exists to close; failing the write would let a ledger veto a settings
+   * save, which neither audit seam is allowed to do.
+   */
+  private async secretAuditDigest(
+    namespace: string,
+    key: string,
+    plain: string,
+  ): Promise<string | null> {
+    const provider = this.cryptoProvider;
+    let reason: string;
+    if (provider && typeof provider.keyedDigest === 'function') {
+      try {
+        return await provider.keyedDigest(plain);
+      } catch (err: any) {
+        reason = `the crypto provider refused a keyed digest (${err?.message ?? err})`;
+      }
+    } else {
+      reason = 'no crypto provider with a keyed digest is wired';
+    }
+    const dedupeAt = `${namespace}.${key}`;
+    if (!this.reportedUnkeyedAuditDigests.has(dedupeAt)) {
+      this.reportedUnkeyedAuditDigests.add(dedupeAt);
+      const message =
+        `[SettingsService] ${namespace}.${key}: the audit trail records this secret-valued ` +
+        `setting's write without a value fingerprint because ${reason}. Wire an ICryptoProvider ` +
+        `(SettingsServiceOptions.cryptoProvider) to record its keyed digest.`;
+      if (this.logger?.warn) this.logger.warn(message);
+      else console.warn(message);
+    }
+    return null;
+  }
+
   /** Persist a single key. Throws SettingsLockedError when env-locked. */
   async set(
     namespace: string,
@@ -1669,7 +1723,9 @@ export class SettingsService {
 
       let storedValue: unknown | null = null;
       let storedEnc: string | null = null;
-      let digest = '';
+      // The fingerprint both ledgers record. `null` only for a secret no
+      // keyed digest could be computed for — see `secretAuditDigest`.
+      let digest: string | null = null;
 
       if (!isNull) {
         if (isEncrypted) {
@@ -1696,7 +1752,7 @@ export class SettingsService {
               ciphertext: handle.ciphertext,
             });
             storedEnc = handle.id;
-            digest = this.cryptoProvider.digest(plain);
+            digest = await this.secretAuditDigest(namespace, key, plain);
           } else {
             // #8026 — the legacy inline-adapter path persists only through an
             // adapter that declares real confidentiality. The base64 default
@@ -1706,7 +1762,9 @@ export class SettingsService {
             // branch and fall open.
             this.assertEncryptionAvailable(namespace, key);
             storedEnc = await this.crypto.encrypt(plain, { namespace, key });
-            digest = this.crypto.digest(plain);
+            // Not `this.crypto.digest` — an adapter's digest is not keyed by
+            // contract, and a secret is never fingerprinted with an unkeyed one.
+            digest = await this.secretAuditDigest(namespace, key, plain);
           }
         } else {
           storedValue = rawValue;
@@ -1750,7 +1808,9 @@ export class SettingsService {
             // an audit row invisible to RLS readers — see `SettingsAuditSink`.
             tenantId: ctx.tenantId,
             action: isNull ? 'reset' : 'set',
-            valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
+            valueDigest: isEncrypted
+              ? digest === null ? '<encrypted>' : '<encrypted:' + digest + '>'
+              : digest ?? '',
             encrypted: isEncrypted,
             requestId: ctx.requestId,
           });
@@ -2431,7 +2491,7 @@ export class SettingsService {
    *
    * Nothing else can reference the handle: ids are minted per `encrypt()` call,
    * `sys_setting.value_enc` is the only column that holds one, and the audit
-   * trail records digests (`sha256:…`) rather than handles — so it stays
+   * trail records digests (`hmac-sha256:…`) rather than handles — so it stays
    * readable after the ciphertext is gone.
    *
    * **Best-effort, and deliberately after the repoint.** The write has already

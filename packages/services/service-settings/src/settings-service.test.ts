@@ -184,7 +184,7 @@ describe('SettingsService — global scope', () => {
 });
 
 describe('SettingsService — audit sink', () => {
-  it('records masked digest for encrypted values', async () => {
+  it('records an encrypted value without the adapter digest when no keyed digest is available', async () => {
     const events: any[] = [];
     const svc = new SettingsService({
       env: {},
@@ -203,7 +203,9 @@ describe('SettingsService — audit sink', () => {
     const apiKeyEvent = events.find((e) => e.key === 'api_key');
     expect(apiKeyEvent).toBeTruthy();
     expect(apiKeyEvent.encrypted).toBe(true);
-    expect(apiKeyEvent.valueDigest).toMatch(/^<encrypted:fnv32:/);
+    // No crypto provider is wired, so there is no keyed digest; the adapter's
+    // unkeyed digest is never recorded for a secret (crypto-provider contract).
+    expect(apiKeyEvent.valueDigest).toBe('<encrypted>');
   });
 });
 
@@ -2005,7 +2007,7 @@ describe('SettingsService — Phase 3 sys_secret + crypto provider + audit', () 
       action: 'set',
       encrypted: true,
     });
-    expect(auditRows[0].newHash).toMatch(/^sha256:/);
+    expect(auditRows[0].newHash).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
     expect(auditRows[0].newHash).not.toContain('super-secret-key');
   });
 

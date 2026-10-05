@@ -220,14 +220,18 @@ export interface ICryptoProvider {
   rotateKey(handle: CryptoHandle, ctx: CryptoContext): Promise<CryptoHandle>;
 
   /**
-   * Stable hex digest of `plain` used for audit logging. SHOULD NOT
-   * reveal the plaintext (use HMAC or SHA-256 of canonical JSON).
-   * Same hash for same input enables operators to detect duplicate
-   * writes without exposing secrets.
+   * Stable hex digest of `plain` used for audit logging of NON-secret
+   * values. SHOULD NOT reveal the plaintext (use HMAC or SHA-256 of
+   * canonical JSON). Same hash for same input enables operators to detect
+   * duplicate writes.
    *
    * Not keyed by contract: plain SHA-256 satisfies it, so anyone holding a
-   * candidate input can recompute it. A value that must not be computable
-   * without the provider's key comes from {@link ICryptoProvider.keyedDigest}.
+   * candidate input can recompute it — which is why it is never the audit
+   * fingerprint of a secret-valued input (a password, an encrypted settings
+   * key): anyone who can read the audit trail could confirm a guess about
+   * the secret offline. A secret's audit fingerprint, and any other value
+   * that must not be computable without the provider's key, comes from
+   * {@link ICryptoProvider.keyedDigest}.
    */
   digest(plain: string): string;
 
@@ -246,10 +250,16 @@ export interface ICryptoProvider {
    *     output in every process and on every node holding that key, so a
    *     value one node hands out compares equal when a caller echoes it to
    *     another. Replacing the key changes every output.
-   *  3. **Not a substitute for {@link ICryptoProvider.digest}.** `digest`
-   *     keeps its own contract and the stability the audit trail relies on;
-   *     nothing that records or compares audit digests moves to this method,
-   *     and this method is not an audit fingerprint.
+   *  3. **The audit fingerprint of a secret.** An audit trail records a
+   *     secret-valued input (a password, an encrypted settings key) with
+   *     this method, ⛔ never with {@link ICryptoProvider.digest}: by
+   *     requirement 2 equal secrets still record equal fingerprints under
+   *     one key, so "this value changed" and "it went back to an earlier
+   *     value" stay readable, while a reader of the trail cannot confirm a
+   *     guess about the secret offline. If no keyed digest can be had, the
+   *     audit trail records no fingerprint for the secret — it ⛔ never
+   *     falls back to `digest`. Non-secret inputs keep `digest` and its
+   *     stability, unchanged.
    *
    * Output: `hmac-sha256:` followed by the 64 lowercase hex characters of an
    * HMAC-SHA-256 — 76 characters drawn from `[0-9a-z:-]`. That one token
