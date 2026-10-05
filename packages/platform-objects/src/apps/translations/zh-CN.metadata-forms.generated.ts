@@ -1772,6 +1772,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "所需认证特性",
         helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
       },
+      requiresMembershipReach: {
+        label: "所需成员等级可达端点",
+        helpText: "该动作调用的组织端点：只有成员等级可达该端点的成员才会看到它。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
+      },
       requiredPermissions: {
         label: "所需权限",
         helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作路由会以 403 拒绝其他调用方（script、flow 和 modal 动作，以及 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作由浏览器直接调用其端点，因此该端点必须自行再次检查。"

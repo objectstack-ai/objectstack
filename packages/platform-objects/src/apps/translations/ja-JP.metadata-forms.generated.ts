@@ -1772,6 +1772,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
       },
+      requiresMembershipReach: {
+        label: "必要なメンバーシップ到達先",
+        helpText: "このアクションが呼び出す組織エンドポイント。メンバーシップのグレードがそのエンドポイントに到達できるメンバーにだけ表示されます。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
+      },
       requiredPermissions: {
         label: "必要な権限",
         helpText: "このアクションを実行するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D4）。それ以外の呼び出し元はプラットフォームのアクションルートで 403 として拒否され（script、flow、modal アクションと MCP/AI 経路）、ボタンも表示されません。type が api のアクションはエンドポイントを直接呼び出すため、そのエンドポイントで改めてチェックする必要があります。"
