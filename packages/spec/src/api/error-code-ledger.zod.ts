@@ -637,10 +637,12 @@ export const ERROR_CODE_LEDGER = {
     // never satisfy, and the remedy is a body change
     // (`objectstack migrate meta --from N`). It matches this package's own
     // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
-    // refusals from environment state (FLOW_CONVERSION_CONFLICT). The one HTTP
-    // door that reaches the throw, `POST /api/v1/packages`, carries
-    // `requiredRange`, `rangeSource`, `protocolVersion`, `targetMajor` and
-    // `migrateCommand` in `error.details`.
+    // refusals from environment state (FLOW_CONVERSION_CONFLICT). The two HTTP
+    // doors that reach the throw, `POST /api/v1/packages` and (since #21805)
+    // `POST /api/v1/marketplace/install-local`, answer the same bytes through
+    // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,
+    // `rangeSource`, `protocolVersion`, `targetMajor` and `migrateCommand` in
+    // `error.details`.
     'OS_PROTOCOL_INCOMPATIBLE',
   ],
   '@objectstack/objectql': [
@@ -1014,7 +1016,7 @@ export const ERROR_CODE_LEDGER = {
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
     'CLOUD_UNCONFIGURED',            // no cloud endpoint configured on this runtime
     'DEVICE_CODE_FAILED',            // cloud rejected the device-code exchange
-    'DRIVER_UNAVAILABLE',            // no driver service — cannot purge seeded rows
+    'DRIVER_UNAVAILABLE',            // purge-sample-data: the data engine (objectql) or the metadata service is unavailable — cannot purge seeded rows (since #21773)
     'ENVIRONMENT_BIND_FAILED',
     'ENVIRONMENT_NOT_FOUND',
     // [#13353] `requireInstallCapability`'s 403
