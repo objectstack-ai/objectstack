@@ -74,7 +74,7 @@ describe('ComparisonOperatorSchema', () => {
   // rather than an ISO refinement.
   // ==========================================================================
 
-  describe('string comparands (#5685)', () => {
+  describe('string comparands — the ordering slots take a string, which is what the date macros emit', () => {
     const OPS = ['$gt', '$gte', '$lt', '$lte'] as const;
 
     /** `resolveFilterTokens` returns `asYmd(...)` for every calendar-day token. */
@@ -163,7 +163,7 @@ describe('ComparisonOperatorSchema', () => {
   // `filter-comparand-shape.test.ts`.
   // ==========================================================================
 
-  describe('null comparand (#14080)', () => {
+  describe('null comparand — refused in the four ordering slots, like a null list member', () => {
     const OPS = ['$gt', '$gte', '$lt', '$lte'] as const;
     const messagesOf = (result: { error?: { issues: Array<{ message: string }> } }): string =>
       (result.error?.issues ?? []).map((i) => i.message).join('\n');
@@ -194,7 +194,7 @@ describe('ComparisonOperatorSchema', () => {
       expect(nested.success).toBe(false);
     });
 
-    it('the null PREDICATES are untouched — $eq: null / $ne: null keep parsing (#5332)', () => {
+    it('the null PREDICATES are untouched — $eq: null / $ne: null keep parsing', () => {
       expect(FieldOperatorsSchema.safeParse({ $eq: null }).success).toBe(true);
       expect(FieldOperatorsSchema.safeParse({ $ne: null }).success).toBe(true);
       // The normalized AST is a logical group at its root (a bare field
@@ -256,7 +256,7 @@ describe('SetOperatorSchema', () => {
   // on a missing prescription is not coverage of this ruling.
   // ==========================================================================
 
-  describe('$field members are refused (#7596)', () => {
+  describe('$field members are refused', () => {
     it('refuses a $field member of $in, naming the index and the alternative', () => {
       const result = SetOperatorSchema.safeParse({ $in: ['won', { $field: 'budget' }] });
       expect(result.success).toBe(false);
@@ -295,7 +295,7 @@ describe('SetOperatorSchema', () => {
       expect(SetOperatorSchema.safeParse({ $in: [] }).success).toBe(true);
     });
 
-    it('refuses a null member of $in / $nin — ruled 2026-08-31 (#13357)', () => {
+    it('refuses a null member of $in / $nin — ruled 2026-08-31', () => {
       for (const op of ['$in', '$nin'] as const) {
         const result = SetOperatorSchema.safeParse({ [op]: ['won', null] });
         expect(result.success, op).toBe(false);
@@ -361,7 +361,7 @@ describe('RangeOperatorSchema', () => {
   // parse verdicts on a declaration surface, not runtime refusals.)
   // ==========================================================================
 
-  describe('string endpoints (#6571)', () => {
+  describe('string endpoints — `$between` takes the ISO and clock strings the platform produces', () => {
     /**
      * `resolveFilterTokens`' `walk` descends into arrays, and every branch of
      * the resolver returns a string, so a token range resolves to two strings:
@@ -469,7 +469,7 @@ describe('RangeOperatorSchema', () => {
   // was.
   // ==========================================================================
 
-  describe('$field endpoints are refused (#7596)', () => {
+  describe('$field endpoints are refused', () => {
     it('refuses a $field LOWER bound, naming index 0 and the alternative', () => {
       const result = RangeOperatorSchema.safeParse({
         $between: [{ $field: 'a.min' }, '2026-12-31'],
@@ -546,7 +546,7 @@ describe('RangeOperatorSchema', () => {
      * always rejected both), and the pair above them is what moved — which is
      * exactly the evidence that the two faces now agree.
      */
-    it('the whole-filter face refuses these field conditions too — #7711 (was green pre-#7711)', () => {
+    it('the whole-filter face refuses these field conditions too — green while the group branch was a non-strict catch-all', () => {
       const withReference = NormalizedFilterSchema.safeParse({
         $and: [{ amount: { $between: [{ $field: 'budget' }, 100] } }],
       });
@@ -573,7 +573,7 @@ describe('RangeOperatorSchema', () => {
      * is the SCALAR comparand, and it is also what the refusal above prescribes.
      * If this went red the refusal message would be sending authors nowhere.
      */
-    it('leaves the four ORDERING slots taking a reference — #5222, and the prescribed alternative', () => {
+    it('leaves the four ORDERING slots taking a reference — a column-to-column comparison, and the prescribed alternative', () => {
       expect(ComparisonOperatorSchema.safeParse({ $gt: { $field: 'budget' } }).success).toBe(true);
       expect(FieldOperatorsSchema.safeParse({
         $gte: { $field: 'a.min' }, $lte: { $field: 'a.max' },
@@ -605,7 +605,7 @@ describe('RangeOperatorSchema', () => {
   // (`filter-comparand-shape.test.ts`).
   // ==========================================================================
 
-  describe('blank $between endpoints are refused (#18012)', () => {
+  describe('blank $between endpoints are refused', () => {
     const issuesOf = (result: { error?: { issues: Array<{ path: PropertyKey[]; message: string }> } }) =>
       result.error?.issues ?? [];
 
@@ -676,7 +676,7 @@ describe('RangeOperatorSchema', () => {
      * face about each slot, so both are refused on save, at the endpoint, in the
      * sentence the enforced operator slot prints for the same pair.
      */
-    it('is refused by FilterConditionSchema too, at the endpoint, in the operator slot\'s words (#20116)', () => {
+    it('is refused by FilterConditionSchema too, at the endpoint, in the operator slot\'s words', () => {
       const blank = FilterConditionSchema.safeParse({ age: { $between: [18, ''] } });
       expect(blank.success).toBe(false);
       expect(issuesOf(blank).map((i) => i.path)).toEqual([['age', '$between', 1]]);
@@ -1069,7 +1069,7 @@ describe('TypeScript Type System', () => {
    * (the second reads `undefined`, not `never`: the old guard's `never` meets
    * the slot's own `?`, and an optional `never` IS `undefined`.)
    */
-  it('accepts an ISO string on a Date field and orders string fields (#5685)', () => {
+  it('accepts an ISO string on a Date field and orders string fields', () => {
     interface Deal {
       close_date: Date;      // resolved date macro arrives as 'YYYY-MM-DD'
       shift_start: string;   // Field.time — 'HH:MM[:SS[.fff]]'
@@ -1098,7 +1098,7 @@ describe('TypeScript Type System', () => {
    * recorded: the old guard's `never` meets the slot's own `?`, and an optional
    * `never` IS `undefined`.)
    */
-  it('accepts a resolved macro range on a Date field and ranges string fields (#6571)', () => {
+  it('accepts a resolved macro range on a Date field and ranges string fields', () => {
     interface Deal {
       close_date: Date;      // a resolved token range arrives as two 'YYYY-MM-DD'
       shift_start: string;   // Field.time — 'HH:MM[:SS[.fff]]'
@@ -1459,7 +1459,7 @@ describe('NormalizedFilterSchema', () => {
   // as well: the catch-all returned `{}` for the member it admitted, so the
   // parse output no longer carried the condition it was asked about.
   // ==========================================================================
-  describe('#7711 — a member the field-condition branch refuses has nowhere to land', () => {
+  describe('a member the field-condition branch refuses has nowhere to land', () => {
     /** The card's clean control: `$null` has never been anything but a boolean. */
     it('rejects a $and member whose operator map FieldOperatorsSchema refuses', () => {
       const result = NormalizedFilterSchema.safeParse({
@@ -1538,7 +1538,7 @@ describe('NormalizedFilterSchema', () => {
      * the field-condition branch as an empty record, which is what lets the
      * group branch be `.strict()` without touching any of them.
      */
-    it('leaves the #5322 empty-combinator identities accepted', () => {
+    it('leaves the empty-combinator identities accepted — each reduces to its boolean unit', () => {
       for (const identity of [{}, { $and: [] }, { $or: [] }, { $or: [{}] }, { $not: {} }]) {
         expect(NormalizedFilterSchema.safeParse(identity).success).toBe(true);
       }
@@ -1848,7 +1848,7 @@ describe('VALID_AST_OPERATORS', () => {
 // corpus and the memory evaluator's pins — not here.
 // ============================================================================
 
-describe('FieldReferenceSchema.addDays (#14104)', () => {
+describe('FieldReferenceSchema.addDays — a whole-day offset on a reference, an integer or another column', () => {
   const firstIssue = (result: { error?: { issues: Array<{ code: string; path: PropertyKey[]; message: string }> } }) =>
     result.error?.issues[0];
 
@@ -1959,7 +1959,7 @@ describe('FieldReferenceSchema.addDays (#14104)', () => {
       expect(firstIssue(enforced)?.message.startsWith('addDays must be an integer or a { "$field" } reference')).toBe(true);
     });
 
-    it('adds no LIST position — a reference carrying addDays is refused where a bare one is (#7596)', () => {
+    it('adds no LIST position — a reference carrying addDays is refused where a bare one is', () => {
       const result = SetOperatorSchema.safeParse({ $in: [{ $field: 'due_date', addDays: 1 }] });
       expect(result.success).toBe(false);
       expect(firstIssue(result)?.path).toEqual(['$in', 0]);
@@ -1995,7 +1995,7 @@ describe('FieldReferenceSchema.addDays (#14104)', () => {
  *   and refuses `.` and `/` alike, so a slash-separated or unbackticked
  *   respelling trips it too.
  */
-describe('filter.zod.ts docblock @examples (#16923)', () => {
+describe('filter.zod.ts docblock @examples — a `$field` comparand names a column of the same row', () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const SOURCE = readFileSync(resolve(HERE, 'filter.zod.ts'), 'utf8');
 

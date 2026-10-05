@@ -62,7 +62,7 @@ describe('HookBody', () => {
     // #4391. These assertions are what must go red if any of them comes back
     // WITHOUT an implementation behind it.
 
-    it('does not offer `crypto.hash` as a capability token (#4391)', () => {
+    it('does not offer `crypto.hash` as a capability token', () => {
       expect(HookBodyCapability.options).toEqual([
         'api.read',
         'api.write',
@@ -73,7 +73,7 @@ describe('HookBody', () => {
       expect(HookBodyCapability.options).not.toContain('crypto.hash');
     });
 
-    it('rejects a body declaring `crypto.hash`, with the retirement prescription (#4391)', () => {
+    it('rejects a body declaring `crypto.hash`, with the retirement prescription', () => {
       const r = ScriptBodySchema.safeParse({
         language: 'js',
         source: "ctx.input.fp = await ctx.crypto.hash('sha256', ctx.input.email);",
@@ -90,7 +90,7 @@ describe('HookBody', () => {
       expect(message).toMatch(/Delete the capability/s);
     });
 
-    it('still accepts `crypto.uuid` — the sibling that IS implemented (#4391)', () => {
+    it('still accepts `crypto.uuid` — the sibling that IS implemented', () => {
       const r = ScriptBodySchema.safeParse({
         language: 'js',
         source: 'ctx.input.trace = ctx.crypto.randomUUID();',
@@ -99,7 +99,7 @@ describe('HookBody', () => {
       expect(r.success).toBe(true);
     });
 
-    it("gives an UNKNOWN token zod's own message, not the retirement one (#4391)", () => {
+    it("gives an UNKNOWN token zod's own message, not the retirement one", () => {
       // Only the value that used to be legal gets "was removed" — telling the
       // author of a typo that their token was retired would misinform.
       const r = ScriptBodySchema.safeParse({

@@ -46,7 +46,7 @@ function refusedAt(input: unknown) {
   return issue;
 }
 
-describe('[#21182] `imageField` names a declared `image` or `avatar` field of the same object', () => {
+describe('`imageField` names a declared `image` or `avatar` field of the same object', () => {
   it('accepts an `image` field (control)', () => {
     const parsed = ObjectSchema.safeParse(account('logo'));
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);

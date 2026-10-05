@@ -44,7 +44,7 @@ describe('checkManagedApiMethodAffordances — the contradiction it names', () =
     expect(verbs(conflicts)).toEqual(['create', 'delete']);
   });
 
-  it('covers the legacy `upsert`/`purge` verbs a raw whitelist may still carry (#3543)', () => {
+  it('covers the legacy `upsert`/`purge` verbs a raw whitelist may still carry', () => {
     const conflicts = checkManagedApiMethodAffordances(
       managed({ enable: { apiMethods: ['upsert', 'purge'] } }),
     );
@@ -54,7 +54,7 @@ describe('checkManagedApiMethodAffordances — the contradiction it names', () =
     ]);
   });
 
-  it('is the exact shape #7521 was filed for (sys_environment / sys_package)', () => {
+  it('is the exact shape the boot only warned about, now named at authoring time (sys_environment / sys_package)', () => {
     // `managedBy: 'platform'` grants CRUD by default, so the contradiction here
     // comes from `userActions` CLOSING the writes while `apiMethods` still
     // advertises them. This declaration booted the control plane for months.

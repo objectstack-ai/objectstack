@@ -20,7 +20,7 @@ import {
 } from './import-coercion';
 import { REFERENCE_VALUE_TYPES } from './field-value.zod';
 
-describe('import boolean tokens (#4173)', () => {
+describe('import boolean tokens — one table for the server coercion and the Import Wizard preview', () => {
   it('both sets are non-empty and disjoint', () => {
     expect(IMPORT_BOOLEAN_TRUE_TOKENS.size).toBeGreaterThan(0);
     expect(IMPORT_BOOLEAN_FALSE_TOKENS.size).toBeGreaterThan(0);
@@ -45,7 +45,7 @@ describe('import boolean tokens (#4173)', () => {
   });
 });
 
-describe('import reference types (#4173)', () => {
+describe('import reference types — exported from spec, not copied at each consumer', () => {
   it('is the reference value types plus the legacy generic spelling, exactly', () => {
     expect([...IMPORT_REFERENCE_TYPES].sort()).toEqual(
       [...REFERENCE_VALUE_TYPES, 'reference'].sort(),
