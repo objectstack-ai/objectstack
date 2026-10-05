@@ -48,7 +48,7 @@ import {
   matchesLikePattern,
 } from './filter.zod';
 
-describe('[#7536] the wire lowering of `like` / `ilike`', () => {
+describe('the wire lowering of `like` / `ilike` — its own operator, never folded onto `$contains`', () => {
   // ── The card's repro table, as pins ───────────────────────────────────────
 
   it('keeps a wildcard pattern INTACT — the `%` is the caller\'s, not a literal', () => {
@@ -153,7 +153,7 @@ describe('[#7536] the wire lowering of `like` / `ilike`', () => {
   });
 });
 
-describe('[#7536] the `$like` pattern language', () => {
+describe('the `$like` pattern language', () => {
   // One definition, shared by every face — so these cases are the contract the
   // SQL emitters and the JS evaluator are BOTH held to.
 
@@ -220,7 +220,7 @@ describe('[#7536] the `$like` pattern language', () => {
   });
 });
 
-describe('[#7536] the LIKE → GLOB translation the SQLite dialects need', () => {
+describe('the LIKE → GLOB translation the SQLite dialects need', () => {
   // SQLite's `LIKE` folds ASCII case and cannot be told not to per statement,
   // so a case-exact pattern match has to use `GLOB` — which speaks a DIFFERENT
   // pattern language. These cases are what stops the two from being confused.

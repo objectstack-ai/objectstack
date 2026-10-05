@@ -78,11 +78,11 @@ const SCOPE_ROWS: readonly Row[] = [
 
 /** Rule 3 — NULL polarity, leaf by leaf, exactly as the four hand copies compile it. */
 const NULL_ROWS: readonly Row[] = [
-  { name: '$ne a value: a row with no value satisfies it (#5298)',
+  { name: '$ne a value: a row with no value satisfies it',
     input: { stage: { $ne: 'won' } }, output: { $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'won' } }] }] } },
-  { name: '$nin: a row with no value satisfies it (#5298)',
+  { name: '$nin: a row with no value satisfies it',
     input: { stage: { $nin: ['won'] } }, output: { $and: [{ $or: [{ stage: { $null: true } }, { stage: { $nin: ['won'] } }] }] } },
-  { name: '$notContains: a row with no value satisfies it (#5298)',
+  { name: '$notContains: a row with no value satisfies it',
     input: { name: { $notContains: 'x' } }, output: { $and: [{ $or: [{ name: { $null: true } }, { name: { $notContains: 'x' } }] }] } },
   { name: '$ne: null is the total IS NOT NULL and is left alone',
     input: { stage: { $ne: null } }, output: { stage: { $ne: null } } },
@@ -90,9 +90,9 @@ const NULL_ROWS: readonly Row[] = [
     input: { a: { $ne: { $field: 'b' } } }, output: { a: { $ne: { $field: 'b' } } } },
   { name: 'only the negative operator moves; its siblings stay under the key',
     input: { amount: { $gt: 1, $ne: 5 } }, output: { amount: { $gt: 1 }, $and: [{ $or: [{ amount: { $null: true } }, { amount: { $ne: 5 } }] }] } },
-  { name: '$not over a positive leaf requires a value (#5146)',
+  { name: '$not over a positive leaf requires a value',
     input: { $not: { stage: 'won' } }, output: { $not: { $and: [{ stage: { $null: false } }, { stage: 'won' }] } } },
-  { name: '$not over a negative leaf keeps the NULL escape (#5146)',
+  { name: '$not over a negative leaf keeps the NULL escape',
     input: { $not: { stage: { $ne: 'won' } } }, output: { $not: { $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'won' } }] }] } } },
   { name: '$not over a total leaf is left alone',
     input: { $not: { stage: { $null: true } } }, output: { $not: { stage: { $null: true } } } },
@@ -231,7 +231,7 @@ describe('lowerFilterCondition — copy-on-write, provenance, non-nodes', () => 
     expect(lowered.$or[0]).toBe(untouched);
   });
 
-  it('carries the provenance mark of every node it replaces (#8220)', () => {
+  it('carries the provenance mark of every node it replaces', () => {
     const author = markFilterSubtreeProvenance({ at: { $lte: '2026-07-28' } }, 'author');
     const policy = markFilterSubtreeProvenance({ stage: { $ne: 'won' } }, 'policy');
     const lowered = lowerFilterCondition({ $and: [author, policy] }, TYPED) as { $and: unknown[] };

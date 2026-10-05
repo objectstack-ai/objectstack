@@ -49,7 +49,7 @@ const union = (...sets: ReadonlySet<string>[]) => new Set(sets.flatMap((s) => [.
 
 // ── H5: the operators are the ruling's list AND the schema's key set ────────
 
-describe('[#15661] the judged operators', () => {
+describe('the judged operators', () => {
   it('are the seven the ruling names, verbatim', () => {
     expect([...TEXT_FILTER_OPERATORS]).toEqual([
       '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains', '$like', '$ilike',
@@ -73,7 +73,7 @@ describe('[#15661] the judged operators', () => {
 
 // ── H1: the refused set is the union of the six exports; nothing minted ─────
 
-describe('[#15661] the refused set', () => {
+describe('the refused set', () => {
   it('equals the union of the six sets the ruling names — by set equality against the imports', () => {
     expect(sorted(TEXT_OPERATOR_DOOR_REFUSED_TYPES)).toEqual(sorted(union(
       NUMERIC_VALUE_TYPES,
@@ -125,7 +125,7 @@ describe('[#15661] the refused set', () => {
 
 // ── H1: the census — every FieldType member exactly once across the rows ────
 
-describe('[#15661] the class table is a census of FieldType', () => {
+describe('the class table is a census of FieldType', () => {
   it('every FieldType member appears in exactly one class row — none absent, none judged twice', () => {
     const seen = new Map<string, string[]>();
     for (const row of TEXT_OPERATOR_DOOR_TYPE_CLASSES) {
@@ -181,7 +181,7 @@ describe('[#15661] the class table is a census of FieldType', () => {
 
 // ── The verdict ──────────────────────────────────────────────────────────────
 
-describe('[#15661] textOperatorDoorVerdict', () => {
+describe('textOperatorDoorVerdict — a text operator over a type that never stores a string is refused', () => {
   it('refuses every member of the refused set and passes every member of the passing set', () => {
     for (const t of TEXT_OPERATOR_DOOR_REFUSED_TYPES) expect(textOperatorDoorVerdict({ type: t }), t).toBe('door-refusal');
     for (const t of TEXT_OPERATOR_DOOR_PASSING_TYPES) expect(textOperatorDoorVerdict({ type: t }), t).toBe('passes');
@@ -211,7 +211,7 @@ describe('[#15661] textOperatorDoorVerdict', () => {
 
 // ── The fixture ──────────────────────────────────────────────────────────────
 
-describe('[#15661] the fixture', () => {
+describe('the fixture', () => {
   it('carries one field per FieldType member (f_<type>), four typed formulas and one untyped', () => {
     const names = TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
@@ -242,7 +242,7 @@ describe('[#15661] the fixture', () => {
 const isRefusal = (c: TextOperatorDoorCase): c is TextOperatorDoorRefusalCase => c.verdict === 'door-refusal';
 const fieldOf = (c: TextOperatorDoorCase) => TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.find((f) => f.name === c.field)!;
 
-describe('[#15661] TEXT_OPERATOR_DOOR_CASES', () => {
+describe('TEXT_OPERATOR_DOOR_CASES', () => {
   it('covers every fixture field × every operator, plus a dotted path into every structured-JSON field', () => {
     const jsonFields = TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.filter((f) => STRUCTURED_JSON_TYPES.has(f.type)).length;
     expect(TEXT_OPERATOR_DOOR_CASES).toHaveLength(

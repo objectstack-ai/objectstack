@@ -21,7 +21,7 @@ import { SEARCH_VIRTUAL_TYPES } from './search-fields';
 // DELIBERATELY unjudged (structured/JSON — live on two of three backends, the
 // carve-out the maintainer ruling names with a ⛔).
 // ---------------------------------------------------------------------------
-describe('[#8371] classifyDottedFilterHead — the FILTER axis dotted verdict', () => {
+describe('classifyDottedFilterHead — the FILTER axis dotted verdict, by the type of the head segment', () => {
   it('a relation head is refused: the stored value is a scalar id, not an embedded document', () => {
     expect(classifyDottedFilterHead({ type: 'lookup' })).toBe('relation');
     expect(classifyDottedFilterHead({ type: 'master_detail' })).toBe('relation');
@@ -37,7 +37,7 @@ describe('[#8371] classifyDottedFilterHead — the FILTER axis dotted verdict', 
     }
   });
 
-  it('a virtual head is refused: the #8296 verdict finally reaching the dotted spelling', () => {
+  it('a virtual head is refused: the unmaterializable-field verdict finally reaching the dotted spelling', () => {
     for (const type of SEARCH_VIRTUAL_TYPES) {
       expect(classifyDottedFilterHead({ type }), `'${type}' must classify as virtual`).toBe('virtual');
     }

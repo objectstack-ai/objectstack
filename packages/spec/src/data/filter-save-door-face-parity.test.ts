@@ -206,7 +206,7 @@ const POSITIONS: ReadonlyArray<readonly [label: string, wrap: (e: Record<string,
   ['under $not', (e) => ({ $not: e }), '$not.f'],
 ];
 
-describe('#20116 §1 — the enumeration: the save door refuses exactly what the query faces refuse', () => {
+describe('§1 — the enumeration: the save door refuses exactly what the query faces refuse', () => {
   it('the table is derived, not hand-listed, and covers every arm the faces and the flag rule judge', () => {
     // The vocabulary is the enforced copy's, so a new operator joins the table.
     expect(OPERATORS).toEqual(expect.arrayContaining(['$eq', '$ne', '$gt', '$in', '$nin', '$between', '$null', '$exists']));
@@ -284,7 +284,7 @@ describe('#20116 §1 — the enumeration: the save door refuses exactly what the
 // §2 The envelope and the words, per arm
 // ---------------------------------------------------------------------------
 
-describe('#20116 §2 — each refusal: issue code, path and the prescription', () => {
+describe('§2 — each refusal: issue code, path and the prescription', () => {
   /** The face's message for `where`, with its ` at <facePath>.` location replaced by `.`. */
   function faceSentenceWithoutLocation(where: unknown, facePath: string): string {
     const face = faceRefusal(where);
@@ -305,13 +305,13 @@ describe('#20116 §2 — each refusal: issue code, path and the prescription', (
     ['a three-bound $between', { amount: { $between: [1, 2, 3] } }, 'amount.$between', 'where.amount.$between'],
     ['a $ne list — the appended member', { stage: { $ne: ['won', 'lost'] } }, 'stage.$ne', 'where.stage.$ne'],
     ['an empty $ne list', { stage: { $ne: [] } }, 'stage.$ne', 'where.stage.$ne'],
-    ['an implicit list (#19889, unchanged)', { stage: ['won'] }, 'stage', 'where.stage'],
-    ['a $eq list (#19889, unchanged)', { stage: { $eq: ['won'] } }, 'stage.$eq', 'where.stage.$eq'],
+    ['an implicit list (an equality-slot refusal, unchanged)', { stage: ['won'] }, 'stage', 'where.stage'],
+    ['a $eq list (an equality-slot refusal, unchanged)', { stage: { $eq: ['won'] } }, 'stage.$eq', 'where.stage.$eq'],
     // [#21448] A list at every other scalar operator: ordering, text and flag.
-    ['a $gt list (#21448)', { amount: { $gt: [10, 99] } }, 'amount.$gt', 'where.amount.$gt'],
-    ['an empty $lte list (#21448)', { amount: { $lte: [] } }, 'amount.$lte', 'where.amount.$lte'],
-    ['a $contains list (#21448)', { stage: { $contains: ['won', 'lost'] } }, 'stage.$contains', 'where.stage.$contains'],
-    ['a $null list — a flag (#21448)', { stage: { $null: [true] } }, 'stage.$null', 'where.stage.$null'],
+    ['a $gt list', { amount: { $gt: [10, 99] } }, 'amount.$gt', 'where.amount.$gt'],
+    ['an empty $lte list', { amount: { $lte: [] } }, 'amount.$lte', 'where.amount.$lte'],
+    ['a $contains list', { stage: { $contains: ['won', 'lost'] } }, 'stage.$contains', 'where.stage.$contains'],
+    ['a $null list — a flag', { stage: { $null: [true] } }, 'stage.$null', 'where.stage.$null'],
   ])('%s — the face\'s sentence, less its location', (_label, where, issuePath, facePath) => {
     const issue = issueAt(FilterConditionSchema.safeParse(where), issuePath);
     expect(issue.code).toBe('custom');
@@ -420,7 +420,7 @@ describe('#20116 §2 — each refusal: issue code, path and the prescription', (
 // §3 The stored carriers refuse on save, at their own paths
 // ---------------------------------------------------------------------------
 
-describe('#20116 §3 — the stored carriers', () => {
+describe('§3 — the stored carriers', () => {
   const dataset = (extra: Record<string, unknown>) => ({
     name: 'deals_ds',
     label: 'Deals',
@@ -486,7 +486,7 @@ describe('#20116 §3 — the stored carriers', () => {
 // §4 CONTROLS — what the face judges but passes stays accepted at BOTH doors
 // ---------------------------------------------------------------------------
 
-describe('#20116 §4 — what stays accepted, at both doors', () => {
+describe('§4 — what stays accepted, at both doors', () => {
   it.each([
     ['$null: true', { stage: { $null: true } }],
     ['$null: false', { stage: { $null: false } }],
@@ -546,7 +546,7 @@ describe('#20116 §4 — what stays accepted, at both doors', () => {
 // §5 Inside a nested relation, the ANALYTICS carriers answer as the analytics door
 // ---------------------------------------------------------------------------
 
-describe('#20116 §5 — inside a nested relation, the analytics carriers refuse what the analytics door refuses', () => {
+describe('§5 — inside a nested relation, the analytics carriers refuse what the analytics door refuses', () => {
   // The analytics `where` door flattens a nested relation to dotted members and
   // hands each entry to the same query faces it hands a top-level entry. The
   // analytics carriers' own walk (`refuseNestedRelationComparands`, #20207's,
@@ -697,7 +697,7 @@ describe('#20116 §5 — inside a nested relation, the analytics carriers refuse
 // §6 The comparand-TYPE face: its words, its own table, one issue per slot
 // ---------------------------------------------------------------------------
 
-describe('#20116 §6 — the comparand-TYPE face at the save door', () => {
+describe('§6 — the comparand-TYPE face at the save door', () => {
   /** The type face's message for `where`, with its ` at <facePath> ` location clause removed. */
   function typeFaceSentenceWithoutLocation(where: unknown, facePath: string): string {
     const face = typeFaceRefusal(where);
@@ -740,7 +740,7 @@ describe('#20116 §6 — the comparand-TYPE face at the save door', () => {
     ['$null: a plain object — the type face\'s refusal, not the flag rule\'s', { stage: { $null: { a: 1 } } }, 'stage.$null', /^Filter comparand is a plain object/],
     ['$exists: undefined — the type face\'s refusal', { stage: { $exists: undefined } }, 'stage.$exists', /^Filter comparand is undefined\./],
     ['$null: a bigint within 2^53 — the type face passes it, the flag rule refuses it', { stage: { $null: 5n } }, 'stage.$null', /^Operator "\$null" on field "stage" requires a boolean comparand/],
-    ['$icontains: a Map — the type face\'s refusal, and the #19514 text arm stays silent', { name: { $icontains: new Map() } }, 'name.$icontains', /^Filter comparand is a Map instance/],
+    ['$icontains: a Map — the type face\'s refusal, and the text-comparand arm stays silent', { name: { $icontains: new Map() } }, 'name.$icontains', /^Filter comparand is a Map instance/],
     ['$between: [undefined, 5] — the shape face\'s blank endpoint answers first', { amount: { $between: [undefined, 5] } }, 'amount.$between.0', /^A blank value is not a valid \$between endpoint/],
   ] as const)('one slot, one issue, in the query doors\' order — %s', (_label, where, issuePath, head) => {
     const result = FilterConditionSchema.safeParse(where);
@@ -792,7 +792,7 @@ describe('#20116 §6 — the comparand-TYPE face at the save door', () => {
 // §7 Adopting the analytics carrier moves no published byte
 // ---------------------------------------------------------------------------
 
-describe('#20116 §7 — the analytics carrier filter publishes exactly the bare condition', () => {
+describe('§7 — the analytics carrier filter publishes exactly the bare condition', () => {
   it('its JSON Schema projection is the optional FilterCondition\'s, byte for byte — the walk is a dropped refinement', () => {
     // Why moving the dataset carriers' declaration into its own module, and
     // making the dashboard widget's filter a carrier, changes no published

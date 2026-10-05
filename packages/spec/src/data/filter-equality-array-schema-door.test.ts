@@ -87,7 +87,7 @@ const REFUSED: ReadonlyArray<readonly [label: string, where: unknown, issuePath:
 // §1 FilterConditionSchema refuses both spellings, at the slot's own path
 // ---------------------------------------------------------------------------
 
-describe('#19889 §1 — FilterConditionSchema refuses an array in the equality slot', () => {
+describe('§1 — FilterConditionSchema refuses an array in the equality slot', () => {
   it.each(REFUSED)('refuses %s', (_label, where, issuePath) => {
     const issue = issueAt(FilterConditionSchema.safeParse(where), issuePath);
     expect(issue.message).toMatch(/requires a single comparable value, but received an array/);
@@ -104,7 +104,7 @@ describe('#19889 §1 — FilterConditionSchema refuses an array in the equality 
 // §2 FieldOperatorsSchema.$eq refuses — the enforced copy and the documented one
 // ---------------------------------------------------------------------------
 
-describe('#19889 §2 — the $eq operator slot refuses an array', () => {
+describe('§2 — the $eq operator slot refuses an array', () => {
   it.each([
     ['FieldOperatorsSchema (the enforced copy)', FieldOperatorsSchema],
     ['EqualityOperatorSchema (the documentation copy)', EqualityOperatorSchema],
@@ -125,7 +125,7 @@ describe('#19889 §2 — the $eq operator slot refuses an array', () => {
 // §3 The parse-door message IS the compile-face message
 // ---------------------------------------------------------------------------
 
-describe('#19889 §3 — one text, two doors', () => {
+describe('§3 — one text, two doors', () => {
   it.each(REFUSED)('%s — the schema door prints the face\'s sentence', (_label, where, issuePath, facePath) => {
     const face = faceRefusal(where);
     // The face is the ADR-0112 class-1 refusal it has been since #19757.
@@ -174,7 +174,7 @@ describe('#19889 §3 — one text, two doors', () => {
 // §4 CONTROLS — both doors accept, so the arm is exactly the face's
 // ---------------------------------------------------------------------------
 
-describe('#19889 §4 — what stays accepted, at BOTH doors', () => {
+describe('§4 — what stays accepted, at BOTH doors', () => {
   const day = new Date('2026-07-01T00:00:00.000Z');
   it.each([
     ['a string', { stage: 'won' }],
@@ -244,7 +244,7 @@ describe('#19889 §4 — what stays accepted, at BOTH doors', () => {
 // §5 The stored carriers refuse on save, naming the path
 // ---------------------------------------------------------------------------
 
-describe('#19889 §5 — a stored filter carrier refuses the shape on save', () => {
+describe('§5 — a stored filter carrier refuses the shape on save', () => {
   const dataset = (extra: Record<string, unknown>) => ({
     name: 'deals_ds',
     label: 'Deals',
