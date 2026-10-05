@@ -70,7 +70,8 @@ Derived from the changesets objectui declared over the range — 24 releasing of
      carries its own record.
      (5) objectui#8347 (`b403bb36f`): `BaseSchema` loses its index signature, a TypeScript
      narrowing of objectui's node types; no code in this repository compiles against them,
-     and objectui's tolerant zod mirror keeps its accept set.
+     and objectui's zod faces keep their accept sets for every key but `visibleWhen`, which
+     widens on both to the `{ dialect, source }` envelope this repository's own parse writes.
      Where an entry mirrors an ObjectStack key, the ledger entry belongs to the
      `packages/spec` PR that lands it, never to the pin bump.
      Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
