@@ -29,26 +29,24 @@
 // the spec-exported key face` test below pins list↔walker on this side, so a
 // hand-copied list here fails rather than silently offering a key nothing reads.
 
-// ## Why this file simulates a `live` ledger row (#11624)
+// ## Why this file simulates a `live` ledger row
 //
 // Everything below is the behaviour of the flow bucket ITSELF — which keys the
 // walker harvests, how the coverage report attributes them, what the skeleton
-// looks like. None of it changed in #11624. What changed is WHEN it runs: the
-// `flows` row in `@objectstack/spec/liveness/translation.json` is `planned` +
-// `authorWarn`, and `os lint` runs this bucket in the SAME pass as
-// `lintLivenessProperties`, so demanding the keys while the ledger warns
-// authors for writing them left the author with no move that satisfies both.
-// The bucket is now gated on that row, and it turns itself back on the day the
-// row flips to `live` (dropping its `authorWarn`; for `flows` that waits on
-// #20318).
+// looks like. WHEN it runs is the ledger's call: the bucket is gated on the
+// `flows` row in `@objectstack/spec/liveness/translation.json`. While that row
+// was `planned` + `authorWarn`, `os lint` would have demanded the keys in the
+// same pass that warned authors for writing them, leaving no move that
+// satisfies both, so the walk left the group out. The row is `live` now (the
+// runner reads the flow's own `label` as well as `screens`), and the bucket is
+// back on with no edit to the walker.
 //
-// So these pins are re-anchored, not retired: the mock below is the ledger
-// warning on nothing, i.e. exactly the post-flip world. Retiring them instead
-// would have left the flip with no proof the bucket still works, and a pin that
-// "passes" because the walker now emits nothing is the worst of both. The
-// GATED half — that none of this reaches an author while the row is `planned`
-// — is pinned next door in `i18n-flow-liveness-gate.test.ts`, against the real
-// shipped ledger.
+// The mock below pins the ledger to "warns on nothing", which today is also
+// the real ledger's state. It stays so that these pins keep measuring the
+// bucket whatever the shipped ledger says next: a pin that "passes" because
+// the walker emits nothing is the worst of both. The GATED half — what the
+// walk does for a group the ledger DOES warn on — is pinned next door in
+// `i18n-flow-liveness-gate.test.ts`, which also pins the real shipped ledger.
 //
 // The mock is fail-loud: if it stopped applying, every `expect(...).toContain`
 // below would go red rather than silently assert over an empty walk.
