@@ -4833,6 +4833,24 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * field. The compound door's parity argument is a statement about ONE pair of
  * routes that spell one name two ways; it is not a general licence, and the
  * dispatcher is not the third member of that pair.
+ *
+ * ## [#21841] The external-table import, and why it went the dispatcher's way
+ *
+ * "Import as Object" (`@objectstack/service-datasource`) saves through this
+ * gate since #21788, so a re-import that would shrink an object it created is
+ * refused here and relayed as `400 EXTERNAL_IMPORT_ERROR`. The import route
+ * reads no `force`, so the default clause sent that caller round in a circle.
+ * It states `'external-import'` and gets a clause of its own rather than a
+ * `force`, for the reasons the dispatcher did and one more: the route has no
+ * twin that reads `?force`, and no first-party caller re-imports through it
+ * (the console's import dialog saves its draft through
+ * `PUT /api/v1/meta/object/:name`, the very door this clause names), so a
+ * `force` there would be a new capability with nothing pulling on it. Unlike
+ * the dispatcher, a door that DOES read `?force` exists for the same item, so
+ * the clause names it instead of only telling the caller to reconcile.
+ *
+ * ⛔ Same warning as above: the import is not a twin of the `PUT` door, and
+ * giving it a `force` to "match" would be a new surface, not a repair.
  */
 /**
  * [commit 82cb6e849 / commit d806081dd] Which write door a `saveMetaItem` refusal is being
@@ -4865,8 +4883,16 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * case rather than a hypothetical — which is why {@link specValidationFindings}
  * lists the two faces on one `case` instead of letting `'meta-dispatch'` fall
  * to a default that was never written for it.
+ *
+ * ⚠️ [#21841] `'external-import'` differs from `'meta-dispatch'` on that SAME
+ * second question, in the other direction: the import route relays a refusal
+ * as `sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', message)` and nothing else,
+ * so no `issues[]` reaches its caller and the message is the sole carrier of
+ * the findings. It therefore stays OUT of {@link specValidationFindings}'
+ * trimming case and keeps the full-prose default — the polarity that comment
+ * defends, working as designed for a door added after it.
  */
-type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch';
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch' | 'external-import';
 
 function destructiveChangeRemedy(
     face: MetadataWriteFace | undefined,
@@ -4897,6 +4923,20 @@ function destructiveChangeRemedy(
             return `this save cannot be forced: the dispatcher's \`PUT /meta\` accepts no \`force\`. `
                 + `Re-submit '${name}' with a body that keeps the fields and types named above, `
                 + `or reconcile that stored item first.`;
+        case 'external-import':
+            // [#21841] "Import as Object" (`@objectstack/service-datasource`),
+            // relayed by the import route as `400 EXTERNAL_IMPORT_ERROR`. That
+            // route reads no `force` and was deliberately not given one (see the
+            // section above `MetadataWriteFace`). Both remedies are things the
+            // caller can do from where they stand: import the table under a
+            // name nothing stores yet, or save the changed definition through
+            // the metadata door, which reads `?force=true` for this very item
+            // and is where a destructive change is acknowledged on purpose.
+            // Same grammar as the two faces above — name the door, deny the
+            // mechanism, then prescribe.
+            return `this import cannot be forced: the external-table import route accepts no \`force\`. `
+                + `Import the table under a new \`name\`, or save the changed definition of '${name}' `
+                + `through \`PUT /api/v1/meta/object/${name}?force=true\`, which accepts the destructive change on purpose.`;
         default:
             return 're-submit with ?force=true to proceed.';
     }
