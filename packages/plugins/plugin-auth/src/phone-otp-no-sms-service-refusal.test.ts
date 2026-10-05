@@ -240,6 +240,43 @@ describe('POST /phone-number/send-otp without a deliverable SMS service', () => 
     expect(sms.sent).toHaveLength(0);
   });
 
+  it('request-password-reset for a REGISTERED number still answers {status:true} — no existence oracle', async () => {
+    const engine = createMemoryEngine();
+    // A phone-carrying account, so the route reaches the send callback (an
+    // unregistered number returns before it, and would prove nothing).
+    await engine.insert('sys_user', {
+      id: 'usr_phone_reset',
+      email: 'u-phone-reset@placeholder.invalid',
+      name: 'Phone Reset Subject',
+      phone_number: PHONE,
+      phone_number_verified: true,
+    });
+    const manager = makeManager(engine);
+    // Pass-through spy: proves the route REACHED the refusing send for this
+    // registered number, rather than returning early as it does for an
+    // unregistered one.
+    const deliver = vi.spyOn(manager as any, 'deliverPhoneOtp');
+
+    const response = await manager.handleRequest(
+      new Request(`${AUTH}/phone-number/request-password-reset`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ phoneNumber: PHONE }),
+      }),
+    );
+
+    // better-auth runs this send through `runInBackgroundOrAwait`, which logs a
+    // throw and answers success — so the refusal cannot leak, by status or
+    // body, whether the number belongs to an account.
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toEqual({ status: true });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    await expect(deliver.mock.results[0]?.value).rejects.toMatchObject({
+      statusCode: 400,
+      body: { code: 'SMS_SERVICE_REQUIRED' },
+    });
+  });
+
   it('outside production a log-only transport still delivers (the refusal is production-only for it)', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     const engine = createMemoryEngine();

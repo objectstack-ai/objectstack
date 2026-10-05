@@ -527,6 +527,7 @@ export const ERROR_CODE_LEDGER = {
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
     'EMAIL_DOMAIN_NOT_ALLOWED',   // [#11739] audience posture email_domain: the address's domain is off the allowlist
     'EMAIL_SERVICE_REQUIRED',
+    'SMS_SERVICE_REQUIRED',       // [#21793] 400 on /phone-number/send-otp: phone OTP needs a deliverable SMS service and none is configured (none wired, or a log-only transport in production)
     'ENV_ACCESS_DENIED',
     'INVALID_EMAIL',
     'INVALID_PHONE',

@@ -2109,9 +2109,53 @@ describe('AuthManager', () => {
       expect(opts.phoneNumberValidator('bob@example.com')).toBe(false);
     });
 
-    it('sendOTP throws NOT_SUPPORTED without an SMS service (pre-#2780 behaviour preserved)', async () => {
-      const { opts } = await bootOtp();
-      await expect(opts.sendOTP({ phoneNumber: PHONE, code: '123456' })).rejects.toThrow(/NOT_SUPPORTED/);
+    // No deliverable SMS service ⇒ a typed refusal the router can map: an
+    // `APIError` carrying 400 + `SMS_SERVICE_REQUIRED`. A plain `Error` here
+    // reached the caller as a 500 with a null body (better-call maps only
+    // `APIError`); the wire answer is pinned in
+    // `phone-otp-no-sms-service-refusal.test.ts`.
+    describe('no deliverable SMS service refuses with 400 SMS_SERVICE_REQUIRED', () => {
+      const refusalOf = async (run: () => Promise<unknown>): Promise<any> => {
+        try {
+          await run();
+        } catch (e) {
+          return e;
+        }
+        throw new Error('expected the call to reject, but it resolved');
+      };
+
+      it('no SMS service wired', async () => {
+        const { opts } = await bootOtp();
+        const err = await refusalOf(() => opts.sendOTP({ phoneNumber: PHONE, code: '123456' }));
+        const { isAPIError } = await import('better-auth/api');
+        expect(isAPIError(err)).toBe(true);
+        expect(err.status).toBe('BAD_REQUEST');
+        expect(err.statusCode).toBe(400);
+        expect(err.body?.code).toBe('SMS_SERVICE_REQUIRED');
+        expect(String(err.message)).not.toContain('123456');
+      });
+
+      it('a log-only SMS transport in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+          const { manager, opts } = await bootOtp();
+          const sent: unknown[] = [];
+          manager.setSmsService({
+            async send(input: unknown) {
+              sent.push(input);
+              return { id: 'sms_log', status: 'sent' };
+            },
+            isConfigured: () => false,
+          } as any);
+          const err = await refusalOf(() => opts.sendOTP({ phoneNumber: PHONE, code: '654321' }));
+          expect(err.statusCode).toBe(400);
+          expect(err.body?.code).toBe('SMS_SERVICE_REQUIRED');
+          expect(String(err.message)).not.toContain('654321');
+          expect(sent).toHaveLength(0);
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
     });
 
     it('sendOTP delivers the code in the SMS body (and only there)', async () => {
