@@ -124,6 +124,31 @@ function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
  * fleet. Prime Directive #12: the shim goes once the producer agrees.
  */
 
+/**
+ * [#21839] The password a share-link holder presented, read the ONE way both
+ * public routes (`/resolve` and `/messages`) read it.
+ *
+ * The `x-share-password` request header is the preferred form: a header is
+ * not part of the request URL, so it stays out of browser history, referrers
+ * and any access log that records URLs. The `?password=` query parameter is
+ * still accepted for compatibility with clients that send it today, and is
+ * read first when present, exactly as the dispatcher twin
+ * (`runtime/src/domains/share-links.ts`) reads it — two mounts of the same
+ * routes must not answer the same request differently. `/messages` read the
+ * query parameter alone until this helper; it now takes the header too, as
+ * its twin always has.
+ *
+ * Nothing on this path logs either form: the routes write no log line, and
+ * the service's log lines name the link, never the presented password.
+ */
+function presentedPassword(req: IHttpRequest): string | undefined {
+  const q: any = req.query ?? {};
+  if (typeof q.password === 'string') return q.password;
+  const v = req.headers?.['x-share-password'];
+  const header = Array.isArray(v) ? v[0] : v;
+  return typeof header === 'string' ? header : undefined;
+}
+
 /** Strip `redactFields` from a record (also removes from nested arrays of objects). */
 function applyRedaction(record: any, redactFields: string[]): any {
   if (!record || typeof record !== 'object' || redactFields.length === 0) return record;
@@ -230,13 +255,7 @@ export function registerShareLinkRoutes(
       // the "must be signed in" check by inventing a user id.
       const signedInUserId = (await ctxOf(req)).userId;
       const recipientEmail = typeof q.email === 'string' ? q.email : undefined;
-      const providedPassword =
-        typeof q.password === 'string'
-          ? q.password
-          : (() => {
-              const v = req.headers?.['x-share-password'];
-              return Array.isArray(v) ? v[0] : v;
-            })();
+      const providedPassword = presentedPassword(req);
 
       const resolved = await service.resolveToken(req.params.token, {
         signedInUserId,
@@ -363,9 +382,9 @@ export function registerShareLinkRoutes(
   // ──────────────────────────────────────────────────────────────
   http.get(`${base}/:token/messages`, (async (req, res) => {
     try {
-      const password =
-        typeof req.query?.password === 'string' ? (req.query.password as string) : undefined;
-      const resolved = await service.resolveToken(req.params.token, { providedPassword: password });
+      const resolved = await service.resolveToken(req.params.token, {
+        providedPassword: presentedPassword(req),
+      });
       if (!resolved) {
         sendError(res, 404, 'NOT_FOUND', 'Share link not found');
         return;
