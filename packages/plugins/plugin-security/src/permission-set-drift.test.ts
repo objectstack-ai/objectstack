@@ -349,6 +349,8 @@ const envShapes = [
   { label: 'runtime-package set', body: { name: 'rt_pkg_set', label: 'Runtime package set', objects: { obj_a: { allowRead: true } }, _packageId: RUNTIME_PACKAGE, _provenance: 'org' }, packageId: RUNTIME_PACKAGE },
   { label: 'org-owned set', body: { name: 'org_owned_set', label: 'Org-owned set', objects: { obj_a: { allowRead: true } }, _provenance: 'org' }, packageId: null },
   { label: 'clone', body: { name: 'contributor_clone', label: 'Contributor (clone)', objects: { obj_a: { allowRead: true } }, _provenance: 'org' }, packageId: null },
+  // The lock module's documented runtime shadow: the `'sys_metadata'` sentinel package id.
+  { label: 'runtime shadow', body: { name: 'runtime_only_set', label: 'Runtime-only set', objects: { obj_a: { allowRead: true } }, _packageId: 'sys_metadata', _provenance: 'org' }, packageId: null },
 ] as const;
 
 /** A record that DIFFERS from the body (so a judged set would be surfaced), plus its stored definition. */
@@ -411,8 +413,9 @@ describe('[#21860] computePermissionSetDriftDiagnostics — the declared populat
       rt_pkg_set: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
       org_owned_set: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
       contributor_clone: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
+      runtime_only_set: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
     });
     // Nothing was deleted: every stored definition is still there.
-    expect(ql.metaRows.map((r) => r.name).sort()).toEqual(['contributor_clone', 'org_owned_set', 'rt_pkg_set']);
+    expect(ql.metaRows.map((r) => r.name).sort()).toEqual(['contributor_clone', 'org_owned_set', 'rt_pkg_set', 'runtime_only_set']);
   });
 });

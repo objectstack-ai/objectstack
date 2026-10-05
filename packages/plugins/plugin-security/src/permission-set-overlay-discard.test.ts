@@ -404,6 +404,14 @@ const ENV_SHAPES: EnvShape[] = [
     registered: { name: 'contributor_clone', label: 'Contributor (clone)', objects: envObjects, _provenance: 'org' },
     packageId: null,
   },
+  {
+    // The runtime shadow the lock module documents for a definition that lives
+    // only in `sys_metadata`: its package id is the `'sys_metadata'` sentinel,
+    // which the classifier excludes and a bare "has a package id" read accepts.
+    label: "a runtime shadow carrying the 'sys_metadata' sentinel package id",
+    registered: { name: 'runtime_only_set', label: 'Runtime-only set', objects: envObjects, _packageId: 'sys_metadata', _provenance: 'org' },
+    packageId: null,
+  },
 ];
 
 /** The set's record and its one stored definition — the only copy of it there is. */
