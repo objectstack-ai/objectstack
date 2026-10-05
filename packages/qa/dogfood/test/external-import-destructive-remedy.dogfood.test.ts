@@ -58,7 +58,7 @@ interface Envelope {
   success?: boolean;
   error?: { code?: string; message?: string };
   item?: { fields?: Record<string, unknown> };
-  draft?: { definition?: Record<string, unknown> };
+  data?: { draft?: { definition?: Record<string, unknown> } };
   records?: Array<Record<string, unknown>>;
 }
 
@@ -159,7 +159,11 @@ describe('a destructive re-import is refused with a remedy that works (showcase)
     // options: the definition the refused re-import would have saved.
     const draft = await call('POST', draftPath, SHRINKING);
     expect(draft.status, JSON.stringify(draft.json)).toBe(200);
-    const definition = { ...draft.json.draft?.definition, name: NAME };
+    const drafted = draft.json.data?.draft?.definition;
+    // Premise: the draft really is the shrunk definition, not an empty body.
+    expect(Object.keys((drafted?.fields ?? {}) as object)).toEqual(expect.arrayContaining(['name', 'email']));
+    expect(Object.keys((drafted?.fields ?? {}) as object)).not.toContain(DROPPED);
+    const definition = { ...drafted, name: NAME };
 
     // Control: on that door it is `force` that lifts the refusal.
     const unforced = await call('PUT', `/meta/object/${NAME}`, definition);
