@@ -391,21 +391,23 @@
       "title": "The published first-run closes: create-objectstack scaffold → install → validate → build → boot → health, with the skills boundary holding",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["new user (published-registry consumer)"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["npm registry reachability (the whole point is the PUBLISHED path, not the repo checkout)"],
+        "requires": [
+          "npm registry reachability (the whole point is the PUBLISHED path, not the repo checkout)",
+          "PRE-RELEASE VARIANT (proved by run #21845 on the 17.7 candidate) — the published path can only measure what is already released, so to test an unreleased candidate: in the candidate checkout run pnpm install --frozen-lockfile && pnpm build, pack every public workspace package and publish the tarballs ONLY to a localhost registry configured with NO upstream for @objectstack/* and create-objectstack (so nothing under test can resolve from npm), point the scaffold at it (npm_config_registry), and run the repo's own bin — node <checkout>/packages/create-objectstack/bin/create-objectstack.js qa-first-run -t blank --skip-skills — in place of npx create-objectstack@latest. Prove the candidate is what got installed: the scaffold lockfile's integrity hash for each @objectstack/* package equals the local tarball's. Nothing is published anywhere else. The run record names which path it took (published or pre-release)"
+        ],
         "knownGaps": [
           "during an RC window the repo version is unpublished and `latest` points at the previous major, so the protocol-major handshake refuses the artifact — that refusal is the ADR-0087 D1 gate WORKING on a skew the fallback introduced (#4894); record it in evidence, do not fail the item for it"
         ]
       },
       "steps": [
-        "in a scratch dir: `npx -y create-objectstack@latest qa-first-run -t blank --skip-skills`",
-        "cd qa-first-run && npm install --no-fund --no-audit; echo $?",
-        "npm run validate; echo $? — then npm run build; echo $?",
+        "in a scratch dir: `npx -y create-objectstack@latest qa-first-run -t blank --skip-skills; echo $?` (or the repo's bin against the local registry, for the pre-release variant in fixtures.requires) — the scaffolder runs the install ITSELF (pnpm when its probe finds pnpm, npm otherwise), so its exit code and its install output are the install step's evidence. ⛔ Do not follow it with a second `npm install`: on a pnpm-installed scaffold that fails (17.6.0 and 17.7 alike) and the failure is the extra step's, not the product's",
+        "cd qa-first-run && npm run validate; echo $? — then npm run build; echo $?",
         "boot from the artifact exactly as the workflow does: `npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &`, poll /api/v1/health up to 60s, then `curl -fsS http://localhost:8080/api/v1/ready`",
         "repeat scaffold + validate + build across the template matrix (variants) — remote templates always ship build; run validate where the script exists",
         "skills boundary probe: in a fresh scaffold run `npx -y skills add <objectstack checkout>/skills --all --copy` and compare the installed set to the curated skills/ catalog; then list repo-root discovery and assert no internal skill (dogfood-verification) surfaces",
@@ -433,7 +435,7 @@
         {
           "clause": "the skills boundary holds: the installed set equals the curated skills/ catalog and repo-root discovery surfaces NO internal skill (the 15.1 third-party-eval leak, pinned in the workflow)",
           "oracle": "log",
-          "verify": "set-equality against the curated catalog; grep for dogfood-verification in the discovery listing comes back empty",
+          "verify": "set-equality, by UNIQUE SKILL NAME, against the curated catalog — the installed set is the de-duplicated names of the directories holding a SKILL.md (as scaffold-e2e.yml computes it with sort -u), never a raw file or path count; grep for dogfood-verification in the discovery listing comes back empty",
           "evidence": "the installed-set diff + discovery listing"
         },
         {
@@ -452,11 +454,14 @@
       "automated": { "kind": "ci", "ref": ".github/workflows/scaffold-e2e.yml" },
       "source": [
         ".github/workflows/scaffold-e2e.yml (#2908 — the scaffold→install→validate→build→boot→health lane, the registry-canary template matrix, the skills-boundary assertions, the #4894 RC-window fallback)",
-        "packages/create-objectstack (the scaffolder under test)"
+        "packages/create-objectstack (the scaffolder under test)",
+        "packages/create-objectstack/src/detect-package-manager.ts (the scaffolder installs with pnpm when its probe finds it, npm otherwise — why a trailing npm install is not part of the path)",
+        "#21845 (follow-up run: the 17.7 candidate scaffold passed through the pre-release local-registry variant)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the published first-run experience mirrored step-for-step from scaffold-e2e.yml, template matrix as variants, RC-window protocol refusal recorded as gate-working instead of failure", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-14", "change": "variants narrowed to [blank]: the five remote content templates were delisted from the marketplace and retired from the create-objectstack catalog, and the scaffold-e2e registry-canary matrix this item mirrors was trimmed with them", "ref": "claude/issue-8677-retire-remote-template-catalog" }
+        { "revision": 2, "date": "2026-08-14", "change": "variants narrowed to [blank]: the five remote content templates were delisted from the marketplace and retired from the create-objectstack catalog, and the scaffold-e2e registry-canary matrix this item mirrors was trimmed with them", "ref": "claude/issue-8677-retire-remote-template-catalog" },
+        { "revision": 3, "date": "2026-10-05", "change": "three corrections from run #21845. (1) The separate `npm install` step is dropped: the scaffolder already installs (pnpm when found, npm otherwise), and a trailing npm install fails on the pnpm layout on 17.6.0 and 17.7 alike, so the step measured itself rather than the product. The scaffolder's own exit code is now the install evidence, which is also what the published canary job in scaffold-e2e.yml does. Of the card's three options this one was picked as the least ambiguous: it does not depend on which package manager the host has, as `pnpm install` would, and it does not change the published scaffold command, as `--skip-install` would. (2) fixtures.requires gains a pre-release variant: pack the workspace to a localhost registry with no upstream for @objectstack/* and create-objectstack, run the repo's bin against it, and prove the candidate via lockfile integrity. The published path measures only what is released. (3) The skills-boundary clause compares unique skill names, not a raw count (card #21851 entries 8 and 9)", "ref": "#21845" }
       ]
     },
     {
@@ -819,7 +824,7 @@
       "title": "The documented newcomer verification loop closes on a FRESHLY SCAFFOLDED project: os validate passes and the Console actually paints at /_console/ — the seam between the scaffold item and the showcase boot item",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["a brand-new developer following content/docs/getting-started/quick-start.mdx, with no prior project"],
@@ -834,9 +839,9 @@
         ]
       },
       "steps": [
-        "scaffold a fresh project exactly as the published docs instruct: `npx -y create-objectstack@latest qa-console-first-paint` (no -t flag — the docs never pass one), then `npm install`",
+        "scaffold a fresh project exactly as the published docs instruct: `npx -y create-objectstack@latest qa-console-first-paint; echo $?` (no -t flag — the docs never pass one; for an unreleased candidate use cli.scaffold-first-run's pre-release variant). The scaffolder installs ITSELF (pnpm when found, npm otherwise) and the docs prescribe no separate install — ⛔ do not add a trailing `npm install`: it fails on a pnpm-installed scaffold (17.6.0 and 17.7 alike)",
         "run the documented gate: `npx os validate; echo $?`",
-        "run `npm run dev` — the scaffold's OWN script, which is what a newcomer reaches for after `npm install` — and probe http://localhost:3000/_console/",
+        "run `npm run dev` — the scaffold's OWN script, which is what a newcomer reaches for once the scaffold has installed — and probe http://localhost:3000/_console/",
         "load the console in a browser and record what a newcomer actually sees: does the shell render, and is there any identity they can sign in with?",
         "stop; run the documented spelling `npx os dev --ui` and probe /_console/ again — the two must agree (see clause 3; `--ui` is a forwarder for a serve-side flag that is already default-on, so this is a no-op equivalence check, not a divergence hunt)",
         "capture the boot log for both invocations"
@@ -863,8 +868,8 @@
         {
           "clause": "a newcomer can complete the documented visual check, or the run states precisely what stops them — the docs promise 'create a record, watch an action show/hide, confirm the nav and filters' on this project",
           "oracle": "dom",
-          "verify": "attempt the documented visual check; if no identity exists to sign in with on a blank scaffold, that is the finding — record it rather than substituting showcase credentials",
-          "evidence": "what the newcomer sees, including any sign-in wall"
+          "verify": "attempt the documented visual check: sign in with the seeded dev admin and create a record on the scaffold's object (a 201 that reads back). The action/nav half ('watch an action show/hide, confirm the nav and filters') has NOTHING to act on here — a blank scaffold ships no app and no action — so it is a stated LIMIT of this item, recorded as not-applicable and never as a FAIL or a PASS; the in-console continuation that authors an app and lands it in the launcher is studio-authoring.first-run-loop (it does not author an action either). If no identity exists to sign in with on a blank scaffold, that is the finding — record it rather than substituting showcase credentials",
+          "evidence": "what the newcomer sees, including any sign-in wall, plus the record create + read-back"
         }
       ],
       "negative": [
@@ -893,7 +898,8 @@
           "change": "new — angle-5 (docs claims) probe of the published first-run. Covers a real seam between two existing items: cli.scaffold-first-run boots the scaffold headless via `os start --artifact`, cli.dev-boot-contract drives the console against the fully-populated showcase, and nobody drives the console against a fresh BLANK scaffold — where there is no seed data and no seeded admin unless one is requested. Checked and CLEAN on three questions the sweep raised: no doc anywhere in content/docs/ prescribes a retired template (`todo`/`compliance`/`content`/`contracts`/`procurement`), every documented invocation is a bare `npx create-objectstack my-app` resolving to the only catalog entry, and `npm run validate` is the same binary as `npx os validate`. REFUTED during authoring, recorded here so it is not re-derived: the sweep first read the blank template's bare `\"dev\": \"objectstack dev\"` against the quick-start's `os dev --ui` and inferred that `npm run dev` would strand a newcomer with no console. Source-checking the chain disproves it — dev.ts forwards `--ui` only when set and never forwards `--no-ui`, serve.ts declares `ui` `default: true`, and cli.mdx states outright that the console is 'already on by default in dev'. The bare script is CORRECT; `--ui` on `dev` is a no-op forwarder. Clause 3 accordingly asserts the two invocations AGREE, and a difference is the failure",
           "ref": "#9299"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected the stale 'no seeded admin unless one is requested' assumption in both knownGaps. commands/dev.ts resolves seed-admin as flags['seed-admin'] ?? true and documents it 'Default: on', so a bare `objectstack dev` on an empty DB seeds admin@objectos.ai / admin123 and prints it in the banner. Clause 4's open question ('is there any identity a newcomer can sign in with?') has a definite answer, and leaving the gap as written told the runner not to assume the answer the tree already fixes (#9467 CF-6)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the stale 'no seeded admin unless one is requested' assumption in both knownGaps. commands/dev.ts resolves seed-admin as flags['seed-admin'] ?? true and documents it 'Default: on', so a bare `objectstack dev` on an empty DB seeds admin@objectos.ai / admin123 and prints it in the banner. Clause 4's open question ('is there any identity a newcomer can sign in with?') has a definite answer, and leaving the gap as written told the runner not to assume the answer the tree already fixes (#9467 CF-6)", "ref": "#9386" },
+        { "revision": 3, "date": "2026-10-05", "change": "two corrections from run #21845. (1) Step 1's trailing `npm install` is dropped: the scaffolder already installs (pnpm when found, npm otherwise), the quick-start prescribes no separate install, and a trailing npm install fails on the pnpm layout on 17.6.0 and 17.7 alike. This matches the choice made on cli.scaffold-first-run, and the npm run dev step no longer presumes it. (2) acceptance[3] states its limit: a blank scaffold ships no app or action, so the docs' 'watch an action show/hide, confirm the nav and filters' half is recorded as not-applicable here, never as a FAIL. The record-create half stays scored. The clause names studio-authoring.first-run-loop as the in-console continuation and says outright that it covers the app/nav half and no action (card #21851 entries 8 and 10)", "ref": "#21845" }
       ]
     },
     {
