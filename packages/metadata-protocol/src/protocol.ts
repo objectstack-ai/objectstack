@@ -16534,31 +16534,37 @@ export class ObjectStackProtocolImplementation implements
      * the artifact lookup does not (the `_lock` gate bound a disabled
      * package's artifact before #21803 when it was registered first), so the
      * installed packages are read too: a disabled package is still installed.
-     * A registry double without either listing contributes nothing here, and
-     * {@link shippedArtifactsOf} then answers the package-less lookup alone.
+     * A registry without either listing, or whose listing throws (a
+     * metadata-only host's partial registry: listing there is best-effort
+     * context, never the reason a write fails), contributes nothing here, and
+     * {@link shippedArtifactsOf} then answers with the package-less lookup and
+     * whatever could be listed: never looser than the `_lock` gate before
+     * #21803, which asked that lookup alone.
      */
     private artifactPackageIds(type: string): Set<string> {
         const registry = (this.engine as any)?.registry;
         const ids = new Set<string>();
         if (!registry) return ids;
-        const addId = (id: unknown): void => {
-            if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') ids.add(id);
+        const addIds = (read: () => unknown, idOf: (entry: any) => unknown): void => {
+            let listed: unknown;
+            try {
+                listed = read();
+            } catch {
+                return; // See this method's header: the package-less lookup still answers.
+            }
+            if (!Array.isArray(listed)) return;
+            for (const entry of listed) {
+                const id = idOf(entry);
+                if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') ids.add(id);
+            }
         };
         if (typeof registry.listItems === 'function') {
             for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
-                const listed: unknown = registry.listItems(spelling);
-                if (!Array.isArray(listed)) continue;
-                for (const entry of listed) addId((entry as { _packageId?: unknown } | null | undefined)?._packageId);
+                addIds(() => registry.listItems(spelling), (entry) => entry?._packageId);
             }
         }
         if (typeof registry.getAllPackages === 'function') {
-            const installed: unknown = registry.getAllPackages();
-            if (Array.isArray(installed)) {
-                for (const record of installed) {
-                    const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
-                    addId(r?.manifest?.id ?? r?.id);
-                }
-            }
+            addIds(() => registry.getAllPackages(), (record) => record?.manifest?.id ?? record?.id);
         }
         return ids;
     }
