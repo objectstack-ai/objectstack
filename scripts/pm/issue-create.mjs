@@ -604,7 +604,7 @@ export async function selfTest() {
       t('under an EXPLICIT dispatch, no run is exit 6 — no fall-back', [noRunExplicit.exitCode, noRunExplicit.seen.length], [EXIT_UNCONFIRMED, 0]);
       const noRunAuto = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('no-run') });
       t('⛔ under AUTO, an accepted dispatch with no run is exit 6 UNCONFIRMED too — no number, and ZERO requests after it: no POST, no read-back', [noRunAuto.exitCode, noRunAuto.number, noRunAuto.seen.map((s) => s.call)], [EXIT_UNCONFIRMED, null, []]);
-      t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exitCode === noRunExplicit.exitCode, noRunAuto.lines.includes(unconfirmedText(noRunAuto.relay, 'issue-create'))], [true, true]);
+      t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exitCode === noRunExplicit.exitCode, noRunAuto.relay ? noRunAuto.lines.includes(unconfirmedText(noRunAuto.relay, 'issue-create')) : false], [true, true]);
       const failedRun = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('failure', { run: { ...RUN, conclusion: 'failure' }, detail: 'conclusion failure' }) });
       t('⛔ a run that FAILED is never fallen back from, even under auto: exit 5, no POST', [failedRun.exitCode, failedRun.seen.length], [EXIT_PLATFORM_REFUSAL, 0]);
 

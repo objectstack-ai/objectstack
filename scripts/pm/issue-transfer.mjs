@@ -835,7 +835,7 @@ export async function selfTest() {
       const ba = board();
       const noRunAuto = await drive(ba, { route: dispatchRoute('auto'), send: outcome('no-run', ba) });
       t('⛔ under AUTO, an accepted dispatch with no run is exit 6 UNCONFIRMED too — the pre-read alone, ZERO requests after it: no target read, no mutation', [noRunAuto.exitCode, noRunAuto.seen.map((s) => s.call)], [EXIT_UNCONFIRMED, [`GET /repos/${SRC}/issues/7`]]);
-      t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exitCode === noRun.exitCode, noRunAuto.lines.includes(unconfirmedText(noRunAuto.relay, 'issue-transfer'))], [true, true]);
+      t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exitCode === noRun.exitCode, noRunAuto.relay ? noRunAuto.lines.includes(unconfirmedText(noRunAuto.relay, 'issue-transfer')) : false], [true, true]);
       // A run that reports success while the board never moved: the read-back, not the run, decides.
       const bs = board();
       const lied = await drive(bs, { route: dispatchRoute(), send: liar });
