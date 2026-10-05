@@ -1736,6 +1736,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "错误消息",
         helpText: "动作失败时显示的错误消息，替代原始错误信息。"
       },
+      outcomeMessages: {
+        label: "按结果的成功消息",
+        helpText: "按处理程序结果显示的成功消息，以 JSON 填写：每个键是处理程序在成功返回中给出的 snake_case `outcome` 值，每个值是该结果显示的文字，例如 {\"archived\": \"已归档\", \"already_archived\": \"此前已归档\"}。文字中可插入 ${result.*}。没有对应条目的结果显示成功消息；处理程序从不返回的键永远不会显示。不能与结果对话框或 `operation: 'update'` 同时使用。"
+      },
+      onSuccess: {
+        label: "成功后跳转",
+        helpText: "动作成功后的跳转：要打开的路由，以及在哪里打开。"
+      },
+      "onSuccess.navigate": {
+        label: "跳转目标",
+        helpText: "动作成功后打开的路由或 URL 模板。可插入 ${param.*}（参数对话框收集的值）、${ctx.*}（origin、apiBase、user、org、recordId、selection）和 ${result.*}（服务器响应，例如 ${result.id}）。相对值是应用内路由。"
+      },
+      "onSuccess.openIn": {
+        label: "跳转打开位置",
+        helpText: "跳转在哪里打开——'self'（默认）在当前页跳转，'newTab' 打开新的浏览器标签页。"
+      },
       refreshAfter: {
         label: "完成后刷新",
         helpText: "执行完成后刷新当前列表/页面"
