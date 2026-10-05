@@ -112,7 +112,7 @@ function makeRecordingService(): {
   return { service, seen };
 }
 
-describe('share-link contract — enforcement takes the full ExecutionContext (#6430)', () => {
+describe('share-link contract — enforcement takes the full ExecutionContext', () => {
   it('accepts the whole resolveAuthzContext envelope at an enforcement call site', async () => {
     const { service, seen } = makeRecordingService();
 

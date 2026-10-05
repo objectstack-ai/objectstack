@@ -65,14 +65,14 @@ function assertRegisterContract(type: string, name: string, data: unknown): void
         const shape = data === null ? 'null' : Array.isArray(data) ? 'an array' : `a ${typeof data}`;
         throw registerRefusal(
             `IMetadataService.register('${type}', '${name}'): data is ${shape}, not a metadata document — ` +
-                `refused, never accepted-and-dropped or coerced into storability (#7378 row 3).`,
+                `refused, never accepted-and-dropped or coerced into storability.`,
         );
     }
     const documentName = (data as { name?: unknown }).name;
     if (documentName !== undefined && documentName !== name) {
         throw registerRefusal(
             `IMetadataService.register('${type}', '${name}'): data.name is '${String(documentName)}', which disagrees ` +
-                `with the name argument '${name}' — refused, since silent resolution in either direction can misplace the item (#7378 row 1).`,
+                `with the name argument '${name}' — refused, since silent resolution in either direction can misplace the item.`,
         );
     }
 }
@@ -139,7 +139,7 @@ async function assertRefused(service: IMetadataService, testCase: MetadataRoundT
         () => undefined,
         (thrown: unknown) => thrown as Error & { code?: string; status?: number },
     );
-    expect(error, `register must REFUSE this write (#7378): ${testCase.id}`).toBeDefined();
+    expect(error, `register must REFUSE this write: ${testCase.id}`).toBeDefined();
     expect(error).toMatchObject({
         code: StandardErrorCode.enum.VALIDATION_ERROR,
         status: 400,

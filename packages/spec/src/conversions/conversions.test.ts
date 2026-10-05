@@ -231,7 +231,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * case by whether the two values actually disagree; these tests pin both
    * halves, because only one of them is a change.
    */
-  describe('shadowed alias, split by value (#4923)', () => {
+  describe('shadowed alias, split by value', () => {
     const crudFlow = (config: Record<string, unknown>) => ({
       flows: [{ name: 'f', nodes: [{ id: 'a', type: 'create_record', config }] }],
     });
@@ -408,7 +408,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * and a second replay is a no-op. The flow rehydration seam's refusal by id
    * is pinned where that seam lives (`service-automation`).
    */
-  describe('flow-decision-mode-inclusive-explicit (#15429)', () => {
+  describe('flow-decision-mode-inclusive-explicit', () => {
     const ID = 'flow-decision-mode-inclusive-explicit';
     const entry = () => ALL_CONVERSIONS.find((c) => c.id === ID)!;
     const decisionFlow = (edges: Record<string, unknown>[], config?: Record<string, unknown>) => ({
@@ -608,7 +608,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  describe('flow-node-wait-timeout-keys-removed (#4158)', () => {
+  describe('flow-node-wait-timeout-keys-removed', () => {
     const wecFlow = (waitEventConfig: Record<string, unknown>) => ({
       flows: [
         {
@@ -666,7 +666,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  describe('flow-node-script-branch-keys-removed (#4343)', () => {
+  describe('flow-node-script-branch-keys-removed', () => {
     /** One `script` node in a flow shaped the way the conversion walks it. */
     const scriptFlow = (config: Record<string, unknown>) => ({
       flows: [
@@ -782,7 +782,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  describe('flow-node-wait-event-config-lift (PD #12 retirement, #4045)', () => {
+  describe('flow-node-wait-event-config-lift (PD #12 retirement)', () => {
     /**
      * One `wait` node in a flow that `FlowSchema` can actually parse — `label` is
      * required on both the flow and every node, which the conversion fixtures
@@ -900,7 +900,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
   // that never runs the conversion is NOT broken. Either alone would be the
   // wrong shape — a rename that breaks old rows, or a rename that leaves one
   // deployment holding two spellings of one driver forever.
-  describe('datasource-driver-mongo-to-mongodb (#6345)', () => {
+  describe('datasource-driver-mongo-to-mongodb', () => {
     const convert = (datasources: unknown[]) =>
       collectConversionNotices({ datasources }, { includeRetired: true });
 
@@ -954,7 +954,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
   // driver-scoped by construction; these pin the two edges the flat fixture
   // pair cannot express as sharply: the same key converting under one driver
   // and not another, and the load-path posture.
-  describe('datasource-config-driver-key-aliases (#4456)', () => {
+  describe('datasource-config-driver-key-aliases', () => {
     const convert = (datasources: unknown[]) =>
       collectConversionNotices({ datasources }, { includeRetired: true });
 
@@ -973,7 +973,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(notices.filter((n) => n.conversionId === 'datasource-config-driver-key-aliases')).toHaveLength(1);
     });
 
-    it('still lands for a row whose driver id is ITSELF being renamed (#6345)', () => {
+    it('still lands for a row whose driver id is ITSELF being renamed', () => {
       // The pairs are keyed by CANONICAL driver id, and commit e2798fab7 renamed mongo's.
       // A stored `driver: 'mongo'` must therefore still find the mongo pairs
       // (through the alias) even as the sibling conversion rewrites its id —
@@ -1016,7 +1016,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * into a kind would turn a loud rejection into a wrong comparison — the exact
    * failure class #5011 exists to end.
    */
-  describe('dashboard-widget-compareto-converged (#5011)', () => {
+  describe('dashboard-widget-compareto-converged', () => {
     const dash = (compareTo: unknown) => ({
       dashboards: [{
         name: 'revenue_review',
@@ -1111,7 +1111,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * every case here runs the plain load posture (no `includeRetired`) — that
    * the rewrite happens without it is the property objectui is waiting on.
    */
-  describe('page-header-subtitle-alias (#4827 — the `subtitle ?? description` retirement)', () => {
+  describe('page-header-subtitle-alias (the `subtitle ?? description` retirement)', () => {
     const pageWith = (...components: Record<string, unknown>[]) => ({
       pages: [{ name: 'crm_lead_detail', regions: [{ name: 'header', components }] }],
     });
@@ -1285,7 +1285,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * out of the same key. Both are ways this rewrite could be lossy, and neither
    * is visible in a fixture that only carries the happy path.
    */
-  describe('inline-action-api-params-to-body-extra (#5777)', () => {
+  describe('inline-action-api-params-to-body-extra', () => {
     const button = (action: Record<string, unknown>) => ({
       pages: [{
         name: 'showcase_contact_form',
@@ -1328,7 +1328,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(applyConversions(stack)).toBe(stack);
     });
 
-    it('keeps BOTH when `bodyExtra` already says something different (#4923 house rule)', () => {
+    it('keeps BOTH when `bodyExtra` already says something different', () => {
       const stack = button({ type: 'api', target: '/x', params: { a: 1 }, bodyExtra: { b: 2 } });
       const out = applyConversions(stack);
       expect(out).toBe(stack);
@@ -1388,7 +1388,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    *   - the **acceptance face in both directions**, since a rename moves what
    *     the schema accepts as well as what it refuses.
    */
-  describe('page-tabs-type-to-tab-style (#6776)', () => {
+  describe('page-tabs-type-to-tab-style', () => {
     const regionPage = (properties: Record<string, unknown>) => ({
       pages: [{ name: 'sys_position_detail', regions: [{ name: 'main', components: [{ type: 'page:tabs', properties }] }] }],
     });
@@ -1463,14 +1463,14 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(applyConversions(stack, { includeRetired: true })).toBe(stack);
     });
 
-    it('keeps BOTH when `tabStyle` already says something different (#4923 house rule)', () => {
+    it('keeps BOTH when `tabStyle` already says something different', () => {
       const stack = regionPage({ tabStyle: 'pill', type: 'card', items: [] });
       const { out, notices } = convert(stack);
       expect(out).toBe(stack);
       expect(notices).toEqual([]);
     });
 
-    it('drops the redundant twin when both spellings agree (#4923)', () => {
+    it('drops the redundant twin when both spellings agree', () => {
       const { out, notices } = convert(regionPage({ tabStyle: 'pill', type: 'pill', items: [] }));
       expect(propsOf(out, 'region')).toEqual({ tabStyle: 'pill', items: [] });
       expect(notices).toHaveLength(1);
@@ -1531,7 +1531,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * down, through the very machinery meant to repair it. `retiredFromLoadPath`
    * is what buys that, so it is asserted directly rather than inferred.
    */
-  describe('app-hidden-to-unpublished (#4829)', () => {
+  describe('app-hidden-to-unpublished', () => {
     const storedApp = (app: Record<string, unknown>) => ({ apps: [{ name: 'production_management', ...app }] });
     const convertStored = (stack: Record<string, unknown>) => {
       const notices: ConversionNotice[] = [];
@@ -1556,7 +1556,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(notices).toEqual([]);
     });
 
-    it('#4923: a row that already carries `_unpublished` keeps BOTH keys, untouched', () => {
+    it('a row that already carries `_unpublished` keeps BOTH keys, untouched', () => {
       // The machine has already spoken about this row. Reconciling a
       // disagreeing pair is a human's call, not the loader's — and it is what
       // makes the pass idempotent on a row that has already converted.
@@ -1671,7 +1671,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * `includeRetired` (the stored posture); the one case without it pins that
    * the load seam does NOT quietly accept the dialect.
    */
-  describe('field-reference-to-alias (#13700 — the stored `reference_to` dialect canonicalizes)', () => {
+  describe('field-reference-to-alias (the stored `reference_to` dialect canonicalizes)', () => {
     const stackWith = (fields: Record<string, unknown>) => ({
       objects: [{ name: 'crm_contact', label: 'Contact', fields }],
     });
@@ -1796,7 +1796,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
  * Written against the SEAM rather than the id, so re-adding the behaviour
  * under a different id fails here too.
  */
-describe('no conversion invents a NOT NULL column (ADR-0113, #16693)', () => {
+describe('no conversion invents a NOT NULL column (ADR-0113)', () => {
   const requiredOnly = () => ({
     objects: [{
       name: 'clm_party',

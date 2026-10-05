@@ -17,7 +17,7 @@ import type { SendEmailInput, SendTemplateInput } from './email-service';
  *    BOTH `SendEmailInput` and `SendTemplateInput` (the template entry point
  *    forwards it into the send it performs).
  */
-describe('Email Service Contract — organization widening (#11741)', () => {
+describe('Email Service Contract — organization widening', () => {
   it('accepts the pre-widening SendEmailInput shape unchanged (organizationId optional, absent legal)', () => {
     const legacy: SendEmailInput = { to: 'a@b.com', subject: 'Hi', text: 'x' };
     expect(legacy).not.toHaveProperty('organizationId');
@@ -60,7 +60,7 @@ describe('Email Service Contract — organization widening (#11741)', () => {
  * itself a compile error (TS2578) under `check:test-typecheck` — the pin fails
  * loudly in both directions.
  */
-describe('Email Service Contract — SendTemplateInput.org retired (#11832)', () => {
+describe('Email Service Contract — SendTemplateInput.org retired', () => {
   it('refuses `org` at compile time (excess property; organizationId is NOT an overlay opt-in)', () => {
     const input: SendTemplateInput = {
       template: 'auth.password_reset',

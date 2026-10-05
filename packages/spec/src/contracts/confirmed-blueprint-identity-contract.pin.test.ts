@@ -49,7 +49,7 @@ const asOptions = (o: ChatWithToolsOptions) => o;
 /** A plausible digest — the shape cloud stamps, opaque to this contract. */
 const DIGEST = 'sha256:3f6a1c0e9b2d4a7f8c5e1b0d9a2f4c6e8b0d3a5f7c9e1b3d5a7f9c1e3b5d7a9f';
 
-describe('confirmedBlueprintIdentity contract (#15937)', () => {
+describe('confirmedBlueprintIdentity — declared on the protocol ToolExecutionContext', () => {
   it('is declared on `ToolExecutionContext` and round-trips the digest', () => {
     const ctx = asCtx({
       actor: { id: 'usr_1' },

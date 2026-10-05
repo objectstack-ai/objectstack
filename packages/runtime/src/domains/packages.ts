@@ -32,6 +32,10 @@ import {
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
+// refusal. The install branch asks the predicate ahead of its generic catch,
+// and its no-protocol fallback runs the same handshake.
+import { assertProtocolCompat, isProtocolIncompatibleError, type ProtocolIncompatibleError } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
@@ -579,6 +583,40 @@ function requireDuplicableSource(
 }
 
 /**
+ * [#21727] The HTTP answer for ADR-0087 D1's protocol refusal: the error's
+ * declared status (422) with the structured diagnostic in `error.details`.
+ *
+ * ADR-0087 D1 promises a refusal whose diagnostic "the consumer that must act
+ * on this refusal" can read, and that consumer is an agent. This door used to
+ * serve the throw through `errorFromThrown`, which answered the 500 fallback
+ * and kept the five fields only inside the prose.
+ *
+ * `details` is a CLOSED shape: exactly these five members of
+ * `ProtocolIncompatibleDiagnostic`, named one by one. ⛔ It is not a spread of
+ * the diagnostic. `packageId` and `runtimeMajor` stay out (the first is the
+ * id the caller sent, the second is derivable from `protocolVersion`), and a
+ * member later added to the diagnostic does not reach the wire without a
+ * decision here. `code` goes in as the shared envelope builder's promotion
+ * slot (`error-envelope.ts`), so it lands in `error.code` and never as
+ * `error.details.code` (ADR-0112 D5): the same exit the #9585
+ * `FlowActionRefusal` branch uses in `domains/actions.ts`.
+ *
+ * The message is the error's own prose, unchanged: the CLI and people read
+ * it, and its `Run:` command is the same string as `migrateCommand`.
+ */
+function protocolIncompatibleAnswer(deps: DomainHandlerDeps, err: ProtocolIncompatibleError) {
+    const d = err.diagnostic;
+    return deps.error(err.message, err.status, {
+        code: err.code,
+        requiredRange: d.requiredRange,
+        rangeSource: d.rangeSource,
+        protocolVersion: d.protocolVersion,
+        targetMajor: d.targetMajor,
+        migrateCommand: d.migrateCommand,
+    });
+}
+
+/**
  * Handles Package Management requests
  *
  * REST Endpoints:
@@ -603,6 +641,12 @@ function requireDuplicableSource(
  * but these call sites bypassed both, so a deliberate 404 still rendered as a
  * 500 and `fields[]` was still dropped. Route new handlers through the shared
  * helper rather than re-deriving the status here.
+ *
+ * [#21727] ONE recognised carrier answers ahead of that helper: the install
+ * branch's `ProtocolIncompatibleError`, through {@link protocolIncompatibleAnswer}.
+ * It still answers the status the error declares. What it adds is the
+ * structured diagnostic, which the shared resolver's closed `details` list
+ * drops by design.
  */
 /**
  * [#14375 / ADR-0130 Consequences row 6] Decorate one registry row with the
@@ -1253,11 +1297,36 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const settings = request?.settings;
             let pkg: any;
             const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
-            if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
-                const out = await protocolSvc.installPackage({ manifest, settings });
-                pkg = out?.package ?? out;
-            } else {
-                pkg = registry.installPackage(manifest, settings);
+            try {
+                if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
+                    const out = await protocolSvc.installPackage({ manifest, settings });
+                    pkg = out?.package ?? out;
+                } else {
+                    // [#21727] The no-protocol fallback runs the SAME ADR-0087
+                    // D1 handshake the protocol primitive runs before its
+                    // registry write (`installPackage` in
+                    // `@objectstack/metadata-protocol`). Without it, a
+                    // composition with no `protocol` service installed a
+                    // package whose declared range excludes this runtime, which
+                    // the composed door refuses. The default warn hook matches
+                    // the primitive's, so no-range and unparsed ranges warn the
+                    // same way on both arms.
+                    assertProtocolCompat(manifest);
+                    pkg = registry.installPackage(manifest, settings);
+                }
+            } catch (err) {
+                // [#21727] The protocol refusal's typed carrier, recognised
+                // BEFORE the generic catch: the #9585 `FlowActionRefusal`
+                // idiom (`domains/actions.ts`), ruled for this card by triage.
+                // The shared `resolveThrownHttpError` builds `details` from a
+                // closed list that drops a thrown `.diagnostic` (#8016, #9106,
+                // #9585), so this branch carries ADR-0087 D1's structured
+                // diagnostic itself. Every other throw rethrows to the generic
+                // catch unchanged.
+                if (isProtocolIncompatibleError(err)) {
+                    return { handled: true, response: protocolIncompatibleAnswer(deps, err) };
+                }
+                throw err;
             }
             // [#18058 → #18877] HONOUR `enableOnInstall`, which this door declared
             // and ignored. `PackageInstallRequestSchema` has carried

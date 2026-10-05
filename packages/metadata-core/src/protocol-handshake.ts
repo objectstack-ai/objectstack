@@ -73,15 +73,68 @@ export interface ProtocolIncompatibleDiagnostic {
 }
 
 /**
+ * Brand for {@link ProtocolIncompatibleError}. It uses `Symbol.for`, so
+ * recognition keeps working when two module instances of this package coexist
+ * (the ESM and CJS builds, or `src` beside `dist`), where an `instanceof` would
+ * silently answer false. The runtime's `FlowActionRefusal` uses the same idiom.
+ */
+const PROTOCOL_INCOMPATIBLE_BRAND = Symbol.for('objectstack.metadata-core.protocolIncompatibleError');
+
+/**
  * Structured error thrown at the install/load boundary for an incompatible
  * package. Extends `MetadataError` so callers can `instanceof` across package
  * boundaries and read `.code`; `.diagnostic` carries the JSON-serializable
  * detail for `--json` output and the MCP surface (ADR-0087 D4).
+ *
+ * ## The status it declares: 422 (#21727)
+ *
+ * The manifest is well-formed, but it declares a range this runtime can never
+ * satisfy, and the remedy is to change the body
+ * (`objectstack migrate meta --from N`). That is 422, the status
+ * {@link SchemaValidationError} maps to in this same package. It is NOT 409:
+ * the error-code ledger keeps 409 for refusals that come from environment
+ * state, where resubmitting the same body could succeed later. With no
+ * declared status, every HTTP door answered the 500 fallback for a manifest
+ * the caller wrote. Both spellings are declared because doors read either one
+ * (`resolveThrownHttpError` reads `status`, then `statusCode`).
+ *
+ * `code` is redeclared as a literal, always equal to `diagnostic.code`, so that
+ * `check:error-status-conformance` derives this class as a producer of
+ * `OS_PROTOCOL_INCOMPATIBLE` at 422. A code that arrives only through `super()`
+ * is invisible to that gate.
+ *
+ * ## The structured diagnostic on the wire
+ *
+ * The shared resolver (`resolveThrownHttpError` in `@objectstack/types`)
+ * builds `details` from a closed list that deliberately drops a thrown
+ * `.diagnostic` (#8016, #9106, #9585). So the one HTTP door that reaches this
+ * throw (the install branch of `POST /api/v1/packages`) recognises the error
+ * with {@link isProtocolIncompatibleError} ahead of its generic catch. It
+ * answers the declared status and puts the diagnostic's five fields in
+ * `error.details`. A caller that does not recognise the error still answers
+ * the right status, without `details`.
  */
 export class ProtocolIncompatibleError extends MetadataError {
+  readonly code = 'OS_PROTOCOL_INCOMPATIBLE' as const;
+  readonly status = 422;
+  readonly statusCode = 422;
+
   constructor(public readonly diagnostic: ProtocolIncompatibleDiagnostic) {
     super(diagnostic.code, diagnostic.message);
+    (this as Record<PropertyKey, unknown>)[PROTOCOL_INCOMPATIBLE_BRAND] = true;
   }
+}
+
+/**
+ * Recognition predicate for {@link ProtocolIncompatibleError}. A door asks it
+ * BEFORE its generic catch. It checks the brand rather than `instanceof` (see
+ * {@link PROTOCOL_INCOMPATIBLE_BRAND}). A foreign object that merely copies the
+ * field names is not recognised, so no thrower can impersonate the protocol
+ * refusal's structured channel with a lookalike.
+ */
+export function isProtocolIncompatibleError(e: unknown): e is ProtocolIncompatibleError {
+  return typeof e === 'object' && e !== null
+    && (e as Record<PropertyKey, unknown>)[PROTOCOL_INCOMPATIBLE_BRAND] === true;
 }
 
 /**

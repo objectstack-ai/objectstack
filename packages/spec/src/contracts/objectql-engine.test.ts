@@ -26,7 +26,7 @@ import type { ExecutionContext } from '../kernel/execution-context.zod';
  * contract (`check:engine-double-contract` counts this file's doubles against
  * a shrink-only baseline, and a pin block is not a reason to grow it).
  */
-describe('getObject return contract (#12248, #11833 fork 3)', () => {
+describe('getObject return contract — a structured answer, not `unknown`', () => {
   type EngineAnswer = ReturnType<IObjectQLEngine['getObject']>;
   type RegistryAnswer = ReturnType<EngineSchemaRegistryView['getObject']>;
 
@@ -103,7 +103,7 @@ describe('getObject return contract (#12248, #11833 fork 3)', () => {
  * the contract, no engine double is stood up, and on a revert to `unknown` the
  * consumer reads below stop compiling with no `@ts-expect-error` needed.
  */
-describe('getSchema return contract (#12481 — #12248 one member over, #11833 fork 3 by inheritance)', () => {
+describe('getSchema return contract — the same answer as its alias getObject', () => {
   type SchemaAnswer = ReturnType<IObjectQLEngine['getSchema']>;
 
   it('answers exactly the spec registered-object type', () => {
@@ -160,7 +160,7 @@ describe('getSchema return contract (#12481 — #12248 one member over, #11833 f
  * Same discipline as the blocks above: member types read off the contract, no
  * engine double.
  */
-describe('judgeFilter contract (#20157, #19995 ruling C)', () => {
+describe('judgeFilter contract — the engine judges a filter without running it', () => {
   type Member = IObjectQLEngine['judgeFilter'];
 
   it('is OPTIONAL: a caller must work with an engine that lacks it', () => {

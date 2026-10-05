@@ -20,7 +20,7 @@ import type {
     IApprovalService,
 } from './approval-service';
 
-describe('approval row organization_id declaration (#10331)', () => {
+describe('approval rows declare the organization_id they are stamped with', () => {
     it('is readable off ApprovalRequestRow without a cast, at the stamped shape', () => {
         // Reading the property off the declared type — no `as`, no indexing
         // through `any`. This line failing to compile is the regression.
@@ -87,7 +87,7 @@ export type ActedAsIsOptional = Assert<{} extends Pick<ApprovalActionRow, 'acted
 /** A string slot address — not a boolean flag, not an object, not nullable. */
 export type ActedAsIsAString = Assert<Eq<ApprovalActionRow['acted_as'], string | undefined>>;
 
-describe('[#21458] ApprovalActionRow.acted_as — the slot an approval action was taken as', () => {
+describe('ApprovalActionRow.acted_as — the slot an approval action was taken as', () => {
     it('is optional and string-typed: a row without it still conforms, and one with it reads back', () => {
         const read = (row: ApprovalActionRow): string | undefined => row.acted_as;
 
@@ -187,7 +187,7 @@ const minimalService = (): IApprovalService => ({
     listActions: async () => [],
 });
 
-describe('[#15389] continueRestoredRun — the approvals operator repair verb, declared', () => {
+describe('continueRestoredRun — the approvals operator repair verb, declared', () => {
     it('is optional: the minimal implementation still conforms and has no operator door', () => {
         const service = minimalService();
 

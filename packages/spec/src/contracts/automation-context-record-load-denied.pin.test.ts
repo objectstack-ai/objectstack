@@ -69,7 +69,7 @@ export const contextWithTheKey: AutomationContext = { record: { id: 'rec-1' }, o
 // @ts-expect-error — `false` is not a member: the key is ABSENT, never `false` (handler-face convention, mirrored).
 export const contextWithFalse: AutomationContext = { record: { id: 'rec-1' }, object: 'crm_deal', recordLoadDenied: false };
 
-describe('[#14244] AutomationContext.recordLoadDenied mirrors the producer signal', () => {
+describe('AutomationContext.recordLoadDenied mirrors the producer signal', () => {
   it('reads the key back as exactly `true`, and its absence as `undefined` (anti-vacuity)', () => {
     expect(contextWithTheKey.recordLoadDenied).toBe(true);
     expect(contextWithoutTheKey.recordLoadDenied).toBeUndefined();

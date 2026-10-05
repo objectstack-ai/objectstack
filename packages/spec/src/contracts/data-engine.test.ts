@@ -213,7 +213,7 @@ describe('Data Engine Contract', () => {
    * `IDataEngine[…]`, so nothing here can drift from the contract by being
    * modelled beside it.
    */
-  describe('the narrowed verb declarations are pinned, not just guarded (#16231)', () => {
+  describe('the narrowed verb declarations are pinned, not just guarded', () => {
     type FindOneAnswer = Awaited<ReturnType<IDataEngine['findOne']>>;
     type UpdateAnswer = Awaited<ReturnType<IDataEngine['update']>>;
     type DeleteAnswer = Awaited<ReturnType<IDataEngine['delete']>>;
@@ -266,7 +266,7 @@ describe('Data Engine Contract', () => {
    * re-opening Option A or has moved the member, and either way it is a
    * maintainer decision, not a merge conflict to resolve by hand.
    */
-  describe('strictReadonlyWrites stays OFF the serializable options bags (#5126)', () => {
+  describe('strictReadonlyWrites stays OFF the serializable options bags', () => {
     const shapeKeys = (schema: unknown): string[] =>
       Object.keys((schema as { shape: Record<string, unknown> }).shape);
 
@@ -452,7 +452,7 @@ describe('Data Engine Contract', () => {
   // it). The value-level optionality evidence already exists above: every
   // pre-existing minimal `IDataEngine` literal in this file omits
   // `introspectDatasource` and compiles.
-  describe('introspectDatasource (#11493)', () => {
+  describe('introspectDatasource — answers the spec introspection shape', () => {
     type Member = IDataEngine['introspectDatasource'];
     type EngineIntrospection = Awaited<ReturnType<NonNullable<Member>>>;
 
@@ -511,7 +511,7 @@ describe('Data Engine Contract', () => {
   // file, which omit all five and compile); every directive below is resolved
   // by tsc, so reverting a member makes its `@ts-expect-error` unused, and an
   // unused directive is itself an error.
-  describe('datasource resolution members (#12248, #11833 fork 1)', () => {
+  describe('datasource resolution members — declared, and optional', () => {
     type ResolveMember = IDataEngine['resolveEffectiveDatasource'];
     type DriverMember = IDataEngine['getDriverForObject'];
 
@@ -572,7 +572,7 @@ describe('Data Engine Contract', () => {
     });
   });
 
-  describe('datasource lifecycle members (#12248, #12010, #12805 via the #11833 ruling item 4)', () => {
+  describe('datasource lifecycle members — declared at the shape the engine keeps', () => {
     type RegisterMember = IDataEngine['registerDatasourceDef'];
     type ListMember = IDataEngine['listDatasourceDefs'];
     type MarkMember = IDataEngine['markDatasourceUnavailable'];
@@ -676,7 +676,7 @@ describe('Data Engine Contract', () => {
     });
   });
 
-  describe('syncObjectSchema (#12482 — the #12010 "not verified" member, via the #11833 ruling item-4 precedent)', () => {
+  describe('syncObjectSchema — declared, since two services already call it', () => {
     type SyncMember = IDataEngine['syncObjectSchema'];
 
     it('is optional — only engines owning drivers and DDL answer', () => {

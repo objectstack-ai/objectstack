@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertProtocolCompat,
   checkProtocolCompat,
+  isProtocolIncompatibleError,
   ProtocolIncompatibleError,
   rangeAdmitsMajor,
 } from './protocol-handshake.js';
@@ -208,6 +209,40 @@ describe('assertProtocolCompat', () => {
       expect((e as ProtocolIncompatibleError).code).toBe('OS_PROTOCOL_INCOMPATIBLE');
       expect((e as ProtocolIncompatibleError).diagnostic.migrateCommand).toContain('--from 10');
     }
+  });
+
+  it('[#21727] the refusal declares 422 in both spellings, and its literal code matches the diagnostic', () => {
+    let thrown: unknown;
+    try {
+      assertProtocolCompat({ id: 'p', engines: { protocol: '^10' } }, RT, () => {});
+    } catch (e) {
+      thrown = e;
+    }
+    const err = thrown as ProtocolIncompatibleError;
+    expect(err.status).toBe(422);
+    expect(err.statusCode).toBe(422);
+    expect(err.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(err.code).toBe(err.diagnostic.code);
+  });
+
+  it('[#21727] isProtocolIncompatibleError recognises the brand, never a lookalike', () => {
+    let thrown: unknown;
+    try {
+      assertProtocolCompat({ id: 'p', engines: { protocol: '^10' } }, RT, () => {});
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isProtocolIncompatibleError(thrown)).toBe(true);
+    // Copying the names is not enough to reach the door's structured channel.
+    const lookalike = Object.assign(new Error('x'), {
+      name: 'ProtocolIncompatibleError',
+      code: 'OS_PROTOCOL_INCOMPATIBLE',
+      status: 422,
+      diagnostic: { code: 'OS_PROTOCOL_INCOMPATIBLE' },
+    });
+    expect(isProtocolIncompatibleError(lookalike)).toBe(false);
+    expect(isProtocolIncompatibleError(null)).toBe(false);
+    expect(isProtocolIncompatibleError('OS_PROTOCOL_INCOMPATIBLE')).toBe(false);
   });
 
   it('returns silently on ok', () => {
