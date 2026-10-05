@@ -56,7 +56,7 @@ const sorted = (s: Iterable<string>) => [...s].sort();
 
 // ── The grammar ──────────────────────────────────────────────────────────────
 
-describe('[#20336] the numeric grammar', () => {
+describe('the numeric grammar — a JSON number literal naming a finite double', () => {
   it('admits exactly the case table\'s admitted rows, each at its value, and refuses the rest with their form', () => {
     for (const row of NUMERIC_STRING_GRAMMAR_CASES) {
       const reading = readNumericString(row.input);
@@ -128,7 +128,7 @@ describe('[#20336] the numeric grammar', () => {
 
 // ── Which fields ─────────────────────────────────────────────────────────────
 
-describe('[#20336] the judged fields', () => {
+describe('the judged fields', () => {
   it('are NUMERIC_VALUE_TYPES itself, by identity — nothing re-listed', () => {
     expect(NUMBER_COMPARAND_DOOR_JUDGED_TYPES).toBe(NUMERIC_VALUE_TYPES);
   });
@@ -159,7 +159,7 @@ describe('[#20336] the judged fields', () => {
 
 // ── Which positions ──────────────────────────────────────────────────────────
 
-describe('[#20336] the judged positions', () => {
+describe('the judged positions', () => {
   it('partition FieldOperatorsSchema\'s keys with the text operators and the three flag operators', () => {
     const judged = [...NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS, ...NUMBER_COMPARAND_DOOR_LIST_OPERATORS];
     // [#20311] `$empty` is a boolean flag like `$null` / `$exists`, not a value of the field.
@@ -171,7 +171,7 @@ describe('[#20336] the judged positions', () => {
 
 // ── The verdict ──────────────────────────────────────────────────────────────
 
-describe('[#20336] numberComparandDoorVerdict', () => {
+describe('numberComparandDoorVerdict — a numeric string narrows to its number, a non-numeric one is refused', () => {
   it('refuses a non-numeric string on a number field with the INVALID_FILTER / 400 envelope and its form', () => {
     expect(numberComparandDoorVerdict({ type: 'number' }, 'abc')).toEqual({
       verdict: 'door-refusal', form: 'not-a-number', code: 'INVALID_FILTER', status: 400,
@@ -184,7 +184,7 @@ describe('[#20336] numberComparandDoorVerdict', () => {
     expect(numberComparandDoorVerdict({ type: 'formula', returnType: 'number' }, '1e3')).toEqual({ verdict: 'narrows', value: 1000 });
   });
 
-  it('[#20502] refuses a boolean, a Date and an array on a number field with the INVALID_FILTER / 400 envelope and its form', () => {
+  it('refuses a boolean, a Date and an array on a number field with the INVALID_FILTER / 400 envelope and its form', () => {
     const refused: ReadonlyArray<readonly [unknown, string]> = [
       [true, 'boolean'], [false, 'boolean'],
       [new Date(0), 'date'], [new Date(Number.NaN), 'date'],
@@ -202,7 +202,7 @@ describe('[#20336] numberComparandDoorVerdict', () => {
     expect(sorted(new Set(refused.map(([, form]) => form)))).toEqual(sorted(NON_NUMERIC_VALUE_FORMS));
   });
 
-  it('[#20502] passes a number, a bigint and null, and leaves every value outside the accepted comparand types to the comparand-type door', () => {
+  it('passes a number, a bigint and null, and leaves every value outside the accepted comparand types to the comparand-type door', () => {
     const passes: readonly unknown[] = [
       12, 0, -1.5, 1e21, 10n, null,
       // Outside the comparand-type door's accepted set — refused THERE, on every field.
@@ -219,7 +219,7 @@ describe('[#20336] numberComparandDoorVerdict', () => {
     }
   });
 
-  it('[#20502] a boolean or a Date on a field that is NOT numeric is not this door\'s subject', () => {
+  it('a boolean or a Date on a field that is NOT numeric is not this door\'s subject', () => {
     for (const t of [...BOOLEAN_VALUE_TYPES, ...CALENDAR_DATE_TYPES, ...INSTANT_TYPES, ...STRING_VALUE_TYPES]) {
       for (const v of [true, new Date(0), [1]]) {
         expect(numberComparandDoorVerdict({ type: t }, v), `${t} · ${String(v)}`).toEqual({ verdict: 'passes' });
@@ -240,7 +240,7 @@ describe('[#20336] numberComparandDoorVerdict', () => {
 
 // ── The words ────────────────────────────────────────────────────────────────
 
-describe('[#20336] numberComparandRefusalMessage', () => {
+describe('numberComparandRefusalMessage', () => {
   const site = {
     field: 'amount', declaredType: 'number', path: 'where.amount.$gt', value: 'abc', form: 'not-a-number' as const,
   };
@@ -267,7 +267,7 @@ describe('[#20336] numberComparandRefusalMessage', () => {
     for (const m of messages) expect(m).not.toMatch(/#\d/);
   });
 
-  it('[#20502] names a Date AS a Date — its JSON form is a quoted string, which would read as the string the grammar refuses', () => {
+  it('names a Date AS a Date — its JSON form is a quoted string, which would read as the string the grammar refuses', () => {
     const at = new Date(Date.UTC(2026, 0, 1));
     const message = numberComparandRefusalMessage({ ...site, value: at, form: 'date' }, "find('deal')");
     expect(message.startsWith(
@@ -305,7 +305,7 @@ describe('[#20336] numberComparandRefusalMessage', () => {
   });
 
   // [#20510] `having`'s site kind, and the driver-bound PostgreSQL clause.
-  describe('[#20510] `aggregated` and `boundByDriver`', () => {
+  describe('`aggregated` and `boundByDriver` — the refusal says only what is true at its position', () => {
     const havingSite = {
       field: 'total', declaredType: 'number', path: 'having.total.$gt', value: 'abc',
       form: 'not-a-number' as const, aggregated: true as const, boundByDriver: false as const,
@@ -352,7 +352,7 @@ describe('[#20336] numberComparandRefusalMessage', () => {
       }
     });
 
-    it('[#20510] the pre-existing `where` message is unchanged, byte for byte', () => {
+    it('the pre-existing `where` message is unchanged, byte for byte', () => {
       const at = new Date(Date.UTC(2026, 0, 1));
       expect(numberComparandRefusalMessage(site, "find('deal')")).toBe(
         "find('deal'): filter on 'amount' compares a declared number field against \"abc\" at where.amount.$gt, "
@@ -379,7 +379,7 @@ describe('[#20336] numberComparandRefusalMessage', () => {
 
 // ── The fixture ──────────────────────────────────────────────────────────────
 
-describe('[#20336] the fixture', () => {
+describe('the fixture', () => {
   it('carries one field per FieldType member (f_<type>), four typed formulas and one untyped', () => {
     const names = NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
@@ -427,7 +427,7 @@ function comparandAt(c: NumberComparandDoorCase, filter: Record<string, unknown>
   return m[2] === undefined ? at : (at as unknown[])[Number(m[2])];
 }
 
-describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
+describe('NUMBER_COMPARAND_DOOR_CASES', () => {
   it('has unique case names — they are used as test names', () => {
     const names = NUMBER_COMPARAND_DOOR_CASES.map((c) => c.name);
     expect(new Set(names).size).toBe(names.length);
@@ -448,7 +448,7 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     }
   });
 
-  it('[#20502] the flag operators pass their boolean — the door never judges $null / $exists / $empty, whatever the verdict says of a boolean', () => {
+  it('the flag operators pass their boolean — the door never judges $null / $exists / $empty, whatever the verdict says of a boolean', () => {
     const flags = NUMBER_COMPARAND_DOOR_CASES.filter((c) => /\.\$(?:null|exists|empty)$/.test(c.position));
     expect(sorted(flags.map((c) => c.position))).toEqual(['f_number.$empty', 'f_number.$exists', 'f_number.$null']);
     for (const c of flags) {
@@ -491,7 +491,7 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     }
   });
 
-  it('[#20502] refuses false at $gt on every judged field, and true and a Date at every judged position on f_number', () => {
+  it('refuses false at $gt on every judged field, and true and a Date at every judged position on f_number', () => {
     const value = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[value]'));
     const judgedFields = NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.filter((f) => numberComparandFieldVerdict(f) === 'judged');
     const falseAtGt = value.filter((c) => c.comparand === false);
@@ -510,14 +510,14 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     }
   });
 
-  it('[#20502] the non-string rows that PASS: the null test, and a boolean or a Date on a field class that holds one', () => {
+  it('the non-string rows that PASS: the null test, and a boolean or a Date on a field class that holds one', () => {
     const passing = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[value]') && c.verdict === 'passes');
     expect(passing.map((c) => [c.position, c.comparand instanceof Date ? 'Date' : c.comparand])).toEqual([
       ['f_number', null], ['f_number.$ne', null], ['f_boolean.$eq', true], ['f_datetime.$gt', 'Date'],
     ]);
   });
 
-  it('[#20502] the refused forms: every string form and every value form is in the table', () => {
+  it('the refused forms: every string form and every value form is in the table', () => {
     const forms = new Set(NUMBER_COMPARAND_DOOR_CASES.filter(isRefusal).map((c) => c.form));
     expect(sorted(forms)).toEqual(sorted([...NON_NUMERIC_STRING_FORMS, ...NON_NUMERIC_VALUE_FORMS]));
   });

@@ -384,8 +384,11 @@ const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/phone-nu
 #### OTP sign-in and self-service reset (requires SMS delivery)
 
 The OTP surface opens only when a **deliverable SMS service** is configured
-(`services.sms`, Setup → Settings → SMS Delivery); without one these endpoints
-fail loudly with `NOT_SUPPORTED`. The public config advertises real
+(`services.sms`, Setup → Settings → SMS Delivery). Without one — no SMS
+service wired, or only the log transport in production — `send-otp` answers
+`400` with `code: "SMS_SERVICE_REQUIRED"` and a message naming the fix, while
+`request-password-reset` keeps answering `{status:true}` (it never reveals
+whether a number is registered) and sends nothing. The public config advertises real
 availability as `features.phoneNumberOtp`, which is what the Console login UI
 gates its "Sign in with verification code" mode and the SMS reset branch on.
 
@@ -756,7 +759,8 @@ The OTP surfaces — `POST /phone-number/send-otp` + `POST /phone-number/verify`
 (sign-in / verification) and `POST /phone-number/request-password-reset` +
 `POST /phone-number/reset-password` (self-service reset) — only work when an
 SMS service is wired (`@objectstack/service-sms` registers the `sms` kernel
-service). Without one, `send-otp` fails loudly instead of silently dropping
+service). Without one, `send-otp` fails loudly — `400` with
+`code: "SMS_SERVICE_REQUIRED"` — instead of silently dropping
 the code; phone sign-in is then password-based only (an admin sets the
 password — see Admin User Management below). OTP requests are rate-limited
 per phone number to prevent SMS-pumping abuse.
