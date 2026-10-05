@@ -489,7 +489,12 @@ export function buildSettingAuditWriter(
           request_id: entry.requestId ?? null,
           reason: entry.reason ?? null,
           created_at: new Date().toISOString(),
-        }, { bypassTenantAudit: true });
+          // The explicit system opt-in, as the settings row write carries:
+          // `sys_setting_audit` is the platform's own ledger, written after
+          // the settings door already authorized the change, and not a
+          // write that may rely on a missing principal to pass the security
+          // middleware's principal-less hand-off (ADR-0096 D5).
+        }, { bypassTenantAudit: true, context: { isSystem: true } });
       } catch (err: any) {
         logger?.warn?.('SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err));
       }

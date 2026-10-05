@@ -94,12 +94,28 @@ export interface SettingsRow {
 export interface SettingsEngine {
   find(
     objectName: string,
-    opts: { where?: Record<string, unknown>; limit?: number; bypassTenantAudit?: boolean },
+    opts: {
+      where?: Record<string, unknown>;
+      limit?: number;
+      bypassTenantAudit?: boolean;
+      /**
+       * Execution context for the read, forwarded VERBATIM to the data engine.
+       * `SettingsService` sends `{ isSystem: true }` on its own `sys_setting`
+       * reads; an adapter that drops it hands the engine a context with no
+       * principal and no system opt-in. Same forwarding rule as `update`'s
+       * `context` below.
+       */
+      context?: Record<string, unknown>;
+    },
   ): Promise<any[]>;
   insert(
     objectName: string,
     data: Record<string, unknown>,
-    opts?: { bypassTenantAudit?: boolean },
+    opts?: {
+      bypassTenantAudit?: boolean;
+      /** Forwarded VERBATIM, as on `find` and `update`. */
+      context?: Record<string, unknown>;
+    },
   ): Promise<any>;
   update(
     objectName: string,
