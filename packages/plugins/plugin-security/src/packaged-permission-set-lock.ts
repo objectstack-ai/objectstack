@@ -153,11 +153,11 @@ export type LayeredProbe =
  *
  * [#21789] A package id on the item does not answer that by itself. The
  * registry holds stored rows as well as artifacts: the metadata layer hydrates
- * every env-wide `sys_metadata` row into it (on a list read and at boot) and
- * stamps the row's `package_id` column onto the body as `_packageId`. A set
- * saved into a writable runtime package therefore carries a package id just as
- * a code-shipped one does, and reading "has a package id" as "shipped by code"
- * locked it after the first list read. What tells the two apart is the
+ * env-wide `sys_metadata` rows into it, and the list read (`getMetaItems`)
+ * stamps the row's `package_id` column onto the body as `_packageId` on the
+ * way. A set saved into a writable runtime package therefore carries a package
+ * id just as a code-shipped one does, and reading "has a package id" as
+ * "shipped by code" locked it after the first list read. What tells the two apart is the
  * provenance the hydrator writes on every stored row (ADR-0010
  * `_provenance: 'org'`), read through `isTenantAuthored`: the exclusion
  * `isCodeArtifactBody` and `SchemaRegistry.getArtifactItem` already apply, so

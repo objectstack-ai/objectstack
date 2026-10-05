@@ -9,10 +9,10 @@
 //
 // The lock (`packaged-permission-set-lock.ts`, plugin-security) asked the
 // engine registry "does any item of this name carry a package id?". The
-// registry holds stored rows as well as artifacts: a list read
-// (`GET /meta/permission`) and the boot both hydrate every env-wide
-// `sys_metadata` row into it, stamping the row's `package_id` column onto the
-// body as `_packageId`. So a set saved into a writable runtime package read as
+// registry holds stored rows as well as artifacts, and a list read
+// (`GET /meta/permission`) hydrates every env-wide `sys_metadata` row into it
+// with the row's `package_id` column stamped onto the body as `_packageId`.
+// So a set saved into a writable runtime package read as
 // code-shipped after the first list read, and every edit of it answered
 // `403 NOT_OVERRIDABLE` at both doors. The provenance that tells the two apart
 // was on the same body all along: the hydrator writes `_provenance: 'org'` on
@@ -45,11 +45,14 @@
 //
 // ## Why a booted stack, booted twice
 //
-// The defect is a property of where the stored row's package id comes from,
-// and there are two producers: the list read (boot 1) and the boot hydration
-// (boot 2, same file). Each half asserts its producer actually stamped the
-// package id on the row BEFORE it asserts the edit lands — without that
-// precondition an accepted edit would prove nothing.
+// Each side has a second producer at boot. The projection echo the read serves
+// is minted again by the boot's reconciliation rather than by a save, so boot 2
+// (same file) reads the three shapes again before anything is written. The
+// stored row's package id is stamped by the list read, not by the boot's own
+// hydration (measured: after the cold boot the runtime-package set's registry
+// row carries no package id until the first list read), so boot 2 issues that
+// read and asserts the stamp is back BEFORE it asserts the edit lands —
+// without that precondition an accepted edit would prove nothing.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -95,8 +98,10 @@ function cloneAction(): CloneAction {
     return action as CloneAction;
 }
 
-/** The ADR-0112 envelope's code, nested under `error`. */
-const errorCode = (json: any): unknown => json?.error?.code;
+/** The `/meta` REST door's refusal carries its code at the top level. */
+const metaRefusalCode = (json: any): unknown => json?.code;
+/** The data door answers the ADR-0112 envelope, its code nested under `error`. */
+const dataRefusalCode = (json: any): unknown => json?.error?.code;
 
 describe('[#21789] the permission-set lock reads the row\'s provenance — the three org-owned shapes edit, a code-shipped set stays refused (showcase)', () => {
     let prevCwd: string;
@@ -221,9 +226,11 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
 
     it('control: a set the showcase package ships is still refused at both doors with 403 NOT_OVERRIDABLE', async () => {
         const put = await putDefinition({ name: SHIPPED, packageQuery: '' }, 'Contributor (customized)');
-        expect({ status: put.status, code: errorCode(put.json) }).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect({ status: put.status, code: metaRefusalCode(put.json) }, JSON.stringify(put.json))
+            .toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
         const patch = await patchRecord(SHIPPED, 'customized');
-        expect({ status: patch.status, code: errorCode(patch.json) }).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect({ status: patch.status, code: dataRefusalCode(patch.json) }, JSON.stringify(patch.json))
+            .toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
     });
 
     it('control: the layered read still reports the shipped set as code-shipped and not editable', async () => {
@@ -237,6 +244,10 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
     });
 
     describe('after a cold boot on the same database file', () => {
+        // The boot is the other producer on each side: the projection echo is
+        // minted again by the boot's reconciliation (not by a save), and the
+        // registry rows are hydrated again (the list read below re-stamps the
+        // package id, as a Studio page load does).
         beforeAll(async () => {
             await stack?.stop();
             stack = undefined;
@@ -245,20 +256,7 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
             ql = await stack.kernel.getServiceAsync('objectql');
         }, 300_000);
 
-        it('precondition: the boot stamped the runtime package onto its set\'s registry row, as a stored row', () => {
-            const rows = registryRows(PKG_SET);
-            expect(rows.map((r) => ({ _packageId: r._packageId ?? null, _provenance: r._provenance ?? null })))
-                .toEqual([{ _packageId: PKG, _provenance: 'org' }]);
-        });
-
-        it('the runtime-package set still edits at both doors', async () => {
-            const put = await putDefinition({ name: PKG_SET, packageQuery: `?package=${PKG}` }, 'Runtime package set (after a cold boot)');
-            expect(put.status, JSON.stringify(put.json)).toBe(200);
-            const patch = await patchRecord(PKG_SET, 'after a cold boot');
-            expect(patch.status, JSON.stringify(patch.json)).toBe(200);
-        });
-
-        it('all three shapes still read as editable and tenant-authored', async () => {
+        it('the echo the boot mints carries the lock\'s verdict: all three shapes read editable and tenant-authored', async () => {
             for (const shape of SHAPES) {
                 const env = await layered(shape.name);
                 expect({ name: shape.name, editable: env?.editable, provenance: env?.provenance })
@@ -266,9 +264,23 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
             }
         });
 
+        it('after the list read stamps the package id again, the runtime-package set still edits at both doors', async () => {
+            const list = await stack!.apiAs(token, 'GET', '/meta/permission');
+            expect(list.status).toBe(200);
+            // ⛔ The precondition again: without the stamp the edits below prove nothing.
+            const rows = registryRows(PKG_SET);
+            expect(rows.map((r) => ({ _packageId: r._packageId ?? null, _provenance: r._provenance ?? null })))
+                .toEqual([{ _packageId: PKG, _provenance: 'org' }]);
+            const put = await putDefinition({ name: PKG_SET, packageQuery: `?package=${PKG}` }, 'Runtime package set (after a cold boot)');
+            expect(put.status, JSON.stringify(put.json)).toBe(200);
+            const patch = await patchRecord(PKG_SET, 'after a cold boot');
+            expect(patch.status, JSON.stringify(patch.json)).toBe(200);
+        });
+
         it('control: the shipped set is still refused at the metadata door with 403 NOT_OVERRIDABLE', async () => {
             const put = await putDefinition({ name: SHIPPED, packageQuery: '' }, 'Contributor (customized)');
-            expect({ status: put.status, code: errorCode(put.json) }).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+            expect({ status: put.status, code: metaRefusalCode(put.json) }, JSON.stringify(put.json))
+                .toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
         });
     });
 });
