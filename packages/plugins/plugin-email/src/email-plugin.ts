@@ -36,7 +36,7 @@ import type {
   SettingsUnsubscribe,
 } from '@objectstack/spec/system';
 import {
-  bootstrapDeclaredEmailTemplates,
+  bootstrapEffectiveEmailTemplates,
   upsertDeclaredEmailTemplate,
   deactivateDeclaredEmailTemplate,
   mapTemplateToRow,
@@ -1102,7 +1102,7 @@ export class EmailServicePlugin implements Plugin {
     try { tenancy = ctx.getService('tenancy'); } catch { /* optional */ }
 
     try {
-      await bootstrapDeclaredEmailTemplates(engine, metadataService, ctx.logger as any, undefined, { protocol, tenancy });
+      await bootstrapEffectiveEmailTemplates(engine, metadataService, { protocol, tenancy }, ctx.logger as any);
     } catch (err: any) {
       ctx.logger.warn(
         'EmailServicePlugin: declared email-template bootstrap failed (built-in templates still serve): '

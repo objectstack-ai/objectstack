@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   bootstrapDeclaredEmailTemplates,
+  bootstrapEffectiveEmailTemplates,
   upsertDeclaredEmailTemplate,
   deactivateDeclaredEmailTemplate,
   mapTemplateToRow,
@@ -494,7 +495,7 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
       { organizationId: ORG, items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
     );
 
-    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined, undefined, undefined, {
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
       protocol,
       tenancy: { defaultOrgId: async () => ORG },
     });
@@ -512,13 +513,13 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
       { organizationId: ORG, items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
     );
 
-    await bootstrapDeclaredEmailTemplates(engine as any, undefined, undefined, undefined, {
+    await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
       protocol,
       tenancy: { defaultOrgId: async () => null },
     });
 
-    // No organization on the request: one plant's overlay is never what the
-    // org-agnostic sending row carries.
+    // No organization on the request: the tenancy contract named none, so the
+    // read is env-wide and the declaration is what the row carries.
     expect(protocol.requests).toEqual([{ type: 'email_template' }]);
     expect(rowsOf(engine)[0].subject).toBe(PACKAGE_WORDING);
   });
@@ -533,10 +534,10 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
       async getMetaItems(): Promise<never> { throw new Error('sys_metadata read failed'); },
     };
 
-    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined, { warn }, undefined, {
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
       protocol,
       tenancy: { defaultOrgId: async () => ORG },
-    });
+    }, { warn });
 
     expect(result).toEqual({ seeded: 0, skipped: 0 });
     expect(rowsOf(engine)[0].subject).toBe(OVERLAY_WORDING);
@@ -562,10 +563,10 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
       ],
     });
 
-    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined, { warn }, undefined, {
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
       protocol,
       tenancy: { defaultOrgId: async () => ORG },
-    });
+    }, { warn });
 
     expect(result).toEqual({ seeded: 0, skipped: 2 });
     expect(rowsOf(engine).map((r) => r.subject)).toEqual(['Admin original', 'Data-door wording']);

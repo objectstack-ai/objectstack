@@ -115,6 +115,10 @@ function uid(prefix: string): string {
  * (#21785). Both are optional: a host that registers no `protocol` has no
  * metadata door, so nothing can overlay a declaration there and the registry
  * read below is already the effective one.
+ *
+ * Module-internal: exported for EmailServicePlugin's boot wiring only and
+ * deliberately NOT re-exported from the package entry — see
+ * {@link bootstrapEffectiveEmailTemplates}.
  */
 export interface EffectiveEmailTemplateSources {
   /** The `protocol` service. `getMetaItems` is the layered list `GET /meta/email_template` serves. */
@@ -154,9 +158,9 @@ const EFFECTIVE_READ_FAILED = Symbol('email-template-effective-read-failed');
  * org-less reader of org-overridable metadata does: `tenancy.defaultOrgId()`,
  * as the anonymous form doors read a form (`@objectstack/rest`). That answers
  * the Default Organization under `single` (ADR-0131: the organization IS the
- * environment there) and `null` whenever a walled posture was requested, where
- * the read is env-wide and no plant's overlay becomes everyone's mail. The
- * sending row stays org-agnostic: template resolution keys on
+ * environment there) and `null` whenever a walled posture was requested (the
+ * tenancy contract never guesses an organization there), where the read is
+ * env-wide. The sending row stays org-agnostic: template resolution keys on
  * `(name, locale)` only, and per-organization template rows are a capability
  * no ruling has opened.
  *
@@ -359,17 +363,43 @@ export async function deactivateDeclaredEmailTemplate(
 }
 
 /**
- * Materialize every declared email template into `sys_email_template`, as the
- * metadata door serves it (an overlay of the declaration included) when
- * `sources.protocol` is given — see {@link readDeclared}. Idempotent and safe
+ * Materialize every declared email template into `sys_email_template` from the
+ * ObjectQL registry (falling back to the metadata service). Idempotent and safe
  * to run on every boot.
+ *
+ * The published signature, unchanged. It delegates to
+ * {@link bootstrapEffectiveEmailTemplates} with no sources, so an external
+ * caller reads the registry exactly as before — the declarations plus the
+ * env-wide overlays boot hydration registered. The plugin's own boot wiring
+ * calls the effective form directly.
  */
 export async function bootstrapDeclaredEmailTemplates(
   engine: IDataEngine,
   metadataService: any,
   logger?: Logger,
   object = EMAIL_TEMPLATE_OBJECT,
-  sources?: EffectiveEmailTemplateSources,
+): Promise<BootstrapDeclaredEmailTemplatesResult> {
+  return bootstrapEffectiveEmailTemplates(engine, metadataService, undefined, logger, object);
+}
+
+/**
+ * [#21785] The boot sweep EmailServicePlugin runs: materialize every
+ * `email_template` into `sys_email_template` as the metadata door serves it —
+ * an overlay of the declaration included — when `sources.protocol` is given,
+ * and from the registry otherwise (see {@link readDeclared}). The one sweep
+ * body; {@link bootstrapDeclaredEmailTemplates} is this with no sources.
+ *
+ * Module-internal: NOT re-exported from the package entry (`src/index.ts`),
+ * and the package's `exports` map names only that entry, so this function and
+ * {@link EffectiveEmailTemplateSources} add nothing to the published surface.
+ * No caller outside this package needs them.
+ */
+export async function bootstrapEffectiveEmailTemplates(
+  engine: IDataEngine,
+  metadataService: any,
+  sources: EffectiveEmailTemplateSources | undefined,
+  logger?: Logger,
+  object = EMAIL_TEMPLATE_OBJECT,
 ): Promise<BootstrapDeclaredEmailTemplatesResult> {
   const declared = await readDeclared(engine, metadataService, 'email_template', sources, logger);
   if (declared === EFFECTIVE_READ_FAILED || declared.length === 0) return { seeded: 0, skipped: 0 };
