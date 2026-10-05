@@ -48,7 +48,7 @@ const STANDALONE_ITEM = {
   config: { type: 'grid', columns: [{ field: 'name' }] },
 } as const;
 
-describe('AssembledViewArtifactSchema — the non-container view vocabulary (#5320)', () => {
+describe('AssembledViewArtifactSchema — the declared home for non-container view artifacts', () => {
   it('accepts an expanded viewKind item (what the ADR-0017 dual-read exports)', () => {
     const [expanded] = expandViewContainer('account', CONTAINER);
     expect(expanded.viewKind).toBe('list');

@@ -62,7 +62,7 @@ const undeclaredKey: AssembledViewArtifact = { type: 'grid', columns: ['name'], 
 const parsedFromUnknown: AssembledViewArtifactParsed = someValue;
 void [fromUnknown, container, undeclaredKey, parsedFromUnknown];
 
-describe('[#19920] AssembledViewArtifact is a non-container view artifact, not unknown', () => {
+describe('AssembledViewArtifact is a non-container view artifact, not unknown', () => {
   it('has a typed body for every non-container member', () => {
     expect(Object.keys(BODY_OF_EACH_MEMBER).sort()).toEqual(
       VIEW_METADATA_BRANCHES.filter((branch) => branch !== 'container').sort(),

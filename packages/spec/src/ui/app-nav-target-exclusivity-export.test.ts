@@ -315,7 +315,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
  * `*` of each line first, THEN flatten whitespace — a claim wraps lines, and
  * a raw search reads a confident 0 on text that is plainly there.
  */
-describe('`recordId` docblock parity with the accept set (#16875)', () => {
+describe('`recordId` docblock parity with the accept set', () => {
   const src = fs.readFileSync(path.join(HERE, 'app.zod.ts'), 'utf8');
 
   const recordIdDocblock = ((): string => {

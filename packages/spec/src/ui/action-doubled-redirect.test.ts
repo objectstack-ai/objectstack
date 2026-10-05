@@ -21,7 +21,7 @@ import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 const base = { name: 'open_sso_portal', label: 'Open SSO portal' };
 
-describe('ActionSchema — doubled post-success navigation (#11519)', () => {
+describe('ActionSchema — doubled post-success navigation is refused, with no precedence field', () => {
   describe('refusal pin — the statically-knowable doubled declaration', () => {
     const doubled = {
       ...base,

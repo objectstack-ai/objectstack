@@ -169,7 +169,7 @@ describe('§3 the `pagination` bag stays open — the narrowing did not reach si
 
 describe('§4 the two arms agree on a page size and disagree on openness, both on purpose', () => {
   for (const [label, value] of NOT_A_PAGE_SIZE) {
-    it(`both arms refuse a ${label} pageSize — the disagreement #19046 closes`, () => {
+    it(`both arms refuse a ${label} pageSize — the view and component arms no longer disagree`, () => {
       expect(PaginationConfigSchema.safeParse({ pageSize: value }).success, 'view arm').toBe(false);
       expect(grid().safeParse({ pagination: { pageSize: value } }).success, 'component arm').toBe(false);
     });

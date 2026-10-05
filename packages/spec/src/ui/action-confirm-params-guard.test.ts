@@ -46,7 +46,7 @@ const guardIssue = (result: ReturnType<typeof ActionSchema.safeParse>) =>
     ? undefined
     : result.error.issues.find((i) => i.path.join('.') === 'confirmText');
 
-describe('#7428 — `confirmText` + non-empty `params` is refused on ActionSchema', () => {
+describe('`confirmText` + non-empty `params` is refused on ActionSchema', () => {
   it('refuses the pair, at the `confirmText` path', () => {
     const result = ActionSchema.safeParse({
       ...base,
@@ -127,7 +127,7 @@ describe('#7428 — `confirmText` + non-empty `params` is refused on ActionSchem
   });
 });
 
-describe('#7428 — what the guard must NOT touch', () => {
+describe('what the `confirmText` + `params` guard must NOT touch', () => {
   it('accepts `confirmText` on a param-LESS action — the confirm is the only dialog', () => {
     const result = ActionSchema.safeParse({
       ...base,
@@ -145,7 +145,7 @@ describe('#7428 — what the guard must NOT touch', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts `params` + `description` — the shape #7278 migrated TO', () => {
+  it('accepts `params` + `description` — the one-dialog shape the confirm question migrated TO', () => {
     // If this ever goes red the guard has swallowed its own remedy and the two
     // migrations have nowhere to land.
     const result = ActionSchema.safeParse({
@@ -168,7 +168,7 @@ describe('#7428 — what the guard must NOT touch', () => {
   });
 });
 
-describe('#7428 — the guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
+describe('the pair guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
   it('BulkActionDefSchema still ACCEPTS `confirmText` + non-empty `params`', () => {
     // The pinning test the boundary ruling asks for. This pairing is INTENDED
     // on the bulk surface: per that schema's own describe() text the params are
