@@ -12,6 +12,12 @@
  * Normalizes the JSON by sorting keys and removing whitespace
  * to ensure consistent checksums across identical content.
  *
+ * ⚠️ Not the `sys_metadata.checksum` stamp (#21828). That column carries
+ * `hashSpec(body, type)` from `@objectstack/metadata-core`, which every writer
+ * of it stamps (`DatabaseLoader`, `SysMetadataRepository`). This function sorts
+ * EVERY map, an object's `fields` included, whose key order the spec declares
+ * to be the field order, so it cannot tell a field reorder from no change.
+ *
  * @param metadata - The metadata object to checksum
  * @returns SHA-256 hex string
  */

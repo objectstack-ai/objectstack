@@ -19,13 +19,12 @@ import type {
   MetadataRecord,
   MetadataHistoryRecord,
 } from '@objectstack/spec/system';
-import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { SysMetadataObject, SysMetadataHistoryObject, hashSpec } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
-import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
 // `driver-error-classification.ts` `## Home` section. The verdicts are
@@ -698,12 +697,23 @@ export class DatabaseLoader implements MetadataLoader {
   /**
    * Create a history record for a metadata change.
    *
+   * [#21828] The caller has already decided this IS a change and hands in the
+   * stamp it wrote on the parent row ({@link contentHash}), so the history row
+   * carries the same value. ⛔ No "unchanged?" comparison here: the only
+   * `'update'` caller, `save`, reaches this line after comparing CONTENT, and a
+   * second comparison of the new stamp with the previous STORED stamp is never
+   * the right arbiter. A stamp written under an older rule can equal the new
+   * one while the content differs (a reorder of an object's `fields` into
+   * sorted key order, against a stamp that sorted every map), which would
+   * record a real change with no history row.
+   *
    * @param type - Metadata type
    * @param name - Metadata name
    * @param version - Version number
    * @param metadata - The metadata payload
    * @param operationType - Type of operation
-   * @param previousChecksum - Checksum of previous version (if any)
+   * @param checksum - The parent row's new stamp, `contentHash` of the stored body
+   * @param previousChecksum - The parent row's stamp before this write (if any)
    * @param changeNote - Optional change description
    * @param recordedBy - Optional user who made the change
    */
@@ -713,6 +723,7 @@ export class DatabaseLoader implements MetadataLoader {
     version: number,
     metadata: unknown,
     operationType: 'create' | 'update' | 'publish' | 'revert' | 'delete',
+    checksum: string,
     previousChecksum?: string,
     changeNote?: string,
     recordedBy?: string
@@ -722,12 +733,6 @@ export class DatabaseLoader implements MetadataLoader {
     await this.ensureHistorySchema();
 
     const now = new Date().toISOString();
-    const checksum = await calculateChecksum(metadata);
-
-    // Skip if checksum matches previous version (no actual change)
-    if (previousChecksum && checksum === previousChecksum && operationType === 'update') {
-      return;
-    }
 
     const historyId = generateId();
     const metadataJson = JSON.stringify(metadata);
@@ -1353,7 +1358,8 @@ export class DatabaseLoader implements MetadataLoader {
 
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(restoredData);
-    const newChecksum = await calculateChecksum(restoredData);
+    // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
+    const newChecksum = contentHash(metadataJson, type);
 
     const existing = await this._findOne(this.tableName, {
       where: this.baseFilter(type, name),
@@ -1383,6 +1389,7 @@ export class DatabaseLoader implements MetadataLoader {
       newVersion,
       restoredData,
       'revert',
+      newChecksum,
       previousChecksum,
       changeNote ?? `Rolled back to version ${targetVersion}`,
       recordedBy
@@ -1401,17 +1408,19 @@ export class DatabaseLoader implements MetadataLoader {
 
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(data);
-    const newChecksum = await calculateChecksum(data);
 
     try {
+      // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
+      const newChecksum = contentHash(metadataJson, type);
       const existing = await this._findOne(this.tableName, {
         where: this.baseFilter(type, name),
       });
 
       if (existing) {
-        // Skip update if the content is identical (prevents phantom version bumps)
+        // Skip the write when the stored CONTENT is identical (prevents phantom
+        // version bumps). [#21828] Content, not stamps: see `storedBodyUnchanged`.
         const previousChecksum = existing.checksum as string | undefined;
-        if (newChecksum === previousChecksum) {
+        if (storedBodyUnchanged(existing, type, newChecksum)) {
           // No DB write, but make sure the cached payload reflects the latest
           // call (prior cached `null` would otherwise mask a freshly-saved
           // record).
@@ -1444,6 +1453,7 @@ export class DatabaseLoader implements MetadataLoader {
           version,
           data,
           'update',
+          newChecksum,
           previousChecksum
         );
 
@@ -1481,7 +1491,8 @@ export class DatabaseLoader implements MetadataLoader {
           name,
           1,
           data,
-          'create'
+          'create',
+          newChecksum
         );
 
         return {
@@ -1521,6 +1532,62 @@ export class DatabaseLoader implements MetadataLoader {
 
     this.invalidate(type, name);
   }
+}
+
+/**
+ * [#21828] The content hash this loader stamps on a `sys_metadata` row and on
+ * its history row: `hashSpec(body, type)` from `@objectstack/metadata-core`,
+ * the hash `SysMetadataRepository` stamps on the same column. One column, one
+ * vocabulary (`sha256:` + 64 hex). ⛔ Not `calculateChecksum`: it sorts every
+ * map, an object's `fields` included, and writes bare hex, so a field-reorder-
+ * only `register` hashed equal and was never persisted.
+ *
+ * Hashed AS ITS TYPE (canonicalize guarantee 8): a map the spec declares
+ * ordered (an `object`'s `fields`) keeps its key order, so a reorder of it is a
+ * change, and every other map stays key-order independent.
+ *
+ * It hashes the bytes the loader stores (the parse of the JSON it writes), not
+ * the in-memory value it was handed. Canonicalize guarantee 7 makes the two one
+ * hash for every value JSON can carry. For a value it cannot (a function or an
+ * `undefined` property, which the stored JSON drops), the stamp still names
+ * the stored bytes, and `hashSpec` is never handed what it refuses.
+ */
+function contentHash(storedJson: string, type: string): string {
+  return hashSpec(JSON.parse(storedJson), type);
+}
+
+/**
+ * [#21828] Does `row` already store the body whose {@link contentHash} is
+ * `hash`? `save`'s no-op question, answered about CONTENT: the stored bytes
+ * are re-hashed under the current rule, the comparison
+ * `SysMetadataRepository.put` makes for an ordered-map type
+ * (`storedBodyUnchanged` there).
+ *
+ * The stored stamp cannot answer it, because a row's stamp may come from an
+ * older rule. Before #21828 this loader stamped `calculateChecksum` (bare hex,
+ * every map sorted), and a row `SysMetadataRepository` stamped before #21790
+ * carries an order-blind `sha256:` hash. Trusting the stamp misfires both ways:
+ *   - an identical body looks changed against a stamp no current hash equals,
+ *     so every such row would be rewritten with a version bump and a history
+ *     row recording no change, on the first `register` after an upgrade;
+ *   - a reorder of an object's `fields` INTO sorted key order looks unchanged
+ *     against an order-blind stamp, the drop #21828 fixes.
+ * The stamp of a skipped row is left as written: it stays the row's version
+ * token until its content next changes.
+ *
+ * Stored bytes that are absent or do not parse are not the incoming body, so
+ * the answer is "changed" and the write goes ahead, which also repairs the row.
+ */
+function storedBodyUnchanged(row: Record<string, unknown>, type: string, hash: string): boolean {
+  const stored = row.metadata;
+  if (stored === null || stored === undefined) return false;
+  let storedBody: unknown;
+  try {
+    storedBody = typeof stored === 'string' ? JSON.parse(stored) : stored;
+  } catch {
+    return false;
+  }
+  return hashSpec(storedBody, type) === hash;
 }
 
 /**
