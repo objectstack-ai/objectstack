@@ -24,7 +24,7 @@ import {
 // the first time instead of silently dead.
 
 /**
- * The `'metadata'` service members this plugin reads: datasource and package
+ * The `'metadata'` service members this plugin reads: datasource
  * definitions, and the catalog write. Objects are not read here — see
  * `objectRegistry` in {@link ExternalDatasourceServicePlugin.init}.
  */
