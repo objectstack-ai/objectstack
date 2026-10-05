@@ -48,7 +48,7 @@ const isTheOperator = (operator: string) => operator === '$icontains' || operato
 // 1. The predicate answers EXACTLY the two declared REJECTION rows
 // ---------------------------------------------------------------------------
 
-describe('#18113 — isRefusedTextComparand, driven through every FILTER_TEXT_CASES case', () => {
+describe('isRefusedTextComparand — the one predicate every face reads, driven through every FILTER_TEXT_CASES case', () => {
   it('the table still carries both verdicts, so this suite is not vacuous', () => {
     expect(FILTER_TEXT_CASES.filter(isRejection).length).toBeGreaterThan(0);
     expect(FILTER_TEXT_CASES.filter((c) => !isRejection(c)).length).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe('#18113 — isRefusedTextComparand, driven through every FILTER_TEXT_CA
 // 2. The reason names each row's `mustMention` tokens, per ARRIVING spelling
 // ---------------------------------------------------------------------------
 
-describe('#18113 — textComparandRefusalReason names what the row requires', () => {
+describe('textComparandRefusalReason names what the row requires', () => {
   const rows = FILTER_TEXT_CASES.filter(
     (c): c is FilterTextRejectionCase =>
       isRejection(c) && comparands(c).some(({ operator }) => isTheOperator(operator)),
@@ -215,7 +215,7 @@ describe('#18113 — textComparandRefusalReason names what the row requires', ()
 // 3. Reachability — the ruling's unblock criterion is an EXPORT, not a merge
 // ---------------------------------------------------------------------------
 
-describe('#18113 — both names reach the data entry', () => {
+describe('both names reach the data entry', () => {
   it('are re-exported from the barrel a consumer imports', () => {
     // objectui#9048 is `pm:blocked` until the INSTALLED `@objectstack/spec`
     // exports these. A module nothing re-exports satisfies the card's letter

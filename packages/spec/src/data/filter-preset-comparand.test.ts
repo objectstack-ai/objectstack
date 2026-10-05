@@ -28,7 +28,7 @@ function refusal(input: unknown) {
   return r.success ? null : r.error.issues;
 }
 
-describe('[#8793] FilterConditionSchema — bare preset names in ordering comparands', () => {
+describe('FilterConditionSchema — a bare preset name in an ordering comparand is refused at publish', () => {
   it('refuses every declared preset under every ordering operator, with code + path + prescription', () => {
     for (const preset of DATE_RANGE_PRESETS) {
       for (const op of ['$gt', '$gte', '$lt', '$lte'] as const) {
@@ -112,7 +112,7 @@ describe('[#8793] FilterConditionSchema — bare preset names in ordering compar
   });
 });
 
-describe('[#8793] the refusal reaches the authored surfaces that embed FilterConditionSchema', () => {
+describe('the refusal reaches the authored surfaces that embed FilterConditionSchema', () => {
   const widget = (filter: unknown) => ({
     name: 'sales',
     label: 'Sales',

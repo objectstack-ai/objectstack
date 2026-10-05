@@ -29,6 +29,7 @@ import {
   suggestFieldTypeForSqlType,
   isCompatible,
   ExternalCatalogSchema,
+  unprovisionedInjectedColumns,
   type ExternalCatalog,
   type SqlDialect,
   type FieldType,
@@ -661,8 +662,19 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       fieldToRemote.set(fieldName, remoteCol);
     }
 
+    // [#21788] The anchors the platform injects with NO storage behind them
+    // (`organization_id`, the audit pair, `owner_id`,
+    // `owning_business_unit_id` on a federated object) are not remote columns
+    // and never were: the remote owns the schema. An object read as the
+    // registry holds it — every stored object the metadata door or the import
+    // saved, rehydrated at boot — carries them in `fields`, and comparing them
+    // reported each as a `missing_column` error, which aborted the boot under
+    // the default `onMismatch: 'fail'`. The spec's own provenance verdict
+    // (#7865) names exactly those anchors; an author-declared field of the same
+    // name is the author's and is still compared.
+    const unprovisioned = new Set(unprovisionedInjectedColumns(obj));
     for (const [fieldName, field] of Object.entries(obj.fields ?? {})) {
-      if (BUILTIN_COLUMNS.has(fieldName)) continue;
+      if (BUILTIN_COLUMNS.has(fieldName) || unprovisioned.has(fieldName)) continue;
       const remoteCol = fieldToRemote.get(fieldName) ?? fieldName;
       if (ignore.has(remoteCol)) continue;
 

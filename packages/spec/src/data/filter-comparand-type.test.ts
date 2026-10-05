@@ -38,7 +38,7 @@ class Money {
   constructor(readonly v: number) {}
 }
 
-describe('the accepted set (#7872 ruling)', () => {
+describe('the accepted set — one set, defined at the shared door for every driver', () => {
   it('is exactly the measured superset — string | number | bigint | boolean | null | Date', () => {
     expect([...ACCEPTED_FILTER_COMPARAND_TYPES]).toEqual([
       'string', 'number', 'bigint', 'boolean', 'null', 'Date',
@@ -118,7 +118,7 @@ describe('refusals — the measured divergence rows die at the door', () => {
     expect(err?.message).toContain('where.qty');
   });
 
-  it.each(refused)('refuses %s as an $in member — each member is a comparand in its own right (#5234)', (_name, value) => {
+  it.each(refused)('refuses %s as an $in member — each member is a comparand in its own right', (_name, value) => {
     const err = refusalOf(() => normalizeFilterComparandTypes({ qty: { $in: [100, value] } }));
     expect(err?.code).toBe('INVALID_FILTER');
     expect(err?.message).toContain('where.qty.$in[1]');
@@ -131,7 +131,7 @@ describe('refusals — the measured divergence rows die at the door', () => {
     expect(err?.message).toMatch(/omit/);
   });
 
-  it('the undefined prescription is position-safe: it names the null predicate by its ruled spellings, at every position it is emitted at (#14426)', () => {
+  it('the undefined prescription is position-safe: it names the null predicate by its ruled spellings, at every position it is emitted at', () => {
     // "Write null for the null predicate" was position-agnostic advice: followed
     // at `$gt: undefined` it produced `$gt: null`, refused one door over since
     // the 2026-09-01 ruling; at an `$in` member it produced `$in: [null]`,
@@ -183,7 +183,7 @@ describe('refusals — the measured divergence rows die at the door', () => {
   });
 });
 
-describe('bigint — accepted, and NARROWED copy-on-write (#7872; the memory crash cell dies here)', () => {
+describe('bigint — accepted, and NARROWED copy-on-write (the memory crash cell dies here)', () => {
   it('narrows an exact-range bigint to its number, without touching the caller’s object', () => {
     const original = { qty: { $eq: BigInt(100) } };
     const out = normalizeFilterComparandTypes(original);
@@ -222,7 +222,7 @@ describe('bigint — accepted, and NARROWED copy-on-write (#7872; the memory cra
 });
 
 describe('boundaries the door deliberately does not cross', () => {
-  it('leaves a FieldReference alone at every position — #5222/scalar comparison/#7597 own its fate', () => {
+  it('leaves a FieldReference alone at every position — cross-field push-down, scalar comparison and the `$eq` lowering own its fate', () => {
     for (const filter of [
       { amount: { $gt: { $field: 'budget' } } },
       { amount: { $eq: { $field: 'budget' } } },
@@ -233,7 +233,7 @@ describe('boundaries the door deliberately does not cross', () => {
     }
   });
 
-  it('does not descend into a no-$-key plain object — nested-relation / deep-equality structure (#5869 boundary)', () => {
+  it('does not descend into a no-$-key plain object — nested-relation / deep-equality structure', () => {
     const filter = { author: { name: 'x' } };
     expect(normalizeFilterComparandTypes(filter)).toBe(filter);
   });
@@ -252,18 +252,18 @@ describe('boundaries the door deliberately does not cross', () => {
     expect(normalizeFilterComparandTypes(retired)).toBe(retired);
   });
 
-  it('does not judge a non-array list-operator comparand — that SHAPE belongs to the engine’s #5869 gate', () => {
+  it('does not judge a non-array list-operator comparand — that SHAPE is refused 400 by the engine’s shape gate', () => {
     const filter = { stage: { $in: 'won' } };
     expect(normalizeFilterComparandTypes(filter)).toBe(filter);
   });
 
-  it('keeps the zero-operator constraint for the driver refusal that names it (#5240)', () => {
+  it('keeps the zero-operator constraint for the driver refusal that names it', () => {
     const filter = { qty: {} };
     expect(normalizeFilterComparandTypes(filter)).toBe(filter);
   });
 });
 
-describe('parseFilterAST is the compile face that runs the door (#7872)', () => {
+describe('parseFilterAST is the compile face that runs the door', () => {
   it('judges the OBJECT passthrough — the form that used to leave unexamined', () => {
     const err = refusalOf(() => parseFilterAST({ qty: { $eq: Symbol('x') } }));
     expect(err?.code).toBe('INVALID_FILTER');
