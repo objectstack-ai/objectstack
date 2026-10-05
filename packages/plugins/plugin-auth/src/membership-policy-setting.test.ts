@@ -86,6 +86,10 @@ function makeEngine(seed: { users?: Array<{ id: string }>; members?: Array<{ use
       return [];
     }),
     findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
+    // The deployment ledger the one-time backfill records itself in is
+    // present; it holds no record yet (`findOne` answers null), so the pass
+    // runs on this boot.
+    getObject: vi.fn((name: string) => ({ name })),
   };
 }
 

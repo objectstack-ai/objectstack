@@ -84,7 +84,6 @@ export interface MembershipBackfillLedger {
   getObject(name: string): unknown;
   findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
-  update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
 
 export type OneTimeMembershipBackfillStatus =
@@ -117,7 +116,7 @@ const SYSTEM_CTX = { isSystem: true };
 
 function resolveLedger(engine: unknown): MembershipBackfillLedger | undefined {
   const candidate = engine as any;
-  for (const method of ['getObject', 'findOne', 'insert', 'update']) {
+  for (const method of ['getObject', 'findOne', 'insert']) {
     if (typeof candidate?.[method] !== 'function') return undefined;
   }
   return candidate as MembershipBackfillLedger;

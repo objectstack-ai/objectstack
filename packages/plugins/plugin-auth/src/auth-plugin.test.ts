@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthPlugin } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
@@ -1470,6 +1471,8 @@ describe('AuthPlugin', () => {
         sys_user: [{ id: 'admin' }],
         sys_member: [],
         sys_organization: [],
+        // The deployment ledger the one-time pass records itself in.
+        sys_migration: [],
       };
       const matches = (row: any, where: any) =>
         Object.entries(where ?? {}).every(([k, v]) => {
@@ -1479,9 +1482,14 @@ describe('AuthPlugin', () => {
       return {
         tables,
         registerMiddleware: vi.fn(),
+        getObject: vi.fn((name: string) => (name in tables ? { name } : undefined)),
         find: vi.fn(async (object: string, q: any) =>
           (tables[object] ?? []).filter((r) => matches(r, q?.where)).slice(0, q?.limit ?? 100),
         ),
+        findOne: vi.fn(async (object: string, q: any) => {
+          assertEngineFindOnePredicate(object, q);
+          return (tables[object] ?? []).find((r) => matches(r, q?.where)) ?? null;
+        }),
         insert: vi.fn(async (object: string, data: any) => {
           (tables[object] ??= []).push(data);
           return data;
@@ -1524,20 +1532,43 @@ describe('AuthPlugin', () => {
       expect(mockContext.hook).toHaveBeenCalledWith('app:seeded', expect.any(Function));
     });
 
-    it('binds a user seeded after kernel:ready when app:seeded fires', async () => {
+    it('app:seeded runs the one-time pass when kernel:ready had no target organization yet', async () => {
+      // No platform admin at kernel:ready ⇒ no default organization ⇒ the
+      // pass has no target, decides nothing and records nothing.
+      ql.tables.sys_user_permission_set = [];
       await boot();
-      // Boot: default org created, admin bound as owner, first backfill pass
-      // sees no member-less users.
       await hookCapture.trigger('kernel:ready');
-      expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
+      expect(ql.tables.sys_organization).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(0);
 
-      // A background seed inserts a member-less user AFTER kernel:ready.
+      // A background seed inserts a member-less user, and the organization
+      // appears before the seed settles.
       ql.tables.sys_user.push({ id: 'seeded_u2' });
+      ql.tables.sys_organization.push({ id: 'org_default', slug: 'default' });
 
       await hookCapture.trigger('app:seeded');
 
       const seededMember = ql.tables.sys_member.find((m: any) => m.user_id === 'seeded_u2');
       expect(seededMember).toMatchObject({ user_id: 'seeded_u2', role: 'member' });
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toEqual(['adr-0093-membership-backfill']);
+    });
+
+    it('once the pass is recorded, a later trigger binds nobody — a removed member stays removed', async () => {
+      await boot();
+      // Boot: default org created, admin bound as owner, the one-time pass
+      // runs and records itself.
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toEqual(['adr-0093-membership-backfill']);
+
+      // A member-less user now exists — the shape a membership removal leaves.
+      ql.tables.sys_user.push({ id: 'removed_u3' });
+
+      await hookCapture.trigger('app:seeded');
+      await hookCapture.trigger('kernel:ready');
+
+      expect(ql.tables.sys_member.find((m: any) => m.user_id === 'removed_u3')).toBeUndefined();
+      expect(ql.tables.sys_migration).toHaveLength(1);
     });
 
     it('OS_SKIP_MEMBERSHIP_BACKFILL=1 disables the app:seeded re-run', async () => {
