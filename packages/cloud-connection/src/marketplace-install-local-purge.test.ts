@@ -32,7 +32,7 @@ import { tmpdir } from 'node:os';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 
-import { purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset, type SeedMatchProblem } from './marketplace-install-local-purge.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
@@ -289,6 +289,59 @@ describe('purgeSeedRows — reference parts of a key', () => {
     });
 });
 
+describe('matchSeedRows — the identification, read-only', () => {
+    it('identifies exactly the rows the purge deletes, and deletes nothing', async () => {
+        const tables: Record<string, Row[]> = {
+            acc: [{ id: 'a1', name: 'Acme' }, { id: 'a2', name: 'Globex' }, { id: 'u1', name: 'User Authored Co' }],
+            con: [{ id: 'c1', email: 'ada@acme.test', account: 'a1' }],
+        };
+        const { engine, deletes } = makeEngine(tables);
+        const match = await matchSeedRows({ engine, datasets: DATASETS, graph: GRAPH, report: vi.fn() });
+        expect(match).toEqual({
+            rows: [{ object: 'acc', id: 'a1' }, { object: 'acc', id: 'a2' }, { object: 'con', id: 'c1' }],
+            absent: 0,
+            unidentified: 0,
+        });
+        expect(deletes).toEqual([]);
+        expect(tables.acc).toHaveLength(3);
+    });
+
+    it('`firstOnly` stops at the first identified row: one object read when the first parent matches', async () => {
+        const tables: Record<string, Row[]> = {
+            acc: [{ id: 'a1', name: 'Acme' }, { id: 'a2', name: 'Globex' }],
+            con: [{ id: 'c1', email: 'ada@acme.test', account: 'a1' }],
+        };
+        const { engine, reads } = makeEngine(tables);
+        const match = await matchSeedRows({ engine, datasets: DATASETS, graph: GRAPH, report: vi.fn(), firstOnly: true });
+        expect(match.rows).toEqual([{ object: 'acc', id: 'a1' }]);
+        expect(reads.map((r) => r.object)).toEqual(['acc']);
+    });
+
+    it('`firstOnly` with no seed row in scope reads every seeded object and identifies nothing', async () => {
+        const tables: Record<string, Row[]> = { acc: [{ id: 'u1', name: 'User Authored Co' }], con: [] };
+        const { engine, reads } = makeEngine(tables);
+        const match = await matchSeedRows({ engine, datasets: DATASETS, graph: GRAPH, report: vi.fn(), firstOnly: true });
+        expect(match.rows).toEqual([]);
+        expect(reads.map((r) => r.object)).toEqual(['acc', 'con']);
+    });
+
+    it('reports a failed read as `read` data, counting every record of that dataset as unidentified', async () => {
+        const { engine } = makeEngine({ con: [] });
+        const failing = {
+            ...engine,
+            find: async (object: string, query?: any) => {
+                if (object === 'acc') throw new Error('no such table: acc');
+                return engine.find(object, query);
+            },
+        };
+        const problems: SeedMatchProblem[] = [];
+        const match = await matchSeedRows({ engine: failing, datasets: DATASETS, graph: GRAPH, report: (p) => problems.push(p) });
+        expect(problems[0]).toEqual({ object: 'acc', kind: 'read', records: 2, detail: 'no such table: acc' });
+        expect(match.unidentified).toBe(2);
+        expect(match.rows).toEqual([]);
+    });
+});
+
 // ── The route: scope chosen by the install's own rule, order from the loader ──
 
 type Handler = (c: any) => Promise<any>;
@@ -307,6 +360,7 @@ const MANIFEST = {
 };
 
 const PURGE = 'POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data';
+const LIST = 'GET /api/v1/marketplace/install-local';
 
 function makeC(manifestId: string) {
     return {
@@ -346,7 +400,7 @@ async function bootWith(opts: {
         installedBy: 'admin',
         withSampleData: true,
     });
-    const { engine, deletes } = makeEngine(opts.tables);
+    const { engine, deletes, reads } = makeEngine(opts.tables);
     const routes = new Map<string, Handler>();
     const rawApp = {
         get: (p: string, h: Handler) => routes.set(`GET ${p}`, h),
@@ -384,7 +438,7 @@ async function bootWith(opts: {
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(ctx as any);
     await hooks.get('kernel:ready')?.();
-    return { purge: routes.get(PURGE)!, deletes, logger };
+    return { purge: routes.get(PURGE)!, list: routes.get(LIST)!, deletes, reads, logger };
 }
 
 describe('POST …/purge-sample-data — through the engine, in the install\'s scope', () => {
@@ -449,5 +503,86 @@ describe('POST …/purge-sample-data — through the engine, in the install\'s s
         expect(res.payload.error.code).toBe('DRIVER_UNAVAILABLE');
         expect(deletes).toEqual([]);
         expect(new LocalManifestSource(dir).read(MANIFEST.id).entry?.sampleDataPurged).toBeUndefined();
+    });
+});
+
+/** The listing's `withSampleData` for the one ledgered package. */
+async function listedSampleData(list: Handler): Promise<{ status: number; withSampleData: unknown; items: number }> {
+    const res = await list(makeC(MANIFEST.id));
+    const items = res.payload?.data?.items ?? [];
+    return { status: res.status, withSampleData: items[0]?.withSampleData, items: items.length };
+}
+
+describe('GET … listing — `withSampleData` is the caller\'s own scope, read from its rows (#21775)', () => {
+    it('wall: after a purge in organization A, the listing read as B still answers true and read as A answers false', async () => {
+        const tables: Record<string, Row[]> = {
+            pg_account: [
+                { id: 'a1', name: 'Acme', organization_id: 'org_a' },
+                { id: 'u1', name: 'User Authored Co', organization_id: 'org_a' },
+                { id: 'b1', name: 'Acme', organization_id: 'org_b' },
+            ],
+            pg_contact: [
+                { id: 'c1', email: 'ada@acme.test', account: 'a1', organization_id: 'org_a' },
+                { id: 'd1', email: 'ada@acme.test', account: 'b1', organization_id: 'org_b' },
+            ],
+        };
+        const opts: { tables: Record<string, Row[]>; posture: 'isolated'; activeOrg?: string } = { tables, posture: 'isolated', activeOrg: 'org_a' };
+        const { purge, list, reads } = await bootWith(opts);
+
+        // Both organizations hold their seed rows before the purge.
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: true, items: 1 });
+        opts.activeOrg = 'org_b';
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: true, items: 1 });
+
+        opts.activeOrg = 'org_a';
+        const purged = await purge(makeC(MANIFEST.id));
+        expect(purged.payload.data).toMatchObject({ deleted: 2, skipped: 0, errors: 0 });
+        // The install-wide record now says "no sample data" — for every organization.
+        expect(new LocalManifestSource(dir).read(MANIFEST.id).entry).toMatchObject({ withSampleData: false, sampleDataPurged: true });
+
+        reads.length = 0;
+        opts.activeOrg = 'org_b';
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: true, items: 1 });
+        // B's answer came from B's rows, and from no other organization's.
+        expect(reads.length).toBeGreaterThan(0);
+        for (const r of reads) expect(r.query.where).toEqual({ organization_id: 'org_b' });
+
+        // A keeps a user-authored row in a seeded object; it is not a seed row.
+        opts.activeOrg = 'org_a';
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: false, items: 1 });
+    });
+
+    it('wall, no active organization: every entry answers false, 200, and no seed row is read (ADR-0123 D2)', async () => {
+        const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme', organization_id: 'org_a' }], pg_contact: [] };
+        const { list, reads } = await bootWith({ tables, posture: 'isolated' });
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: false, items: 1 });
+        expect(reads.filter((r) => r.object in tables)).toEqual([]);
+    });
+
+    it('no wall: the derived answer is the one the ledger records, before and after a purge', async () => {
+        const tables: Record<string, Row[]> = {
+            pg_account: [{ id: 'a1', name: 'Acme' }, { id: 'u1', name: 'User Authored Co' }],
+            pg_contact: [{ id: 'c1', email: 'ada@acme.test', account: 'a1' }],
+        };
+        const { purge, list } = await bootWith({ tables, posture: 'single' });
+        const recorded = () => new LocalManifestSource(dir).read(MANIFEST.id).entry?.withSampleData;
+
+        expect(recorded()).toBe(true);
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: recorded(), items: 1 });
+
+        expect((await purge(makeC(MANIFEST.id))).status).toBe(200);
+        expect(recorded()).toBe(false);
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: recorded(), items: 1 });
+    });
+
+    it('rows the engine will not return: the entry answers false, and the operator is told why', async () => {
+        const failing = withInstallerGrants({
+            find: async (object: string) => { throw new Error(`no such table: ${object}`); },
+        });
+        const { list, logger } = await bootWith({ tables: {}, posture: 'single', services: { objectql: failing } });
+        expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: false, items: 1 });
+        const warned = logger.warn.mock.calls.map((c) => String(c[0])).join('\n');
+        expect(warned).toContain(`${MANIFEST.id}: the installed-apps listing could not read this package's seed rows`);
+        expect(warned).toContain('no such table: pg_account');
     });
 });

@@ -83,6 +83,17 @@ const CONTROL = 'CONTROL-VALUE-8497-RECORD-FLOWED';
 
 /** The flagged column every stored row carries — the caller never sends it. */
 const SECRET_FIELD = 'vault_secret';
+/**
+ * Credential-class columns every stored row carries, holding what the engine
+ * would store: a `password` field's plaintext and a `secret` field's handle
+ * ref. The engine masks both on read; every write response owes the same mask.
+ */
+const PASSWORD_FIELD = 'vault_password';
+const TOKEN_FIELD = 'vault_token';
+const CREDENTIAL_SENTINELS = ['PASSWORD-SENTINEL-NEVER-SERIALIZED', 'secret:HANDLE-SENTINEL-NEVER-SERIALIZED'];
+const STORED_CREDENTIALS = { [PASSWORD_FIELD]: CREDENTIAL_SENTINELS[0], [TOKEN_FIELD]: CREDENTIAL_SENTINELS[1] };
+const NEVER_SERIALIZED = [SENTINEL, ...CREDENTIAL_SENTINELS];
+const leaks = (wire: string) => NEVER_SERIALIZED.filter((v) => wire.includes(v));
 
 const VAULT = {
   name: 'vault',
@@ -91,6 +102,8 @@ const VAULT = {
     id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
     name: { name: 'name', label: 'Name', type: 'text' },
     [SECRET_FIELD]: { name: SECRET_FIELD, label: 'Secret', type: 'text', internal: true },
+    [PASSWORD_FIELD]: { name: PASSWORD_FIELD, label: 'Password', type: 'password' },
+    [TOKEN_FIELD]: { name: TOKEN_FIELD, label: 'Token', type: 'secret' },
   },
   // `clone` so the clone route is reachable; no `api`/`bulk` narrowing so the
   // ADR-0049 exposure gate resolves unrestricted and every bulk route is
@@ -138,7 +151,7 @@ function memoryDriver() {
       seq += 1;
       const id = (data.id as string) ?? `r_${seq}`;
       // The stored secret the caller never sent — present on every row.
-      const row = { ...data, id, [SECRET_FIELD]: SENTINEL };
+      const row = { ...data, id, [SECRET_FIELD]: SENTINEL, ...STORED_CREDENTIALS };
       table(object).set(id, row);
       return { ...row };
     },
@@ -146,7 +159,7 @@ function memoryDriver() {
       const t = table(object);
       const cur = t.get(id);
       if (!cur) return null;
-      const next = { ...cur, ...data, id, [SECRET_FIELD]: SENTINEL };
+      const next = { ...cur, ...data, id, [SECRET_FIELD]: SENTINEL, ...STORED_CREDENTIALS };
       t.set(id, next);
       return { ...next };
     },
@@ -387,7 +400,7 @@ const DISPOSITIONS: Record<string, Disposition> = {
 
 const keyOf = (r: { method: string; path: string }) => `${r.method} ${r.path}`;
 
-describe('#8497 tripwire: no REST write response carries an `internal: true` value', () => {
+describe('#8497 tripwire: no REST write response carries an `internal: true` value or a credential-class stored value', () => {
   it('the enumeration is real: it sees the direct-engine mouth this guard exists for', async () => {
     const { rest } = await bootRest();
     const writes = (rest.getRoutes() as Array<{ method: string; path: string }>)
@@ -427,11 +440,11 @@ describe('#8497 tripwire: no REST write response carries an `internal: true` val
 
   for (const [key, disposition] of Object.entries(DISPOSITIONS)) {
     if (disposition.kind !== 'driven') continue;
-    it(`${key}: response never carries the internal sentinel${disposition.expectRecord ? ', and really returned a record' : ''}`, async () => {
+    it(`${key}: response never carries the internal or credential sentinels${disposition.expectRecord ? ', and really returned a record' : ''}`, async () => {
       const booted = await bootRest();
       const res = await disposition.invoke(booted);
       const wire = JSON.stringify(res.body ?? null);
-      expect(wire.includes(SENTINEL), `${key} leaked an internal field: ${wire}`).toBe(false);
+      expect(leaks(wire), `${key} leaked an internal or credential-class field: ${wire}`).toEqual([]);
       if (disposition.expectRecord) {
         expect(
           wire.includes(CONTROL),
@@ -452,6 +465,23 @@ describe('#8497 tripwire: no REST write response carries an `internal: true` val
     // The engine's WRITE result is whole — that is exactly what #7823 chose,
     // and exactly why every mouth above must strip.
     expect(raw[SECRET_FIELD]).toBe(SENTINEL);
+    expect(raw[PASSWORD_FIELD]).toBe(CREDENTIAL_SENTINELS[0]);
+    expect(raw[TOKEN_FIELD]).toBe(CREDENTIAL_SENTINELS[1]);
+  }, 60_000);
+
+  it('POST /api/v1/batch update arm applies the rules even when the protocol has no helper method', async () => {
+    // The arm must not depend on an optional protocol method: a protocol
+    // occupant without it would otherwise skip both rules silently.
+    const booted = await bootRest();
+    const protocol = (booted.rest as unknown as { protocol: Record<string, unknown> }).protocol;
+    Object.defineProperty(protocol, 'omitInternalWriteFields', { value: undefined, configurable: true });
+    const id = await seed(booted);
+    const res = await call(booted, 'POST', '/api/v1/batch', {
+      body: { operations: [{ object: 'vault', action: 'update', id, data: { name: CONTROL } }] },
+    });
+    const wire = JSON.stringify(res.body ?? null);
+    expect(leaks(wire), wire).toEqual([]);
+    expect(wire.includes(CONTROL), wire).toBe(true);
   }, 60_000);
 
   it('NEGATIVE CONTROL: the machinery goes red on a direct engine mouth that skips the helper', async () => {
@@ -469,11 +499,11 @@ describe('#8497 tripwire: no REST write response carries an `internal: true` val
     };
 
     const leaked = await leakyMouth();
-    expect(JSON.stringify(leaked).includes(SENTINEL)).toBe(true); // half 1: the scan bites
+    expect(leaks(JSON.stringify(leaked))).toEqual(NEVER_SERIALIZED); // half 1: the scan bites
 
     // half 2: the shared helper is exactly what closes it.
     omitInternalFieldsFromWriteResponse(VAULT, leaked.results);
-    expect(JSON.stringify(leaked).includes(SENTINEL)).toBe(false);
+    expect(leaks(JSON.stringify(leaked))).toEqual([]);
     expect(JSON.stringify(leaked).includes(CONTROL)).toBe(true); // …and the record survives
   }, 60_000);
 });

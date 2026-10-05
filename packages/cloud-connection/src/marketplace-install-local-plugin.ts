@@ -44,7 +44,10 @@
  *            authenticated principal (anonymous → 401); `installedBy` and
  *            `storageDir` are served only to a `manage_metadata` holder
  *            (commit 01074e551). The four routes above require `manage_metadata`
- *            outright (#8976).
+ *            outright (#8976). Each entry's `withSampleData` says whether the
+ *            caller's own scope — its active organization under a wall —
+ *            holds any of the package's seed rows, read from the rows, never
+ *            from the install-wide ledger record (#21775).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
  *          → removes the cached manifest, withdraws the package from the
@@ -114,7 +117,7 @@ import {
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import { purgeSeedRows } from './marketplace-install-local-purge.js';
+import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { DeletePackageRequest, UninstallCleanupOutcome } from '@objectstack/metadata-protocol';
 
@@ -297,6 +300,17 @@ function describeLedgerCause(cause: unknown): string {
 /** Best-effort manifest id from a registry package entry (shape varies). */
 function manifestIdOf(p: any): string | undefined {
     return p?.manifest?.id ?? p?.id ?? p?.manifest?.name ?? undefined;
+}
+
+/**
+ * The seed datasets a cached manifest bundles: its `data[]` entries that name
+ * an object and carry records. One reading for the two doors that match seed
+ * rows — the purge, and the listing's `withSampleData` (#21775).
+ */
+function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
+    return Array.isArray(manifest?.data)
+        ? manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
+        : [];
 }
 
 /**
@@ -1344,6 +1358,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * the four mutating doors use, not a second session read. Two auth
      * mechanisms in one file is how the next gap gets created, and this file has
      * already produced one.
+     *
+     * ## [#21775] `withSampleData` is the caller's own scope, read from its rows
+     *
+     * Each entry's `withSampleData` answers "does MY scope hold this package's
+     * sample data?" — derived per request by {@link sampleDataInScope}, never
+     * read from the ledger's install-wide record of the same name.
      */
     private handleList = async (c: any, ctx: PluginContext): Promise<Response> => {
         // Before the ledger is touched, exactly as the mutating doors refuse
@@ -1355,6 +1375,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         const { entries, skipped } = this.readAll();
         this.warnSkippedLedgerEntries(ctx, skipped, 'it is MISSING from the installed-apps list served to the console');
+        const withSampleData = await this.sampleDataInScope(c, ctx, entries);
         return c.json({
             success: true,
             data: {
@@ -1364,13 +1385,123 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     manifestId: e.manifestId,
                     version: e.version,
                     installedAt: e.installedAt,
-                    withSampleData: e.withSampleData ?? false,
+                    withSampleData: withSampleData.has(e.manifestId),
                     ...(operator ? { installedBy: e.installedBy } : {}),
                 })),
                 total: entries.length,
                 ...(operator ? { storageDir: this.storageDir } : {}),
             },
         }, 200);
+    };
+
+    /**
+     * [#21775] The listed entries whose sample data is in the CALLER'S scope —
+     * the set the listing answers each entry's `withSampleData` from.
+     *
+     * ## The rows are the authority, not the ledger
+     *
+     * The ledger's `withSampleData` / `sampleDataPurged` are install-time
+     * records: one value per install, flipped by whichever organization seeded
+     * or purged last. Under an organization wall sample data is per
+     * organization — the install, the reseed and the purge each act in the
+     * caller's active organization, and the per-organization replay seeds every
+     * new one — so the listing that read the record told organization B "no
+     * sample data" after a purge in organization A, while B held every one of
+     * its seed rows. The ledger shape stays as it is; the listing stops reading
+     * it.
+     *
+     * ## Present = at least one seed row, identified the purge's way
+     *
+     * An entry is in the set when {@link matchSeedRows} — the purge's own
+     * identification (each dataset's `externalId`), read-only — finds at least
+     * ONE of the package's seed rows in scope. Not "all", and not a count: the
+     * console reads the flag to enable its purge item and to word its reseed
+     * item ("Add sample data" / "Reseed again"), and the purge has work to do
+     * exactly when one seed row is there. A seed record the purge could not
+     * identify either (no key value, a key two rows carry) is not evidence of
+     * presence; the purge reports those when it runs.
+     *
+     * ## Scope — the purge's
+     *
+     * Under a wall, the caller's active organization, from the same
+     * `organizationWallActive` + `resolveActiveOrgId` pair the purge scopes
+     * with. Without a wall the deployment is one logical tenant and the match is
+     * table-wide, as the purge's is, so the derived answer is the one the
+     * ledger records after an install that seeded, a purge and a reseed. Where
+     * a door's write did not land whole — a purge the engine refused for some
+     * rows, rows deleted by hand — the rows answer and the record does not.
+     *
+     * A walled session with NO active organization reads nothing: every entry
+     * answers `false`, HTTP 200, and no row is read (ADR-0123 D2 — a
+     * tenant-scoped read resolves to nothing, not an error). The doors that
+     * would act on that answer, reseed and purge, refuse the same session with
+     * D2's write refusal.
+     *
+     * ## When the rows cannot be read
+     *
+     * No metadata service, a dependency graph that does not build, an object
+     * whose rows the engine will not return: the entry answers `false`, and why
+     * is logged at `warn` — once per entry per request, the way this door
+     * reports a corrupt ledger entry — to the operator, with the wire shape
+     * unchanged.
+     */
+    private sampleDataInScope = async (c: any, ctx: PluginContext, entries: InstalledEntry[]): Promise<Set<string>> => {
+        const present = new Set<string>();
+        const seeded = entries
+            .map((entry) => ({ entry, datasets: seedDatasetsOf(entry.manifest) }))
+            .filter(({ datasets }) => datasets.length > 0);
+        if (seeded.length === 0) return present;
+
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            // [ADR-0123 D2] No organization, so no organization's rows to read.
+            if (!resolved) return present;
+            organizationId = resolved;
+        }
+
+        const unread = (manifestId: string, why: string): void => {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: the installed-apps listing could not read this package's `
+                + `seed rows (${why}), so it answers withSampleData: false for it`,
+            );
+        };
+        let ql: IObjectQLEngine | undefined;
+        let metadata: IMetadataService | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+        if (!ql || !metadata) {
+            for (const { entry } of seeded) {
+                unread(entry.manifestId, 'the data engine (objectql) or the metadata service is not available on this runtime');
+            }
+            return present;
+        }
+
+        for (const { entry, datasets } of seeded) {
+            try {
+                // The graph the purge reads its order and its reference keys
+                // from: the loader's own, over the package's seeded objects.
+                const { SeedLoaderService } = await import('@objectstack/runtime');
+                const loader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+                const graph = await loader.buildDependencyGraph([...new Set(datasets.map((d) => String(d.object)))]);
+                const failedReads: string[] = [];
+                const match = await matchSeedRows({
+                    engine: ql,
+                    datasets,
+                    graph,
+                    organizationId,
+                    firstOnly: true,
+                    report: (problem) => {
+                        if (problem.kind === 'read') failedReads.push(`${problem.object}: ${problem.detail}`);
+                    },
+                });
+                if (match.rows.length > 0) present.add(entry.manifestId);
+                else if (failedReads.length > 0) unread(entry.manifestId, failedReads.join('; '));
+            } catch (err: any) {
+                unread(entry.manifestId, String(err?.message ?? err));
+            }
+        }
+        return present;
     };
 
     private handleUninstall = async (c: any, ctx: PluginContext): Promise<Response> => {
@@ -1844,9 +1975,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'purge sample data');
         }
 
-        const datasets = Array.isArray(entry.manifest?.data)
-            ? entry.manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-            : [];
+        const datasets = seedDatasetsOf(entry.manifest);
 
         if (datasets.length === 0) {
             return c.json({

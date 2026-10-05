@@ -695,6 +695,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 ec,
                 driver: _context.dataDriver,
                 envId: _context?.environmentId,
+                requestContext: _context,
                 callData: (a, params, dataDriver, scopeId, execCtx) =>
                     actionExec.callData(deps, _context, a, params, dataDriver, scopeId, execCtx),
             });
