@@ -145,7 +145,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
 import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -1978,7 +1978,8 @@ interface StoredRowPlace {
  * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
  * (`getMetaItem`, its draft-preview arm, `getMetaItemLayered`) asks the store
  * candidate by candidate, and {@link mergePackageAwareOverlay} (the list's
- * active and draft-preview merges) asks the rows it already read. Before
+ * active and draft-preview merges, a list scoped to a package included, whose
+ * package-less rows enter as stand-ins, #21817) asks the rows it already read. Before
  * #21804 the list took the LATEST of a package's row and the package-less row
  * in row order, so in one order the list served the package-less body for a
  * package whose by-name read served the package's own row.
@@ -2026,6 +2027,18 @@ function servedOverlayRowCandidates(address: {
  *     the LATEST contribution wins, as before.
  *   • A name with NO package-owned row resolves to its latest package-less
  *     contribution — the pre-existing env-wide behaviour, unchanged.
+ *   • [#21817] A list scoped to one package passes the package-less rows in
+ *     its scope as STAND-INS (`standIn` on a record). A stand-in serves a
+ *     slot the package seats, by the same served-row resolution, so the
+ *     scoped list's slot is what `getMetaItem` naming the package serves:
+ *     the package's own row, else the package-less row. A stand-in never
+ *     seats a slot itself, so the scoped list still lists only the items the
+ *     package ships. A slot that only stand-ins reach is emitted with its
+ *     latest stand-in and recorded in `unseated`, and an item recorded there
+ *     that arrives as a base item counts as a stand-in again: a later layer
+ *     (the draft preview, the MetadataService listing) may still seat that
+ *     slot, and the caller drops what is still recorded once the last layer
+ *     has merged.
  *
  * `transform(data, prev)` runs on each `records` body before it enters the
  * merge (view-identity healing, draft tagging); `prev` is the base row it
@@ -2047,27 +2060,33 @@ function servedOverlayRowCandidates(address: {
  * its buckets are unchanged.
  *
  * @param type Canonical (singular) metadata type of every row being merged.
+ * @param unseated [#21817] The scoped list's record of stand-ins no
+ *        contribution has seated yet (see the stand-in bullet above).
  */
 function mergePackageAwareOverlay(
     type: string,
     baseItems: unknown[],
-    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace }>,
+    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
     rowsRead?: { readonly organizationId: string | undefined },
+    unseated?: WeakSet<object>,
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
-    // `stored` marks a contribution that is a stored row the caller read.
-    type Contribution = { pkg: string | undefined; item: any; stored?: StoredRowPlace };
+    // `stored` marks a contribution that is a stored row the caller read;
+    // `standIn` one that serves a slot without seating it ([#21817]).
+    type Contribution = { pkg: string | undefined; item: any; stored?: StoredRowPlace; standIn?: true };
     const buckets = new Map<string, Contribution[]>();
     const order: string[] = []; // first-seen slot order → stable output
     const slotOf = (item: unknown, name: unknown): string => {
         const disc = itemDiscriminator(type, item);
         return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
     };
-    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace) => {
+    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace, standIn?: boolean) => {
         let list = buckets.get(slot);
         if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
-        list.push(stored ? { pkg, item, stored } : { pkg, item });
+        const c: Contribution = stored ? { pkg, item, stored } : { pkg, item };
+        if (standIn) c.standIn = true;
+        list.push(c);
     };
     // [#21804] The stored row the served-row resolution picks for package
     // `real` among a slot's contributions: the first candidate of
@@ -2086,10 +2105,11 @@ function mergePackageAwareOverlay(
     for (const raw of baseItems) {
         const item = raw as any;
         if (item && typeof item === 'object' && 'name' in item) {
-            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item);
+            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item,
+                undefined, unseated?.has(item));
         }
     }
-    for (const { data, packageId, stored } of records) {
+    for (const { data, packageId, stored, standIn } of records) {
         const body = data as any;
         if (!(body && typeof body === 'object' && 'name' in body)) continue;
         // The base row this record shadows at its own slot (for view-identity
@@ -2102,12 +2122,24 @@ function mergePackageAwareOverlay(
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined);
+        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined, standIn);
     }
 
     const out: unknown[] = [];
     for (const slot of order) {
         const list = buckets.get(slot)!;
+        // [#21817] Only stand-ins reach this slot: no item of the package is
+        // here (yet), so the stand-in is held back, not served as one.
+        if (list.every((c) => c.standIn)) {
+            // The stand-in the one candidate order picks among the stored
+            // rows here, else (no stored row: a stand-in held back by an
+            // earlier merge) the latest.
+            let held = rowsRead ? servedStoredRow(list, undefined) : undefined;
+            if (held === undefined) held = list[list.length - 1].item;
+            unseated?.add(held);
+            out.push(held);
+            continue;
+        }
         const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
         if (reals.length === 0) {
             out.push(list[list.length - 1].item); // latest package-less row wins
@@ -4801,6 +4833,24 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * field. The compound door's parity argument is a statement about ONE pair of
  * routes that spell one name two ways; it is not a general licence, and the
  * dispatcher is not the third member of that pair.
+ *
+ * ## [#21841] The external-table import, and why it went the dispatcher's way
+ *
+ * "Import as Object" (`@objectstack/service-datasource`) saves through this
+ * gate since #21788, so a re-import that would shrink an object it created is
+ * refused here and relayed as `400 EXTERNAL_IMPORT_ERROR`. The import route
+ * reads no `force`, so the default clause sent that caller round in a circle.
+ * It states `'external-import'` and gets a clause of its own rather than a
+ * `force`, for the reasons the dispatcher did and one more: the route has no
+ * twin that reads `?force`, and no first-party caller re-imports through it
+ * (the console's import dialog saves its draft through
+ * `PUT /api/v1/meta/object/:name`, the very door this clause names), so a
+ * `force` there would be a new capability with nothing pulling on it. Unlike
+ * the dispatcher, a door that DOES read `?force` exists for the same item, so
+ * the clause names it instead of only telling the caller to reconcile.
+ *
+ * ⛔ Same warning as above: the import is not a twin of the `PUT` door, and
+ * giving it a `force` to "match" would be a new surface, not a repair.
  */
 /**
  * [commit 82cb6e849 / commit d806081dd] Which write door a `saveMetaItem` refusal is being
@@ -4833,8 +4883,16 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * case rather than a hypothetical — which is why {@link specValidationFindings}
  * lists the two faces on one `case` instead of letting `'meta-dispatch'` fall
  * to a default that was never written for it.
+ *
+ * ⚠️ [#21841] `'external-import'` differs from `'meta-dispatch'` on that SAME
+ * second question, in the other direction: the import route relays a refusal
+ * as `sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', message)` and nothing else,
+ * so no `issues[]` reaches its caller and the message is the sole carrier of
+ * the findings. It therefore stays OUT of {@link specValidationFindings}'
+ * trimming case and keeps the full-prose default — the polarity that comment
+ * defends, working as designed for a door added after it.
  */
-type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch';
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch' | 'external-import';
 
 function destructiveChangeRemedy(
     face: MetadataWriteFace | undefined,
@@ -4865,6 +4923,20 @@ function destructiveChangeRemedy(
             return `this save cannot be forced: the dispatcher's \`PUT /meta\` accepts no \`force\`. `
                 + `Re-submit '${name}' with a body that keeps the fields and types named above, `
                 + `or reconcile that stored item first.`;
+        case 'external-import':
+            // [#21841] "Import as Object" (`@objectstack/service-datasource`),
+            // relayed by the import route as `400 EXTERNAL_IMPORT_ERROR`. That
+            // route reads no `force` and was deliberately not given one (see the
+            // section above `MetadataWriteFace`). Both remedies are things the
+            // caller can do from where they stand: import the table under a
+            // name nothing stores yet, or save the changed definition through
+            // the metadata door, which reads `?force=true` for this very item
+            // and is where a destructive change is acknowledged on purpose.
+            // Same grammar as the two faces above — name the door, deny the
+            // mechanism, then prescribe.
+            return `this import cannot be forced: the external-table import route accepts no \`force\`. `
+                + `Import the table under a new \`name\`, or save the changed definition of '${name}' `
+                + `through \`PUT /api/v1/meta/object/${name}?force=true\`, which accepts the destructive change on purpose.`;
         default:
             return 're-submit with ?force=true to proceed.';
     }
@@ -8863,6 +8935,17 @@ export class ObjectStackProtocolImplementation implements
         // scoped to a package reads its rows with that package only, so it
         // reads the package-agnostic set too (the overlay cache answers it).
         let lockRows: readonly any[] = [];
+        // [#21817] A list scoped to a package serves, in each slot the package
+        // seats, the row `getMetaItem` naming that package serves: the
+        // package's own row, else the package-less row (ADR-0048), by the one
+        // candidate order ({@link servedOverlayRowCandidates}). Its row read
+        // names the package, so the package-less rows come from the
+        // package-agnostic read above, filtered back to the package-less ones.
+        // They enter each merge as stand-ins ({@link mergePackageAwareOverlay}):
+        // a stand-in serves a slot the package seats and never seats one, so
+        // the list's membership stays the items the package ships. A stand-in
+        // no layer seated is recorded here and dropped after the last merge.
+        const unseated = packageId ? new WeakSet<object>() : undefined;
         try {
             // [#21442] The row set this read consults — the overlay cache
             // included — is {@link readActiveOverlayRows}, and each row is
@@ -8872,7 +8955,8 @@ export class ObjectStackProtocolImplementation implements
             // scope for one caller.
             const records = await this.readActiveOverlayRows(request, orgId);
             lockRows = packageId ? await this.readActiveOverlayRows({ type: request.type }, orgId) : records;
-            if (records && records.length > 0) {
+            const standInRows = packageId ? lockRows.filter((row) => (row?.package_id ?? null) === null) : [];
+            if ((records && records.length > 0) || standInRows.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
                 const overlays = this.storedOverlayEntries(request, records);
 
@@ -8899,7 +8983,14 @@ export class ObjectStackProtocolImplementation implements
                 const placed = mergeable.map(({ data, packageId: recPkg, organizationId: recOrg, type: recType }) => ({
                     data, packageId: recPkg, stored: { organizationId: recOrg, type: recType },
                 }));
-                items = mergePackageAwareOverlay(request.type, items, placed, (data, prev) => {
+                // [#21817] The package-less rows, placed the same way, as
+                // stand-ins: the same parse and the same shipped-flow rule.
+                const standIns = this.storedOverlayEntries(request, standInRows)
+                    .filter(({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name))
+                    .map(({ data, organizationId: recOrg, type: recType }) => ({
+                        data, packageId: undefined, stored: { organizationId: recOrg, type: recType }, standIn: true,
+                    }));
+                items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns], (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -8917,7 +9008,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                }, { organizationId: orgId });
+                }, { organizationId: orgId }, unseated);
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -8957,14 +9048,30 @@ export class ObjectStackProtocolImplementation implements
                 // `records`, the one the by-name read asks, so the two doors
                 // answer the same row for the name. An item the registry or a
                 // package supplies under the name is still replaced, as before.
-                if (isView) {
+                //
+                // [#21817] In a list scoped to a package, a package-less row
+                // of the name stands in ahead of the expansion too: the by-name
+                // read naming the package serves that row before it asks any
+                // expansion. The expansion still seats the slot, so a stand-in
+                // held back by the merge is served there, as the package's.
+                if (isView && records.length > 0) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
                         if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
                     }
                     const ownRowNames = this.namesWithOwnStoredRow(records);
+                    const standInNames = this.namesWithOwnStoredRow(standInRows);
                     for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
                         if (ownRowNames.has(vi.name as string)) continue;
+                        const held = byName.get(vi.name as string) as Record<string, unknown> | undefined;
+                        if (held !== undefined && standInNames.has(vi.name as string)) {
+                            // Seated: a copy the `unseated` record does not hold,
+                            // stamped as the merge stamps a stand-in.
+                            if (unseated?.has(held)) {
+                                byName.set(vi.name as string, held._packageId === undefined ? { ...held, _packageId: packageId } : { ...held });
+                            }
+                            continue;
+                        }
                         byName.set(vi.name as string, vi);
                     }
                     items = Array.from(byName.values());
@@ -9015,27 +9122,36 @@ export class ObjectStackProtocolImplementation implements
         // process-wide registry or to non-preview reads.
         if (request.previewDrafts) {
             try {
-                const queryDrafts = async (oid: string | null): Promise<any[]> => {
+                const queryDrafts = async (oid: string | null, pkg: string | undefined): Promise<any[]> => {
                     const whereClause: Record<string, unknown> = { type: request.type, state: 'draft', organization_id: oid };
-                    if (packageId) whereClause.package_id = packageId;
+                    if (pkg) whereClause.package_id = pkg;
                     let rs = await this.engine.find('sys_metadata', { where: whereClause });
                     if (!rs || rs.length === 0) {
                         const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                         if (alt) {
                             const altWhere: Record<string, unknown> = { type: alt, state: 'draft', organization_id: oid };
-                            if (packageId) altWhere.package_id = packageId;
+                            if (pkg) altWhere.package_id = pkg;
                             rs = await this.engine.find('sys_metadata', { where: altWhere });
                         }
                     }
                     return rs ?? [];
                 };
-                const draftRecords = [...(await queryDrafts(null)), ...(orgId ? await queryDrafts(orgId) : [])];
-                if (draftRecords.length > 0) {
+                const draftRecords = [...(await queryDrafts(null, packageId)), ...(orgId ? await queryDrafts(orgId, packageId) : [])];
+                // [#21817] A list scoped to a package previews the package-less
+                // drafts as stand-ins, as its active arm does: the
+                // package-agnostic draft read, filtered back to the
+                // package-less rows. The by-name preview arm naming the
+                // package serves that draft when the package has none.
+                const standInDraftRecords = packageId
+                    ? [...(await queryDrafts(null, undefined)), ...(orgId ? await queryDrafts(orgId, undefined) : [])]
+                        .filter((record) => (record?.package_id ?? null) === null)
+                    : [];
+                if (draftRecords.length > 0 || standInDraftRecords.length > 0) {
                     // ADR-0048 (#1828) — package-aware draft overlay (parity with
                     // the active-overlay merge above): a package-scoped draft
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
-                    const drafts = draftRecords.map((record) => {
+                    const placeDraft = (record: any) => {
                         const data = this.convertStoredItem(
                             String(record.type ?? request.type),
                             typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
@@ -9052,14 +9168,18 @@ export class ObjectStackProtocolImplementation implements
                             type: String(record.type ?? request.type),
                         };
                         return { data, packageId: recPkg, stored };
-                    });
+                    };
+                    const drafts = [
+                        ...draftRecords.map(placeDraft),
+                        ...standInDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
+                    ];
                     // [#7774] Same bundle slot as the active merge above — a
                     // draft of one locale must preview over that locale, not
                     // over the whole bundle.
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    }, { organizationId: orgId });
+                    }, { organizationId: orgId }, unseated);
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -9144,10 +9264,20 @@ export class ObjectStackProtocolImplementation implements
                             packageId: ((it as any)?._packageId ?? undefined) as string | undefined,
                         })),
                     );
+                    // [#21817] A stand-in still held back here takes the
+                    // package's runtime item of its slot as the item it serves
+                    // (the latest contribution, stamped as the package's): a
+                    // seated copy, which `unseated` does not hold.
                 }
             }
         } catch {
             // MetadataService not available or doesn't support this type
+        }
+
+        // [#21817] A stand-in no layer seated is a package-less row of an item
+        // the package does not ship: it is not in the package's list.
+        if (unseated) {
+            items = (items as any[]).filter((it) => !(it && typeof it === 'object' && unseated.has(it)));
         }
 
         // Hide metadata owned by a disabled package. `listItems` already drops
@@ -13686,6 +13816,34 @@ export class ObjectStackProtocolImplementation implements
      * RBAC/RLS is enforced by forwarding the caller's `context` to
      * `engine.find` so users only see records they are entitled to read.
      *
+     * ## An object the caller may not READ is outside the sweep
+     *
+     * The REST door checks authentication only, so the object-level read
+     * admission is decided per object, here: before an object is queried, the
+     * `security` service's `canReadObject` — the engine middleware's own read
+     * gate, arm for arm (`ISecurityService.canReadObject`) — is asked with the
+     * caller's context, and an object it refuses is skipped. Without this, the
+     * middleware's denial on the first unreadable object in scope failed the
+     * WHOLE search with 403, so a member who could not read every object got
+     * no results at all. The field-level half is the same question one axis
+     * down: the engine's predicate guard refuses a search that would match on
+     * a field the caller may not query, so each object's search fields are
+     * narrowed to the security service's `getQueryableFields` answer, and an
+     * object left with none is skipped too.
+     *
+     * A skipped object leaves nothing behind: it is never queried, never
+     * named, and never counted in `totalObjects`, and the decision is made
+     * before any row is read — so no hit, count or timing depends on what the
+     * object holds. An explicit `objects=` naming an unreadable object answers
+     * exactly as one naming an object that does not exist. A `false` is a
+     * narrowing only; the engine still enforces everything on the objects
+     * that ARE queried, row scope included. If `canReadObject` itself throws,
+     * the search fails rather than answering without that object. Note that
+     * plugin-security's `canReadObject` catches a permission-resolution
+     * failure itself and answers `false` (its documented fail-closed
+     * contract), so during a permission outage the sweep SKIPS objects rather
+     * than failing: nothing is disclosed, but `totalObjects` shrinks.
+     *
      * ## [#8896] A swept object that could not be READ fails the search
      *
      * `totalObjects` / `totalHits` / `truncated` describe a COMPLETE sweep of
@@ -13786,6 +13944,27 @@ export class ObjectStackProtocolImplementation implements
         const hits: Array<{ object: string; id: string; title: string; snippet?: string; record: any }> = [];
         let objectsScanned = 0;
 
+        // The caller's read admission, asked of the same authority the engine
+        // middleware enforces (see the method doc): `canReadObject` for the
+        // object, `getQueryableFields` for the fields the search may match on.
+        // Only a caller that carries a context is asked about: a context-less
+        // in-process call reaches `find` without one, so asking on its behalf
+        // would answer a question its reads never pose. No security service,
+        // or one without a method, means no pre-filter on that axis — `find`
+        // still enforces both, so the absence can only make the answer
+        // stricter (a denial propagates, as before), never wider. That is also
+        // why an `undefined` ("no answer") from `getQueryableFields` narrows
+        // nothing here: this sweep never bypasses the middleware's guards.
+        const securityService = request.context !== undefined
+            ? this.getServicesRegistry?.().get('security') as Partial<ISecurityService> | undefined
+            : undefined;
+        const canReadObject = typeof securityService?.canReadObject === 'function'
+            ? (object: string) => securityService.canReadObject!(object, request.context)
+            : undefined;
+        const getQueryableFields = typeof securityService?.getQueryableFields === 'function'
+            ? (object: string) => securityService.getQueryableFields!(object, request.context)
+            : undefined;
+
         for (const obj of allObjects) {
             if (hits.length >= overallLimit) break;
             if (!obj?.name) continue;
@@ -13884,7 +14063,7 @@ export class ObjectStackProtocolImplementation implements
             // of one helper, which is the stronger form of the same fix.
             const fieldMetaByName: Record<string, any> = {};
             for (const f of fields) if (f?.name) fieldMetaByName[f.name] = f;
-            const { allowed: searchableFields } = resolveSearchFieldResolution({
+            const { allowed: declaredSearchFields } = resolveSearchFieldResolution({
                 fields: fieldMetaByName,
                 searchableFields: obj.searchableFields,
                 // [ADR-0079] `nameField` is the canonical primary-title pointer;
@@ -13893,7 +14072,39 @@ export class ObjectStackProtocolImplementation implements
                 // a third spelling here would re-split what this card merged.
                 displayField: obj.nameField ?? obj.displayNameField,
             });
-            if (searchableFields.length === 0) continue;
+            if (declaredSearchFields.length === 0) continue;
+
+            // Skip an object the caller may not read — before any query, so
+            // nothing about its rows can shape the answer, and before the
+            // count, so `totalObjects` covers only what was swept. A throw
+            // propagates: an admission that could not be decided fails the
+            // search rather than quietly shrinking it.
+            if (canReadObject && !(await canReadObject(obj.name))) continue;
+
+            // …and match only on the fields the caller may QUERY. The engine's
+            // predicate guard refuses a search whose resolved fields include
+            // one hidden from the caller (the filter oracle: row presence would
+            // disclose the hidden value), and that 403 failed the whole sweep —
+            // `sys_user`'s searchable fields include admin-only columns, so
+            // every member's unscoped search hit it. `searchFields` only ever
+            // NARROWS the server-resolved set (ADR-0061), so handing the engine
+            // the queryable subset searches what the caller could have filtered
+            // on themselves through `searchFields`. An object left with no
+            // queryable search field is skipped like an unreadable one.
+            // An `undefined` answer narrows nothing here: unlike the contract's
+            // fallback for consumers without an answer (treat every field with a
+            // `maskingRule` as not queryable), this sweep leaves that judgement to
+            // the engine's predicate guard on `find`, which can only refuse.
+            let searchableFields = declaredSearchFields;
+            if (getQueryableFields) {
+                const queryable = await getQueryableFields(obj.name);
+                if (queryable !== undefined) {
+                    const allowed = new Set(queryable);
+                    searchableFields = declaredSearchFields.filter((f) => allowed.has(f));
+                    if (searchableFields.length === 0) continue;
+                }
+            }
+            const narrowed = searchableFields.length < declaredSearchFields.length;
 
             objectsScanned++;
 
@@ -13910,10 +14121,12 @@ export class ObjectStackProtocolImplementation implements
                     // and `search` is a declared `find` option
                     // (`EngineQueryOptionsSchema`, `ENGINE_FIND_OPTION_KEYS`) —
                     // so this is the engine's published door, not a private one.
-                    // No `searchFields`: that key only ever NARROWS the resolved
-                    // set (ADR-0061), and the palette wants the object's full
-                    // default reach.
+                    // `searchFields` only when the caller's queryable set is
+                    // narrower than the declared one (see above): that key only
+                    // ever NARROWS the resolved set (ADR-0061), and otherwise
+                    // the palette wants the object's full default reach.
                     search: q,
+                    ...(narrowed ? { searchFields: searchableFields } : {}),
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],
                 };
@@ -13969,15 +14182,19 @@ export class ObjectStackProtocolImplementation implements
                 // query error or a refused datasource all mean the object's rows
                 // may well match and simply were not seen.
                 //
-                // The comment this replaces named "RBAC denial" as a benign
-                // reason. Measured on this tree, that is not a failure mode of
-                // this seam: object-level authorization is enforced at the REST
-                // door (`enforceAuth`) BEFORE `searchAll` is reached, and
-                // row-level security narrows `find`'s result set rather than
-                // throwing. Nothing in-repo registers a `beforeFind` hook that
-                // denies by throwing. Were one added, the ruling for this family
-                // still applies: a read that could not run must not be answered
-                // "there are no matches here".
+                // A permission denial is NOT swallowed here either. The REST
+                // door (`enforceAuth`) checks authentication only; the read
+                // admission is asked BEFORE this `try`, via the security
+                // service's `canReadObject` and `getQueryableFields` (see
+                // above), so an object the caller may not read never reaches
+                // `find`, and one it may read is searched only on fields it may
+                // query. A denial that still arrives here is a verdict those
+                // answers did not foresee — a permission subsystem that could
+                // not resolve, a delegator that does not exist, a security
+                // service without those methods — and the ruling for this
+                // family applies to it: a read that could not run must not be
+                // answered "there are no matches here". Row-level security
+                // narrows `find`'s result set rather than throwing.
                 //
                 // No new response field and no new error code — the caller
                 // receives the read's own failure, envelope intact.

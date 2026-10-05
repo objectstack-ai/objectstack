@@ -208,7 +208,7 @@ describe('unknownImportMappingTargets', () => {
     )).toEqual([]);
   });
 
-  it('[#20149] is empty for a mapping that writes an address by its declared parts — every transform, split elements too', () => {
+  it('is empty for a mapping that writes an address by its declared parts — every transform, split elements too', () => {
     expect(unknownImportMappingTargets(
       [
         { source: 'Name', target: 'full_name' },
@@ -221,7 +221,7 @@ describe('unknownImportMappingTargets', () => {
     )).toEqual([]);
   });
 
-  it('[#20149] refuses a part of a field the same mapping also writes whole, naming where the whole value is written', () => {
+  it('refuses a part of a field the same mapping also writes whole, naming where the whole value is written', () => {
     const misses = unknownImportMappingTargets(
       [
         { source: 'Street', target: 'mailing_address.street' },

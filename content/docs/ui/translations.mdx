@@ -382,27 +382,30 @@ Honest limits worth knowing before you plan around them:
   by rule name alone and so could not tell two objects' rules apart; the route
   above is object-scoped and shipped with its reader. ADR-0049's 2026-09-04
   amendment carries that record.
-- **The `flows` group is only partly applied.** A screen flow's copy has
-  somewhere to live (#7646) and the keys are addressed the way the runner
-  resolves them — flow name, screen node id, screen field name. The console's
-  screen-flow runner reads `screens`: each screen's `title` and each field's
-  `label`, `placeholder` and `inlineHelpText` render in the active locale. The
-  flow's own `label` is read by nothing yet, so the liveness ledger carries the
-  group as `planned` and the compile lint warns when you author it. The runner's
-  own chrome — the Cancel and Submit buttons — is deliberately outside the
-  group: it belongs to the console's message catalog rather than your app's
-  bundle.
+- **The `flows` group is applied by the console's screen-flow runner, and its
+  face is deliberately small.** The keys are addressed the way the runner
+  resolves them — flow name, screen node id, screen field name — and both
+  halves render in the active locale:
+  - `screens` is applied to the screen copy: each screen's `title`, and each
+    field's `label`, `placeholder` and `inlineHelpText`;
+  - the flow's own `label` names the flow in the runner's header, above the
+    step's heading, and in the completion toast. A locale the bundle does not
+    cover shows the label authored on the flow, and a backend that serves no
+    label shows the flow's API name.
 
-  **So the tooling does not ask you for these keys either.** `os lint` does not
-  report `flows.*` as missing translations, and `os i18n extract` does not
-  scaffold them into your bundle — both read the same `planned` row. Without
-  that, the two halves of a single `os lint` run contradicted each other:
-  omitting the keys was reported as a coverage gap, and adding them was reported
-  as authoring a group nothing reads. If you author the copy anyway you get the
-  liveness warning and nothing else — it is telling you the truth, not asking
-  you to delete a key you will need later. The day the runner lands and the row
-  flips to `live`, both the coverage report and the extract skeleton pick the
-  group up on their own; there is no flag to turn on.
+  Three strings stay outside the group. A screen's `description` renders as
+  authored. A `successMessage` authored on the flow replaces the completion
+  sentence and renders as authored too, so the translated label appears in the
+  toast only when the flow declares none. The runner's own chrome — the Cancel
+  and Submit buttons — belongs to the console's message catalog rather than your
+  app's bundle.
+
+  **The tooling asks for these keys like any other group's.** `os lint` reports
+  a missing `flows.*` key against `supportedLocales`, and `os i18n extract`
+  scaffolds the group into your bundle. A flow's own `label` is asked for only
+  when the flow has a screen node, at any depth, because the runner opens only
+  on a screen: a scheduled or record-triggered flow with no screen has no
+  surface that shows its translated label.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
   interpolation is always simple `{variable}` substitution.
 - **Runtime authoring is process-wide.** The authored layer is synced across all

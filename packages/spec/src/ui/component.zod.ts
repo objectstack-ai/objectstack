@@ -3620,7 +3620,8 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  *   executor — a member is an action entry, whose executor is `type`, where a
  *   node spells it `actionType`), `name`, `label`, `description`, `target`,
  *   `openIn`, `method`, `params` (an array is the input list; an object is
- *   the request payload of a `type: 'api'` member only, `static-params.ts:172-183`),
+ *   the request payload of a `type: 'api'` member only, `static-params.ts:172-183`,
+ *   and refused on every other member — below),
  *   `bodyExtra`, `bodyShape`, `operation`, `patch`, `confirmText`,
  *   `successMessage`, `errorMessage`, `refreshAfter`, `locations`, `toast`,
  *   `resultDialog`, `onSuccess` and `objectName`.
@@ -3646,6 +3647,32 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * A code-composed `onClick` (group `:314`, menu `:249`) is a function, which
  * metadata cannot carry.
  *
+ * ## `params` takes the array form only, unless the member's `type` is `api`
+ *
+ * [#21855] The rows' value ratchet for this one member, with its own
+ * inventory. A member's `params` is its `ActionParam[]` input list: both
+ * containers forward an array as `actionParams` (group `:330-335`, menu
+ * `:265-270`; the renderer directory is byte-identical at the current
+ * `.objectui-sha` pin `0abd4f9f8` and at objectui `main` `f1a177c41`). Any
+ * other value goes through `readActionEntryParamValues`
+ * (`static-params.ts:172-182`), which returns it unchanged for a `type: 'api'`
+ * member — the inline-action payload window (#5777), as the request payload
+ * until 18 — and for every other `type`, an absent one included, returns
+ * nothing (with a development-build warning only). So an object `params` on a
+ * non-`api` member parsed here and was dropped at run time: no error and no
+ * effect. The maintainer's ruling A on objectui#10289 (record 5825589480)
+ * keeps `params` to one shape and declares no other value-bag key, and fork
+ * 5 A on #21704 refused the member's `properties.params`, so a member has no
+ * static-values spelling at all: {@link actionContainerMemberParamsFitType}
+ * refuses a non-array `params` on a non-`api` member at the gate, with the
+ * member prescription the `properties` guidance gives — static values belong
+ * on an `action:button` node, whose `params` object carries them. The value
+ * stays `z.unknown()` (the runner reason): the `api` window and the array's
+ * elements are untouched. Census before the change: no `action:group` /
+ * `action:menu` member authors a non-array `params` on a non-`api` type in
+ * objectstack, objectui (pin and `main`) or hotcrm, outside objectui's own
+ * probes of the drop.
+ *
  * The two members differ only in `size`, so one shape builder serves both
  * ({@link actionContainerMemberShape}); each container's member is built once.
  * A factory the rows call, not a {@link lazySchema}, for the reason
@@ -3670,7 +3697,7 @@ function actionContainerMemberShape() {
     tags: z.array(z.enum(['separator-before'])).optional()
       .describe('Item tags — `separator-before` draws a divider above the item in a dropdown or menu (not above the first item); no other tag is drawn'),
     params: z.unknown().optional()
-      .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs; an object is forwarded as the request payload of a `type: \'api\'` member only (use `bodyExtra` for that)'),
+      .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs. Only a `type: \'api\'` member takes any other value, forwarded as its request payload (use `bodyExtra` for that); on every other member a non-array `params` is refused — author an action with static parameter values as its own `action:button` node'),
     description: z.string().optional()
       .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
     target: z.string().optional()
@@ -3731,6 +3758,33 @@ const actionContainerMemberHistory = (container: string) =>
   `Until this shape was declared, each \`${container}\` member was an open record: a misspelled key passed, `
   + 'and the container drew and ran the member without it.';
 
+/**
+ * [#21855] A container member's `params` fits its `type`: the array form only,
+ * unless the member's `type` is `api` (see "`params` takes the array form only"
+ * on {@link actionContainerMemberShape}). A refinement on the member, so the
+ * issue lands at `actions.N.params`; the unknown-key refusal stays terminal
+ * (`strictObject`), so a member already refused for a key is not judged twice.
+ */
+function actionContainerMemberParamsFitType(container: 'action:group' | 'action:menu') {
+  return (member: { type?: string; params?: unknown }, ctx: z.RefinementCtx): void => {
+    const { params, type } = member;
+    if (params === undefined || Array.isArray(params) || type === 'api') return;
+    const written = params !== null && typeof params === 'object' ? 'the object written here' : 'the value written here';
+    const typed = type === undefined ? 'this member names no `type`' : `this member's \`type\` is \`'${type}'\``;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['params'],
+      message:
+        `\`params\` on an \`${container}\` member is the list of inputs the runner collects from the user before the `
+        + 'action runs — an `ActionParam[]` array. The container forwards any other `params` value only for a '
+        + `\`type: 'api'\` member, as its request payload (write \`bodyExtra\` for that), and ${typed}, so `
+        + `${written} is dropped and never reaches the action. A member's static parameter values are not part of the `
+        + 'inline action vocabulary: to run an action with static parameter values, author it as its own '
+        + '`action:button` node, whose `params` object carries them.',
+    });
+  };
+}
+
 /** The aliases a container member answers: the rows' table, with the executor key turned round. */
 const ACTION_CONTAINER_MEMBER_ALIASES = {
   actionType: 'type',
@@ -3750,7 +3804,7 @@ function buildActionGroupMember() {
     ...actionContainerMemberShape(),
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
-  });
+  }).superRefine(actionContainerMemberParamsFitType('action:group'));
 }
 let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
 /** The one {@link buildActionGroupMember} instance. */
@@ -3769,7 +3823,7 @@ function buildActionMenuMember() {
         + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
         + 'read a member\'s `size`.',
     },
-  }, actionContainerMemberShape());
+  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'));
 }
 let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
 /** The one {@link buildActionMenuMember} instance. */

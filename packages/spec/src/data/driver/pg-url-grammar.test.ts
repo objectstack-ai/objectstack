@@ -36,7 +36,7 @@ const ACCEPTED_EVERYWHERE = [
   'postgres://user@db.example.com/app?sslmode=require',
 ];
 
-describe('pg-url-grammar server twin (#9091 arm)', () => {
+describe('pg-url-grammar server twin — still asks the parser `pg` itself runs', () => {
   it('refuses each measured-bad DSN with the pg-grammar prescription', () => {
     for (const value of REFUSED_ON_SERVER) {
       const findings = serverFindings(value, 'url');
@@ -52,7 +52,7 @@ describe('pg-url-grammar server twin (#9091 arm)', () => {
   });
 });
 
-describe('pg-url-grammar browser twin (#11072 degradation)', () => {
+describe('pg-url-grammar browser twin — degrades to the shape-only checks, with no `pg` parse', () => {
   it('answers no findings for the very values the server twin refuses', () => {
     for (const value of [...REFUSED_ON_SERVER, ...ACCEPTED_EVERYWHERE]) {
       expect(browserFindings(value, 'url'), value).toEqual([]);

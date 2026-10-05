@@ -11,3 +11,7 @@ export * from './eval-user.zod';
 // gatekeepers (better-auth's role registry and the `sys_invitation` /
 // `sys_member` role selects). Organization grade only; capability = position.
 export * from './membership-role';
+// ADR-0108 D1 — the fourth fact beside the three above: which membership grade
+// reaches which better-auth organization endpoint, and the action sugar lowered
+// from it. Reach, not authority; never merged into the name list.
+export * from './membership-reach';

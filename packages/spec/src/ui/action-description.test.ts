@@ -32,7 +32,7 @@ import { ObjectTranslationDataSchema, TranslationDataSchema } from '../system/tr
  */
 const base = { name: 'approval_reject', label: 'Reject', target: 'rejectApproval' } as const;
 
-describe('ActionSchema.description (#7367)', () => {
+describe('ActionSchema.description — the line the param dialog shows', () => {
   it('accepts a plain string, matching `label`\'s I18nLabel contract', () => {
     const result = ActionSchema.safeParse({
       ...base,
@@ -125,7 +125,7 @@ describe('ActionSchema.description (#7367)', () => {
   });
 });
 
-describe('the surfaces #7367 deliberately does NOT widen', () => {
+describe('the surfaces the action `description` key deliberately does NOT widen', () => {
   it('an action PARAM still routes `description` to `helpText`', () => {
     // `ACTION_PARAM_KEY_ALIASES.description = 'helpText'` is a PARAM-surface
     // entry and stays correct: the param's help line is `helpText`, and the key
@@ -163,7 +163,7 @@ describe('the surfaces #7367 deliberately does NOT widen', () => {
   });
 });
 
-describe('actionTranslationSchema.description (#7367)', () => {
+describe('actionTranslationSchema.description', () => {
   it('accepts the key at the object-scoped address the resolver walks first', () => {
     const result = ObjectTranslationDataSchema.safeParse({
       _actions: {

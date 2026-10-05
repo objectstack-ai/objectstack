@@ -33,7 +33,7 @@ describe('HookEvent', () => {
     });
   });
 
-  describe('Removed non-dispatched events (#3195)', () => {
+  describe('Removed non-dispatched events', () => {
     it('should reject per-method read and *Many events that the engine never dispatched', () => {
       // These were declared but never fired; the engine only ever triggers the
       // 8 events above. Removed rather than left as silent no-ops — read
@@ -349,7 +349,7 @@ describe('HookSchema', () => {
   // that the VALUE set is closed (a non-member is a VALUE error located at
   // `runAs`, never a top-level unrecognized key).
   // ---------------------------------------------------------------------------
-  describe('runAs (#14010)', () => {
+  describe('runAs — a hook may run as `system` or `user`, and inherits by default', () => {
     const base = {
       name: 'stamp_grade',
       object: 'account',
@@ -526,7 +526,7 @@ describe('HookContextSchema', () => {
   // it — a parsed context would lose the key and every guard downstream would
   // read undefined. The populate and sandbox halves are pinned where they can
   // execute (objectql's cascade suite; runtime's QuickJS integration pin).
-  describe('Referential-Cleanup Marker (#13644)', () => {
+  describe('Referential-Cleanup Marker — declared, and true only on a reference-cleanup write by the engine', () => {
     it('keeps referentialFieldClear through a parse, typed — the guard idiom evaluates on the parsed value', () => {
       const context = HookContextSchema.parse({
         object: 'note',
@@ -724,7 +724,7 @@ describe('HookContextSchema', () => {
     // #3280 made `organizationId` the blessed developer-facing name; the
     // `tenantId` alias was removed from this surface in v16 (#3290). A stray
     // `tenantId` key is now stripped by the schema rather than surfaced.
-    it('exposes session.organizationId and no longer carries the removed tenantId alias (#3290)', () => {
+    it('exposes session.organizationId and no longer carries the removed tenantId alias', () => {
       const context = HookContextSchema.parse({
         object: 'account',
         event: 'beforeInsert',
@@ -921,7 +921,7 @@ describe('HookSchema - condition property', () => {
 // defineHook factory (#4269)
 // ============================================================================
 
-describe('defineHook (#4269)', () => {
+describe('defineHook — the authoring factory, so a hook is validated where it is written', () => {
   const config: Hook = {
     name: 'order_guard',
     object: 'order',
@@ -1003,7 +1003,7 @@ describe('defineHook (#4269)', () => {
  * TS2578 "Unused '@ts-expect-error' directive" on the two directives below.
  * Direction predicted before running it, and that is what it did.
  */
-describe('session.roles retirement (#5050, ADR-0049)', () => {
+describe('session.roles retirement (ADR-0049)', () => {
   it('REJECTS an authored `roles`, with the prescription in the message', () => {
     expect(() =>
       HookContextSchema.parse({
@@ -1131,7 +1131,7 @@ describe('session.roles retirement (#5050, ADR-0049)', () => {
  * `session.positions.includes(...)` as an access check is exactly what the
  * `roles` tombstone above was written to stop.
  */
-describe('session.positions / session.preserveAudit declaration (#5605)', () => {
+describe('session.positions / session.preserveAudit declaration', () => {
   it('PRESERVES `positions` through a parse instead of stripping it', () => {
     const context = HookContextSchema.parse({
       object: 'account',
@@ -1145,7 +1145,7 @@ describe('session.positions / session.preserveAudit declaration (#5605)', () => 
     expect(context.session?.positions).toEqual(['sales_manager', 'org_admin']);
   });
 
-  it('PRESERVES `preserveAudit` through a parse (#3493 has a live consumer)', () => {
+  it('PRESERVES `preserveAudit` through a parse (the opt-in a historical import uses to keep its audit stamps)', () => {
     const context = HookContextSchema.parse({
       object: 'account',
       event: 'beforeInsert',
@@ -1283,7 +1283,7 @@ describe('session.positions / session.preserveAudit declaration (#5605)', () => 
  * because a green companion test read as a pin is how #5605's third assertion
  * nearly got over-credited.
  */
-describe('HookContext.api typing (#5945)', () => {
+describe('HookContext.api typing — the minimum scoped context the docs teach: `object()` and `transaction()`', () => {
   /** Shaped like ObjectQL's `ScopedContext` — a live object, not authored data. */
   const liveApi = {
     object: (_name: string) => ({
@@ -1379,7 +1379,7 @@ describe('HookContext.api typing (#5945)', () => {
 // old `timeout` is a retiredKey tombstone on this strict shape, so the
 // rejection carries the RENAME (the prescription is the payload) rather than a
 // bare unrecognized-key error, and the value survives at the same magnitude.
-describe('hook.timeout → hook.timeoutMs (#14478, ADR-0087 `hook-timeout-to-timeout-ms`)', () => {
+describe('hook.timeout → hook.timeoutMs (ADR-0087 `hook-timeout-to-timeout-ms`)', () => {
   const base = { name: 'audit_order', object: 'order', events: ['afterInsert' as const], handler: 'auditOrder' };
 
   it('REFUSES the retired `timeout` spelling with the rename in the message', () => {

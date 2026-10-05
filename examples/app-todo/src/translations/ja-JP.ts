@@ -91,6 +91,25 @@ export const jaJP: TranslationData = {
       description: '個人タスク管理アプリケーション',
     },
   },
+  // The quick-add wizard: the flow's name in the runner header and completion
+  // toast, each screen's heading and each field label.
+  flows: {
+    quick_add_task: {
+      label: 'タスクをすばやく追加',
+      screens: {
+        screen_1: {
+          title: 'タスクの詳細',
+          fields: {
+            subject: { label: 'タスクの件名' },
+            priority: { label: '優先度' },
+            dueDate: { label: '期日' },
+            category: { label: 'カテゴリ' },
+          },
+        },
+        success_screen: { title: 'タスクを作成しました' },
+      },
+    },
+  },
   // Single-segment `messages` ids — `t()` walks the dot path, so an id
   // containing a dot resolves to nothing; see the `en` bundle (#18566).
   messages: {

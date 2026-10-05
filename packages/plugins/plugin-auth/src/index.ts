@@ -11,6 +11,9 @@
 export * from './auth-plugin.js';
 export * from './auth-manager.js';
 export * from './ensure-default-organization.js';
+// ADR-0093 D7 — the default-org bootstrap with its owner bind decided once;
+// the walled `@objectstack/organizations` wiring calls the same gate.
+export * from './default-org-bootstrap-once.js';
 // #17440 — the read-only preflight that guards the retirement of
 // `sys_account.issuer`, plus the re-point guard that answers the one case the
 // retired column still discriminated. Exported because a host that upgrades

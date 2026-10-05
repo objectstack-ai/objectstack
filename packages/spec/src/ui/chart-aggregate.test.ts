@@ -42,7 +42,7 @@ describe('ChartAggregateSchema', () => {
   });
 });
 
-describe('result-column naming convention (#3701)', () => {
+describe('result-column naming convention — rows keyed by the raw field names', () => {
   // The whole point of the convention: rows are keyed by the RAW FIELD NAMES,
   // NOT by a derived measure name. A dataset keys its rows `sum_amount`; an
   // object-bound aggregate keys the same numbers `amount`.

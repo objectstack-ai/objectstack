@@ -99,6 +99,25 @@ export const zhCN: TranslationData = {
       description: '个人任务管理应用',
     },
   },
+  // The quick-add wizard: the flow's name in the runner header and completion
+  // toast, each screen's heading and each field label.
+  flows: {
+    quick_add_task: {
+      label: '快速添加任务',
+      screens: {
+        screen_1: {
+          title: '任务详情',
+          fields: {
+            subject: { label: '任务主题' },
+            priority: { label: '优先级' },
+            dueDate: { label: '截止日期' },
+            category: { label: '分类' },
+          },
+        },
+        success_screen: { title: '任务已创建' },
+      },
+    },
+  },
   // Single-segment `messages` ids — `t()` walks the dot path, so an id
   // containing a dot resolves to nothing; see the `en` bundle (#18566).
   messages: {

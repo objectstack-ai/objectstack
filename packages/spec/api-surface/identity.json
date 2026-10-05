@@ -32,12 +32,17 @@
     "InvitationSchema (const)",
     "InvitationStatus (const)",
     "InvitationStatus (type)",
+    "MEMBERSHIP_REACH (const)",
+    "MEMBERSHIP_REACH_NAMES (const)",
     "MEMBERSHIP_ROLE_ADMIN (const)",
     "MEMBERSHIP_ROLE_DELEGATED_ADMIN (const)",
     "MEMBERSHIP_ROLE_MEMBER (const)",
     "MEMBERSHIP_ROLE_OWNER (const)",
     "Member (type)",
     "MemberSchema (const)",
+    "MembershipReachEntry (type)",
+    "MembershipReachName (type)",
+    "MembershipReachStatement (type)",
     "ORGANIZATION_ADMIN (const)",
     "ORGANIZATION_ADMIN_GRANTS (const)",
     "ORGANIZATION_ADMIN_NO_BYPASS (const)",
@@ -103,7 +108,9 @@
     "VerificationTokenSchema (const)",
     "createEvalUser (function)",
     "definePosition (function)",
+    "lowerRequiresMembershipReach (function)",
     "mapMembershipRole (function)",
+    "membershipReachPredicate (function)",
     "positionForm (const)"
   ]
 }

@@ -128,7 +128,7 @@ const CASES: Array<{ label: string; param: Record<string, unknown>; accepted: bo
   },
 ];
 
-describe('#6970 ActionParamSchema.defaultValue — authored defaults meet the param value contract', () => {
+describe('ActionParamSchema.defaultValue — authored defaults meet the param value contract', () => {
   for (const { label, param, accepted } of CASES) {
     it(`${accepted ? 'accepts' : 'rejects'}: ${label}`, () => {
       const issue = defaultValueIssue(param);
@@ -151,7 +151,7 @@ describe('#6970 ActionParamSchema.defaultValue — authored defaults meet the pa
     });
   }
 
-  it('#16077 carries the rename, not a member type error, on a renamed structured default', () => {
+  it('carries the rename, not a member type error, on a renamed structured default', () => {
     // The action-param gate and the field gate share ONE core
     // (`checkLiteralDefaultValue`), so the positional issue read cost this
     // surface the same prescription. Pinned here as well as at the core
@@ -247,7 +247,7 @@ describe('#6970 ActionParamSchema.defaultValue — authored defaults meet the pa
   });
 });
 
-describe('[#20740] the submit door refuses a zone-suffixed `time` value', () => {
+describe('the submit door refuses a zone-suffixed `time` value — a time of day is a zone-less wall clock', () => {
   it('`validateActionParams` answers `invalid_shape` naming the param; a zone-less wall clock passes', () => {
     for (const value of ['10:00Z', '10:00+08:00', '10:00:00-0530']) {
       const issue = submitIssue({ name: 'at', type: 'time', defaultValue: value });

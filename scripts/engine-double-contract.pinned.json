@@ -1387,6 +1387,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.scoped-list-fallback.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2692,6 +2702,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-plugin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-settings-refusal-isolation.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2769,6 +2784,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/member-role-canonical.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/membership-backfill-ledger.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2899,6 +2919,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/sys-session-ttl-sweep.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/user-created-in-request.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

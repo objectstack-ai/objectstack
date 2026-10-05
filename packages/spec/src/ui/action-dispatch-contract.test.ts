@@ -40,7 +40,7 @@ const undeclaredAction = {
 };
 const recalcSelection = { ...undeclaredAction, execution: 'aggregate' as const };
 
-describe('#17319 — the defect, reproduced (and still true: this is an authoring key)', () => {
+describe('the defect, reproduced (and still true: the declared dispatch contract is an authoring key)', () => {
   it('hands the SAME action opposite input under the two wirings, with zero diagnostics', () => {
     // One declared param — everything else in each bag is a builtin the author
     // cannot declare and the gate must admit.
@@ -74,7 +74,7 @@ describe('#17319 — the defect, reproduced (and still true: this is an authorin
   });
 });
 
-describe("#17319 — the vocabulary is `bulkActionDefs`' own", () => {
+describe("an action's dispatch contract speaks `bulkActionDefs`' own vocabulary", () => {
   it('accepts exactly the def`s two options on the action, and no third spelling', () => {
     expect(BulkActionExecutionSchema.options).toEqual(['perRecord', 'aggregate']);
 
@@ -102,7 +102,7 @@ describe("#17319 — the vocabulary is `bulkActionDefs`' own", () => {
   });
 });
 
-describe('#17319 — accept, refuse, and the key spellings', () => {
+describe('`execution` on an action — accept, refuse, and the key spellings', () => {
   it('accepts both declared contracts and keeps the value verbatim', () => {
     expect(ActionSchema.parse(recalcSelection).execution).toBe('aggregate');
     expect(ActionSchema.parse({ ...undeclaredAction, execution: 'perRecord' }).execution).toBe('perRecord');
@@ -135,7 +135,7 @@ describe('#17319 — accept, refuse, and the key spellings', () => {
   });
 });
 
-describe('#17319 — ⛔ no silent default for an undeclared action', () => {
+describe('⛔ no silent dispatch-contract default for an undeclared action', () => {
   it('parses an action that omits the key, and leaves it ABSENT', () => {
     const parsed = ActionSchema.parse(undeclaredAction);
     expect(parsed.execution).toBeUndefined();
