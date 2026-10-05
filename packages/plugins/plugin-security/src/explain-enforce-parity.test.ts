@@ -656,6 +656,8 @@ const withPrincipal = (source: PostureSource, f: (rig: PrincipalRig) => Promise<
 
 const REFUSED_INVALID: Enforced = { kind: 'refused', ...INVALID };
 const REFUSED_DENIED: Enforced = { kind: 'refused', ...DENIED };
+/** [#21771] The read door's answer for an id it does not return, which a by-id write now gives for a row its caller cannot read. */
+const REFUSED_NOT_FOUND: Enforced = { kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 };
 
 /** Rows over one row-level policy: every verdict position, for a predicate the find refuses and for the control. */
 function rlsRows(card: string, label: string, predicate: string, refused: boolean): Row[] {
@@ -706,7 +708,9 @@ function rlsRows(card: string, label: string, predicate: string, refused: boolea
     },
     {
       card, shape: `${label}: record r2, update`, position: 'record.visible',
-      enforced: REFUSED_DENIED,
+      // r2 is outside the predicate, so the caller cannot read it (#21771);
+      // a predicate the find refuses still refuses before that question.
+      enforced: refused ? REFUSED_DENIED : REFUSED_NOT_FOUND,
       run: withRls(predicate, async (r) => ({ explain: await r.explain('update', 'r2'), enforce: await r.update('r2') })),
     },
     {
@@ -853,8 +857,10 @@ const TABLE: Row[] = [
   },
   {
     card: '#19963 control', shape: 'private OWD, an `own` writer, a row owned by someone else, update', position: 'record.visible',
-    // The sharing middleware's by-id write refusal.
-    enforced: { kind: 'refused', code: 'FORBIDDEN', status: 403 },
+    // [#21771] The `own` writer cannot READ a row owned by someone else on a
+    // private object, so the by-id write answers the read door's not-found
+    // before the sharing middleware's write refusal is reached.
+    enforced: REFUSED_NOT_FOUND,
     run: withSharing({}, async (r) => ({
       explain: await r.explain(SHARING_OWN, 'update', 'l_other'), enforce: await r.update(SHARING_OWN, 'l_other'),
     })),

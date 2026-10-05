@@ -159,6 +159,8 @@ async function boot(makeDriver: () => Driver, predicate: string) {
 type Envelope = { code: string; status: number };
 const DENIED: Envelope = { code: 'PERMISSION_DENIED', status: 403 };
 const INVALID: Envelope = { code: 'INVALID_FILTER', status: 400 };
+/** [#21771] The read door's answer for an id it does not return. */
+const NOT_FOUND: Envelope = { code: 'RECORD_NOT_FOUND', status: 404 };
 
 const envelopeOf = (e: unknown): Envelope => {
   const x = e as { code?: string; status?: number; statusCode?: number };
@@ -267,8 +269,10 @@ for (const [driverName, makeDriver, available] of DRIVERS) {
 
       expect(await outcome(w.request('update', 'r1'))).toBe('admitted');
       expect((await w.explain('update', 'r1')).record).toEqual({ recordId: 'r1', visible: true, decidedBy: 'rls' });
-      expect(await outcome(w.request('update', 'r2'))).toEqual(DENIED);
-      expect((await w.explain('update', 'r2')).record).toEqual({ recordId: 'r2', visible: false, decidedBy: 'rls' });
+      // [#21771] r2 is a row the caller cannot read: the write door answers
+      // what a nonexistent id answers, and explain reports the missing shape.
+      expect(await outcome(w.request('update', 'r2'))).toEqual(NOT_FOUND);
+      expect((await w.explain('update', 'r2')).record).toEqual({ recordId: 'r2', visible: false });
     });
   });
 }
