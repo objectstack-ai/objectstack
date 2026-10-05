@@ -25,11 +25,18 @@
  *     history), the datasource admin routes, the generic data door over
  *     `sys_metadata` / `sys_metadata_history`, and the audit ledger's copy.
  *
+ * The harness mounts the datasource admin SERVICE but not its REST routes, and
+ * no audit writer; this file mounts both itself, exactly as `os serve` does
+ * (`registerDatasourceAdminRoutes(httpServer, ctx, '/api/v1')` from a plugin
+ * resolving `http.server`, and `AuditPlugin`).
+ *
  * Every value below is a probe sentinel, not a credential.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
+import { AuditPlugin } from '@objectstack/plugin-audit';
+import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -81,7 +88,20 @@ describe('contractless-driver datasource credentials: refused at write, withheld
   let dbFile: string;
 
   const boot = async () => {
-    stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+    // The `/api/v1/datasources` routes, mounted the way `os serve` mounts them.
+    const adminRoutes = {
+      name: 'dogfood.datasource-admin-routes',
+      version: '1.0.0',
+      optionalDependencies: ['com.objectstack.server.hono'],
+      init: async (ctx: any) => {
+        const httpServer = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+        registerDatasourceAdminRoutes(httpServer, ctx, '/api/v1');
+      },
+    };
+    stack = await bootStack(showcaseStack, {
+      databaseFile: dbFile,
+      extraPlugins: [new AuditPlugin(), adminRoutes as never],
+    });
     token = await stack.signIn();
   };
 
@@ -110,13 +130,22 @@ describe('contractless-driver datasource credentials: refused at write, withheld
   });
 
   it('1 — both write doors refuse the credential material before anything is stored', async () => {
+    // The metadata save door: the spec gate's refusal, every position named.
     const meta = await call('PUT', `/meta/datasource/${NAME}`, LEGACY_BODY);
-    expect(meta.status, meta.text).toBe(400);
-    const metaError = JSON.parse(meta.text).error;
-    expect(metaError?.code, meta.text).toBe('VALIDATION_ERROR');
-    expect(meta.text).toContain('config.apiKey');
+    expect(meta.status, meta.text).toBe(422);
+    const metaBody = JSON.parse(meta.text);
+    expect(metaBody.code, meta.text).toBe('INVALID_METADATA');
+    expect((metaBody.issues as Array<{ path: string }>).map((issue) => issue.path).sort()).toEqual([
+      'config.accessToken',
+      'config.apiKey',
+      'config.connectionString',
+      'config.oauth.client_secret',
+      'config.privateKey',
+      'config.secretAccessKey',
+    ]);
     expect(leaked(meta.text)).toEqual([]);
 
+    // The Setup → Datasources create door.
     const admin = await call('POST', '/datasources', LEGACY_BODY);
     expect(admin.status, admin.text).toBe(400);
     expect(admin.text).toContain('config.apiKey');
@@ -151,40 +180,51 @@ describe('contractless-driver datasource credentials: refused at write, withheld
     const [active] = await stored('sys_metadata');
     expect(active?.id, 'the seeded row survived the restart').toBeTruthy();
     const filter = (where: Record<string, unknown>) => encodeURIComponent(JSON.stringify(where));
-    const doors = [
-      `/meta/datasource/${NAME}`,
-      '/meta/datasource',
-      `/meta/datasource/${NAME}/published`,
-      `/meta/datasource/${NAME}/layers`,
-      `/meta/datasource/${NAME}/history`,
-      `/datasources/${NAME}`,
-      '/datasources',
-      `/data/sys_metadata?filter=${filter({ name: NAME })}`,
-      `/data/sys_metadata/${active.id}`,
-      `/data/sys_metadata_history?filter=${filter({ name: NAME })}`,
+    // `serves`: what the answer must contain — the positive control that the
+    // door read the seeded row at all. A door serving the body must carry the
+    // non-secret MARKER from its config; the admin list serves summaries (no
+    // config) and must name the row; the history list serves versions only.
+    const doors: Array<{ path: string; serves?: string }> = [
+      { path: `/meta/datasource/${NAME}`, serves: MARKER },
+      { path: '/meta/datasource', serves: MARKER },
+      { path: `/meta/datasource/${NAME}/published`, serves: MARKER },
+      { path: `/meta/datasource/${NAME}/layers`, serves: MARKER },
+      { path: `/meta/datasource/${NAME}/history` },
+      { path: `/datasources/${NAME}`, serves: MARKER },
+      { path: '/datasources', serves: NAME },
+      { path: `/data/sys_metadata?filter=${filter({ name: NAME })}`, serves: MARKER },
+      { path: `/data/sys_metadata/${active.id}`, serves: MARKER },
+      { path: `/data/sys_metadata_history?filter=${filter({ name: NAME })}`, serves: MARKER },
     ];
-    const report: Record<string, unknown> = {};
-    for (const path of doors) {
+    for (const { path, serves } of doors) {
       const res = await call('GET', path);
-      report[path] = { status: res.status, marker: res.text.includes(MARKER), leaked: leaked(res.text) };
+      expect.soft(res.status, `${path} answers`).toBe(200);
+      expect.soft(leaked(res.text), `${path} serves no credential`).toEqual([]);
+      if (serves) expect.soft(res.text.includes(serves), `${path} serves the row (positive control)`).toBe(true);
     }
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify(report, null, 2));
-    for (const path of doors) {
-      const r = report[path] as { status: number; marker: boolean; leaked: string[] };
-      expect.soft(r.leaked, `${path} serves no credential`).toEqual([]);
-      expect.soft(r.status, `${path} answers`).toBe(200);
-      expect.soft(r.marker, `${path} serves the row (positive control)`).toBe(true);
-    }
+
+    // The admin edit form's view names what it withheld and keeps the rest.
+    const form = JSON.parse((await call('GET', `/datasources/${NAME}`)).text);
+    const config = (form.datasource ?? form.data?.datasource ?? form).config;
+    expect(config).toEqual({
+      host: MARKER,
+      oauth: { clientId: 'cid' },
+      connectionString: `Server=${MARKER};User Id=u`,
+    });
   }, 180_000);
 
   it('3 — the audit ledger records the seeded write without its credentials', async () => {
     const ql: any = await stack.kernel.getServiceAsync('objectql');
+    // The writer copies the audited row at write time — the seeding update
+    // above included — so this is the at-rest copy, read straight from the
+    // table, and then through the data door an administrator reads it by.
     const audit = rowsOf(await ql.find('sys_audit_log', { where: { object_name: 'sys_metadata' }, context: SYSTEM }));
     const ours = audit.filter((row) => JSON.stringify(row).includes(MARKER));
-    // eslint-disable-next-line no-console
-    console.log('audit rows', audit.length, 'ours', ours.length);
     expect(ours.length, 'the ledger recorded the datasource row').toBeGreaterThan(0);
-    expect(leaked(JSON.stringify(ours))).toEqual([]);
+    expect(leaked(JSON.stringify(audit))).toEqual([]);
+
+    const door = await call('GET', `/data/sys_audit_log?filter=${encodeURIComponent(JSON.stringify({ object_name: 'sys_metadata' }))}`);
+    expect(door.status, door.text).toBe(200);
+    expect(leaked(door.text)).toEqual([]);
   });
 });
