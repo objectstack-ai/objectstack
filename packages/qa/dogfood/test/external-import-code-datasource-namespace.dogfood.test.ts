@@ -94,12 +94,15 @@ describe('an import over a code-defined datasource is held to its package\'s nam
   });
 
   it('premise: the code-defined datasource carries the provenance of the package that declares it', async () => {
+    const version = (showcaseStack as unknown as { manifest?: { version?: string } }).manifest?.version;
+    expect(version).toMatch(/^\d+\.\d+\.\d+/);
+
     const read = await call('GET', `/meta/datasource/${DATASOURCE}`);
     expect(read.status, JSON.stringify(read.json)).toBe(200);
     expect(read.json.item).toMatchObject({
       origin: 'code',
       _packageId: PACKAGE_ID,
-      _packageVersion: showcaseStack.manifest?.version,
+      _packageVersion: version,
       _provenance: 'package',
     });
   });
