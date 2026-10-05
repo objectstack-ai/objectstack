@@ -698,7 +698,7 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
             type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
         });
         await expect(refusal).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
-        await expect(refusal).rejects.toThrow(/cannot re-open public form '\/forms\/walled-intake'/);
+        await expect(refusal).rejects.toThrow(/cannot keep public form '\/forms\/walled-intake' open/);
         expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
     });
 
@@ -725,6 +725,51 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
         expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([
             { type: 'view', name: 'task.intake_form', org: 'org_a', state: 'active' },
         ]);
+    });
+
+    it('single: re-saving an org overlay that was open before the env-wide withdrawal is refused', async () => {
+        const { protocol, rows } = makeTenancyProtocol('org_a');
+        await publishEnvWide(protocol);
+        // Open in the organization while open env-wide: accepted.
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
+        })).success).toBe(true);
+        // Then withdrawn env-wide (the link kept, anonymous access cleared).
+        expect((await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: FORM_VIEW(false) })).success)
+            .toBe(true);
+        const before = orgRows(rows).filter((r) => r.org === 'org_a');
+        // A re-save of the still-open overlay (only its label changes) would
+        // leave open a form the env-wide layer withdrew: refused.
+        await expect(protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(true, 'Intake (renamed)'), organizationId: 'org_a',
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual(before);
+    });
+
+    it('single: a container-shaped org save is judged as the list read expands it', async () => {
+        const { protocol, rows } = makeTenancyProtocol('org_a');
+        const container = (allowAnonymous: boolean) => ({
+            name: 'task', object: 'task', formViews: { intake_form: { sharing: sharing(allowAnonymous) } },
+        });
+        expect((await protocol.saveMetaItem({ type: 'view', name: 'task', item: container(false) })).success).toBe(true);
+        const refusal = protocol.saveMetaItem({ type: 'view', name: 'task', item: container(true), organizationId: 'org_a' });
+        await expect(refusal).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        await expect(refusal).rejects.toThrow(/cannot keep public form '\/forms\/walled-intake' open/);
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+        // Control: the same container kept withdrawn in the organization saves.
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task', item: container(false), organizationId: 'org_a',
+        })).success).toBe(true);
+    });
+
+    it('control (single): a sharing with no public link env-wide is not a withdrawal', async () => {
+        const { protocol } = makeTenancyProtocol('org_a');
+        const linkless = FORM_VIEW(true);
+        linkless.config.sharing = { enabled: false, allowAnonymous: false } as any;
+        expect((await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: linkless })).success).toBe(true);
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
+        })).success).toBe(true);
     });
 
     it('control (single): an org-scoped republish over an env-wide published form still saves', async () => {

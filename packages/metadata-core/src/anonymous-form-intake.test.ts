@@ -11,7 +11,6 @@ import {
     anonymousFormIntakeUnavailableMessage,
     anonymousFormIntakeUnavailableRemedy,
     anonymousFormIntakeWithdrawnIn,
-    anonymousFormWithdrawnSlugs,
     anonymousFormObjectName,
     anonymousFormSharingPath,
     publicFormSlug,
@@ -187,43 +186,55 @@ describe('where the reason is located, and the reason itself', () => {
     });
 });
 
-describe('anonymousFormIntakeWithdrawnIn — a withdrawal at any layer is a kill switch', () => {
+describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same form at any layer closes it', () => {
     const view = (sharing: unknown, name = 'contact') => ({
         name, object: 'inquiry', viewKind: 'form', config: { sharing },
     });
     const openView = view(OPEN);
     const [candidate] = anonymousFormIntakeCandidates(openView);
 
-    it('anonymousFormWithdrawnSlugs: a sharing naming a slug it does not open withdraws that slug', () => {
-        expect(anonymousFormWithdrawnSlugs(view({ ...OPEN, allowAnonymous: false }))).toEqual(['contact-us']);
-        expect(anonymousFormWithdrawnSlugs(view({ ...OPEN, enabled: false }))).toEqual(['contact-us']);
-        expect(anonymousFormWithdrawnSlugs(view({ allowAnonymous: true, publicLink: 'contact-us' }))).toEqual(['contact-us']);
-        expect(anonymousFormWithdrawnSlugs(openView)).toEqual([]);
-        expect(anonymousFormWithdrawnSlugs(view({ enabled: false }))).toEqual([]);
-        expect(anonymousFormWithdrawnSlugs(view(undefined))).toEqual([]);
-    });
-
-    it('the same view switched off at the same slot withdraws, whatever its public link says', () => {
+    it('the same view, same slot, the link kept with a switch cleared: withdrawn', () => {
         expect(anonymousFormIntakeWithdrawnIn([view({ ...OPEN, allowAnonymous: false })], openView, candidate)).toBe(true);
-        expect(anonymousFormIntakeWithdrawnIn([view({ enabled: false })], openView, candidate)).toBe(true);
-        expect(anonymousFormIntakeWithdrawnIn([view({ allowAnonymous: false, enabled: true })], openView, candidate)).toBe(true);
+        expect(anonymousFormIntakeWithdrawnIn([view({ ...OPEN, enabled: false })], openView, candidate)).toBe(true);
+        // A raw body with `enabled` absent reads as its parsed default (`false`).
+        expect(anonymousFormIntakeWithdrawnIn(
+            [view({ allowAnonymous: true, publicLink: '/forms/contact-us' })], openView, candidate,
+        )).toBe(true);
     });
 
-    it('another view withdrawing the slug withdraws it', () => {
-        const layer = [view({ ...OPEN, enabled: false }, 'legacy_contact')];
-        expect(anonymousFormIntakeWithdrawnIn(layer, openView, candidate)).toBe(true);
+    it('two different views sharing a slug do not close each other', () => {
+        const other = view({ ...OPEN, enabled: false }, 'legacy_contact');
+        const [otherOpen] = anonymousFormIntakeCandidates(view(OPEN, 'legacy_contact'));
+        // One layer holding both: the open one stays open…
+        expect(anonymousFormIntakeWithdrawnIn([openView, other], openView, candidate)).toBe(false);
+        // …and a withdrawal of this view does not close the other view's form.
+        expect(anonymousFormIntakeWithdrawnIn(
+            [view({ ...OPEN, enabled: false }), view(OPEN, 'legacy_contact')], view(OPEN, 'legacy_contact'), otherOpen,
+        )).toBe(false);
     });
 
-    it('a layer that opens it, or has no word on it, withdraws nothing', () => {
+    it('not a withdrawal: no body of the view, no sharing, the link cleared or changed', () => {
         expect(anonymousFormIntakeWithdrawnIn([openView], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn([], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn([view(undefined)], openView, candidate)).toBe(false);
-        // Another view switched off at its own slot, naming no slug: not this form.
-        expect(anonymousFormIntakeWithdrawnIn([view({ enabled: false }, 'other')], openView, candidate)).toBe(false);
-        // A different slug withdrawn elsewhere: not this form.
+        expect(anonymousFormIntakeWithdrawnIn([view({ enabled: false, allowAnonymous: false })], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn(
-            [view({ ...OPEN, enabled: false, publicLink: '/forms/other' }, 'other')], openView, candidate,
+            [view({ ...OPEN, enabled: false, publicLink: '/forms/other' })], openView, candidate,
         )).toBe(false);
+    });
+
+    it('a schema-parsed sharing with no public link is not a withdrawal, as its raw body is not', () => {
+        for (const raw of [{ password: 'secret' }, { allowedDomains: ['example.com'] }, { enabled: true }]) {
+            const parsed = SharingConfigSchema.parse(raw);
+            // The parse fills the switches with their `false` defaults…
+            expect(parsed.enabled === true && parsed.allowAnonymous === true).toBe(false);
+            // …and neither shape names the link, so neither withdraws.
+            expect(anonymousFormIntakeWithdrawnIn([view(parsed)], openView, candidate)).toBe(false);
+            expect(anonymousFormIntakeWithdrawnIn([view(raw)], openView, candidate)).toBe(false);
+        }
+        // Control: a parsed sharing that keeps the link and does not open it withdraws.
+        const closed = SharingConfigSchema.parse({ publicLink: '/forms/contact-us', allowAnonymous: true });
+        expect(anonymousFormIntakeWithdrawnIn([view(closed)], openView, candidate)).toBe(true);
     });
 
     it('slots are matched per shape: a formViews entry is judged against the same key only', () => {
@@ -233,9 +244,8 @@ describe('anonymousFormIntakeWithdrawnIn — a withdrawal at any layer is a kill
         });
         const opened = nested({ ...OPEN, publicLink: '/forms/a' }, { ...OPEN, publicLink: '/forms/b' });
         const [ca, cb] = anonymousFormIntakeCandidates(opened);
-        const layer = [nested({ enabled: false }, { ...OPEN, publicLink: '/forms/b' })];
+        const layer = [nested({ ...OPEN, publicLink: '/forms/a', enabled: false }, { ...OPEN, publicLink: '/forms/b' })];
         expect(anonymousFormIntakeWithdrawnIn(layer, opened, ca)).toBe(true);
         expect(anonymousFormIntakeWithdrawnIn(layer, opened, cb)).toBe(false);
     });
 });
-

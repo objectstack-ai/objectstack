@@ -15723,6 +15723,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         organizationId: string | null | undefined;
         body: unknown;
+        /** The package binding the row is saved under (a container's expansion is placed by it). */
+        packageId?: string | null;
     }): Promise<Error | null> {
         if (!args.organizationId) return null;
         const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
@@ -15762,58 +15764,67 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * An organization-scoped `view` write, in the organization the anonymous
-     * form doors read, that would re-open a public form the env-wide layer
+     * form doors read, that would leave open a public form the env-wide layer
      * withdrew. Returns the refusal, or `null` when the write is fine.
      *
-     * A withdrawal is a kill switch: any layer that withdraws a public form's
-     * intake (or its anonymous access) closes it, and layering may only narrow
-     * intake, never re-open it. The doors enforce that at read time
+     * A withdrawal is a kill switch: an explicit withdrawal of a public form
+     * (the same view, the same slot, the link kept with `enabled` or
+     * `allowAnonymous` cleared) at any layer closes it, and layering may only
+     * narrow intake, never re-open it. The doors enforce that at read time
      * (`registerFormEndpoints` in `@objectstack/rest` reads the env-wide layer
-     * beneath the organization's and lets either withdraw), so such a write
-     * would be accepted and then never honoured. It is refused instead, and the
-     * author is pointed at the env-wide definition, which is the switch.
+     * beneath the organization's and lets its withdrawal close the form), so
+     * such a write would be accepted and then never honoured. It is refused
+     * instead, and the author is pointed at the env-wide definition, which is
+     * the switch.
      *
-     * Judged by the doors' own predicate ({@link anonymousFormIntakeWithdrawnIn})
-     * over the env-wide `view` list, and only for a slug this write opens that
-     * the organization's current definition does not: an edit that leaves the
-     * organization's intake as it is (or withdraws it) is never refused here.
+     * Judged by the doors' own verdict ({@link anonymousFormIntakeWithdrawnIn})
+     * over the env-wide `view` list, for every form this write would leave
+     * open — whether or not the organization's current definition has it open
+     * already, so re-saving an overlay that was open before the env-wide
+     * withdrawal is refused too. The body is judged as the list read serves
+     * it: a container-shaped body (`formViews`, `form`, …) is expanded into
+     * the view items the doors read ({@link expandRuntimeViewContainer}). An
+     * organization-scoped save that keeps the form withdrawn, or that opens
+     * nothing the env-wide layer withdrew, is never refused here.
      */
     private async anonymousFormIntakeReopenRefusal(args: {
         type: string;
         name: string;
         organizationId: string;
         body: unknown;
+        packageId?: string | null;
     }): Promise<Error | null> {
-        if (!args.body || typeof args.body !== 'object') return null;
-        const body = { ...(args.body as Record<string, unknown>), name: args.name };
-        const proposed = anonymousFormIntakeCandidates(body);
-        if (proposed.length === 0) return null;
-        const current = new Set(anonymousFormIntakeSlugs(
-            ((await this.getMetaItem({ type: args.type, name: args.name, organizationId: args.organizationId })) as any)
-                ?.item,
-        ));
-        const opening = proposed.filter((c) => !current.has(c.slug));
-        if (opening.length === 0) return null;
+        if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) return null;
+        const raw = args.body as Record<string, unknown>;
+        // The name stamp the container-collision judge applies (a body with no
+        // `name` is a container under the save name); a view item is the save
+        // name's own row.
+        const stamped = raw.name ? raw : { ...raw, name: args.name };
+        const served: unknown[] = isAggregatedViewContainer(stamped)
+            ? this.expandRuntimeViewContainer(args.type, stamped, { packageId: args.packageId ?? undefined })
+            : [{ ...raw, name: args.name }];
+        const open = served.flatMap((view) => anonymousFormIntakeCandidates(view).map((c) => ({ view, c })));
+        if (open.length === 0) return null;
         const envWide: any = await this.getMetaItems({ type: args.type });
         const layer: unknown[] = Array.isArray(envWide?.items) ? envWide.items : [];
         const reopened = [...new Set(
-            opening.filter((c) => anonymousFormIntakeWithdrawnIn(layer, body, c)).map((c) => c.slug),
+            open.filter(({ view, c }) => anonymousFormIntakeWithdrawnIn(layer, view, c)).map(({ c }) => c.slug),
         )].sort();
         if (reopened.length === 0) return null;
         const list = reopened.map((s) => `'/forms/${s}'`).join(', ');
         const err: any = new Error(
-            `Metadata item 'view/${args.name}' cannot re-open public form ${list} for anonymous intake `
+            `Metadata item 'view/${args.name}' cannot keep public form ${list} open for anonymous intake `
             + `in organization '${args.organizationId}': the env-wide definition withdraws it. A withdrawal is `
             + `a kill switch, so an organization overlay may narrow a public form's intake but never re-open it, `
-            + `and the anonymous form doors would keep answering it as not found. To publish it again, save the `
-            + `form env-wide (retry with no active organization) with sharing enabled and anonymous access `
-            + `allowed. An organization-scoped edit that keeps this form withdrawn is still accepted. `
+            + `and the anonymous form doors keep answering it as not found. Save this overlay with the form's `
+            + `sharing withdrawn (enabled or allowAnonymous false), or, to publish the form again, save it `
+            + `env-wide (retry with no active organization) with sharing enabled and anonymous access allowed. `
             + `See docs/adr/0005-metadata-customization-overlay.md.`
         );
         err.code = 'NOT_OVERRIDABLE';
         err.status = 403;
         // The sentence an end user is shown (the producer-declared channel).
-        err.userMessage = `This public form was withdrawn for the whole environment, so it cannot be re-opened `
+        err.userMessage = `This public form was withdrawn for the whole environment, so it cannot be open `
             + `for one organization. Publish it again from the environment-wide form definition.`;
         err.organizationId = args.organizationId;
         err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
@@ -19174,6 +19185,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 organizationId: request.organizationId,
                 body: request.item,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
             });
             if (intakeRefusal) throw intakeRefusal;
         }

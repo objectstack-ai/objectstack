@@ -10718,9 +10718,10 @@ export class RestServer {
         //
         // A withdrawal is a kill switch: layering may only narrow anonymous
         // intake, never re-open it. A candidate is served only when no layer
-        // the doors read withdraws it (`anonymousFormIntakeWithdrawnIn`): the
-        // read the form is found in, and, when that read is an organization's,
-        // the env-wide read beneath it.
+        // beneath the read it is found in explicitly withdraws the same form
+        // (`anonymousFormIntakeWithdrawnIn`: the same view, the same slot, the
+        // link kept with a switch cleared). Another view publishing the same
+        // slug is a different form and closes nothing.
         const findPublicFormView = (
             views: any[],
             slug: string,
@@ -10793,9 +10794,11 @@ export class RestServer {
             // The organization read prefers the organization's overlay of a
             // view over the env-wide one, so on its own it cannot see an
             // env-wide withdrawal that overlay disagrees with. Read the
-            // env-wide layer too, and let either layer's withdrawal close the
-            // form: an organization overlay can narrow intake, never re-open it.
-            const layers: any[][] = [items];
+            // env-wide layer too, and let its withdrawal of the same form close
+            // it: an organization overlay can narrow intake, never re-open it.
+            // (The read the form is found in holds only that view's own body,
+            // which is open, so it withdraws nothing of its own.)
+            const layers: any[][] = [];
             if (organizationId) {
                 const envWideRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                     type: 'view',
