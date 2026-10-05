@@ -70,7 +70,11 @@ describe('i18n extraction — outcomeMessages (#21095)', () => {
   });
 
   it('emits nothing for an outcome nobody declared, and nothing for an action without the map', () => {
-    const outcomeKeys = paths().filter((k) => k.includes('.outcomeMessages.'));
+    // The `metadataForms.` subtree is left out: the action form's own
+    // `outcomeMessages` row puts its label / helpText / placeholder strings at
+    // `metadataForms.action.fields.outcomeMessages.*`, which are form-row text,
+    // not the copy of any declared outcome.
+    const outcomeKeys = paths().filter((k) => k.includes('.outcomeMessages.') && !k.startsWith('metadataForms.'));
     expect(outcomeKeys.sort()).toEqual([
       'globalActions.check_app_updates.outcomeMessages.up_to_date',
       'objects.sys_environment._actions.archive_environment.outcomeMessages.already_archived',
