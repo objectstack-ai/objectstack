@@ -54,14 +54,15 @@ Set `sharingModel: 'private'` on the object so submissions are staff-scoped afte
 
 ### 4. Withdraw a public form
 
-To stop taking submissions, keep the form's `publicLink` and clear a switch: `enabled: false` or `allowAnonymous: false`. Both anonymous endpoints then answer `404 FORM_NOT_FOUND`, and nothing is created.
+To stop taking submissions, keep the form's `publicLink` and set a switch to `false`: `enabled: false` or `allowAnonymous: false`. Both anonymous endpoints then answer `404 FORM_NOT_FOUND`, and nothing is created.
 
-A withdrawal is a kill switch across metadata layers. If the environment-wide definition withdraws the form, an organization's copy of the same view cannot open it again: the endpoints keep answering not found, and an organization-scoped save that would leave the form open is refused with `403 NOT_OVERRIDABLE`. To publish the form again, save it environment-wide with both switches on. An organization's copy can always withdraw the form for itself.
+A withdrawal is a kill switch across metadata layers. If the environment-wide definition withdraws the form, an organization's copy of the same view cannot open it again. The endpoints keep answering not found, and an organization-scoped save that would leave the form open is refused with `403 NOT_OVERRIDABLE`. To publish the form again, save it environment-wide with both switches on. An organization's copy can always withdraw the form for itself.
 
-Only an explicit withdrawal closes the form:
+Only an explicit withdrawal of the same form closes it:
 
-- **It closes the same form only.** A withdrawal applies to the view that carries it, at the same place in that view (`form`, the same `formViews` entry, or the view's own `config`), across its layers. A different view that uses the same public link (for example, another app's "contact us" form) is a separate form. It neither closes this one nor is closed by it.
-- **Removing is not withdrawing.** Removing the `sharing` block, clearing or changing the `publicLink`, or deleting the view at one layer does not withdraw the form at the other layers. A form that only an organization publishes stays open there. To close a form for good, keep the link and set `enabled: false` or `allowAnonymous: false`.
+- **The same form is the same stored view definition.** An organization's copy of a view is keyed by the name of the definition it overrides. Inside that definition, a withdrawn form matches the organization's form by its place (`form`, the same `formViews` entry, or the view's own `config`) or by its public link. A match on either is enough. So renaming the `formViews` key, moving the form to another place, or pointing the link at a new slug (including a change of letter case) does not re-open it. A form that differs from every withdrawn form in both place and link is a different form, such as a sibling in the same view.
+- **A different view is a different form.** A different view that uses the same public link (for example, another app's "contact us" form) neither closes this one nor is closed by it.
+- **Only `false` withdraws.** A switch that is simply absent is not a withdrawal. Removing the `sharing` block, clearing the `publicLink`, or deleting the view at one layer does not withdraw the form at the other layers. A form that only an organization publishes stays open there. To close a form for good, keep the link and set `enabled: false` or `allowAnonymous: false`.
 
 ## Why
 

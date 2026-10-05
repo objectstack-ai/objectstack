@@ -10719,9 +10719,10 @@ export class RestServer {
         // A withdrawal is a kill switch: layering may only narrow anonymous
         // intake, never re-open it. A candidate is served only when no layer
         // beneath the read it is found in explicitly withdraws the same form
-        // (`anonymousFormIntakeWithdrawnIn`: the same view, the same slot, the
-        // link kept with a switch cleared). Another view publishing the same
-        // slug is a different form and closes nothing.
+        // (`anonymousFormIntakeWithdrawnIn`: the same view name, matched by
+        // slot or by slug, the link kept with a switch set to `false`).
+        // Another view publishing the same slug is a different form and closes
+        // nothing.
         const findPublicFormView = (
             views: any[],
             slug: string,

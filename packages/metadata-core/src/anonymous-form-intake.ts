@@ -22,10 +22,10 @@
  *
  * Clearing either switch withdraws the form from every anonymous door.
  *
- * A withdrawal is a kill switch: any metadata layer the doors read whose body
- * of the same view explicitly withdraws the form (the link kept, a switch
- * cleared) closes it, and layering may only narrow intake, never re-open it
- * ({@link anonymousFormIntakeWithdrawnIn}).
+ * A withdrawal is a kill switch: any metadata layer whose body of the same
+ * stored row explicitly withdraws the form (the link kept, a switch set to
+ * `false`), matched by slot or by slug, closes it, and layering may only narrow
+ * intake, never re-open it ({@link anonymousFormIntakeWithdrawnIn}).
  *
  * The candidates are the three shapes a view carries a form in: the nested
  * `form`, every `formViews` entry, and the flattened `config` of a
