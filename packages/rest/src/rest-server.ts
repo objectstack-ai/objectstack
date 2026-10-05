@@ -23,6 +23,9 @@ import {
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
     // owner, shared with the runtime dispatcher's `/security` domain.
     isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
+    // The write-response rules (credential-class mask, `internal` omit) for
+    // the cross-object batch's direct-engine update arm.
+    omitInternalFieldsFromWriteResponse,
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
@@ -13390,19 +13393,23 @@ export class RestServer {
                                 const id = op.id ?? data?.id;
                                 const updated = await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped });
                                 // [#7823] …but the RESPONSE half moved to the ingress
-                                // (A-prime ruling, 2026-08-13): the engine no longer
-                                // strips `internal: true` fields from its write
-                                // results, so this direct-`ql.update` mouth must
-                                // apply the shared strip itself before the row rides
-                                // `results` out to the caller. Reached through the
-                                // protocol instance because this package does not
-                                // depend on `@objectstack/metadata-protocol` (same
-                                // duck-typing as the `createManyData` probes).
-                                // Dormant today — no `internal`-flagged object grants
-                                // `bulk` — wired so the flag's guarantee does not
-                                // depend on that staying true.
-                                (p as any).omitInternalWriteFields?.(op.object, updated);
-                                out.push(updated);
+                                // (A-prime ruling, 2026-08-13): the engine keeps its
+                                // write results whole, so this direct-`ql.update`
+                                // mouth applies the shared write-response rules
+                                // itself (credential-class mask, then `internal`
+                                // omit) before the row rides `results` out. Called
+                                // from `@objectstack/core` directly — never through
+                                // an optional protocol method, which a protocol
+                                // without it would skip silently. FAIL CLOSED: with
+                                // no registered schema to judge the fields by, only
+                                // the id is echoed.
+                                const updateSchema = (ql as any).registry?.getObject?.(op.object);
+                                if (!updateSchema) {
+                                    out.push(updated && typeof updated === 'object' ? { id: (updated as any).id ?? id } : updated);
+                                } else {
+                                    omitInternalFieldsFromWriteResponse(updateSchema, updated);
+                                    out.push(updated);
+                                }
                             } else { // 'delete'
                                 out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
                             }
