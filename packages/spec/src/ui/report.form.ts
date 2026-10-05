@@ -82,7 +82,11 @@ export const reportForm = defineForm({
             // A `chart` input sat here until #20161: the key was removed from
             // `JoinedReportBlockSchema` because no renderer ever drew a block
             // chart, so this control offered a setting that plotted nothing.
-            { field: 'dataset', label: 'Dataset' },
+            // #21714: a joined report refuses a block that binds no `dataset`
+            // (#21702), so this column declares the `ref:dataset` picker the
+            // top-level binding declares, marked required: a block is bound
+            // in the form before save.
+            { field: 'dataset', label: 'Dataset', widget: 'ref:dataset', required: true },
             { field: 'rows', label: 'Rows' },
             { field: 'columns', label: 'Columns' },
             { field: 'values', label: 'Values' },

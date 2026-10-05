@@ -27,6 +27,7 @@ import { describe, expect, it } from 'vitest';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
+import { reportForm } from './report.form';
 import { JoinedReportBlockSchema, ReportSchema, defineReport } from './report.zod';
 
 const ENTRY_ID = 'ui-report-joined-block-dataset-required';
@@ -242,6 +243,22 @@ describe('the joined reports measured at the census parse unchanged', () => {
     const r = ReportSchema.safeParse(CHURN_SIGNALS);
     expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
     expect(r.data).toEqual({ ...CHURN_SIGNALS, drilldown: true });
+  });
+});
+
+describe('the report form offers a block\'s `dataset` as the dataset picker, marked required (#21714)', () => {
+  it('the "Joined blocks" repeater\'s `dataset` row declares `widget: \'ref:dataset\'` and `required: true`', () => {
+    // Studio's report inspector renders this row spec: the widget hint picks
+    // the cell's control, and `required` draws the column's marker and the
+    // cell's `aria-required`. Without both, a new block is a free-text cell the
+    // refusal above rejects on save.
+    const blocks = (reportForm.sections as any[])
+      .flatMap((s) => s.fields ?? [])
+      .find((f: any) => f?.field === 'blocks');
+    expect(blocks?.type).toBe('repeater');
+    const row = (blocks.fields as any[]).find((f) => f?.field === 'dataset');
+    expect(row?.widget).toBe('ref:dataset');
+    expect(row?.required).toBe(true);
   });
 });
 
