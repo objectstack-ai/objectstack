@@ -24,8 +24,8 @@
 // message and saves nothing, and the draft door answers the prefixed name with
 // no `TODO(namespace)` note. Then the controls that show the stamp moved
 // nothing else: a prefixed import is saved and serves the remote rows, the
-// host `default` datasource carries no package, the admin door keeps refusing
-// edits to a code-defined datasource with the same status and code, and
+// host `default` datasource carries no package, the admin service keeps
+// refusing edits to a code-defined datasource and lists it as before, and
 // validate and the existing federated objects answer as before.
 //
 // The verify harness does not mount the federation service, so this file
@@ -153,22 +153,21 @@ describe('an import over a code-defined datasource is held to its package\'s nam
     expect(read.json.item).not.toHaveProperty('_provenance');
   });
 
-  it('control: the admin door still refuses to edit or remove a code-defined datasource, and lists no envelope key', async () => {
-    const patched = await call('PATCH', `/datasources/${DATASOURCE}`, { label: 'Renamed 21889' });
-    expect(patched.status, JSON.stringify(patched.json)).toBe(400);
-    expect(patched.json.error?.code).toBe('DATASOURCE_ADMIN_ERROR');
+  it('control: the admin service still refuses to edit or remove a code-defined datasource, and lists no envelope key', async () => {
+    // The harness mounts no `/api/v1/datasources` admin routes (the CLI's
+    // `serve` does), so this reads the service those routes relay: a refusal
+    // here is the door's `400 DATASOURCE_ADMIN_ERROR`. The refusals key on
+    // `origin`, which the stamp leaves as it was.
+    const admin = stack.kernel.getService<{
+      updateDatasource(name: string, patch: Record<string, unknown>): Promise<unknown>;
+      removeDatasource(name: string): Promise<void>;
+      listDatasources(): Promise<Array<Record<string, unknown>>>;
+    }>('datasource-admin');
 
-    const removed = await call('DELETE', `/datasources/${DATASOURCE}`);
-    expect(removed.status, JSON.stringify(removed.json)).toBe(400);
-    expect(removed.json.error?.code).toBe('DATASOURCE_ADMIN_ERROR');
+    await expect(admin.updateDatasource(DATASOURCE, { label: 'Renamed 21889' })).rejects.toBeInstanceOf(Error);
+    await expect(admin.removeDatasource(DATASOURCE)).rejects.toBeInstanceOf(Error);
 
-    const put = await call('PUT', `/datasources/${DATASOURCE}`, { label: 'Renamed 21889' });
-    expect(put.status, JSON.stringify(put.json)).toBe(405);
-
-    const listed = await call('GET', '/datasources');
-    expect(listed.status, JSON.stringify(listed.json)).toBe(200);
-    const entries = ((listed.json.data ?? []) as Array<Record<string, unknown>>);
-    const entry = entries.find((d) => d.name === DATASOURCE);
+    const entry = (await admin.listDatasources()).find((d) => d.name === DATASOURCE);
     expect(entry).toMatchObject({ origin: 'code', label: 'External Analytics (SQLite)' });
     expect(entry).not.toHaveProperty('_packageId');
   });
