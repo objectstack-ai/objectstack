@@ -44,7 +44,7 @@ function valueIssue(result: ReturnType<typeof parse>) {
   return issues[0]!;
 }
 
-describe('#7113 — the reported shape is refused at authoring time', () => {
+describe('a set operator carrying a scalar is refused at authoring time', () => {
   it('refuses the card example: a set operator carrying a scalar', () => {
     const result = parse({ field: 'userRole', operator: 'in', value: 'admin' });
     const issue = valueIssue(result);
@@ -72,7 +72,7 @@ describe('#7113 — the reported shape is refused at authoring time', () => {
   });
 });
 
-describe('#7113 — list operators require an array', () => {
+describe('list operators require an array', () => {
   it.each(SKILL_TRIGGER_LIST_VALUE_OPERATORS)('%s refuses a scalar', (operator) => {
     const issue = valueIssue(parse({ field: 'objectName', operator, value: 'lead' }));
     expect(issue.code).toBe('custom');
@@ -109,7 +109,7 @@ describe('#7113 — list operators require an array', () => {
   });
 });
 
-describe('#7113 — identity operators require a string', () => {
+describe('identity operators require a string', () => {
   it.each(SKILL_TRIGGER_SCALAR_VALUE_OPERATORS)('%s refuses an array', (operator) => {
     const issue = valueIssue(parse({ field: 'objectName', operator, value: ['lead'] }));
     expect(issue.code).toBe('custom');
@@ -127,7 +127,7 @@ describe('#7113 — identity operators require a string', () => {
   });
 });
 
-describe('#7113 — `contains` keeps BOTH shapes (#5685: no stricter than the runtime)', () => {
+describe('`contains` keeps BOTH shapes — no stricter than the runtime', () => {
   it('accepts a string comparand — the substring branch', () => {
     expect(parse({ field: 'viewName', operator: 'contains', value: 'kanban' }).success).toBe(true);
   });
@@ -147,7 +147,7 @@ describe('#7113 — `contains` keeps BOTH shapes (#5685: no stricter than the ru
   });
 });
 
-describe('#7113 — the exported vocabularies are the contract, not a copy', () => {
+describe('the exported vocabularies are the contract, not a copy', () => {
   it('the two vocabularies are disjoint and both subsets of the operator enum', () => {
     const all = [
       ...SKILL_TRIGGER_LIST_VALUE_OPERATORS,
@@ -172,7 +172,7 @@ describe('#7113 — the exported vocabularies are the contract, not a copy', () 
   });
 });
 
-describe('#7113 — the refinement does not disturb the carrier', () => {
+describe('the value-shape refinement does not disturb the carrier', () => {
   it('an unrelated operator/value pair still parses through Skill.triggerConditions', () => {
     const skill = SkillSchema.parse({
       name: 'order_management',

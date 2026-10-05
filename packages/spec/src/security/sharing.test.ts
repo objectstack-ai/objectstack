@@ -421,7 +421,7 @@ describe('SharingRuleSchema', () => {
 // key used to be dropped silently, so a share the author intended was never
 // materialised — the same trap class this file's own history (#3896, #3865)
 // keeps closing.
-describe('unknown keys are rejected, not stripped (#4001)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const rule = {
     name: 'r', type: 'criteria' as const, object: 'task',
     condition: 'record.status == "open"',
@@ -472,7 +472,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
 // parses, what is refused, and where the refusal points. The runtime semantics
 // (per-record expansion, `multiple: true` honoured, empty column ⇒ nobody,
 // re-materialisation on the record's own write) are the executor's, #15072.
-describe("sharedWith.type: 'field' — the record-relative recipient (#14103)", () => {
+describe("sharedWith.type: 'field' — the record-relative recipient", () => {
   const rule = (sharedWith: unknown) => ({
     name: 'assignees_can_read',
     object: 'duly_assignment',

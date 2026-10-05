@@ -71,7 +71,7 @@ describe('AIModelConfigSchema', () => {
   });
 });
 
-describe('agent.tools retirement (ADR-0064 / #3820, tombstoned in #3894)', () => {
+describe('agent.tools retirement (ADR-0064) — tombstoned; tools move into skills', () => {
   it('REJECTS a legacy inline tools array, with the fix in the message', () => {
     // Tombstoned, not deleted: AgentSchema is `strictObject`, so a plain
     // deletion would reject the key with a generic unknown-key error.

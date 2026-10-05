@@ -142,7 +142,7 @@ function aiDoorBody(): string {
   return source.slice(start, end === -1 ? source.length : end);
 }
 
-describe('[#17487] the confirmation-gate prescriptions match the door that runs', () => {
+describe('the confirmation-gate prescriptions match the door that runs', () => {
   it('anchors on real text in all three carriers', () => {
     // Anti-vacuity for every assertion below: an empty carrier would pass
     // "carries no denial" by reading nothing.

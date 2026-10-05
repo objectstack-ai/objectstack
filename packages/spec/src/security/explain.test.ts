@@ -195,7 +195,7 @@ describe('ExplainRequestSchema — the request contract', () => {
     expect(recordLevel.recordId).toBe('lr_42');
   });
 
-  it('[#8326] recordIds round-trips a batch; singular and object-level requests are untouched by its presence in the schema', () => {
+  it('recordIds round-trips a batch; singular and object-level requests are untouched by its presence in the schema', () => {
     const batch = ExplainRequestSchema.parse({ object: 'leave_request', operation: 'update', recordIds: ['lr_1', 'lr_2'] });
     expect(batch.recordIds).toEqual(['lr_1', 'lr_2']);
     expect(batch.recordId).toBeUndefined();
@@ -204,7 +204,7 @@ describe('ExplainRequestSchema — the request contract', () => {
     expect(singular.recordIds).toBeUndefined();
   });
 
-  it('[#8326] the cap is 200: exactly 200 ids parse, 201 are refused (never truncated)', () => {
+  it('the cap is 200: exactly 200 ids parse, 201 are refused (never truncated)', () => {
     const ids = (n: number) => Array.from({ length: n }, (_, i) => `r_${i}`);
     expect(ExplainRequestSchema.parse({ object: 'x', operation: 'read', recordIds: ids(200) }).recordIds).toHaveLength(200);
     expect(EXPLAIN_BATCH_MAX_RECORD_IDS).toBe(200);
@@ -212,11 +212,11 @@ describe('ExplainRequestSchema — the request contract', () => {
     expect(over.success).toBe(false);
   });
 
-  it('[#8326] an empty recordIds array is refused — send at least one id or omit the field', () => {
+  it('an empty recordIds array is refused — send at least one id or omit the field', () => {
     expect(ExplainRequestSchema.safeParse({ object: 'x', operation: 'read', recordIds: [] }).success).toBe(false);
   });
 
-  it('[#8326] recordId + recordIds together is a loud refusal, never a silent precedence', () => {
+  it('recordId + recordIds together is a loud refusal, never a silent precedence', () => {
     const both = ExplainRequestSchema.safeParse({
       object: 'x', operation: 'read', recordId: 'r_1', recordIds: ['r_1', 'r_2'],
     });
@@ -224,7 +224,7 @@ describe('ExplainRequestSchema — the request contract', () => {
     expect(JSON.stringify(both.success ? [] : both.error.issues)).toContain('mutually exclusive');
   });
 
-  it('[#8326] non-string members are refused by the element schema', () => {
+  it('non-string members are refused by the element schema', () => {
     expect(ExplainRequestSchema.safeParse({ object: 'x', operation: 'read', recordIds: [42] }).success).toBe(false);
   });
 });
@@ -301,7 +301,7 @@ describe('ExplainDecisionSchema — the full decision report L3 consumes', () =>
     expect(parsed.layers[1].record?.outcome).toBe('excluded');
   });
 
-  it('[#8326] round-trips a batch decision — records[] carries the same verdict shape as record', () => {
+  it('round-trips a batch decision — records[] carries the same verdict shape as record', () => {
     const parsed = ExplainDecisionSchema.parse({
       allowed: true, object: 'leave_request', operation: 'update',
       principal: { userId: 'u2' },
@@ -410,7 +410,7 @@ describe('AccessMatrix schemas — the authoring-time companion', () => {
     });
   });
 
-  it('[#16870] the AUTHORING accept set refuses the very pair this snapshot shape tolerates', () => {
+  it('the AUTHORING accept set refuses a readScope beside viewAllRecords, the pair this snapshot shape tolerates', () => {
     // The boundary, asserted rather than described. If a later change makes
     // the authoring schema accept the pair again, this fails here too — the
     // snapshot tolerance above is only defensible while the door upstream of

@@ -129,7 +129,7 @@ describe('OrganizationSchema', () => {
  * The whole accept set is pinned, not just the row that moved — see the sibling
  * block in `identity.test.ts` for why.
  */
-describe('[#18509] OrganizationSchema.logo accept set', () => {
+describe('OrganizationSchema.logo accept set — null, the shape better-auth serves', () => {
   const base = {
     id: 'org_123',
     name: 'Acme Corporation',
@@ -198,7 +198,7 @@ describe('[#18509] OrganizationSchema.logo accept set', () => {
    * "accepts the served body" and "stopped checking" are otherwise the same
    * green.
    */
-  it('[#18728] accepts a served read-route body WHOLE — updatedAt absent, metadata decoded', () => {
+  it('accepts a served read-route body WHOLE — updatedAt absent, metadata decoded', () => {
     const served = {
       id: 'org_123',
       name: 'Acme Corporation',
@@ -213,7 +213,7 @@ describe('[#18509] OrganizationSchema.logo accept set', () => {
     expect(result.success).toBe(true);
   });
 
-  it('[#18728] accepts the same body with metadata OMITTED — an unset column', () => {
+  it('accepts the same body with metadata OMITTED — an unset column', () => {
     const { metadata: _unset, ...withoutMetadata } = {
       id: 'org_123',
       name: 'Acme Corporation',
@@ -226,7 +226,7 @@ describe('[#18509] OrganizationSchema.logo accept set', () => {
     expect(result.success).toBe(true);
   });
 
-  it('⭐ [#18728] still REFUSES metadata as null or as the stored JSON text', () => {
+  it('⭐ still REFUSES metadata as null or as the stored JSON text', () => {
     // The producer omits an unset column and decodes a set one, so neither of
     // these is a shape any route sends. They must stay refused: if either ever
     // parses, the producer has regressed or this schema has been loosened to
@@ -245,7 +245,7 @@ describe('[#18509] OrganizationSchema.logo accept set', () => {
     }
   });
 
-  it('⭐ [#18728] `.optional()` widened updatedAt by ABSENCE only — a present value is still a datetime', () => {
+  it('⭐ `.optional()` widened updatedAt by ABSENCE only — a present value is still a datetime', () => {
     const result = OrganizationSchema.safeParse({
       id: 'org_123',
       name: 'Acme Corporation',

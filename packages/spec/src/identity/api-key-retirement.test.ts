@@ -52,7 +52,7 @@ import {
 //
 // Form follows #4988 / #5055 / #8075: resolved symbol identity over every
 // public entry via the build-time `export-origins/` artifact.
-describe('[#8715] identity/ ApiKeySchema retirement', () => {
+describe('identity/ ApiKeySchema retirement', () => {
   /** The 3 names the retired def exported (1 schema const + 2 types). */
   const RETIRED_NAMES = ['ApiKeySchema', 'ApiKey', 'ApiKeyParsed'] as const;
 
@@ -79,7 +79,7 @@ describe('[#8715] identity/ ApiKeySchema retirement', () => {
 
     // ── ABSENCE (every entry, not just ./identity) ────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #8715`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after the ApiKeySchema retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────

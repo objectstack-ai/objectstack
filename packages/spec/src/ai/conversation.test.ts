@@ -291,7 +291,7 @@ describe('ConversationSessionSchema', () => {
   it('should accept full session with messages', () => {
     const session = {
       id: 'session-1',
-      name: 'Support Chat - Case #123',
+      name: 'Support Chat - Case',
       context: {
         sessionId: 'session-1',
         userId: 'user-1',
@@ -590,7 +590,7 @@ describe('Real-World Conversation Examples', () => {
 // `ConversationAnalytics` is runtime-emitted, so the silent-strip alternative
 // is the real hazard: this shape is not strict, and a producer still writing
 // `duration` would have lost the one measurement on the row with no error at all.
-describe('ConversationAnalytics.duration carries its unit (#15680)', () => {
+describe('ConversationAnalytics.duration carries its unit', () => {
   const base = {
     sessionId: 'session-1',
     totalMessages: 10,

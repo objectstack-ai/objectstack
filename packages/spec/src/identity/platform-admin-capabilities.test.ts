@@ -7,7 +7,7 @@ import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from './eval-user.z
 import { PermissionSetSchema } from '../security/permission.zod';
 import { PLATFORM_CAPABILITIES, PLATFORM_CAPABILITY_NAMES } from '../security/capabilities';
 
-describe('ADMIN_FULL_ACCESS_CAPABILITIES (#11965, Choice 6A)', () => {
+describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-security imports', () => {
   it('carries exactly the two capability-bearing fields — name/label stay with the declaring package', () => {
     // The export is the capability CONTENT, not a permission set. `name` /
     // `label` (or any other authored field) creeping in here would make the
@@ -31,7 +31,7 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES (#11965, Choice 6A)', () => {
     expect(parsed.objects['*'].modifyAllRecords).toBe(true);
   });
 
-  it('the wildcard grants NO export — #8681 ruling pinned at the declaration\'s new home', () => {
+  it('the wildcard grants NO export — export stays an opt-in axis, pinned at the declaration\'s new home', () => {
     // [#3544/#8681] export is an OPT-IN axis, deliberately absent from the
     // super-user wildcard (maintainer ruling 2026-08-15). Moving the
     // declaration into spec must not resurrect it.
@@ -40,7 +40,7 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES (#11965, Choice 6A)', () => {
     expect(parsed.objects['*'].allowExport).not.toBe(true);
   });
 
-  it('[#21260] carries the compliance ledger’s audit capability, declared org-scoped', () => {
+  it('carries the compliance ledger’s audit capability, declared org-scoped', () => {
     // Ruling B on #21175: platform administrators hold it by default, through
     // this grant (and the config-derived envelope core builds from this same
     // list). The other shipped sets withhold it, pinned on the seeded sets in

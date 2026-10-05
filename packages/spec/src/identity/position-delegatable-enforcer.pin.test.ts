@@ -101,7 +101,7 @@ function unbackedRuleIds(prose: string, backed: Set<string>): string[] {
   return [...new Set(named.filter((id) => !backed.has(id)))];
 }
 
-describe('`delegatable` JSDoc names only enforcers that exist (#6628)', () => {
+describe('`delegatable` JSDoc names only enforcers that exist', () => {
   it('reads a real rule table off `packages/lint`', () => {
     const ids = declaredSecurityRuleIds();
     // A floor, not an exact count — new security rules are expected. Its only

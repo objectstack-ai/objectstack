@@ -112,7 +112,7 @@ const FACES: ReadonlyArray<readonly [string, string]> = [
   ['.describe()', describeFace()],
 ];
 
-describe('[#6919] rls.zod.ts states one predicate grammar on all three faces', () => {
+describe('rls.zod.ts states one predicate grammar on all three faces', () => {
   it('finds all three faces at all (anti-vacuity)', () => {
     // Every assertion below is a search over a string. An empty haystack would
     // make the negative ones pass forever the day someone moves a block.
