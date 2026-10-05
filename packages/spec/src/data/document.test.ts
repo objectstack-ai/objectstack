@@ -235,7 +235,7 @@ describe('ESignatureConfigSchema', () => {
   // pin, the tsc `never` channel and the ADR-0087 registration — lives in
   // `esignature-deadline-keys-retirement.test.ts`; these two are the family
   // tests' one-line refusal witnesses (the #14477 house shape).
-  it('REFUSES an authored `expirationDays` — a retiredKey() tombstone since #14477 (ADR-0049)', () => {
+  it('REFUSES an authored `expirationDays` — a retiredKey() tombstone, since nothing ever read it (ADR-0049)', () => {
     const wellFormed = {
       provider: 'custom',
       signers: [{ email: 'test@example.com', name: 'Test', role: 'Test', order: 1 }],
@@ -252,7 +252,7 @@ describe('ESignatureConfigSchema', () => {
     expect(parsed).not.toHaveProperty('expirationDays');
   });
 
-  it('REFUSES an authored `reminderDays` — a retiredKey() tombstone since #14477 (ADR-0049)', () => {
+  it('REFUSES an authored `reminderDays` — a retiredKey() tombstone, since nothing ever read it (ADR-0049)', () => {
     const wellFormed = {
       provider: 'docusign',
       signers: [{ email: 'test@example.com', name: 'Test', role: 'Test', order: 1 }],

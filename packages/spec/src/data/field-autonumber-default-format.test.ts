@@ -25,7 +25,7 @@ import { z } from 'zod';
 import { FieldSchema } from './field.zod';
 import { DEFAULT_AUTONUMBER_FORMAT, resolveAutonumberFormat } from './autonumber-format';
 
-describe('FieldSchema.autonumberFormat — the declared contract default (#6555)', () => {
+describe('FieldSchema.autonumberFormat — the declared contract default', () => {
   it('declares `{0000}` as the JSON-Schema default for the key', () => {
     const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
       unrepresentable: 'any',

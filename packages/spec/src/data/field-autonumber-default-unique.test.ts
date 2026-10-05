@@ -51,7 +51,7 @@ function minimalField(type: string): Record<string, unknown> {
   return input;
 }
 
-describe('#13894 — autonumber defaults to unique: organization', () => {
+describe('autonumber defaults to unique: organization', () => {
   it("materializes 'organization' when the author omits `unique`", () => {
     const parsed = FieldSchema.parse({ type: 'autonumber' });
     expect(parsed.unique).toBe('organization');
@@ -101,7 +101,7 @@ describe('#13894 — autonumber defaults to unique: organization', () => {
     expect(text.indexOf('unique')).toBe(text.indexOf('multiple') + 1);
   });
 
-  it('is idempotent — parse(parse(x)) is byte-identical (the #9689 class)', () => {
+  it('is idempotent — parse(parse(x)) is byte-identical', () => {
     for (const input of [{ type: 'autonumber' }, { type: 'autonumber', unique: false }, { type: 'text' }]) {
       const once = FieldSchema.parse(input);
       const twice = FieldSchema.parse(once);

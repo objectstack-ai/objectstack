@@ -372,7 +372,7 @@ describe('NoSQL Driver Protocol', () => {
 // never on a bare `toThrow()`. The shape is not strict, so without the
 // tombstone a query authored with `timeout` would have run with NO deadline at
 // all — the failure a driver timeout exists to prevent — and reported nothing.
-describe('NoSQLQueryOptions.timeout carries its unit (#15680)', () => {
+describe('NoSQLQueryOptions.timeout carries its unit', () => {
   it('REFUSES the retired `timeout` with the rename in the message', () => {
     const result = NoSQLQueryOptionsSchema.safeParse({ timeout: 5000 });
     expect(result.success).toBe(false);
