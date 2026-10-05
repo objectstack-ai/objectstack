@@ -183,7 +183,7 @@ describe('declared keys that now have a form row (#19085)', () => {
  * the form; it does not read the row's control or where it sits, so this pin
  * keeps both.
  */
-describe('object.imageField is a plain text row beside nameField (#21765)', () => {
+describe('object.imageField is offered as a plain text row beside nameField, with the parse as the one judge of its value', () => {
   /** The section holding `key` on the object form, and the key's index in it. */
   const locate = (key: string) => {
     const sections = ((METADATA_FORM_REGISTRY.object as any)?.sections ?? []) as Array<{
