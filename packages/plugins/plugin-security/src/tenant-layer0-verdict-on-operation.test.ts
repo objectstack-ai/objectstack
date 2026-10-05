@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { TENANT_SCOPE_FIELD_DEF } from '@objectstack/metadata-core';
+import { TENANT_SCOPE_FIELD_DEF, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { SecurityPlugin } from './security-plugin.js';
@@ -206,7 +206,13 @@ async function boot(opts: {
     objectql: {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       getSchema: (name: string) => SCHEMAS[name],
-      findOne: vi.fn(async (object: string, o: any) => rowsOf(object, o?.where)[0] ?? null),
+      // [#21829] An engine double now that it answers `find` too, so its
+      // `findOne` refuses what the real engine refuses
+      // (`check:engine-double-contract`).
+      findOne: vi.fn(async (object: string, o: any) => {
+        assertEngineFindOnePredicate(object, o);
+        return rowsOf(object, o?.where)[0] ?? null;
+      }),
       // The caller's bound is applied AFTER the filter and BY PRESENCE: core's
       // grants resolution hands every one of these reads a `limit`, and a
       // double that silently ignores it cannot report what the real engine
