@@ -1112,6 +1112,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.platform-store-system-opt-in.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.platform-store-system-opt-in.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.platform-store-system-opt-in.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.publish-commit-capture-read-failure.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -180,6 +180,19 @@ describe('ObjectQLPlugin.resyncAuthoredHooks (#2588)', () => {
     const [hooks] = ql.bindHooks.mock.calls[0];
     expect(hooks.map((h: AnyRecord) => h.name)).toEqual(['good_hook']);
   });
+
+  // [#21911, ADR-0096] The boot / resync read carries the explicit system
+  // opt-in rather than reaching the engine as a principal-less context. No
+  // singular rows, so the legacy plural fallback issues too.
+  it('reads sys_metadata with the explicit system opt-in on every read (#21911)', async () => {
+    ql.find.mockResolvedValue([]);
+
+    await (makePlugin(ql) as any).resyncAuthoredHooks(makeCtx());
+
+    const reads = ql.find.mock.calls.filter(([obj]: [string]) => obj === 'sys_metadata');
+    expect(reads.map(([, q]: [string, AnyRecord]) => q?.where?.type)).toEqual(['hook', 'hooks']);
+    for (const [, q] of reads) expect(q?.context).toEqual({ isSystem: true });
+  });
 });
 
 describe('ObjectQLPlugin protocol-mutation subscription (#2588)', () => {
