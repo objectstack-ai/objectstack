@@ -32,8 +32,21 @@ own `config.<path>` — array elements included (`config.servers.0.password`):
   array holding a non-empty string, number or bytes (an array of objects there has
   each object judged as a credential-shaped object, below). The key
   (`isCredentialShapedConfigKey`) is NFKC-normalised first; a key that is then longer
-  than 256 characters, or still holds a non-ASCII character, is credential-shaped
-  without being read. Otherwise it is judged on its whole name, split into words at
+  than 256 characters is credential-shaped without being read. A key that still holds
+  a non-ASCII character is credential-shaped when that text sits inside or next to a
+  credential word: it holds a credential word of another script (`密码`, `密碼`, `口令`,
+  `密钥`, `密鑰`, `秘钥`, `令牌`, `凭证`, `憑證`, `パスワード`, `暗証番号`, `秘密鍵`, `トークン`,
+  `비밀번호`, `토큰`, `пароль`, `токен`, `contraseña`, matched inside the key's text); read
+  with its invisible format characters (soft hyphen, zero-width space and joiners,
+  word joiner, BOM) removed and its Cyrillic and Greek look-alike letters as the Latin
+  letters they render as, it is credential-shaped (a Cyrillic `а` inside `password`);
+  or, in a run with no ASCII separator that mixes ASCII letters or digits with
+  non-ASCII characters, the ASCII word touching a non-ASCII character is
+  credential-shaped on its own (`password密码`), or a credential word of four or more
+  letters is spelled with non-ASCII characters standing in for or inserted between at
+  most one letter in four, format characters inserted free (`tok€n`). Otherwise a run
+  of non-ASCII characters is a word of its own, so `客户名称`, `Größe` and `café` are not
+  credential-shaped. The key is judged on its whole name, split into words at
   separators and camel-case boundaries, case-insensitively — words, never substrings.
   It is never credential-shaped when its last word is a locator, identifier or
   descriptor (`ref`, `refs`, `reference`, `arn`, `id`, `ids`, `name`, `names`, `path`,
@@ -49,7 +62,8 @@ own `config.<path>` — array elements included (`config.servers.0.password`):
   words and a plural `s` (never the `s` of a word already ending in `s`: `sass` is not
   `sas`), when one of its words is `password`, `passwd`, `passphrase`, `secret` or
   `credential`; when its last word is `token`, `pass`, `pw`, `pwd`, `jwt`, `pat`,
-  `cookie`, `sas`, `auth`, `authorization`, `bearer`, `apikey` or `privkey`, or folds
+  `cookie`, `sas`, `auth`, `authorization`, `bearer`, `apikey`, `privkey`, `pfx`,
+  `pkcs12` or `p12`, or folds
   a compound ending (`db_accesstoken`); when its last word is `key` alone or beside
   `api`, `private`, `secret`, `signing`, `master`, `encryption`, `decryption`,
   `account`, `shared`, `client`, `session`, `auth`, `hmac`, `license`, `subscription`,
@@ -71,15 +85,22 @@ own `config.<path>` — array elements included (`config.servers.0.password`):
   or `credential` followed by nothing, `key`, `accesskey`, `hash` or `string`
   (`secretaccesskey` — not `secretary`), or when it ends in a folded key-material
   compound (`accesstoken`, `apikey`, `privatekey`, `secretkey`, `serviceaccountkey`,
-  `serviceaccountjson`, `privkey`, `sslkey`, `tlskey`, `basicauth`, `bearerauth`,
+  `serviceaccountjson`, `privkey`, `pfx`, `sslkey`, `tlskey`, `basicauth`, `bearerauth`,
   `digestauth`, …); a one-word key starting with `max`, `min`, `num`, `total` or
   `count` is not. **A bare `key` (or `keys`) in an object** is credential material
-  only inside a credential-shaped or header-ish holder (a key one of whose words is
-  `header` or `headers`), or when its value looks like a secret
-  (`looksLikeSecretValue`): a string — or a list element — of at least 16 characters
-  with no whitespace that mixes upper-case letters, lower-case letters and digits, or
-  of at least 32 characters of `A`–`Z`, `a`–`z`, `0`–`9`, `+`, `/`, `=`, `_`, `-`,
-  `.`, `~` holding a digit; bytes count too. So `{ key: 'email' }` is accepted.
+  only inside a credential-shaped, header-ish (a key one of whose words is `header` or
+  `headers`) or TLS holder (a key one of whose words is `ssl`, `tls`, `mtls`, `x509`,
+  `pfx`, `pkcs12` or starts with `cert`: `ssl: { key, cert, ca }`), or when its value
+  looks like key material: a string — or a list element — that looks like a secret
+  (`looksLikeSecretValue`: at least 16 characters with no whitespace that mix
+  upper-case letters, lower-case letters and digits, or at least 32 characters of
+  `A`–`Z`, `a`–`z`, `0`–`9`, `+`, `/`, `=`, `_`, `-`, `.`, `~` holding a digit), at
+  least 16 characters of hexadecimal holding a letter, or digit-free text of which 30%
+  to 70% of the letters are upper-case with at least four lower-to-upper steps that is
+  base64 (at least 16 characters of letters, `+` and `/` with up to two `=`, a length
+  divisible by four, holding a `+`, `/` or `=`) or at least 24 letters, `-` and `_`;
+  bytes count too. So `{ key: 'email' }` and `{ key: 'customerEmailAddress' }` are
+  accepted.
   Everywhere else — a query, fragment or form parameter, a connection-string segment,
   a pair label, a tuple's name — `key` keeps its full judgment.
 - **The secret leaves of a credential-shaped object** (`credentials: {…}`,
@@ -100,9 +121,12 @@ own `config.<path>` — array elements included (`config.servers.0.password`):
   number). In a flat list directly under a header-ish key with an even number of
   elements (`rawHeaders: ['Authorization', '…', 'Accept', 'json']`), the element
   after each credential-shaped name at an even position.
-- **A string carrying a credential, anywhere** (pair labels included): a
-  JSON-encoded object or array (the string's first non-space character is `{` or `[`
-  and it parses), walked by these same rules; a URL userinfo password (`scheme://`, a
+- **A string carrying a credential, anywhere** (pair labels included): a string
+  longer than 65,536 characters, which is not read at all (refused at publish, served
+  empty); a JSON-encoded object or array (the string's first non-space character is
+  `{` or `[` and it parses), walked by these same rules; PEM private-key armour
+  (`-----BEGIN … PRIVATE KEY-----`: `RSA`, `EC`, `DSA`, `ENCRYPTED`, `OPENSSH`, and
+  `PGP PRIVATE KEY BLOCK`), whose block is removed on read; a URL userinfo password (`scheme://`, a
   stacked `jdbc:mysql://` or a scheme-relative `//`); a URL userinfo username with no
   password, or an empty one, that looks like a secret (the rule above:
   `https://ghp_…@host`); a URL query or fragment pair whose name is credential-shaped
@@ -110,20 +134,27 @@ own `config.<path>` — array elements included (`config.servers.0.password`):
   `&X-Amz-Signature=`, `#access_token=`, `#password=`); a credential property in a
   URL's `;key=value` tail (`sqlserver://h;user=u;password=p`); the Oracle thin-driver
   userinfo (`jdbc:oracle:thin:user/password@…`); a scheme-less userinfo password
-  (`user:password@host/db`); a `Name: value` header line, on any line of the string,
-  whose name is a header token that is credential-shaped and whose value is non-empty
-  (`Authorization: Bearer …`); a libpq keyword/value pair whose keyword is
+  (`user:password@host/db`; after an opaque `mailto:`, `sip:`, `sips:`, `tel:`,
+  `urn:`, `xmpp:`, `news:`, `im:` or `pres:` prefix the rest is read instead, and a
+  time of day before the `@` — `12:30@` — is none); a `Name: value` header line,
+  on any line of a multi-line string or of any string under a header-ish key, whose
+  name is a header token that is credential-shaped and whose value is non-empty
+  (`Authorization: Bearer …`; a one-line `description: 'Password: …'` is prose); a libpq keyword/value pair whose keyword is
   credential-shaped, found leniently — a keyword at the start of the string or after
   whitespace, optional whitespace, `=`, and a value single-quoted with `\'` / `\\`
   escapes or a run of non-space characters; any other token is skipped, and an
   unclosed quote runs to the end of the string (`host=h password=p`, an unquoted `;`
   in the value included); a credential segment of a semicolon-delimited connection
-  string (`Server=h;Password=p`, `Pwd=`, `AccountKey=`; quoted values honoured); and
+  string (`Server=h;Password=p`, `Pwd=`, `AccountKey=`; quoted values honoured) —
+  a libpq or segment value that starts with a SQL bind placeholder (`$1`, `?`,
+  `:name`) ending at whitespace, `)`, `,`, `;` or the end is none
+  (`WHERE token = $1`); and
   a credential pair of a form-encoded string — no whitespace, an `&` and an `=`, an
   optional leading `?` (`a=b&pass=c`). Every key, segment key, parameter name and
   header name inside a string is judged by the same key rule, the 256-character cap
-  included. Bytes outside a credential position are judged by their UTF-8 text, as
-  one value.
+  and the non-ASCII reading included. Bytes outside a credential position are judged
+  by their UTF-8 text, as one value; more than 65,536 bytes are judged credential
+  material unread.
 - **A subtree nested deeper than 16 levels** (a JSON-encoded string's contents
   counted from where the string sits), and **a `Map` or a `Set` anywhere**, which
   cannot be judged and are not accepted unjudged.
@@ -173,7 +204,11 @@ deleted every credential withheld inside an array. A flow node with no `id` is f
 the same way.
 
 **`@objectstack/service-datasource`:** `restoreRedactedConfig` follows the identity
-rule above. The credential-migration planner now reports a
+rule above, and carries a value forward only where the read path would still withhold
+it: the grafted config is redacted again and a graft survives only when its landing
+position is still withheld, repeated until nothing more drops — so a pair's value
+beside a label renamed to a non-credential name, a deleted label, or a renamed `key:`
+label is dropped, never served. An untouched Save skips the second walk. The credential-migration planner now reports a
 contractless row's top-level keys that hold any such finding as residue and refuses with its remedy, instead of answering
 `nothing-to-migrate` while the value sits in cleartext.
 
@@ -181,8 +216,14 @@ contractless row's top-level keys that hold any such finding as residue and refu
 `embeddedCredentialOf`, `redactEmbeddedCredentials`, `connectionStringCredentialKeys`,
 `findContractlessCredentials` (with its `ContractlessCredentialFinding` type, whose
 `kind` is `named`, `embedded`, `depth` or `opaque`, and
-`CONTRACTLESS_CREDENTIAL_WALK_DEPTH`), `withholdContractlessCredentials`,
-`looksLikeSecretValue`, and `isContractlessDriver`.
+`CONTRACTLESS_CREDENTIAL_WALK_DEPTH`; an `embedded` finding under a header-ish key
+carries `headerish: true`), `withholdContractlessCredentials`, `looksLikeSecretValue`,
+`MAX_JUDGED_STRING_LENGTH`, the `EmbeddedCredentialOptions` type (`headerish`, taken
+by `embeddedCredentialOf` and `redactEmbeddedCredentials`), and `isContractlessDriver`.
+
+⚠️ A config that inlines a value longer than 65,536 characters under a contractless
+driver (a large CA bundle, for instance) is refused at publish and served empty;
+reference such material by path instead.
 
 ⚠️ **The out-of-repo consumer population is NOT MEASURED.** No datasource in this
 repository uses a contractless driver; plugin drivers in other repositories that

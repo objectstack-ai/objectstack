@@ -1130,11 +1130,20 @@ function embeddedCredentialAt(value: string, depth: number, headerish = false): 
  *  - the Oracle thin-driver userinfo (`jdbc:oracle:thin:user/pass@host`);
  *  - a scheme-less userinfo password (`user:pass@host/db`);
  *  - a `Name: value` header line (one per line) whose name is
- *    credential-shaped (`Authorization: Bearer …`);
+ *    credential-shaped (`Authorization: Bearer …`) — see below for when a
+ *    string is read for header lines;
  *  - a libpq keyword/value pair (`host=h password=p`), found leniently;
  *  - a semicolon-delimited connection-string segment (`Server=h;Password=p`);
  *  - a form-encoded pair (`a=b&pass=c`).
  *
+ *  - PEM private-key armour (`-----BEGIN … PRIVATE KEY-----`), anywhere in it.
+ *
+ * A string longer than {@link MAX_JUDGED_STRING_LENGTH} is not read: it is
+ * judged credential material. A header line is read in a multi-line string,
+ * or in a single-line one only with {@link EmbeddedCredentialOptions.headerish}.
+ * A libpq or segment value starting with a SQL bind placeholder (`$1`, `?`,
+ * `:name`) is none; an opaque URI scheme prefix (`mailto:`, `sip:`, …) is not
+ * a userinfo username, and a time of day (`12:30@`) is no userinfo.
  * Every key inside a string is judged by {@link isCredentialShapedConfigKey},
  * and only a NON-EMPTY credential counts.
  */
@@ -1517,8 +1526,9 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
  *    a non-empty string, a number, non-empty bytes (a `Buffer` or typed array,
  *    judged as ONE value), or an array holding a non-empty primitive
  *    (`apiKeys: ['k1', 'k2']`). A boolean is a flag, never a secret. A bare
- *    `key` counts only inside a credential-shaped or header-ish holder, or
- *    holding a value that looks like a secret ({@link looksLikeSecretValue});
+ *    `key` counts only inside a credential-shaped, header-ish or TLS holder
+ *    ({@link isKeyMaterialHolder}), or holding a value that looks like key
+ *    material ({@link looksLikeBareKeyMaterial});
  *  - inside an object reached under a credential-shaped key (`credentials`,
  *    `auth`), every leaf except a descriptor or identity (`type`, `clientId`,
  *    `user`, …) — an OBJECT below a descriptor key stays inside that context;
