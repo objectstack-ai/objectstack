@@ -43,7 +43,7 @@ import { ScriptValidationSchema } from './validation.zod';
 const fieldDoc = (key: string): string =>
   ((FieldSchema.shape as Record<string, { description?: string }>)[key]?.description) ?? '';
 
-describe('#13879 — `Field.requiredWhen` states its TRANSITION-GATE semantics', () => {
+describe('`Field.requiredWhen` states its TRANSITION-GATE semantics', () => {
   it('names the class and the exact rejection condition', () => {
     const doc = fieldDoc('requiredWhen');
     expect(doc).toContain('TRANSITION GATE');
@@ -81,7 +81,7 @@ describe('#13879 — `Field.requiredWhen` states its TRANSITION-GATE semantics',
   });
 });
 
-describe('#13879 — the field bounds state the same transition-gate class', () => {
+describe('the field bounds state the same transition-gate class', () => {
   // Hardcoded rather than derived from a module set, so this is an independent
   // measurement of which keys carry the statement.
   it.each(['min', 'max', 'minLength', 'maxLength'])(
@@ -108,7 +108,7 @@ describe('#13879 — the field bounds state the same transition-gate class', () 
   );
 });
 
-describe('#13879 — the inline-grid column `requiredWhen` says it enforces nothing', () => {
+describe('the inline-grid column `requiredWhen` says it enforces nothing', () => {
   // The trap this closes: the grid column mirrors objectui's renderer and has
   // no write-path reader at all (`inlineColumns` is classified `presentation`
   // by driver-sql). An author who writes the requirement only here gets no
@@ -127,7 +127,7 @@ describe('#13879 — the inline-grid column `requiredWhen` says it enforces noth
   });
 });
 
-describe('#13879 — the `script` rule states its INVARIANT semantics', () => {
+describe('the `script` rule states its INVARIANT semantics', () => {
   const doc = ((ScriptValidationSchema.shape as Record<string, { description?: string }>)
     .condition?.description) ?? '';
 

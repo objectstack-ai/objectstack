@@ -16,7 +16,7 @@ import { IndexSchema } from './object.zod';
  * place). Rejected words carry the fix: `'tenant'`/`'org'` name
  * `'organization'` in the parse error (ADR-0120 §Terminology).
  */
-describe('UniqueScope (#3696, ADR-0120)', () => {
+describe('UniqueScope (ADR-0120) — bare `true` on a field is unique per organization; global uniqueness must be said', () => {
   describe('FieldSchema.unique', () => {
     it("accepts true / false / 'global' / 'organization'", () => {
       for (const unique of [true, false, 'global', 'organization'] as const) {
