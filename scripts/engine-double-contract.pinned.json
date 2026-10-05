@@ -2882,6 +2882,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/user-created-in-request.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-email/src/attachment-reclaim.test.ts",
       "verb": "delete",
       "pinned": 1
