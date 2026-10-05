@@ -172,7 +172,7 @@ describe('registration judges node config VALUES with the executor-declared cont
         });
         expect(ApprovalNodeConfigSchema.safeParse(definition.nodes[1].config).success).toBe(false);
         const err = refusalOf(engine, 'ignored_fallback', definition);
-        expect(err.message).toContain("node 'gate' (approval): config.fallbackApprovers: ");
+        expect(err.message).toContain("node 'gate' (approval): config.onEmptyApprovers: fallbackApprovers is only read");
     });
 
     it('a node type whose executor declares no contract keeps key-name-only judgement', async () => {
