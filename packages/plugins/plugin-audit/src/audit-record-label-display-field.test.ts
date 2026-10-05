@@ -95,8 +95,8 @@ const objects = [
   {
     name: OBJ.credential,
     label: 'Label Credential',
-    nameField: 'api_secret',
-    fields: { name: text('name'), api_secret: { name: 'api_secret', label: 'API Secret', type: 'secret' as const } },
+    nameField: 'pass_code',
+    fields: { name: text('name'), pass_code: { name: 'pass_code', label: 'Pass Code', type: 'password' as const } },
   },
 ];
 
@@ -176,7 +176,7 @@ describe('[#21878] the activity record label is the ADR-0079 title, with the id 
     ids.titled = await insert(OBJ.titled, { title: V.title });
     ids.subjected = await insert(OBJ.subjected, { subject: V.subject });
     ids.pointer = await insert(OBJ.pointer, { name: V.pointerName, code: V.code });
-    ids.credential = await insert(OBJ.credential, { name: V.credentialName, api_secret: V.secret });
+    ids.credential = await insert(OBJ.credential, { name: V.credentialName, pass_code: V.secret });
   }, 120_000);
 
   afterAll(async () => {
