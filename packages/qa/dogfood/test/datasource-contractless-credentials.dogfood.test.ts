@@ -8,8 +8,9 @@
  * boot on one database file.
  *
  * Before: such a datasource's `config` was validated against nothing, so
- * `apiKey`, `client_secret`, `secretAccessKey`, `privateKey`, `accessToken` and
- * a `Password=` segment inside a connection string were accepted at publish,
+ * `apiKey`, `client_secret`, `secretAccessKey`, `privateKey`, `accessToken`, a
+ * `Password=` segment inside a connection string, a password inside an array
+ * element and an `Authorization` header pair were accepted at publish,
  * stored cleartext in `sys_metadata` and its history, and served back on every
  * administrator read door — only `password` / `token`-style names and URL
  * credentials were withheld.
@@ -53,6 +54,8 @@ const SECRETS = {
   privateKey: 'pin-dogfood-privatekey-91fc',
   accessToken: 'pin-dogfood-accesstoken-06ab',
   connectionPassword: 'pin-dogfood-cspassword-c8e7',
+  serverPassword: 'pin-dogfood-serverpw-5d13',
+  headerBearer: 'pin-dogfood-headerbearer-a2f6',
 } as const;
 const ALL = Object.values(SECRETS);
 const SYSTEM = { isSystem: true } as const;
@@ -71,6 +74,8 @@ const LEGACY_BODY = {
     privateKey: SECRETS.privateKey,
     accessToken: SECRETS.accessToken,
     connectionString: `Server=${MARKER};User Id=u;Password=${SECRETS.connectionPassword}`,
+    servers: [{ host: MARKER, password: SECRETS.serverPassword }],
+    headers: [{ name: 'Authorization', value: `Bearer ${SECRETS.headerBearer}` }],
   },
 };
 
@@ -139,9 +144,11 @@ describe('contractless-driver datasource credentials: refused at write, withheld
       'config.accessToken',
       'config.apiKey',
       'config.connectionString',
+      'config.headers.0.value',
       'config.oauth.client_secret',
       'config.privateKey',
       'config.secretAccessKey',
+      'config.servers.0.password',
     ]);
     expect(leaked(meta.text)).toEqual([]);
 
@@ -210,6 +217,8 @@ describe('contractless-driver datasource credentials: refused at write, withheld
       host: MARKER,
       oauth: { clientId: 'cid' },
       connectionString: `Server=${MARKER};User Id=u`,
+      servers: [{ host: MARKER }],
+      headers: [{ name: 'Authorization' }],
     });
   }, 180_000);
 

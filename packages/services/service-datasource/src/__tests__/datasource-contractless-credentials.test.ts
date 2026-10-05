@@ -38,10 +38,12 @@ const LEGACY: StoredDatasource = {
     privateKey: 'pk-1',
     accessToken: 'at-1',
     connectionString: 'Server=wh;User Id=u;Password=pw-1;Database=d',
+    servers: [{ host: 'a', password: 'srv-1' }, { host: 'b' }],
+    headers: [{ name: 'Authorization', value: 'Bearer hdr-1' }, { name: 'Accept', value: 'application/json' }],
   },
 };
 
-const CLEARTEXT = ['sk-live-1', 'cs-1', 'sak-1', 'pk-1', 'at-1', 'pw-1'];
+const CLEARTEXT = ['sk-live-1', 'cs-1', 'sak-1', 'pk-1', 'at-1', 'pw-1', 'srv-1', 'hdr-1'];
 
 function makeService(seed: StoredDatasource[] = []) {
   const records: StoredDatasource[] = seed.map((r) => structuredClone(r));
@@ -82,6 +84,8 @@ describe('createDatasource / updateDatasource refuse inline credentials for a co
     ['privateKey', { privateKey: 'pk-1' }],
     ['accessToken', { accessToken: 'at-1' }],
     ['connectionString', { connectionString: 'Server=wh;Password=pw-1' }],
+    ['servers.0.password', { servers: [{ host: 'a', password: 'srv-1' }] }],
+    ['headers.0.value', { headers: [{ name: 'Authorization', value: 'Bearer hdr-1' }] }],
   ])('create refuses `config.%s` and persists nothing, no secret minted', async (key, extra) => {
     const { service, records, ops } = makeService();
     await expect(
@@ -120,6 +124,8 @@ describe('getDatasource withholds a legacy contractless row\'s credentials', () 
       host: 'wh.internal',
       oauth: { clientId: 'cid' },
       connectionString: 'Server=wh;User Id=u;Database=d',
+      servers: [{ host: 'a' }, { host: 'b' }],
+      headers: [{ name: 'Authorization' }, { name: 'Accept', value: 'application/json' }],
     });
     const served = JSON.stringify(ds);
     for (const secret of CLEARTEXT) expect(served).not.toContain(secret);
@@ -139,8 +145,20 @@ describe('the edit round trip on a legacy row', () => {
       host: 'wh.internal',
       oauth: { clientId: 'cid' },
       connectionString: 'Server=wh;User Id=u;Database=d',
+      servers: [{ host: 'a' }, { host: 'b' }],
+      headers: [{ name: 'Authorization' }, { name: 'Accept', value: 'application/json' }],
     };
     expect(restoreRedactedConfig(DRIVER, patch, LEGACY.config)).toEqual(LEGACY.config);
+    // The patch's own arrays are copied, never mutated.
+    expect(patch.servers).toEqual([{ host: 'a' }, { host: 'b' }]);
+  });
+
+  it('an author who changed an array element keeps their word; one who removed the array keeps it removed', () => {
+    const changed = { host: 'wh.internal', servers: [{ host: 'a', password: 'new-1' }, { host: 'b' }] };
+    const restored = restoreRedactedConfig(DRIVER, changed, LEGACY.config) as Record<string, any>;
+    expect(restored.servers).toEqual([{ host: 'a', password: 'new-1' }, { host: 'b' }]);
+    const removed = restoreRedactedConfig(DRIVER, { host: 'wh.internal' }, LEGACY.config) as Record<string, any>;
+    expect(removed.servers).toBeUndefined();
   });
 });
 
