@@ -99,8 +99,18 @@ export async function handleShareLinksRequest(
     query: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const result = await handleShareLinksRequestBody(deps, subPath, method, body, query, context);
-    if (!result.response || !isPublicShareLinkRoute(subPath, method)) return result;
+    const isPublic = isPublicShareLinkRoute(subPath, method);
+    let result: HttpDispatcherResult;
+    try {
+        result = await handleShareLinksRequestBody(deps, subPath, method, body, query, context);
+    } catch (err: unknown) {
+        // A throw from OUTSIDE the body's own try (service resolution, engine
+        // lookup) would otherwise leave a public route without the headers
+        // above. Authenticated routes keep their existing propagation.
+        if (!isPublic) throw err;
+        result = { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    if (!result.response || !isPublic) return result;
     return {
         ...result,
         response: { ...result.response, headers: { ...result.response.headers, ...PUBLIC_RESPONSE_HEADERS } },

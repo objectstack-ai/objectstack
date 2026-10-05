@@ -145,3 +145,29 @@ describe('[#21839] dispatcher public share-link routes are never cached', () => 
     expect(list.headers?.Vary).toBeUndefined();
   });
 });
+
+describe('[#21839] a throw outside the body try still carries the public headers', () => {
+  const throwingDeps = (): DomainHandlerDeps =>
+    ({
+      ...makeDeps(undefined, undefined),
+      resolveService: async () => {
+        throw Object.assign(new Error('service registry unavailable'), { status: 503 });
+      },
+    }) as unknown as DomainHandlerDeps;
+
+  it('resolveService throwing on /resolve and /messages answers the mapped error with the headers', async () => {
+    for (const route of ['/tok_21839/resolve', '/tok_21839/messages']) {
+      const res = await handleShareLinksRequest(throwingDeps(), route, 'GET', undefined, {}, {} as HttpProtocolContext);
+      expect(res.handled, route).toBe(true);
+      const answer = res.response as Answer;
+      expect(answer.status, route).toBe(503);
+      expectNoStore(answer, route);
+    }
+  });
+
+  it('an authenticated route still propagates the throw unchanged', async () => {
+    await expect(
+      handleShareLinksRequest(throwingDeps(), '', 'GET', undefined, {}, {} as HttpProtocolContext),
+    ).rejects.toThrow('service registry unavailable');
+  });
+});

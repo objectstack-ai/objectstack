@@ -69,6 +69,32 @@ describe('[#21839] share-link password: node:crypto and pure-JS scrypt are inter
     expect(nodeScrypt).not.toHaveBeenCalled();
   });
 
+  it('a password whose NFKC form differs from its input is one password on both paths', async () => {
+    // A decomposed e + combining acute, and a fullwidth A: NFKC rewrites both.
+    const raw = 'cafe\u0301 \uFF21 21839';
+    const normalised = 'caf\u00e9 A 21839';
+    expect(raw).not.toBe(normalised);
+    expect(raw.normalize('NFKC')).toBe(normalised);
+
+    // pure-JS mints, native verifies — either spelling of the same password.
+    onWebContainer(true);
+    const pureJsHash = await hashShareLinkPassword(raw);
+    onWebContainer(false);
+    expect(await verifyShareLinkPassword(raw, pureJsHash)).toBe(true);
+    expect(await verifyShareLinkPassword(normalised, pureJsHash)).toBe(true);
+    expect(await verifyShareLinkPassword('cafe A 21839', pureJsHash)).toBe(false);
+
+    // native mints, pure-JS verifies — either spelling of the same password.
+    onWebContainer(false);
+    const nativeHash = await hashShareLinkPassword(raw);
+    onWebContainer(true);
+    nodeScrypt.mockClear();
+    expect(await verifyShareLinkPassword(raw, nativeHash)).toBe(true);
+    expect(await verifyShareLinkPassword(normalised, nativeHash)).toBe(true);
+    expect(await verifyShareLinkPassword('cafe A 21839', nativeHash)).toBe(false);
+    expect(nodeScrypt).not.toHaveBeenCalled();
+  });
+
   it('the pure-JS key is byte-identical to node:crypto for the same password and salt', async () => {
     onWebContainer(true);
     const hash = await hashShareLinkPassword(PASSWORD);

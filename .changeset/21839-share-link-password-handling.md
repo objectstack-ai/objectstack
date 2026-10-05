@@ -1,6 +1,7 @@
 ---
 '@objectstack/plugin-sharing': patch
 '@objectstack/plugin-hono-server': patch
+'@objectstack/hono': patch
 '@objectstack/runtime': patch
 ---
 
