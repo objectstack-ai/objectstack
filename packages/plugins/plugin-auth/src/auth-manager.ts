@@ -737,7 +737,7 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * Optional outbound SMS service used by the phoneNumber plugin's OTP
    * callbacks (`sendOTP`, `sendPasswordResetOTP`) and the import SMS-invite
    * path (#2780). When omitted, `/phone-number/send-otp` fails loudly with
-   * NOT_SUPPORTED (the pre-SMS behaviour) instead of silently logging.
+   * 400 `SMS_SERVICE_REQUIRED` instead of silently logging.
    *
    * Resolved lazily through {@link AuthManager.getSmsService}; safe to set
    * after construction. AuthPlugin wires this from the kernel service
@@ -3559,7 +3559,7 @@ export class AuthManager {
       // `/reset-password`) whenever an SMS service is available — resolved
       // lazily per send so the plugin list stays stable while the capability
       // upgrades at kernel:ready. Without one, sendOTP still fails loudly
-      // (NOT_SUPPORTED) instead of silently logging. signUpOnVerification
+      // (400 SMS_SERVICE_REQUIRED) instead of silently logging. signUpOnVerification
       // stays deliberately NOT configured — phone-only accounts are created
       // by the admin create-user/import routes with a placeholder email
       // (see placeholder-email.ts), never by OTP self-signup.
@@ -5313,7 +5313,7 @@ export class AuthManager {
    * why it cannot live in the `sendOTP` callback). Consumes one unit of the
    * per-number budget and throws TOO_MANY_REQUESTS when the cooldown /
    * hourly cap is exhausted. No-op while OTP is undeliverable — the send
-   * callback then fails loudly with NOT_SUPPORTED instead.
+   * callback then fails loudly with 400 SMS_SERVICE_REQUIRED instead.
    */
   async assertPhoneOtpSendAllowed(phone: string): Promise<void> {
     if (!phone || !this.isPhoneOtpDeliverable()) return;
@@ -5330,7 +5330,8 @@ export class AuthManager {
    * #2780 — deliver a phone OTP through the SMS service.
    *
    * Security posture (all named requirements of #2780):
-   *  - No SMS service ⇒ throw NOT_SUPPORTED (loud, like the pre-SMS wiring).
+   *  - No deliverable SMS service ⇒ throw a 400 `SMS_SERVICE_REQUIRED`
+   *    `APIError` (loud, and a status the caller can branch on).
    *  - The per-number cooldown + hourly cap live in the `hooks.before`
    *    admission check, NOT here: better-auth stores the fresh code before
    *    invoking this callback, so a rejection at this point would still
@@ -5345,12 +5346,23 @@ export class AuthManager {
     const sms = this.getSmsService();
     if (!sms || !this.isPhoneOtpDeliverable()) {
       // Absent service, or a log-only transport in production (the code
-      // would vanish into a log no user can read) — fail loudly, exactly
-      // like the pre-SMS wiring.
-      throw new Error(
-        'NOT_SUPPORTED: phone-number OTP requires a configured SMS delivery service. ' +
-        'Phone sign-in is password-based (POST /sign-in/phone-number).',
-      );
+      // would vanish into a log no user can read) — refuse loudly, as a real
+      // `APIError` like the quota branch below: better-call maps ONLY an
+      // `APIError` to a status, and a plain `Error` reached the caller as a
+      // 500 with a null body, leaving the login page nothing to branch on.
+      // 400 + `SMS_SERVICE_REQUIRED` mirrors the email sibling
+      // (`EMAIL_SERVICE_REQUIRED`, also 400): a delivery service this request
+      // needs is not configured on this deployment. The code is registered
+      // for this package in the ADR-0112 error-code ledger. The message names
+      // the capability and the fix, and never the OTP code.
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('BAD_REQUEST', {
+        message:
+          'Phone verification codes are unavailable: this deployment has no configured SMS ' +
+          'delivery service. An administrator can configure one under Setup → Settings → SMS ' +
+          'Delivery; until then, sign in with your phone number and password.',
+        code: 'SMS_SERVICE_REQUIRED',
+      });
     }
     const otpCfg = this.config.phoneOtp ?? {};
     const minutes = Math.max(1, Math.round((otpCfg.expiresIn ?? 300) / 60));

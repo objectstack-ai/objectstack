@@ -419,6 +419,40 @@ describe('projectPermissionMutation (the awaited projector)', () => {
     expect(healed?._envProjection).toBeUndefined();
   });
 
+  // [#21789] The echo is served by the protocol's layered read as the item's
+  // `code` layer, and the envelope's `provenance` is read off it — so the echo
+  // must say what the lock says, or the read reports a lock the doors do not
+  // enforce (an org's own set rendered "locked by a code package").
+  it('[#21789] the echo of a set no code package ships says so: `_provenance: \'org\'`', async () => {
+    const ql = makeQl();
+    // The registry holds the stored row the way the hydrator registers it —
+    // a runtime package id stamped on, tenant provenance written over it.
+    (ql as any).registry = {
+      listItems: (t: string) => (t === 'permission'
+        ? [{ ...envBody(), _packageId: 'app.crm_workspace', _provenance: 'org' }]
+        : []),
+    };
+    const protocol = makeProtocol(ql);
+    ql.metaRows.push({ id: 'm1', type: 'permission', name: 'organization_admin', state: 'active', organization_id: null, metadata: JSON.stringify(envBody()) });
+    const metadata = makeMetadataFacade();
+    await projectPermissionMutation(protocol, { ql, metadata }, { type: 'permission', name: 'organization_admin', state: 'active' });
+    const entry = metadata.registry.get('permission/organization_admin');
+    expect({ marker: entry?._envProjection, provenance: entry?._provenance }).toEqual({ marker: true, provenance: 'org' });
+  });
+
+  it('[#21789] control: the echo of a legacy overlay of a code-shipped set does NOT claim tenant provenance', async () => {
+    const ql = makeQl();
+    const shipped = { ...envBody({ systemPermissions: ['declared.only'] }), _packageId: 'com.example.crm', _provenance: 'package' };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [shipped] : []) };
+    const protocol = makeProtocol(ql, { organization_admin: shipped });
+    ql.metaRows.push({ id: 'm1', type: 'permission', name: 'organization_admin', state: 'active', organization_id: null, metadata: JSON.stringify(envBody({ systemPermissions: ['overlaid'] })) });
+    const metadata = makeMetadataFacade();
+    await projectPermissionMutation(protocol, { ql, metadata }, { type: 'permission', name: 'organization_admin', state: 'active' });
+    const entry = metadata.registry.get('permission/organization_admin');
+    expect(entry?.systemPermissions, 'precondition: the overlay was projected').toEqual(['overlaid']);
+    expect({ marker: entry?._envProjection, provenance: entry?._provenance ?? null }).toEqual({ marker: true, provenance: null });
+  });
+
   it('skips draft saves and non-permission events', async () => {
     const ql = makeQl();
     const protocol = makeProtocol(ql);

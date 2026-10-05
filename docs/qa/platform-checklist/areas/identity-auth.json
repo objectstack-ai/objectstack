@@ -151,7 +151,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -159,7 +159,7 @@
         "app": "showcase",
         "requires": [
           "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, deviceAuthorization, oidcProvider) and the socialProviders/oidcProviders maps — each variant names which boot it needs",
-          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud NOT_SUPPORTED)"
+          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud 400 SMS_SERVICE_REQUIRED)"
         ],
         "knownGaps": [
           "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. Run these variants as blocked(dependency, objectui#4179) at the browser lane. The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
@@ -171,7 +171,7 @@
         "for each variant: boot with the method configured ON, GET /api/v1/auth/config, and record the advertisement (features.* flag, emailPassword block, socialProviders list)",
         "email+password: POST /api/v1/auth/sign-up/email (when sign-up enabled), POST /api/v1/auth/sign-in/email, GET /api/v1/auth/get-session, POST /api/v1/auth/sign-out — capture each response and the session cookie lifecycle",
         "phone+password: create a phone-carrying user with a known password, POST the phone sign-in (better-auth /sign-in/phone-number surface — 'always works' when the plugin is on per the spec), verify get-session identifies the user",
-        "phone OTP with NO SMS service configured: request /phone-number/send-otp and capture the loud NOT_SUPPORTED rejection (never a silent 200, never a hang)",
+        "phone OTP with NO SMS service configured: request /phone-number/send-otp and capture the loud 400 SMS_SERVICE_REQUIRED rejection (never a silent 200, never a hang, never a bare 500)",
         "SSO/OIDC: with an oidcProviders[] entry configured, verify the login page shows the SSO button (features.sso is refined to 'usable' — ≥1 provider); drive the authorization-code round trip or cite the pinned OIDC dogfood test per rule 6",
         "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
         "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
@@ -200,9 +200,9 @@
           "evidence": "the sign-in + session trace"
         },
         {
-          "clause": "phone OTP without a deliverable SMS service fails LOUDLY (NOT_SUPPORTED) — the capability degrades to a named error, never a silent success or a hang",
+          "clause": "phone OTP without a deliverable SMS service fails LOUDLY (400 SMS_SERVICE_REQUIRED) — the capability degrades to a named error, never a silent success, a hang or a bare 500",
           "oracle": "api",
-          "verify": "the send-otp response is a non-2xx carrying the not-supported error; features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
+          "verify": "the send-otp response is 400 with a JSON body whose code is SMS_SERVICE_REQUIRED (pinned by packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts); features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
           "evidence": "the rejection + the /auth/config read"
         },
         {
@@ -244,7 +244,7 @@
       ],
       "negative": [
         "a silent 200 on any disabled method's endpoint is a FAIL — a gate that only hides the button is not a gate",
-        "phone OTP hanging or returning 2xx with no SMS service is a FAIL (the spec's own contract is 'loudly NOT_SUPPORTED')",
+        "phone OTP hanging, returning 2xx, or answering a bare 500 with an empty body with no SMS service is a FAIL (the contract is a loud 400 SMS_SERVICE_REQUIRED)",
         "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#4179); the honest verdict is blocked",
         "features.magicLink or features.passkeys appearing in the /api/v1/auth/config payload is a FAIL — #7481 withdrew both until objectui#4179 ships the UI, so their return means the stop-advertising posture regressed",
         "a discovery document whose issuer/endpoints point at a base the server does not actually mount is a FAIL — a wrong .well-known breaks every downstream RP/relying party silently"
@@ -252,7 +252,7 @@
       "variants": [
         "email+password (POST /api/v1/auth/sign-in/email, /sign-up/email, /sign-out, /get-session)",
         "phone+password (better-auth phone-number plugin sign-in surface)",
-        "phone OTP sign-in + reset (requires SMS service; loud NOT_SUPPORTED without — #2780)",
+        "phone OTP sign-in + reset (requires SMS service; loud 400 SMS_SERVICE_REQUIRED on send-otp without — #2780)",
         "enterprise SSO / generic OIDC (oidcProviders[] via genericOAuth; login button gated on usable providers)",
         "social OAuth (socialProviders map, per-provider enabled)",
         "device authorization grant (RFC 8628 — CLI/TV login)",
@@ -274,7 +274,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-method sign-in proof with both-sides gate checks and advertisement parity, grounded in the spec's plugin config + public feature registry", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-20", "change": "scoped scan-functionality (扫描功能) sweep: the 2FA clause asserted the interrupt but cited no pin — added packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts to source and noted in the clause verify + variant row that cookie-lane completion is pinned end-to-end by that test (cite per rule 6 instead of re-deriving). Enrollment lifecycle around the gate now owned by the four new identity-auth.two-factor-* items. No restructuring", "ref": "claude/new-session-0pv25p" },
-        { "revision": 4, "date": "2026-10-05", "change": "clause 10 and step 9 re-pointed: the delete-user half only (stale, #21784 VF4). plugin-auth's auth-route-ledger books POST /api/v1/auth/delete-user with disposition 'disabled': user.deleteUser is deliberately unconfigured (auth-manager), per the maintainer ruling of 2026-08-12 on #7735, so it answers 404 to every caller. The clause dates from revision 1 (2026-08-07) and predates the ruling. The verifier's wording is used. The change-email half is unchanged", "ref": "#21797" }
+        { "revision": 4, "date": "2026-10-05", "change": "clause 10 and step 9 re-pointed: the delete-user half only (stale, #21784 VF4). plugin-auth's auth-route-ledger books POST /api/v1/auth/delete-user with disposition 'disabled': user.deleteUser is deliberately unconfigured (auth-manager), per the maintainer ruling of 2026-08-12 on #7735, so it answers 404 to every caller. The clause dates from revision 1 (2026-08-07) and predates the ruling. The verifier's wording is used. The change-email half is unchanged", "ref": "#21797" },
+        { "revision": 5, "date": "2026-10-05", "change": "clause 4, its negative, step 4, the fixtures row and the phone-OTP variant re-pointed from NOT_SUPPORTED to the shipped refusal: with no deliverable SMS service, send-otp answers 400 with code SMS_SERVICE_REQUIRED (registered for @objectstack/plugin-auth in the ADR-0112 ledger) instead of a 500 with an empty body (#21784 A4). A bare 500 is now named a FAIL. The clause verify cites the door pin", "ref": "#21793" }
       ]
     },
     {

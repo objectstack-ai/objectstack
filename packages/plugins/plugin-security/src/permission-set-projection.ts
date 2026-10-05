@@ -97,6 +97,7 @@ import type { PermissionSetNameCollisionDiagnostic } from './permission-set-name
 import {
   ENV_PROJECTION_MARKER,
   assertPermissionSetNotPackageDeclared,
+  classifyPackagedPermissionSet,
   type LayeredProbe,
 } from './packaged-permission-set-lock.js';
 import { PermissionSetNameConflictError } from './errors.js';
@@ -723,6 +724,21 @@ export async function upsertEnvPermissionSet(
  * artifact after the overlay is gone. When the overlay disappears, a stale
  * echo is healed back to `restoreTo` (the declared body) or dropped.
  *
+ * [#21789] ⭐ The echo also states its PROVENANCE, and it states the lock's
+ * verdict. The metadata manager's get is registry-first, so the protocol's
+ * layered read serves this echo as the item's `code` layer, and the envelope's
+ * `provenance` is read off that layer. Unstamped, every set with an overlay row
+ * (an org's own set, a clone, a set in a writable runtime package) reported a
+ * code layer with no provenance, which is how a client reads "a code package
+ * ships this" (objectui's permission-matrix editor rendered such a set locked
+ * while every write door accepted the save). So the echo carries
+ * `_provenance: 'org'` exactly when {@link classifyPackagedPermissionSet}, the
+ * classifier both write doors ask, answers `org` for the name: the reported
+ * state and the enforced state are one judgment. A `packaged` verdict (a
+ * legacy overlay of a code-shipped set) or an `unknown` one leaves the echo
+ * unstamped, as before, so the read keeps reporting the lock the doors keep
+ * enforcing.
+ *
  * Best-effort: when the facade lacks `registerInMemory`, overlay-only names
  * still resolve via the DatabaseLoader / record dbLoader.
  */
@@ -731,12 +747,14 @@ async function syncEvaluatorRegistry(
   name: string,
   body: any,
   overlayBacked: boolean,
+  tenantAuthored = false,
 ): Promise<void> {
   try {
     if (!metadata || typeof metadata.registerInMemory !== 'function' || !name) return;
     if (overlayBacked && body?.name) {
       metadata.registerInMemory('permission', name, {
         ...stripDecorations(body),
+        ...(tenantAuthored ? { _provenance: 'org' } : {}),
         [ENV_PROJECTION_MARKER]: true,
       });
       return;
@@ -829,6 +847,9 @@ export async function projectPermissionMutation(
   const { ql, metadata, logger } = deps;
   let body: any = null;
   let overlayBacked = false;
+  // [#21789] The layered read, handed to the lock's classifier below as its
+  // second source, exactly as the write doors hand it theirs.
+  let layeredProbe: LayeredProbe | undefined;
   if (protocol && typeof protocol.getMetaItemLayered === 'function') {
     const layered = await protocol.getMetaItemLayered({
       type: 'permission',
@@ -846,6 +867,7 @@ export async function projectPermissionMutation(
     const isEnvelope = layered && typeof layered === 'object'
       && ('effective' in layered || 'overlay' in layered || 'code' in layered);
     if (isEnvelope) {
+      layeredProbe = { status: 'read', envelope: layered };
       const overlay = layered.overlay ?? null;
       overlayBacked = !!overlay;
       const declared = readDeclaredBody(ql, evt.name);
@@ -885,7 +907,11 @@ export async function projectPermissionMutation(
   // unchanged` — never "a write happened". A FAILED write still leaves all
   // three at zero and still skips the sync, exactly as before.
   if (out.seeded + out.updated + out.unchanged > 0) {
-    await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked);
+    // [#21789] The echo's provenance is the lock's verdict for the name — see
+    // {@link syncEvaluatorRegistry}.
+    const tenantAuthored = overlayBacked
+      && classifyPackagedPermissionSet(evt.name, ql, layeredProbe).status === 'org';
+    await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked, tenantAuthored);
   }
   return out;
 }

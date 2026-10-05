@@ -82,7 +82,7 @@ const SLOTS = [
 // §1 The $ne operator slot refuses an array — both copies, one factory
 // ---------------------------------------------------------------------------
 
-describe('#19886 §1 — the $ne operator slot refuses an array', () => {
+describe('§1 — the $ne operator slot refuses an array', () => {
   for (const [label, schema] of SLOTS) {
     it(`${label} refuses $ne: [...] at $ne — issue code, path and the prescription`, () => {
       const issue = issueAt(schema.safeParse({ $ne: ['won', 'lost'] }), '$ne');
@@ -125,7 +125,7 @@ describe('#19886 §1 — the $ne operator slot refuses an array', () => {
 // §2 The face refuses the same shape — the compile half of the ruling
 // ---------------------------------------------------------------------------
 
-describe('#19886 §2 — the shared face refuses $ne: [...] with the ADR-0112 envelope', () => {
+describe('§2 — the shared face refuses $ne: [...] with the ADR-0112 envelope', () => {
   it.each([
     ['top level', { stage: { $ne: ['won', 'lost'] } }, 'where.stage.$ne'],
     ['EMPTY', { stage: { $ne: [] } }, 'where.stage.$ne'],
@@ -144,7 +144,7 @@ describe('#19886 §2 — the shared face refuses $ne: [...] with the ADR-0112 en
 // §3 One remedy text, two doors
 // ---------------------------------------------------------------------------
 
-describe('#19886 §3 — one text, two doors', () => {
+describe('§3 — one text, two doors', () => {
   it.each([
     ['two members', ['won', 'lost']],
     ['one member', ['won']],
@@ -203,7 +203,7 @@ describe('#19886 §3 — one text, two doors', () => {
 // §4 CONTROLS — both doors accept, and keep, every non-array $ne comparand
 // ---------------------------------------------------------------------------
 
-describe('#19886 §4 — what stays accepted, at BOTH doors', () => {
+describe('§4 — what stays accepted, at BOTH doors', () => {
   const day = new Date('2026-07-01T00:00:00.000Z');
   it.each([
     ['a string', 'won'],
@@ -240,7 +240,7 @@ describe('#19886 §4 — what stays accepted, at BOTH doors', () => {
 // §5 The stored-filter carrier walk — refused on save since #20116
 // ---------------------------------------------------------------------------
 
-describe('#19886 §5 — the stored-filter carrier walk refuses $ne: [...] too (#20116)', () => {
+describe('§5 — the stored-filter carrier walk refuses $ne: [...] on save too', () => {
   // This section held an `it.todo`: ruling A named the face and
   // `FieldOperatorsSchema.$ne`, not `FilterConditionSchema`'s carrier walk, so
   // every stored carrier still saved the shape and the face refused it at query
