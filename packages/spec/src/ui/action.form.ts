@@ -119,6 +119,30 @@ export const actionForm = defineForm({
         // `errorMessage` is the twin of the row above: same node (I18nLabel), same
         // plain row, so the renderer derives the same face for both.
         { field: 'errorMessage', helpText: 'Error message shown when the action fails, in place of the raw error.' },
+        // #21863 (ruling 5995552118, 1A) — the two post-success keys, each with
+        // the control ruling 5861442317 already gave its shape, so no designed
+        // control. Both are gated on the two types the parse admits them on
+        // (`refuseInertOutcomeMessages` and the `onSuccess` type refinement in
+        // `action.zod.ts`): only `api` and `script` have a server response.
+        //
+        // `outcomeMessages` is a record keyed by outcome name, so G1's `json`,
+        // the face `patch` and `bodyExtra` carry.
+        { field: 'outcomeMessages', widget: 'json', visibleWhen: "data.type == 'api' || data.type == 'script'", helpText: "Success message per handler outcome, as JSON: each key is a snake_case `outcome` value the handler returns in its success payload, and each value is the label shown for that outcome, e.g. {\"archived\": \"Archived\", \"already_archived\": \"Already archived\"}. A label may interpolate ${result.*}. An outcome with no entry shows the success message; a key the handler never returns is never shown. Not allowed beside a result dialog or `operation: 'update'`." },
+        // `onSuccess` is an object of two keys, so G2's `composite`, the `body`
+        // row's face above, one sub-row per key.
+        {
+          field: 'onSuccess',
+          type: 'composite',
+          visibleWhen: "data.type == 'api' || data.type == 'script'",
+          helpText: 'Navigation after the action succeeds: the route to open, and where to open it.',
+          fields: [
+            { field: 'navigate', type: 'text', required: true, helpText: 'Route or URL template opened after the action succeeds. It may interpolate ${param.*} (the values the params dialog collected), ${ctx.*} (origin, apiBase, user, org, recordId, selection) and ${result.*} (the server response, e.g. ${result.id}). A relative value is an in-app route.' },
+            // `newTab` carries a capital, which `FormSelectOptionSchema.value`
+            // cannot spell, so no inline option list: the select reads its two
+            // members off the served schema, and their meanings ride the help text.
+            { field: 'openIn', type: 'select', helpText: "Where the navigation opens: 'self' (the default) navigates in place; 'newTab' opens a new browser tab." },
+          ],
+        },
         { field: 'refreshAfter', helpText: 'Refresh the list/page after action completes' },
         // `new-tab` is hyphenated, so the same system-identifier bound on
         // `FormSelectOptionSchema.value` applies: the enum derives.
