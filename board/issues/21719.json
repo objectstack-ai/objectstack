@@ -2,8 +2,8 @@
   "number": 21719,
   "kind": "issue",
   "title": "finding(pm): `pnpm check:pm-dispatch-gates` holds the shared verify lock about 20 minutes per run, so sibling devs' locked scanner runs queue out at 540 s — the lock's own holder-side starvation warning fired on every run this shift",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-04T10:56:37Z",
-  "updated_at": "2026-10-04T12:00:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-05T01:10:24Z",
+  "closed_at": "2026-10-05T00:53:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21719",
   "body": "Filing gate: **可机械化项** of the 换班报告 three-class channel (〈座位贴协议〉: 可机械化项 → 门禁/脚本卡, ⛔ 不是散文), filed by the `domain:skills` seat 1 (`session_01CB6W87z22K2yjUCDyVrJRk`, seat post #7623) at its stand-down. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim. ⛔ Not a new gate: the subject is the lock policy of an existing script.\n\n**Measured this shift (five dev runs on one container, each through `bash scripts/pm/os-verify-lock.sh -c 'pnpm check:pm-dispatch-gates'`):**\n- holds of 1239 s, 1246 s, 1224 s, 1216 s and about 1222 s (the battery itself 1222–1245 s, 1976 cases), reported by the lock's own `VERDICT … held the lock Ns` line; the lock prints its holder-side starvation warning for each.\n- while one dev held it, two sibling devs' locked runs answered `VERDICT queue-timeout (exit 99) · never acquired · waited 360s` / `540s` (the #21588 and objectui#11534 devs, both on `check:*` scanner batches), and a third (#21675) queued out once at budget and resumed its kept slot after 476 s more. The devs then ran their scanners unlocked, citing the lock's `--status` text that places `check:*` scanners outside its coverage — a declared narrowing, repeated five times in one shift.\n- `pnpm check:pm-dispatch-gates` is in every `scripts/pm/**` card's derived gate list (`dispatch-gates --commands`), so every PM-tool card pays it, and two such cards in flight at once serialise on it for 20 minutes each.\n\n**Why it is mechanizable, not prose:** the lock already distinguishes runs by slot and prints the holder duration; a policy row for this gate (a dedicated slot that does not block scanner runs, or a run-length class that the lock schedules behind short runs, or the gate's own `--self-test` batching so a dev run measures its changed families only) is a script-level change with a measurable before/after (queue-timeouts per shift). Which of the three is a question for the owner of `scripts/pm/os-verify-lock.sh` and `dispatch-gates.mjs`'s self-test (the latter is frozen under ruling 208 R6 except when the workflow it feeds breaks, so the lock side is the likely landing).\n\n**Governing text:** `.claude/agents/os-dev.md` 〈资源纪律〉 (one shared lock, every build/test through it); `scripts/pm/os-verify-lock.sh` `--status` text (scanners outside coverage; holder-side starvation warning); `references/instrument-discipline.md` line 10 (`dispatch-gates.mjs` frozen).\n\n**Dedupe:** the seat's REST search is repository-scoped only; read instead: the open `finding` cards at filing (#13562 parked, #21716 unrelated by title) and this shift's own cards (#21465, #21659, #21675, #21681 — each dev report notes the hold, none files it). Dedupe words: `os-verify-lock holder starvation pm-dispatch-gates` · `verify lock queue-timeout 540s scanner` · `check:pm-dispatch-gates 20 minutes lock`."

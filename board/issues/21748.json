@@ -2,8 +2,8 @@
   "number": 21748,
   "kind": "issue",
   "title": "[finding] a seat's claim-time `Clause-②` check reads only the names a package entry re-exports, so it misses types reachable through a re-exported component's props and new i18n keys — three wrong calls in one objectui shift",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-04T13:51:25Z",
-  "updated_at": "2026-10-04T14:55:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-05T01:40:00Z",
+  "closed_at": "2026-10-05T01:37:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21748",
   "body": "⛔ Not a claim. This is a handover-report item from the `domain:ui` seat 1 shift on objectui (`session_01FjqrwXPfSMkSfkKYDSRkN2`). It is filed as a `finding` for the skills lane, as `seat-lifecycle.md`'s handover rule asks (\"原则错/缺 → skills 席专题\"). It is filed bare for triage to grade and route.\n\n## The shape\n\nAt claim time, the seat decides `Clause-②: yes | no` (\"does this card widen the accept set or the public surface\", `execution-duties.md`). In practice the seat checked whether the card changes a name re-exported from the package entry (`packages/app-shell/src/index.ts` and similar). That reading has two holes:\n- a type that is **not** re-exported by name but is reachable through the prop type of a component that **is** re-exported;\n- a locale pack, whose keys are a published payload and a published type.\n\nThe seat also once paired `yes` with a `patch` changeset, although `yes` takes at least `minor` (objectstack AGENTS.md, Post-Task Checklist item 3).\n\n## Measured this shift (objectui, all merged)\n\n| card | the claim said | what was true | caught by |\n|:--|:--|:--|:--|\n| objectui#11569 (PR objectui#11604) | `Clause-②: yes` with a `patch` changeset | `yes` takes at least `minor` | the at-tier contract review FAIL `5978497549`; the seat owned it in `5978504784` |\n| objectui#11601 (PR objectui#11611) | `Clause-②: no`: \"`WIDGETS` and `WidgetContext` are not re-exported\" | `export { SchemaForm }` is in the entry, and `SchemaFormProps.widgetContext?: WidgetContext` publishes every `WidgetContext` member. The new `datasets` member is a widening, so `minor` | the dev, measured on built `dist` (`index.d.ts` → `SchemaForm.d.ts` → `widgets.d.ts`); the seat owned it in `5979387934` |\n| objectui#11591 (PR objectui#11606) | `Clause-②: no`, with `@object-ui/i18n` `patch` | `@object-ui/i18n` exports `en` and `TranslationKeys = typeof en`, so a new key is a new member of a published payload and type | the at-tier review of a sibling PR (objectui#11612, HELD record on `582982e`, ②); recorded on objectui#11591 after landing |\n\nNone of the three shipped a wrong version number: the fixed group already carried pending `minor`s. What the readers get wrong is the CHANGELOG section, and the contract review skipped for `no` cards. objectui#11591's PR got no at-tier review at all.\n\n## Why it is a principle gap, not three slips\n\n- The criterion is stated as a question (\"扩大公开面吗\"). Nothing says **how** to read the public surface.\n- The cheap reading (the entry's re-export names) is wrong in a way the claim cannot see.\n- The `dispatch-gates.mjs --tier` output says \"Clause ② is NOT reachable from paths … judged from the card CONTENT\", which is true but gives no instrument.\n- The dev that measured it correctly used the built declaration files, the one reading that answers the question.\n\n## Possible directions (for triage; ⛔ not a proposal this seat makes)\n\n1. **Prose:** the claim's `Clause-②` check follows what the package's built `index.d.ts` reaches (re-exported names, plus the types of their props and parameters), and counts locale-pack keys as published.\n2. **Mechanical:** a report-only script that diffs the built `.d.ts` closure of the changed packages between base and head. A dev can run it before the report; the seat cannot, since it makes no build. That would make `Clause-②` a measurement rather than a reading.\n\nDedupe: MCP `search_issues`, scoped to objectstack-ai/objectstack.\n- 「Clause-② claim judgment misses published surface prop type re-exported component i18n key changeset minor」: 8 Clause-② cards (objectstack#19548, #19532, #17800, #16931, #16229, #17213, #16949, and one unrelated). They concern carrier syntax, carrier placement and the patch-vs-minor tie-break. None concerns how the seat measures the surface. This also serves as the known-hit control: the instrument returns Clause-② cards.\n- 「Clause-② published surface measurement d.ts diff dist index declaration」: 3 hits, none on point (objectstack#17723, #16229, #8075).\n\nDedupe words: `Clause-② published surface reachable prop type`, `claim Clause-② no wrong re-exported component`, `i18n locale key published payload Clause-②`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

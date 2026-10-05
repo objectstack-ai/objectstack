@@ -1,0 +1,37 @@
+{
+  "number": 21780,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): refuse install-local sample data for a session with no active organization (ADR-0123 D2/D4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T00:07:08Z",
+  "updated_at": "2026-10-05T01:34:17Z",
+  "closed_at": "2026-10-05T01:34:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-05T01:34:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21780",
+  "body": "Fixes #21774\n\nClause-②: no\n\nUnder an organization wall, a session with no active organization is ADR-0123 D1's declared state. The install-local sample-data doors now answer it the way ADR-0123 D2 / D4 require, instead of skipping quietly.\n\n## What changed\n- `resolveActiveOrgId` (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`): the \"first membership\" fallback is **deleted**, not repaired. It read `sys_organization_member`, an object nothing defines.\n- **Reseed and purge** answer `403 PERMISSION_DENIED` (standard catalog, no new code) with one sentence built in one place (`noActiveOrganizationRefusal`). The sentence says the session has no active organization and gives the remedy.\n- **Install** still registers the env-wide package. Its `seeded` block is `{ mode: \"refused\", reason }`, with the same sentence in `reason` (was `{ mode: \"skipped\", reason: \"multi-tenant-no-active-org\" }`).\n- `RESEED_SKIPPED` stays for reseed's other declines: `no-datasets`, `objectql-or-metadata-missing`, `seed-error: …`.\n- `storage-service-plugin.ts` (comment only, declared cross-lane): the clause citing the deleted fallback now cites ADR-0123 D1. The comment's own rule is unchanged.\n- Ratchets moved down by one each for this file (`scripts/slot-lookup-baseline.json` 15 to 14, `scripts/query-options-erasure-baseline.json` 2 to 1). The deleted fallback carried those sites.\n\n## Measured before the change (`origin/main` `ebfe658c72`, real walled boot, posture-only)\nTenancy `isolated`, `isolationActive: true`; session `activeOrganizationId` null; 1 `sys_member` row for the admin.\n- install: `200`, `seeded {mode: \"skipped\", reason: \"multi-tenant-no-active-org\"}`\n- reseed: `400 RESEED_SKIPPED` \"Reseed did not run: multi-tenant-no-active-org\"\n- purge: `400 RESEED_SKIPPED` \"Purge did not run: multi-tenant-no-active-org. …\"\n- the fallback's read: `Object 'sys_organization_member' not found` (thrown, swallowed)\n\n## Pins\n- Unit: `marketplace-install-local-no-active-organization.test.ts` (new). It covers walled with no active org and two memberships served by the store, walled with an active org, and `single` (a spy proves `resolveActiveOrgId` is never called). The purge unit pin moves to 403.\n- Door pin on a real walled boot: `packages/qa/dogfood/test/install-local-no-active-organization.dogfood.test.ts` (new). In one session: no-org install/reseed/purge, then the same session after `set-active` to org B, as the control. 7/7 green.\n- Reverse verification (A5), committed fix at `a1a5513852`, through `scripts/ablation-replace.mjs`, two literal anchors, nested WRAP:\n  - anchor 1, the seed refusal line, replaced by the old `mode: 'skipped'` line: blob `5f88579b38e0` to `24f914c847b4`\n  - anchor 2, the purge 403, replaced by the old `RESEED_SKIPPED` / 400: blob to `505004807245`\n  - On disk: removed lines 0/0, injected lines 1/1.\n  - Unit: 4 red (the 3 no-org pins and the purge no-org pin; received `skipped` and `400`), 33 green.\n  - Door: 3 red (no-org install/reseed/purge), 4 green (preconditions, nothing seeded, org-B control).\n  - Restore: three legs prove blob == HEAD `5f88579b38e0` and an empty `git diff HEAD`.\n\n## Verification (head `0590b46d38`)\n- `pnpm --filter @objectstack/cloud-connection test`: 38 files, 466 tests passed.\n- typecheck green for cloud-connection, dogfood and service-storage; `--listFiles` includes both new test files.\n- full `pnpm lint`: exit 0.\n- `dispatch-gates --commands` derived 79 commands; 78 ran green on the final head. `check-empty-changeset` is red **on purpose**; see below.\n\n## Pending release note corrected (the empty-changeset gate stays red by design)\n`.changeset/21728-install-local-purge.md` is pending, from #21773; the last version PR `617f25f8a4` predates that merge. It said a no-active-organization purge is answered `400 RESEED_SKIPPED`. This PR makes that sentence false, and both changesets ship in one release, so its clause now reads `403 PERMISSION_DENIED`, naming the missing active organization. Nothing else in that note changed. The gate's own text classes this as a deliberate correction that a person confirms on the PR. **Please confirm or reject this edit.**\n\n## Acceptance notes\n- The console (objectui at the pinned `.objectui-sha`, `marketplaceApi.ts` `postLocalSampleAction`) shows `error.message` for any non-ok status and does not branch on the code or status. The 400 to 403 move is shown to the user as the new sentence. The `os package install` CLI does not read `seeded`.\n- `resolveActiveOrgId` reads only the better-auth session. An API-key caller (no session cookie) on a walled boot is refused with the session wording. Before, it was skipped. This was not measured further; carrier: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016GiHYRmLSNWTfbX9gVQkpz)_\n"
+}
