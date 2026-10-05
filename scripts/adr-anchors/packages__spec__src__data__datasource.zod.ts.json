@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/data/datasource.zod.ts",
+  "adrs": [
+    "ADR-0015",
+    "ADR-0062"
+  ],
+  "invariant": "Credentials never appear in metadata artefacts (ADR-0015 section 10), for a driver the platform ships no config contract for as much as for one it does: such a datasource's config shape stays unjudged, but a credential-shaped key or an embedded credential (URL userinfo password, credential query parameter, a Password= connection-string segment) is refused at publish by the same name predicate the read-path redactor uses. The remedy is the bound secret (external.credentialsRef), which ADR-0062 D3 resolves at connect and hands to the driver factory; routing the value into the secret store silently is not done, because nothing says which key a contractless driver's factory reads its credential from."
+}
