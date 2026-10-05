@@ -75,7 +75,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
     const engine = safeGetService<IDataEngine>(ctx, 'data');
 
     /**
-     * [#21876] The `'metadata'` service: every datasource and package read
+     * [#21876] The `'metadata'` service: every datasource read
      * below, and the catalog write, go through it. Objects are read from the
      * engine's registry instead ([#21842], `objectRegistry` below).
      *
