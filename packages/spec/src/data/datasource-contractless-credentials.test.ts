@@ -485,8 +485,11 @@ describe('libpq keyword/value pairs are found leniently', () => {
 
 describe('header shapes', () => {
   it('a `Name: value` header line naming a credential is found and loses its value', () => {
-    expect(embeddedCredentialOf('Authorization: Bearer t')).toBeDefined();
-    expect(embeddedCredentialOf('X-Api-Key:k')).toBeDefined();
+    // A single-line string is read as a header line only under a header-ish key.
+    expect(embeddedCredentialOf('Authorization: Bearer t', { headerish: true })).toBeDefined();
+    expect(embeddedCredentialOf('X-Api-Key:k', { headerish: true })).toBeDefined();
+    expect(embeddedCredentialOf('Accept: json\nX-Api-Key:k')).toBeDefined();
+    expect(embeddedCredentialOf('Authorization: Bearer t')).toBeUndefined();
     expect(redactEmbeddedCredentials('Accept: json\r\nAuthorization: Bearer t')).toBe('Accept: json\r\nAuthorization:');
     expect(refusals({ headers: ['Authorization: Bearer t', 'Accept: json'] })).toEqual(['config.headers.0']);
   });
@@ -676,5 +679,166 @@ describe('a bare `key` is credential material only where it can be key material'
     for (const name of ['email', 'customer_email_2', 'orders.created_at', 'AKIA1234567890', 'two words here please']) {
       expect(looksLikeSecretValue(name), name).toBe(false);
     }
+  });
+});
+
+describe('PEM private keys, and a bare `key` in TLS options', () => {
+  const PEM = '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n';
+  const ARMOURS = [
+    PEM,
+    PEM.replace(/PRIVATE KEY/g, 'RSA PRIVATE KEY'),
+    PEM.replace(/PRIVATE KEY/g, 'EC PRIVATE KEY'),
+    PEM.replace(/PRIVATE KEY/g, 'ENCRYPTED PRIVATE KEY'),
+    PEM.replace(/PRIVATE KEY/g, 'OPENSSH PRIVATE KEY'),
+    '-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF\n-----END PGP PRIVATE KEY BLOCK-----',
+  ];
+
+  it.each(['ssl', 'tls', 'certificate', 'clientCert', 'mtls'])('a PEM key under a bare `key` inside `%s` is refused and withheld', (holder) => {
+    const config = { host: 'h', [holder]: { key: PEM, cert: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----', rejectUnauthorized: true } };
+    expect(refusals(config)).toEqual([`config.${holder}.key`]);
+    const served = redactDatasourceConfig(DRIVER, config).config;
+    expect(JSON.stringify(served)).not.toContain('MIIEvQ');
+    expect((served[holder] as Record<string, unknown>).cert).toContain('CERTIFICATE');
+  });
+
+  it('a bare `key` under a TLS holder is withheld whatever its value; under another holder a name stays', () => {
+    expect(refusals({ ssl: { key: 'k' } })).toEqual(['config.ssl.key']);
+    expect(refusals({ sort: { key: 'created_at' }, sslMode: 'require' })).toEqual([]);
+  });
+
+  it.each(ARMOURS.map((armour, i) => [i, armour] as const))('armour %i is secret material in any string, wherever it sits', (_i, armour) => {
+    expect(embeddedCredentialOf(armour)).toBeDefined();
+    expect(refusals({ options: { material: armour } })).toEqual(['config.options.material']);
+    expect(refusals({ list: [`prefix ${armour}`] })).toEqual(['config.list.0']);
+    const served = redactDatasourceConfig(DRIVER, { options: { material: `before ${armour} after` } }).config;
+    expect(JSON.stringify(served)).not.toMatch(/PRIVATE KEY|MIIEvQ|lQOYBF/);
+    expect(embeddedCredentialOf(redactEmbeddedCredentials(armour))).toBeUndefined();
+  });
+
+  it('PEM bytes, and `pfx` bytes or strings, are judged', () => {
+    expect(refusals({ blob: Buffer.from(PEM) })).toEqual(['config.blob']);
+    expect(refusals({ pfx: Buffer.from([0x30, 0x82, 0x01]) })).toEqual(['config.pfx']);
+    expect(refusals({ tls: { pfx: 'MIIKCQIBAzCCCc8GCSqGSIb3' } })).toEqual(['config.tls.pfx']);
+    expect(refusals({ sslPfx: 'MIIK' })).toEqual(['config.sslPfx']);
+    expect(refusals({ tls: { pfx: [{ buf: 'MIIK', passphrase: 'pp' }] } })).toEqual(['config.tls.pfx.0.buf', 'config.tls.pfx.0.passphrase']);
+  });
+
+  it('control: a certificate, a CA bundle and a public key are not private keys', () => {
+    expect(refusals({ ssl: { ca: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----', cert: '-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----' } })).toEqual([]);
+    expect(isCredentialShapedConfigKey('pfxPath')).toBe(false);
+  });
+});
+
+describe('a non-ASCII key is credential-shaped only when the non-ASCII text sits inside or next to a credential word', () => {
+  it.each(['客户名称', 'Größe', 'café', 'größeInBytes', 'naïve_mode', 'nombre_compañía', '名前'])('%j is not credential-shaped', (key) => {
+    expect(isCredentialShapedConfigKey(key)).toBe(false);
+  });
+
+  it('`fieldMap: { 客户名称: … }` is accepted at the write door and served whole', () => {
+    const config = { fieldMap: { '客户名称': 'customer_name', 'Größe': 'size', 'café': 'cafe' } };
+    expect(refusals(config)).toEqual([]);
+    expect(redactDatasourceConfig(DRIVER, config).config).toEqual(config);
+  });
+
+  it.each([
+    // a Cyrillic `а` (U+0430) inside `password`, and a Cyrillic `е` (U+0435) inside `key` / `token`
+    'pаssword', 'db_pаss', 'kеy', 'tokеn', 'api_kеy',
+    // a Greek omicron inside `password`
+    'passwοrd',
+    // zero-width characters inside a word
+    'pass​word', 'to‍ken', 'sec­ret',
+    // a non-ASCII character standing in for, or inserted into, a letter
+    'pas§word', 'tok€n', 'secéret',
+    // next to a credential word
+    'password密码', 'token値', '客户password', 'apiKeyé',
+    // a credential word of another script
+    '数据库密码', 'пароль', 'パスワード',
+    // full-width, read after NFKC
+    'ｐａｓｓｗｏｒｄ',
+  ])('%j is credential-shaped', (key) => {
+    expect(isCredentialShapedConfigKey(key)).toBe(true);
+    expect(refusals({ [key]: 'cleartext-value' })).toEqual([`config.${key}`]);
+  });
+
+  it('the same rule applies to query, form and segment parameter names', () => {
+    expect(embeddedCredentialOf('https://h/x?客户名称=a')).toBeUndefined();
+    expect(embeddedCredentialOf('https://h/x?pаssword=a')).toBeDefined();
+    expect(embeddedCredentialOf('Größe=1;Server=h')).toBeUndefined();
+    expect(embeddedCredentialOf('Server=h;pаssword=a')).toBeDefined();
+    expect(embeddedCredentialOf('café=1&x=2')).toBeUndefined();
+    expect(embeddedCredentialOf('x=1&tokеn=2')).toBeDefined();
+  });
+});
+
+describe('prose, SQL and opaque URIs are not credential strings', () => {
+  it.each([
+    ['a one-line description', { description: 'Password: provided via the secret store' }],
+    ['a SQL bind placeholder', { query: 'SELECT id FROM t WHERE token = $1' }],
+    ['a `?` placeholder', { query: 'SELECT id FROM t WHERE password = ? AND x = 1' }],
+    ['a named placeholder', { query: 'UPDATE t SET a = 1 WHERE token = :token' }],
+    ['a mailto URI', { url: 'mailto:alice@example.com' }],
+    ['a sip URI', { contact: 'sip:alice@example.com' }],
+    ['a tel URI', { contact: 'tel:+1-201-555-0123' }],
+    ['a urn', { id: 'urn:isbn:0451450523' }],
+    ['a time of day', { note: '12:30@office' }],
+    ['a time with seconds', { note: '09:05:59@x' }],
+  ])('%s is accepted', (_label, config) => {
+    expect(refusals(config)).toEqual([]);
+    expect(redactDatasourceConfig(DRIVER, config).config).toEqual(config);
+  });
+
+  it.each([
+    ['a header line in a multi-line string', { note: 'Accept: json\nAuthorization: Bearer abc' }, 'config.note'],
+    ['a one-line header under a header-ish key', { headers: ['Authorization: Bearer abc'] }, 'config.headers.0'],
+    ['a one-line header string under `extraHeaders`', { extraHeaders: 'X-Api-Key: abc' }, 'config.extraHeaders'],
+    ['a SQL literal, not a placeholder', { query: "host=h password=hunter2" }, 'config.query'],
+    ['a sip URI that carries a password', { contact: 'sip:alice:secret@example.com' }, 'config.contact'],
+    ['userinfo that is not a time', { dsn: 'admin:hunter2@db.internal/app' }, 'config.dsn'],
+  ])('control: %s is still refused and withheld', (_label, config, path) => {
+    expect(refusals(config)).toEqual([path]);
+    expect(JSON.stringify(redactDatasourceConfig(DRIVER, config).config)).not.toMatch(/abc|hunter2|secret@/);
+  });
+});
+
+describe('an over-long string is judged conservatively', () => {
+  const LONG = 'a'.repeat(64 * 1024 + 1);
+
+  it('longer than 64 KiB: refused at write, withheld whole on read', () => {
+    expect(embeddedCredentialOf(LONG)).toBeDefined();
+    expect(refusals({ blob: LONG })).toEqual(['config.blob']);
+    expect(refusals({ bytes: Buffer.alloc(64 * 1024 + 1, 0x61) })).toEqual(['config.bytes']);
+    expect(redactDatasourceConfig(DRIVER, { host: 'h', blob: LONG }).config).toEqual({ host: 'h', blob: '' });
+  });
+
+  it('control: at the cap a string is still read', () => {
+    expect(refusals({ blob: 'a'.repeat(64 * 1024) })).toEqual([]);
+  });
+});
+
+describe('a bare `key` value: hex and digit-free base64 key material', () => {
+  it.each(['deadbeefcafebabe', '0123456789abcdef', 'DEADBEEFCAFEBABE0123', 'kPqRzXwYvTnMbLcD+aHf/QeGsJuWiOoK', 'kPqRzXwYvTnMbLcDaHfQeG==', 'kPqRzXwYvTnMbLcDaHfQeGsJuWiOoK'])(
+    '`{ key: %j }` is key material',
+    (value) => {
+      expect(refusals({ key: value })).toEqual(['config.key']);
+    },
+  );
+
+  it.each(['email', 'customerEmailAddress', 'XMLHttpRequestURLBuilder', 'getCustomerEmailAddressForAccount', 'created_at', '2024010112000000', 'orders/customer/name', 'Orders/Customer/Name', 'Sales/Region/Quarter/Total'])(
+    '`{ key: %j }` stays a name',
+    (value) => {
+      expect(refusals({ key: value })).toEqual([]);
+    },
+  );
+});
+
+describe('the round-4 readings stay bounded', () => {
+  it('a 256-character mixed-script key, PEM-shaped and placeholder-shaped strings are judged fast', () => {
+    expect(elapsed(() => isCredentialShapedConfigKey('pé'.repeat(128)))).toBeLessThan(2000);
+    expect(elapsed(() => isCredentialShapedConfigKey(`${'​'.repeat(250)}pass`))).toBeLessThan(2000);
+    expect(elapsed(() => isCredentialShapedConfigKey('§a'.repeat(128)))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf(`-----BEGIN ${'A '.repeat(30_000)}`))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf('-----BEGIN PRIVATE KEY-----'.repeat(2_000)))).toBeLessThan(2000);
+    expect(elapsed(() => redactEmbeddedCredentials('-----BEGIN PRIVATE KEY-----x'.repeat(2_000)))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf('token = $1 '.repeat(5_000)))).toBeLessThan(2000);
   });
 });

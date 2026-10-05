@@ -28,7 +28,9 @@ import { CREDENTIAL_KEY_SPELLINGS } from './common.zod';
  * `secretAccessKey` → `secret access key`, `X-API-Key` → `x api key`,
  * `client_secret` → `client secret`. Judging WORDS rather than substrings is
  * what keeps `bypass`, `passive`, `primaryKey` and `partitionKey` out while
- * `pass`, `key` and `apiKey` are in.
+ * `pass`, `key` and `apiKey` are in. A run of non-ASCII characters is a word
+ * of its own (`客户名称` is one word, `Größe` is `gr`, `öß`, `e`); every ASCII
+ * character other than a letter or a digit is a separator.
  */
 function wordsOf(key: string): string[] {
   // Every pattern here is linear: each matches a fixed number of characters
@@ -38,8 +40,9 @@ function wordsOf(key: string): string[] {
   return key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z])(?=[A-Z][a-z])/g, '$1 ')
+    .replace(/([^\x00-\x7f]+)/g, ' $1 ')
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/)
     .filter(Boolean);
 }
 
@@ -54,19 +57,63 @@ const MAX_JUDGED_KEY_LENGTH = 256;
 
 /**
  * A key as the word judgment reads it: NFKC-normalised (so a full-width
- * `ｐａｓｓｗｏｒｄ` reads as `password`), or `undefined` when the key cannot be
- * judged by words — longer than {@link MAX_JUDGED_KEY_LENGTH}, or still holding
- * a non-ASCII character after normalisation (a letter of another script, a
- * zero-width character inside a word). Such a key is judged credential-shaped.
+ * `ｐａｓｓｗｏｒｄ` reads as `password`), or `undefined` when it is longer than
+ * {@link MAX_JUDGED_KEY_LENGTH} — such a key is judged credential-shaped.
  */
 function judgedKey(key: string): string | undefined {
   if (key.length > MAX_JUDGED_KEY_LENGTH * 4) return undefined;
   const normalized = key.normalize('NFKC');
-  if (normalized.length > MAX_JUDGED_KEY_LENGTH) return undefined;
-  for (let i = 0; i < normalized.length; i += 1) if (normalized.charCodeAt(i) > 0x7f) return undefined;
-  return normalized;
+  return normalized.length > MAX_JUDGED_KEY_LENGTH ? undefined : normalized;
 }
 
+/** The words of a key as the judgment reads them; `undefined` past the length cap. */
+function judgedWords(key: string): string[] | undefined {
+  const judged = judgedKey(key);
+  return judged === undefined ? undefined : wordsOf(judged);
+}
+
+const NON_ASCII_RE = /[^\x00-\x7f]/;
+const isNonAscii = (c: string): boolean => c.charCodeAt(0) > 0x7f;
+
+/**
+ * Invisible format characters (soft hyphen, zero-width space / joiners,
+ * word joiner, BOM, Mongolian vowel separator): NFKC keeps them, and inside a
+ * word they hide it from a word judgment.
+ */
+const FORMAT_CHAR_RE = /[\u00ad\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
+
+/**
+ * Cyrillic and Greek letters that render as a Latin letter (`а` U+0430 → `a`):
+ * a key spelled with them reads to a person as the Latin word.
+ */
+const CONFUSABLE_LETTERS: Readonly<Record<string, string>> = {
+  'а': 'a', 'в': 'b', 'е': 'e', 'ё': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't',
+  'у': 'y', 'х': 'x', 'і': 'i', 'ї': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'һ': 'h', 'ӏ': 'l', 'ԛ': 'q', 'ԝ': 'w',
+  'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u',
+  'χ': 'x', 'ω': 'w',
+};
+
+/** The key with invisible format characters removed and confusable letters read as Latin ones. */
+function confusableReading(key: string): string {
+  return key.replace(FORMAT_CHAR_RE, '').replace(/[^\x00-\x7f]/g, (c) => {
+    const lower = c.toLowerCase();
+    const latin = CONFUSABLE_LETTERS[lower];
+    if (latin === undefined) return c;
+    return lower === c ? latin : latin.toUpperCase();
+  });
+}
+
+/**
+ * Credential words in other scripts, matched as a SUBSTRING of a key's
+ * lower-cased non-ASCII text (`数据库密码`): CJK text has no word separators.
+ */
+const NON_LATIN_CREDENTIAL_WORDS: readonly string[] = [
+  '密码', '密碼', '口令', '密钥', '密鑰', '秘钥', '令牌', '凭证', '憑證',
+  'パスワード', '暗証番号', '秘密鍵', 'トークン',
+  '비밀번호', '토큰',
+  'пароль', 'токен',
+  'contraseña',
+];
 /** {@link CREDENTIAL_KEY_SPELLINGS} folded to one lower-case word each (`auth_token` → `authtoken`). */
 const FOLDED_CREDENTIAL_KEY_SPELLINGS: ReadonlySet<string> = new Set(
   CREDENTIAL_KEY_SPELLINGS.map((key) => wordsOf(key).join('')),
@@ -101,6 +148,9 @@ const CREDENTIAL_WORDS_LAST: ReadonlySet<string> = new Set([
   'bearer',
   'apikey',
   'privkey',
+  'pfx',
+  'pkcs12',
+  'p12',
 ]);
 
 /**
@@ -259,6 +309,7 @@ const FOLDED_CREDENTIAL_ENDINGS: readonly string[] = [
   'serviceaccountjson',
   'accesssignature',
   'privkey',
+  'pfx',
   'sslkey',
   'tlskey',
   'basicauth',
@@ -324,13 +375,95 @@ function isCredentialShapedWord(word: string): boolean {
 }
 
 /**
+ * Does a key's non-ASCII text hide a credential word — sit inside one or next
+ * to one? (`judged` is NFKC-normalised and holds a non-ASCII character.)
+ *
+ *  - it holds a credential word of another script
+ *    ({@link NON_LATIN_CREDENTIAL_WORDS}: `数据库密码`, `пароль`);
+ *  - read with its invisible format characters removed and its confusable
+ *    Cyrillic and Greek letters as the Latin letters they render as
+ *    ({@link confusableReading}: `pаssword` with a Cyrillic `а`, `kеy`), the key
+ *    is credential-shaped;
+ *  - in a run of characters with no ASCII separator in it that mixes ASCII
+ *    letters or digits with non-ASCII characters, the ASCII word that TOUCHES
+ *    a non-ASCII character is credential-shaped on its own (`password密码`,
+ *    `token値`); or
+ *  - in such a run, a credential word of four or more letters is spelled with
+ *    non-ASCII characters standing in for, or inserted between, some of its
+ *    letters — at most one per four letters (`pas§word`, `tok€n`) — invisible
+ *    format characters inserted free (`pass` U+200B `word`).
+ *
+ * Anything else non-ASCII is an ordinary word of its own ({@link wordsOf}):
+ * `客户名称`, `Größe` and `café` are not credential-shaped.
+ */
+function nonAsciiHidesCredential(judged: string): boolean {
+  const lower = judged.toLowerCase();
+  if (NON_LATIN_CREDENTIAL_WORDS.some((word) => lower.includes(word))) return true;
+  const reading = confusableReading(judged);
+  if (reading !== judged && judgeWords(wordsOf(reading))) return true;
+  for (const run of judged.split(/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/)) {
+    if (!NON_ASCII_RE.test(run) || !/[A-Za-z0-9]/.test(run)) continue;
+    if (touchingWordIsCredential(run)) return true;
+    const chars = [...run.toLowerCase()];
+    if (FUZZY_CREDENTIAL_WORDS.some((word) => spelledAround(chars, word))) return true;
+  }
+  return false;
+}
+
+/** In a run mixing ASCII and non-ASCII characters: is an ASCII word that touches a non-ASCII character credential-shaped? */
+function touchingWordIsCredential(run: string): boolean {
+  const pieces = run.split(/([^\x00-\x7f]+)/);
+  for (let i = 0; i < pieces.length; i += 2) {
+    const ascii = pieces[i] as string;
+    if (ascii === '') continue;
+    const words = wordsOf(ascii);
+    if (words.length === 0) continue;
+    if (i > 0 && isCredentialShapedWord(words[0] as string)) return true;
+    if (i < pieces.length - 1 && isCredentialShapedWord(words[words.length - 1] as string)) return true;
+  }
+  return false;
+}
+
+/** The credential words a non-ASCII spelling is matched against (four letters or more). */
+const FUZZY_CREDENTIAL_WORDS: readonly string[] = [...new Set([
+  ...CREDENTIAL_WORDS_ANYWHERE,
+  ...CREDENTIAL_WORDS_LAST,
+  'signature',
+])].filter((word) => word.length >= 4);
+
+const isFormatChar = (c: string): boolean => /^[\u00ad\u180e\u200b-\u200f\u2060-\u2064\ufeff]$/.test(c);
+
+/**
+ * Does some stretch of `chars` spell `word` with at least one, and at most one
+ * per four letters, non-ASCII character standing in for a letter or inserted
+ * between two — invisible format characters inserted between letters free?
+ * Bounded: a key is at most 256 characters, a word at most 13, the edit budget
+ * at most 3.
+ */
+function spelledAround(chars: readonly string[], word: string): boolean {
+  const budget = Math.floor(word.length / 4);
+  const align = (i: number, j: number, left: number, used: boolean): boolean => {
+    if (j === word.length) return used;
+    if (i >= chars.length) return false;
+    const c = chars[i] as string;
+    if (c === word[j] && align(i + 1, j + 1, left, used)) return true;
+    if (j > 0 && isFormatChar(c)) return align(i + 1, j, left, true);
+    if (!isNonAscii(c) || left === 0) return false;
+    return align(i + 1, j + 1, left - 1, true) || (j > 0 && align(i + 1, j, left - 1, true));
+  };
+  for (let start = 0; start < chars.length; start += 1) if (align(start, 0, budget, false)) return true;
+  return false;
+}
+
+/**
  * Is `key` spelled like a credential — judged on its WHOLE name, case- and
  * separator-insensitively?
  *
  * The key is NFKC-normalised first. A key that is then longer than 256
- * characters, or still holds a non-ASCII character, is credential-shaped
- * unread ({@link judgedKey}). Otherwise the key is split into words
- * ({@link wordsOf}). It is NOT credential-shaped
+ * characters is credential-shaped unread ({@link judgedKey}), and so is one
+ * whose non-ASCII text hides a credential word ({@link nonAsciiHidesCredential}).
+ * Otherwise the key is split into words ({@link wordsOf}; a run of non-ASCII
+ * characters is a word of its own). It is NOT credential-shaped
  * when its last word is a descriptor ({@link CREDENTIAL_DESCRIPTOR_ENDINGS},
  * or a word ending in `less`) or its first word marks a flag or a measure
  * ({@link NON_CREDENTIAL_LEADING_WORDS}). Otherwise, after dropping trailing
@@ -363,7 +496,12 @@ export function isCredentialShapedConfigKey(key: string): boolean {
   if (typeof key !== 'string' || key === '') return false;
   const judged = judgedKey(key);
   if (judged === undefined) return true;
-  const words = wordsOf(judged);
+  if (NON_ASCII_RE.test(judged) && nonAsciiHidesCredential(judged)) return true;
+  return judgeWords(wordsOf(judged));
+}
+
+/** The word judgment of {@link isCredentialShapedConfigKey}, on a key already split. */
+function judgeWords(words: readonly string[]): boolean {
   if (words.length === 0) return false;
   if (words.length === 1) return isCredentialShapedWord(words[0] as string);
 
@@ -420,9 +558,8 @@ const IDENTITY_LEAF_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 function isDescriptorLeafKey(key: string): boolean {
-  const judged = judgedKey(key);
-  if (judged === undefined) return false;
-  const words = wordsOf(judged);
+  const words = judgedWords(key);
+  if (words === undefined) return false;
   const last = words[words.length - 1];
   if (last === undefined) return false;
   return CREDENTIAL_DESCRIPTOR_ENDINGS.has(last) || IDENTITY_LEAF_WORDS.has(last) || last.endsWith('less');
@@ -430,18 +567,28 @@ function isDescriptorLeafKey(key: string): boolean {
 
 /** Is `key` the bare word `key` (or `keys`), in any case and with any separators? */
 function isBareKeyName(key: string): boolean {
-  const judged = judgedKey(key);
-  if (judged === undefined) return false;
-  const words = wordsOf(judged);
+  const words = judgedWords(key);
+  if (words === undefined) return false;
   return words.length === 1 && (words[0] === 'key' || words[0] === 'keys');
 }
 
 /** Is `key` header-ish — does one of its words name a header (`headers`, `httpHeaders`, `rawHeaders`)? */
 function isHeaderishKey(key: string | undefined): boolean {
   if (key === undefined) return false;
-  const judged = judgedKey(key);
-  if (judged === undefined) return false;
-  return wordsOf(judged).some((word) => word === 'header' || word === 'headers');
+  return judgedWords(key)?.some((word) => word === 'header' || word === 'headers') ?? false;
+}
+
+/**
+ * Words of a holder that make a bare `key` below it key material: the TLS
+ * options of a client (`ssl: { key, cert, ca }`, `tls: { key }`, pg / mysql2 /
+ * mongodb / `tls.connect`), and any word starting with `cert`
+ * (`certificate: { key }`, `clientCert: { key }`).
+ */
+const KEY_MATERIAL_HOLDER_WORDS: ReadonlySet<string> = new Set(['ssl', 'tls', 'mtls', 'x509', 'pfx', 'pkcs12']);
+
+/** Is `key` a holder whose bare `key` is TLS key material? */
+function isKeyMaterialHolder(key: string): boolean {
+  return judgedWords(key)?.some((word) => KEY_MATERIAL_HOLDER_WORDS.has(word) || word.startsWith('cert')) ?? false;
 }
 
 /**
@@ -560,8 +707,18 @@ function semicolonSegments(value: string): ConnectionStringSegment[] {
   return out;
 }
 
+/**
+ * A value that STARTS with a SQL bind placeholder (`$1`, `?`, `:name`)
+ * ending at whitespace, `)`, `,`, `;` or the end — `WHERE token = $1` is a
+ * query, not a credential.
+ */
+const SQL_PLACEHOLDER_RE = /^(?:\$[0-9]+|\?|:[A-Za-z_][A-Za-z0-9_]*)(?=[\s),;]|$)/;
+
 const isCredentialSegment = (segment: ConnectionStringSegment): boolean =>
-  segment.key !== undefined && segment.value !== '' && isCredentialShapedConfigKey(segment.key.trim());
+  segment.key !== undefined
+  && segment.value !== ''
+  && !SQL_PLACEHOLDER_RE.test(segment.value)
+  && isCredentialShapedConfigKey(segment.key.trim());
 
 /** Strip the credential segments of a semicolon-delimited string — and the tail each one drags (see {@link CONNECTION_STRING_KEYWORDS}). */
 function redactSemicolonSegments(value: string): string {
@@ -661,7 +818,8 @@ function libpqPairs(value: string): LibpqPair[] {
   return out;
 }
 
-const isCredentialLibpqPair = (pair: LibpqPair): boolean => pair.value !== '' && isCredentialShapedConfigKey(pair.key);
+const isCredentialLibpqPair = (pair: LibpqPair): boolean =>
+  pair.value !== '' && !SQL_PLACEHOLDER_RE.test(pair.value) && isCredentialShapedConfigKey(pair.key);
 
 /** The string without its credential libpq pairs, each cut with the whitespace that separated it. */
 function redactLibpqPairs(value: string): string {
@@ -691,6 +849,29 @@ function redactLibpqPairs(value: string): string {
  * after each candidate `@` stops at the next `@`.
  */
 const SCHEMELESS_USERINFO_RE = /^([^\s/?#@:;=]+):([^\s/?#]+)@(?=[^\s/?#@]*[A-Za-z0-9])/;
+
+/**
+ * Opaque URI schemes whose `scheme:` prefix is not a userinfo username
+ * (`mailto:alice@example.com`): the judgment reads what follows the prefix
+ * instead, so `sip:alice:secret@host` is still found.
+ */
+const OPAQUE_SCHEME_RE = /^(?:mailto|sips?|tel|urn|xmpp|news|im|pres):/i;
+
+/** A time of day (`12:30@`, `9:05:59.250@`) — not a `user:password@` pair. */
+const TIME_USERINFO_RE = /^[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?@/;
+
+/**
+ * Where a scheme-less `user:password@host` userinfo starts in `value` — after
+ * an opaque scheme prefix, else `0` — or `-1` when the string holds none
+ * (a time of day before the `@` is none).
+ */
+function schemelessUserinfoAt(value: string): number {
+  const opaque = OPAQUE_SCHEME_RE.exec(value);
+  const from = opaque ? opaque[0].length : 0;
+  const rest = value.slice(from);
+  if (TIME_USERINFO_RE.test(rest) || !SCHEMELESS_USERINFO_RE.test(rest)) return -1;
+  return from;
+}
 
 /**
  * `jdbc:oracle:thin:user/password@…` — the Oracle thin-driver form, whose
@@ -877,14 +1058,42 @@ function parsedJson(value: string): object | undefined {
   }
 }
 
+/**
+ * Longer than this, a string (or the UTF-8 text of bytes) is not read at all:
+ * it is judged credential material unread — refused at write, withheld whole
+ * on read — so an over-long value can neither cost the judgment time nor hide
+ * a credential from it.
+ */
+export const MAX_JUDGED_STRING_LENGTH = 64 * 1024;
+
+/**
+ * PEM private-key armour — `-----BEGIN PRIVATE KEY-----`, `RSA`, `EC`, `DSA`,
+ * `ENCRYPTED`, `OPENSSH` and `PGP … BLOCK` forms included. Linear: each
+ * candidate starts at a literal `-----BEGIN `, and its letter run ends at the
+ * next `-`.
+ */
+const PEM_PRIVATE_KEY_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----/i;
+
+/** A PEM private-key block, from its BEGIN line to its END line — or to the end of the string when it has none. */
+const PEM_PRIVATE_KEY_BLOCK_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----|$)/gi;
+
+/**
+ * Is a string read for `Name: value` header lines? A multi-line string is; a
+ * single-line one only under a header-ish key (`headers: ['Authorization: …']`)
+ * — a one-line `description: 'Password: provided via the secret store'` is prose.
+ */
+const readsHeaderLines = (value: string, headerish: boolean): boolean => headerish || value.includes('\n');
+
 /** {@link embeddedCredentialOf} at a walk depth — a JSON-encoded string is walked one level deeper. */
-function embeddedCredentialAt(value: string, depth: number): string | undefined {
+function embeddedCredentialAt(value: string, depth: number, headerish = false): string | undefined {
   if (typeof value !== 'string' || value === '') return undefined;
+  if (value.length > MAX_JUDGED_STRING_LENGTH) return `a value longer than ${MAX_JUDGED_STRING_LENGTH} characters, too long to judge`;
   const json = parsedJson(value);
   if (json !== undefined) {
     if (depth > CONTRACTLESS_CREDENTIAL_WALK_DEPTH) return 'a JSON-encoded value nested too deeply to judge';
     return collectFindings(json, depth + 1).length > 0 ? 'credential material inside a JSON-encoded string' : undefined;
   }
+  if (PEM_PRIVATE_KEY_RE.test(value)) return 'a PEM private key';
   const url = urlLayout(value);
   if (url) {
     if (url.password !== undefined) return 'a userinfo password inside a URL';
@@ -897,8 +1106,8 @@ function embeddedCredentialAt(value: string, depth: number): string | undefined 
     return undefined;
   }
   if (ORACLE_THIN_USERINFO_RE.test(value)) return 'a userinfo password (`user/password@host`)';
-  if (SCHEMELESS_USERINFO_RE.test(value)) return 'a userinfo password (`user:password@host`)';
-  if (linesOf(value).some((line) => credentialHeaderLineName(line) !== undefined)) {
+  if (schemelessUserinfoAt(value) !== -1) return 'a userinfo password (`user:password@host`)';
+  if (readsHeaderLines(value, headerish) && linesOf(value).some((line) => credentialHeaderLineName(line) !== undefined)) {
     return 'a credential header line (`Name: value`)';
   }
   return keyValueCredentialOf(value);
@@ -929,8 +1138,19 @@ function embeddedCredentialAt(value: string, depth: number): string | undefined 
  * Every key inside a string is judged by {@link isCredentialShapedConfigKey},
  * and only a NON-EMPTY credential counts.
  */
-export function embeddedCredentialOf(value: string): string | undefined {
-  return embeddedCredentialAt(value, 0);
+export function embeddedCredentialOf(value: string, options?: EmbeddedCredentialOptions): string | undefined {
+  return embeddedCredentialAt(value, 0, options?.headerish === true);
+}
+
+/** How {@link embeddedCredentialOf} and {@link redactEmbeddedCredentials} read a string. */
+export interface EmbeddedCredentialOptions {
+  /**
+   * The string sits under a header-ish key (one of whose words is `header` or
+   * `headers`), so a single-line string is read as a `Name: value` header line
+   * too — a multi-line string always is. A finding's
+   * {@link ContractlessCredentialFinding.headerish} carries this.
+   */
+  headerish?: boolean;
 }
 
 /**
@@ -958,12 +1178,16 @@ export function connectionStringCredentialKeys(value: string): string[] {
 }
 
 /** One rewrite pass of {@link redactEmbeddedCredentials}. */
-function redactEmbeddedOnce(value: string, depth: number): string {
-  const json = parsedJson(value);
+function redactEmbeddedOnce(input: string, depth: number, headerish: boolean): string {
+  if (input.length > MAX_JUDGED_STRING_LENGTH) return '';
+  const json = parsedJson(input);
   if (json !== undefined) {
     if (depth > CONTRACTLESS_CREDENTIAL_WALK_DEPTH) return '';
     return JSON.stringify(withholdFindings(json, collectFindings(json, depth + 1), depth + 1));
   }
+  // A PEM private key goes whole, armour included; the rest of the string is
+  // judged as it would be without it.
+  const value = PEM_PRIVATE_KEY_RE.test(input) ? input.replace(PEM_PRIVATE_KEY_BLOCK_RE, '') : input;
   const url = urlLayout(value);
   if (url) {
     const headEnd = url.tail === -1 ? url.queryStart : url.tail;
@@ -996,9 +1220,10 @@ function redactEmbeddedOnce(value: string, depth: number): string {
     return out;
   }
   if (ORACLE_THIN_USERINFO_RE.test(value)) return value.replace(ORACLE_THIN_USERINFO_RE, '$1$2@');
-  if (SCHEMELESS_USERINFO_RE.test(value)) return value.replace(SCHEMELESS_USERINFO_RE, '$1@');
+  const userinfoAt = schemelessUserinfoAt(value);
+  if (userinfoAt !== -1) return value.slice(0, userinfoAt) + value.slice(userinfoAt).replace(SCHEMELESS_USERINFO_RE, '$1@');
   let out = value;
-  if (linesOf(out).some((line) => credentialHeaderLineName(line) !== undefined)) {
+  if (readsHeaderLines(out, headerish) && linesOf(out).some((line) => credentialHeaderLineName(line) !== undefined)) {
     out = out
       .split('\n')
       .map((line) => {
@@ -1012,12 +1237,12 @@ function redactEmbeddedOnce(value: string, depth: number): string {
 }
 
 /** {@link redactEmbeddedCredentials} at a walk depth (see {@link embeddedCredentialAt}). */
-function redactEmbeddedAt(value: string, depth: number): string {
-  if (embeddedCredentialAt(value, depth) === undefined) return value;
-  const out = redactEmbeddedOnce(value, depth);
+function redactEmbeddedAt(value: string, depth: number, headerish = false): string {
+  if (embeddedCredentialAt(value, depth, headerish) === undefined) return value;
+  const out = redactEmbeddedOnce(value, depth, headerish);
   // The invariant the read door rests on: what it serves carries no
   // credential. A string the rewrite cannot clear is withheld whole.
-  return embeddedCredentialAt(out, depth) === undefined ? out : '';
+  return embeddedCredentialAt(out, depth, headerish) === undefined ? out : '';
 }
 
 /**
@@ -1031,8 +1256,8 @@ function redactEmbeddedAt(value: string, depth: number): string {
  * answers `undefined` for it) — a string the rewrite cannot clear comes back
  * empty.
  */
-export function redactEmbeddedCredentials(value: string): string {
-  return redactEmbeddedAt(value, 0);
+export function redactEmbeddedCredentials(value: string, options?: EmbeddedCredentialOptions): string {
+  return redactEmbeddedAt(value, 0, options?.headerish === true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,6 +1283,13 @@ export interface ContractlessCredentialFinding {
   value: unknown;
   /** For `embedded`, what was found, for the author. */
   what?: string;
+  /**
+   * For `embedded`: `true` when the string sits under a header-ish key and was
+   * read as a single-line `Name: value` header line too — hand it to
+   * {@link embeddedCredentialOf} as {@link EmbeddedCredentialOptions.headerish}
+   * to judge the string the same way.
+   */
+  headerish?: true;
 }
 
 /** Deeper than this, a subtree is a {@link ContractlessCredentialFinding} of kind `depth`. */
@@ -1089,11 +1321,47 @@ function binaryText(value: ArrayBufferView | ArrayBuffer): string {
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
 }
 
+/**
+ * Does a string under a bare `key` look like key material rather than a name?
+ * {@link looksLikeSecretValue}, or — wider, for a bare `key` only — at least
+ * 16 characters of hexadecimal holding a letter (`deadbeefcafebabe`), or
+ * digit-free text whose case flips like random text rather than camel case or
+ * a path — 30% to 70% of its letters upper-case and at least four
+ * lower-to-upper steps — that is either base64 (at least 16 characters of
+ * `A`–`Z`, `a`–`z`, `+`, `/`, up to two `=` of padding, a length divisible by
+ * four, and a `+`, a `/` or padding) or at least 24 letters (`-` and `_`
+ * allowed).
+ * `email`, `customerEmailAddress` and `XMLHttpRequestURLBuilder` do not.
+ */
+function looksLikeBareKeyMaterial(value: string): boolean {
+  if (looksLikeSecretValue(value)) return true;
+  if (value.length < 16) return false;
+  if (/^[0-9a-f]+$/i.test(value) && /[a-f]/i.test(value)) return true;
+  // Random text flips case like coin tosses; camel case and paths do not.
+  let upper = 0;
+  let letters = 0;
+  let lowerToUpper = 0;
+  let prev = '';
+  for (const c of value) {
+    const isUpper = c >= 'A' && c <= 'Z';
+    if (isUpper || (c >= 'a' && c <= 'z')) letters += 1;
+    if (isUpper) {
+      upper += 1;
+      if (prev >= 'a' && prev <= 'z') lowerToUpper += 1;
+    }
+    prev = c;
+  }
+  const ratio = letters === 0 ? 0 : upper / letters;
+  if (ratio < 0.3 || ratio > 0.7 || lowerToUpper < 4) return false;
+  if (/^[A-Za-z+/]+={0,2}$/.test(value) && value.length % 4 === 0 && /[+/=]/.test(value)) return true;
+  return value.length >= 24 && /^[A-Za-z_-]+$/.test(value);
+}
+
 /** Does a value under a bare `key` look like key material rather than a name (`{ key: 'email' }`)? */
 function bareKeyHoldsSecret(value: unknown): boolean {
-  if (typeof value === 'string') return looksLikeSecretValue(value);
+  if (typeof value === 'string') return looksLikeBareKeyMaterial(value);
   if (isBinary(value)) return binaryLength(value) > 0;
-  if (Array.isArray(value)) return value.some((element) => typeof element === 'string' && looksLikeSecretValue(element));
+  if (Array.isArray(value)) return value.some((element) => typeof element === 'string' && looksLikeBareKeyMaterial(element));
   return false;
 }
 
@@ -1144,11 +1412,13 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
     const leafKey = key ?? ctx.leafKey;
     let named = key !== undefined && isCredentialShapedConfigKey(key);
     // A bare `key` is credential-shaped only where it can mean key material:
-    // inside a credential-shaped or header-ish holder, or holding a value that
-    // looks like a secret — never `{ key: 'email' }`.
+    // inside a credential-shaped, header-ish or TLS holder, or holding a value
+    // that looks like key material — never `{ key: 'email' }`.
     if (named && isBareKeyName(key as string) && !ctx.enclosing) {
       const holder = ctx.holderKey;
-      named = (holder !== undefined && (isCredentialShapedConfigKey(holder) || isHeaderishKey(holder))) || bareKeyHoldsSecret(value);
+      named = (holder !== undefined
+        && (isCredentialShapedConfigKey(holder) || isHeaderishKey(holder) || isKeyMaterialHolder(holder)))
+        || bareKeyHoldsSecret(value);
     }
     // The descriptor exemption applies to LEAF values only (a string, a
     // number, bytes, a list of them); an object below a descriptor key keeps
@@ -1160,8 +1430,9 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
         if (value !== '') out.push({ path, kind: 'named', value });
         return;
       }
-      const what = embeddedCredentialAt(value, at);
-      if (what) out.push({ path, kind: 'embedded', value, what });
+      const headerish = isHeaderishKey(leafKey) || isHeaderishKey(ctx.holderKey);
+      const what = embeddedCredentialAt(value, at, headerish);
+      if (what) out.push({ path, kind: 'embedded', value, what, ...(headerish ? { headerish: true as const } : {}) });
       return;
     }
     if (typeof value !== 'object') {
@@ -1169,7 +1440,10 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
       return;
     }
     if (isBinary(value)) {
-      if (leafCredential ? binaryLength(value) > 0 : embeddedCredentialAt(binaryText(value), at) !== undefined) {
+      const judged = leafCredential
+        || binaryLength(value) > MAX_JUDGED_STRING_LENGTH
+        || embeddedCredentialAt(binaryText(value), at, isHeaderishKey(leafKey) || isHeaderishKey(ctx.holderKey)) !== undefined;
+      if (leafCredential ? binaryLength(value) > 0 : judged) {
         out.push({ path, kind: 'named', value });
       }
       return;
@@ -1213,8 +1487,9 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
       const childPath = [...path, key];
       if (isPair && (labels as readonly string[]).includes(key)) {
         // A label names the pair; it is judged only for an embedded credential.
-        const what = embeddedCredentialAt(value as string, at);
-        if (what) out.push({ path: childPath, kind: 'embedded', value, what });
+        const headerish = isHeaderishKey(ctx.holderKey);
+        const what = embeddedCredentialAt(value as string, at, headerish);
+        if (what) out.push({ path: childPath, kind: 'embedded', value, what, ...(headerish ? { headerish: true as const } : {}) });
         continue;
       }
       if (isPair && key === 'value' && pairCredential) {
@@ -1291,7 +1566,7 @@ function withholdFindings<T>(root: T, findings: readonly ContractlessCredentialF
     const parent = parentOf(finding.path) as Record<string, unknown> | undefined;
     const leaf = finding.path[finding.path.length - 1] as string;
     if (parent && typeof parent[leaf] === 'string') {
-      parent[leaf] = redactEmbeddedAt(parent[leaf] as string, depth + Math.max(0, finding.path.length - 1));
+      parent[leaf] = redactEmbeddedAt(parent[leaf] as string, depth + Math.max(0, finding.path.length - 1), finding.headerish === true);
     }
   }
   // Drops deepest-first and, inside one array, highest index first — so a

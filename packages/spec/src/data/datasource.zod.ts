@@ -582,7 +582,9 @@ function reportContractlessInlineCredentials(
       if (typeof finding.value === 'string' && finding.value.replace(ENV_NAME_PLACEHOLDER_RE, '').trim() === '') continue;
       message = CONTRACTLESS_INLINE_CREDENTIAL_REFUSED(dotted, driverName);
     } else {
-      const what = embeddedCredentialOf(String(finding.value).replace(ENV_NAME_PLACEHOLDER_RE, ''));
+      const what = embeddedCredentialOf(String(finding.value).replace(ENV_NAME_PLACEHOLDER_RE, ''), {
+        headerish: finding.headerish === true,
+      });
       if (!what) continue;
       message = CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED(dotted, driverName, what);
     }
