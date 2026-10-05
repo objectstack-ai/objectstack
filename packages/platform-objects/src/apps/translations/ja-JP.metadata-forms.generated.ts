@@ -60,6 +60,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "レコードタイトル項目",
         helpText: "各レコードのタイトルに使う項目（例: \"name\"、\"subject\"）。ADR-0079 の正規ポインタで、レコード表示・ObjectQL 検索・関連レコードのプレビューが参照します。"
       },
+      imageField: {
+        label: "レコード画像項目",
+        helpText: "各レコードの画像に使う項目で、レコードページのヘッダーでタイトルの横に表示されます。このオブジェクトの image 型または avatar 型の項目を指定してください。それ以外の名前はオブジェクトの保存時に拒否されます。空欄の場合、レコード画像は表示されず、プレースホルダーも描画されません。"
+      },
       isSystem: {
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
