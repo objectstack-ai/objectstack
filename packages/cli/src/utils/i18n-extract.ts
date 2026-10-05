@@ -1825,12 +1825,25 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     if (!flowName) continue;
     const scope: EntryScope = { flowName };
 
+    const nodes: any[] = collectFlowNodesDeep(flow.nodes);
+
     // `flows.<flow>.label` — `lookupFlowLabel`'s key. `Flow.label` is required
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
-    pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
-
-    const nodes: any[] = collectFlowNodesDeep(flow.nodes);
+    //
+    // Demanded only for a flow with a `screen` node, at any depth of the same
+    // node universe the screens walk below reads. The predicate mirrors the one
+    // reader of the key: the console's `FlowRunner` names the flow by it, in
+    // its header and its completion toast, and the runner opens only on a run
+    // paused at a screen. A flow that can never pause there (record-triggered,
+    // scheduled, an API flow with no screen) has no surface that shows its
+    // translated label, so demanding one would ask an author for a string that
+    // is stored and never read. When a reader of a non-screen flow's label
+    // lands (a run-result toast, say), this predicate widens in the same change
+    // as that reader.
+    if (nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE)) {
+      pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
+    }
     for (const node of nodes) {
       if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
