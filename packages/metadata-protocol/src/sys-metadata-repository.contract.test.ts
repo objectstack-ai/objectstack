@@ -580,3 +580,149 @@ describe('SysMetadataRepository — close() terminates every live watcher (#1102
     expect(viaClose).toEqual({ value: undefined, done: true });
   });
 });
+
+/**
+ * #21790 — `ObjectSchema.fields` is a map whose KEY ORDER the spec declares to
+ * be the field order, and the content hash used to sort it away: a pure
+ * reorder hashed equal, `put`'s no-op short-circuit read the publish as
+ * "unchanged", and the object designer's reorder was dropped while the publish
+ * answered success. `hashSpec(body, ref.type)` now keeps that order (see
+ * `canonicalize` guarantee 8).
+ *
+ * The second block is the upgrade half. Every row written before the change
+ * carries the ORDER-BLIND stamp, and that stamp is the row's version token —
+ * readers were handed it, and the optimistic lock compares against it. So the
+ * stamp is accepted as written, and "is this write a no-op?" is answered from
+ * the stored CONTENT under the current rule. Both directions a stale stamp
+ * misfires in are pinned: an identical re-save must not record a change, and a
+ * reorder into sorted order — whose hash IS the stale stamp — must not be
+ * dropped.
+ */
+describe('SysMetadataRepository — a declared ordered map: object `fields` (#21790)', () => {
+  const ref = { org: 'system', type: 'object' as const, name: 'invoice' };
+  // `object` is `allowRuntimeCreate`, not `allowOrgOverride`: the runtime door.
+  const intent = 'runtime-only' as const;
+  const FIELDS: Record<string, { type: string; label: string }> = {
+    title: { type: 'text', label: 'Title' },
+    amount: { type: 'currency', label: 'Amount' },
+    due: { type: 'date', label: 'Due' },
+  };
+  const DECLARED = ['title', 'amount', 'due']; // deliberately not sorted
+  const MOVED = ['due', 'title', 'amount'];
+  const SORTED = ['amount', 'due', 'title'];
+  const body = (order: readonly string[]) => ({
+    name: 'invoice',
+    label: 'Invoice',
+    fields: Object.fromEntries(order.map((k) => [k, FIELDS[k]])),
+  });
+
+  type Engine = ReturnType<typeof makeFakeEngine>;
+  const activeRow = (engine: Engine) =>
+    engine.rows().find((r) => r.type === 'object' && r.state === 'active')!;
+  const storedOrder = (engine: Engine) =>
+    Object.keys((JSON.parse(activeRow(engine).metadata as string) as { fields: object }).fields);
+  const repoOn = (engine: Engine) => {
+    const repo = new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'system' });
+    created.push(repo);
+    return repo;
+  };
+
+  it('a pure reorder, saved as a draft and published, is written', async () => {
+    const engine = makeFakeEngine();
+    const repo = repoOn(engine);
+    const first = await repo.put(ref, body(DECLARED), { parentVersion: null, actor: 't', intent });
+
+    await repo.put(ref, body(MOVED), { parentVersion: null, actor: 't', intent, state: 'draft' });
+    const published = await repo.promoteDraft(ref, { actor: 't', intent });
+
+    expect(published.version).not.toBe(first.version);
+    expect(published.version).toBe(hashSpec(body(MOVED), 'object'));
+    expect(storedOrder(engine)).toEqual(MOVED);
+    expect(Object.keys((await repo.get(ref))!.body.fields as object)).toEqual(MOVED);
+    // The active create, the draft's own row, and the publish — the write the
+    // order-blind hash used to skip.
+    expect(engine.historyRows().map((r) => r.operation_type)).toEqual(['create', 'create', 'publish']);
+  });
+
+  it('…while an identical re-save is still the no-op it was', async () => {
+    const engine = makeFakeEngine();
+    const repo = repoOn(engine);
+    const first = await repo.put(ref, body(DECLARED), { parentVersion: null, actor: 't', intent });
+    const again = await repo.put(ref, body(DECLARED), { parentVersion: first.version, actor: 't', intent });
+
+    expect(again.version).toBe(first.version);
+    expect(again.seq).toBe(first.seq);
+    expect(engine.historyRows()).toHaveLength(1);
+  });
+
+  describe('a row stamped before #21790 — the order-blind stamp, accepted as written', () => {
+    async function legacyRow(order: readonly string[]) {
+      const engine = makeFakeEngine();
+      const stored = body(order);
+      // The stamp every pre-#21790 write took: `hashSpec` with no type.
+      const stamp = hashSpec(stored);
+      const now = new Date().toISOString();
+      await engine.insert('sys_metadata', {
+        type: 'object',
+        name: 'invoice',
+        organization_id: null,
+        package_id: null,
+        state: 'active',
+        version: 1,
+        metadata: JSON.stringify(stored),
+        checksum: stamp,
+        created_at: now,
+        updated_at: now,
+      });
+      return { engine, repo: repoOn(engine), stamp };
+    }
+
+    it('the fixture is a stale stamp: the current rule hashes the same bytes differently', async () => {
+      const { stamp } = await legacyRow(DECLARED);
+      expect(stamp).not.toBe(hashSpec(body(DECLARED), 'object'));
+    });
+
+    it('reads back with the stamp it was written with', async () => {
+      const { repo, stamp } = await legacyRow(DECLARED);
+      expect((await repo.get(ref))!.hash).toBe(stamp);
+    });
+
+    it('an identical re-save: no conflict, no history row, the stored stamp handed back', async () => {
+      const { engine, repo, stamp } = await legacyRow(DECLARED);
+      const res = await repo.put(ref, body(DECLARED), { parentVersion: stamp, actor: 't', intent });
+
+      expect(res.version).toBe(stamp);
+      expect(engine.historyRows()).toEqual([]);
+      expect(activeRow(engine).checksum).toBe(stamp);
+      // The version handed back is the one the next write's lock accepts.
+      await expect(
+        repo.put(ref, body(MOVED), { parentVersion: res.version, actor: 't', intent }),
+      ).resolves.toMatchObject({ version: hashSpec(body(MOVED), 'object') });
+      expect(storedOrder(engine)).toEqual(MOVED);
+    });
+
+    it('a reorder published through a draft is written, chained to the stored stamp', async () => {
+      const { engine, repo, stamp } = await legacyRow(DECLARED);
+      await repo.put(ref, body(MOVED), { parentVersion: null, actor: 't', intent, state: 'draft' });
+      await repo.promoteDraft(ref, { actor: 't', intent });
+
+      expect(storedOrder(engine)).toEqual(MOVED);
+      const publish = engine.historyRows().find((r) => r.operation_type === 'publish');
+      expect(publish).toMatchObject({ previous_checksum: stamp });
+    });
+
+    it('a reorder INTO sorted order is written, though its hash IS the stale stamp', async () => {
+      const { engine, repo, stamp } = await legacyRow(DECLARED);
+      // The trap: the order-blind stamp is the sorted form's hash, so a
+      // comparison of hash against stamp reads this reorder as "unchanged".
+      expect(hashSpec(body(SORTED), 'object')).toBe(stamp);
+
+      await repo.put(ref, body(SORTED), { parentVersion: null, actor: 't', intent, state: 'draft' });
+      await repo.promoteDraft(ref, { actor: 't', intent });
+
+      expect(storedOrder(engine)).toEqual(SORTED);
+      // The draft's own row, then the publish the stale stamp would have skipped.
+      expect(engine.historyRows().map((r) => r.operation_type)).toEqual(['create', 'publish']);
+    });
+  });
+});

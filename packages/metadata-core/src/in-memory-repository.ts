@@ -101,7 +101,8 @@ export class InMemoryRepository implements MetadataRepository {
       throw new ConflictError(ref, opts.parentVersion ?? null, currentHead);
     }
 
-    const hash = hashSpec(spec);
+    // [#21790] Hashed as its type — a declared ordered map keeps its order.
+    const hash = hashSpec(spec, ref.type);
 
     // No-op write — same content. Still consumes nothing; no event emitted.
     if (current && current.hash === hash) {

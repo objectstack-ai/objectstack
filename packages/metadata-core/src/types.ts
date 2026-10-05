@@ -91,13 +91,13 @@ export function refKey(ref: Pick<MetaRef, 'org' | 'type' | 'name'>): string {
  * Full metadata item as stored / returned by the Repository.
  *
  * `body` is the **canonical, Zod-normalised** spec (with defaults filled
- * in). `hash` is `sha256(canonicalize(body))`. Equal hashes imply equal
+ * in). `hash` is `sha256(canonicalize(body, ref.type))`. Equal hashes imply equal
  * specs.
  */
 export const MetadataItemSchema = z.object({
   ref: MetaRefSchema,
   body: z.record(z.string(), z.unknown()).describe('Canonical Zod-normalised spec'),
-  hash: z.string().regex(/^sha256:[0-9a-f]{64}$/).describe('sha256(canonicalize(body))'),
+  hash: z.string().regex(/^sha256:[0-9a-f]{64}$/).describe('sha256(canonicalize(body, ref.type))'),
   parentHash: z.string().nullable().describe('Hash this version was derived from; null for first version'),
   authoredBy: z.string().nullable().describe('Identity of the writer (user id, "cli", "ai:claude", …); null = system-initiated, no actor'),
   authoredAt: z.string().describe('ISO-8601 timestamp'),
