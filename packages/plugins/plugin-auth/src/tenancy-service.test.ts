@@ -565,7 +565,7 @@ describe('defaultOrgId is revalidated when a user is bound', () => {
   /**
    * `sys_organization` + `sys_member` over arrays. `find` honours every `where`
    * key as an equality, so an existence read by `id` answers for that id and
-   * nothing else.
+   * nothing else, and refuses a combinator it does not implement.
    */
   function makeStore(orgs: Array<{ id: string; slug?: string }>) {
     const members: Array<{ id: string; organization_id: string; user_id: string }> = [];
@@ -577,7 +577,11 @@ describe('defaultOrgId is revalidated when a user is bound', () => {
       find: vi.fn(async (object: string, query: any) => {
         const where: Record<string, unknown> = query?.where ?? {};
         const rows = (tables[object] ?? []).filter((row) =>
-          Object.entries(where).every(([k, v]) => row[k] === v),
+          Object.entries(where).every(([k, v]) => {
+            // Plain equality only: a combinator is refused, never read as a field name.
+            if (k.startsWith('$')) throw new Error(`WHERE combinator ${k} is not implemented by this double`);
+            return row[k] === v;
+          }),
         );
         return rows.slice(0, query?.limit ?? rows.length);
       }),
