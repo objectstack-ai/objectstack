@@ -11,7 +11,8 @@
  *
  *   artifact limb   `lookupArtifactItem` → `PLURAL_TO_SINGULAR[type] ?? type`,
  *                   then the raw spelling as a second lookup. FOLDED.
- *   overlay limb    `engine.findOne('sys_metadata', { where: { type, … } })`.
+ *   overlay limb    `engine.findOne('sys_metadata', { where: { type, … } })`
+ *                   ([#21761] since then `engine.find`, every row of the item).
  *                   RAW — and `SysMetadataRepository.whereFor` emits the
  *                   CANONICAL spelling with no at-rest fallback, so the stored
  *                   active row lives under a `type` this query never asked for.
@@ -117,6 +118,10 @@ function harness(opts: {
     const rows = (opts.rows ?? []).map((r) => overlayRow(r.type, r.name, r.lock));
     const items = opts.registryItems ?? {};
     const overlayQueries: Array<Record<string, unknown>> = [];
+    const held = (where: Record<string, unknown>) => rows.filter((r) =>
+        r.type === where['type']
+        && r.name === where['name']
+        && r.state === where['state']);
 
     const engine: any = {
         registry: {
@@ -132,12 +137,16 @@ function harness(opts: {
             if (object !== 'sys_metadata') return null;
             const where = (query?.where ?? {}) as Record<string, unknown>;
             overlayQueries.push(where);
-            return rows.find((r) =>
-                r.type === where['type']
-                && r.name === where['name']
-                && r.state === where['state']) ?? null;
+            return held(where)[0] ?? null;
         }),
-        find: vi.fn(async () => []),
+        // [#21761] The overlay limb selects its lock from EVERY row of the item
+        // in scope, so it reads with `find`; same key discipline as `findOne`.
+        find: vi.fn(async (object: string, query: any) => {
+            if (object !== 'sys_metadata') return [];
+            const where = (query?.where ?? {}) as Record<string, unknown>;
+            overlayQueries.push(where);
+            return held(where);
+        }),
         insert: vi.fn(async (_object: string, values: any) => ({ id: 'inserted', ...values })),
         count: vi.fn(async () => 0),
         execute: vi.fn(async () => ({})),
