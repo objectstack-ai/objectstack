@@ -57,9 +57,13 @@ const createMemoryEngine = () => {
     return out;
   };
   let seq = 0;
+  /** Tables whose inserts fail — the store-fault seam for the fail-closed cases. */
+  const failInserts = new Set<string>();
   return {
     tables,
+    failInserts,
     async insert(name: string, data: any) {
+      if (failInserts.has(name)) throw new Error(`fake driver: insert into ${name} refused`);
       const row = { id: data.id ?? `row_${++seq}`, ...data };
       rows(name).push(row);
       return { ...row };
@@ -101,6 +105,10 @@ const BASE = 'http://localhost:3000';
 const AFTER = `${BASE}/after-sign-in`;
 const IDP = 'https://idp.example.test';
 const EXTERNAL = 'acme-idp';
+/** A generic OIDC provider configured by discovery (subject = `sub`). */
+const OIDC = 'corp-oidc';
+/** A built-in social provider, for the id-token sign-in path. */
+const SOCIAL = 'google';
 
 const provider = (providerId: string) => ({
   providerId,
@@ -117,7 +125,34 @@ const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine,
-    oidcProviders: [provider(EXTERNAL), provider(PLATFORM_IDP_PROVIDER_ID)],
+    oidcProviders: [
+      provider(EXTERNAL),
+      provider(PLATFORM_IDP_PROVIDER_ID),
+      {
+        providerId: OIDC,
+        clientId: `${OIDC}-client`,
+        clientSecret: `${OIDC}-secret`,
+        discoveryUrl: `${IDP}/${OIDC}/.well-known/openid-configuration`,
+        pkce: false,
+      },
+    ],
+    socialProviders: {
+      [SOCIAL]: {
+        clientId: `${SOCIAL}-client`,
+        clientSecret: `${SOCIAL}-secret`,
+        // The id token is synthetic: verification and the profile come from
+        // the stubbed IdP below, never from a real issuer.
+        verifyIdToken: async () => true,
+        getUserInfo: async () => {
+          const profile = idpProfile[SOCIAL];
+          if (!profile) return null;
+          return {
+            user: { id: profile.sub, email: profile.email, emailVerified: profile.email_verified, name: 'Synthetic Person' },
+            data: { ...profile },
+          };
+        },
+      },
+    },
     ...config,
   } as any);
 
@@ -133,6 +168,18 @@ beforeEach(() => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (!url.startsWith(IDP)) return realFetch(input, init);
     const providerId = new URL(url).pathname.split('/')[1]!;
+    if (url.endsWith('/.well-known/openid-configuration')) {
+      return new Response(
+        JSON.stringify({
+          issuer: `${IDP}/${providerId}`,
+          authorization_endpoint: `${IDP}/${providerId}/authorize`,
+          token_endpoint: `${IDP}/${providerId}/token`,
+          userinfo_endpoint: `${IDP}/${providerId}/userinfo`,
+          id_token_signing_alg_values_supported: ['RS256'],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     if (url.endsWith('/token')) {
       return new Response(
         JSON.stringify({ access_token: `at-${providerId}`, token_type: 'Bearer', expires_in: 3600 }),
@@ -189,11 +236,12 @@ const oauthRoundTrip = async (
   providerId: string,
   start: 'sign-in/social' | 'link-social',
   sessionCookie: string[] = [],
+  extraBody: Record<string, unknown> = {},
 ): Promise<URL> => {
   const begin = await post(
     manager,
     start,
-    { provider: providerId, callbackURL: AFTER, disableRedirect: true },
+    { provider: providerId, callbackURL: AFTER, disableRedirect: true, ...extraBody },
     joinCookies(sessionCookie),
   );
   expect(begin.status).toBe(200);
@@ -213,10 +261,14 @@ const userRow = (engine: any, email: string) =>
   (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
 const accountsOf = (engine: any, userId: string, providerId: string) =>
   (engine.tables.get('sys_account') ?? []).filter((a: any) => a.user_id === userId && a.provider_id === providerId);
-const tombstones = (engine: any, userId: string, providerId: string) =>
-  (engine.tables.get('sys_verification') ?? []).filter(
-    (v: any) => v.identifier === unlinkTombstoneIdentifier(userId, providerId),
+/** The providers the user's unlink record lists (none when there is no record). */
+const unlinkedProviders = (engine: any, userId: string): string[] => {
+  const rows = (engine.tables.get('sys_verification') ?? []).filter(
+    (v: any) => v.identifier === unlinkTombstoneIdentifier(userId),
   );
+  expect(rows.length).toBeLessThanOrEqual(1);
+  return rows.length ? JSON.parse(rows[0].value).providers : [];
+};
 const setVerified = (engine: any, email: string, verified: boolean) => {
   userRow(engine, email).email_verified = verified;
 };
@@ -364,7 +416,7 @@ describe('implicit link on external sign-in, end to end', () => {
     const unlink = await post(manager, 'unlink-account', { accountId: linked.id }, joinCookies(session));
     expect(unlink.status).toBe(200);
     expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(0);
-    expect(tombstones(engine, user.id, EXTERNAL)).toHaveLength(1);
+    expect(unlinkedProviders(engine, user.id)).toEqual([EXTERNAL]);
 
     // An implicit sign-in through the same provider no longer re-links.
     const refused = await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social');
@@ -375,9 +427,125 @@ describe('implicit link on external sign-in, end to end', () => {
     const explicit = await oauthRoundTrip(manager, EXTERNAL, 'link-social', session);
     expect(explicit.searchParams.get('error')).toBeNull();
     expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(1);
-    expect(tombstones(engine, user.id, EXTERNAL)).toHaveLength(0);
+    expect(unlinkedProviders(engine, user.id)).toEqual([]);
 
     // …and the provider signs the user in again.
     expect((await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social')).searchParams.get('error')).toBeNull();
+  });
+  it('refuses on the id-token sign-in path for an unverified local row', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'idtoken@example.test';
+    await signUp(manager, email);
+    const user = userRow(engine, email);
+    idpProfile[SOCIAL] = { sub: 'social-1', email, email_verified: true };
+
+    const res = await post(manager, 'sign-in/social', {
+      provider: SOCIAL,
+      idToken: { token: 'synthetic-id-token' },
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).code).toBe(IMPLICIT_LINK_REFUSED);
+    expect(accountsOf(engine, user.id, SOCIAL)).toHaveLength(0);
+    expect(Boolean(userRow(engine, email).email_verified)).toBe(false);
+
+    // The same path links a verified row.
+    setVerified(engine, email, true);
+    const ok = await post(manager, 'sign-in/social', { provider: SOCIAL, idToken: { token: 'synthetic-id-token' } });
+    expect(ok.status).toBe(200);
+    expect(accountsOf(engine, user.id, SOCIAL)).toHaveLength(1);
+  });
+
+  it('a client-supplied link in additionalData does not make a sign-in an explicit link', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'forged@example.test';
+    await signUp(manager, email);
+    const user = userRow(engine, email);
+    idpProfile[EXTERNAL] = { sub: 'ext-5', email, email_verified: true };
+
+    const target = await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social', [], {
+      additionalData: { link: { userId: user.id, email } },
+    });
+
+    expect(target.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
+    expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(0);
+  });
+
+  it('allows an explicit link-social for an unverified user, without marking the email verified', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'explicit@example.test';
+    const session = await signUp(manager, email);
+    const user = userRow(engine, email);
+    expect(Boolean(user.email_verified)).toBe(false);
+    idpProfile[EXTERNAL] = { sub: 'ext-6', email, email_verified: true };
+
+    const target = await oauthRoundTrip(manager, EXTERNAL, 'link-social', session);
+
+    expect(target.searchParams.get('error')).toBeNull();
+    expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(1);
+    expect(Boolean(userRow(engine, email).email_verified)).toBe(false);
+  });
+
+  it('applies to a generic OIDC provider configured by discovery', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'oidc@example.test';
+    await signUp(manager, email);
+    const user = userRow(engine, email);
+    idpProfile[OIDC] = { sub: 'oidc-1', email, email_verified: true };
+
+    const refused = await oauthRoundTrip(manager, OIDC, 'sign-in/social');
+    expect(refused.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
+    expect(accountsOf(engine, user.id, OIDC)).toHaveLength(0);
+
+    setVerified(engine, email, true);
+    const linked = await oauthRoundTrip(manager, OIDC, 'sign-in/social');
+    expect(linked.searchParams.get('error')).toBeNull();
+    expect(accountsOf(engine, user.id, OIDC)).toHaveLength(1);
+  });
+
+  it('refuses the unlink when its record cannot be written, leaving the provider linked', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'storefault@example.test';
+    const session = await signUp(manager, email);
+    setVerified(engine, email, true);
+    const user = userRow(engine, email);
+    idpProfile[EXTERNAL] = { sub: 'ext-7', email, email_verified: true };
+    expect((await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social')).searchParams.get('error')).toBeNull();
+    const [linked] = accountsOf(engine, user.id, EXTERNAL);
+
+    engine.failInserts.add('sys_verification');
+    const unlink = await post(manager, 'unlink-account', { accountId: linked.id }, joinCookies(session));
+    engine.failInserts.delete('sys_verification');
+
+    expect(unlink.status).toBeGreaterThanOrEqual(400);
+    expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(1);
+    expect(unlinkedProviders(engine, user.id)).toEqual([]);
+  });
+
+  it('deleting the user removes its unlink record', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'deleted@example.test';
+    const session = await signUp(manager, email);
+    setVerified(engine, email, true);
+    const user = userRow(engine, email);
+    idpProfile[EXTERNAL] = { sub: 'ext-8', email, email_verified: true };
+    expect((await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social')).searchParams.get('error')).toBeNull();
+    const [linked] = accountsOf(engine, user.id, EXTERNAL);
+    expect((await post(manager, 'unlink-account', { accountId: linked.id }, joinCookies(session))).status).toBe(200);
+    expect(unlinkedProviders(engine, user.id)).toEqual([EXTERNAL]);
+
+    // A server-side deletion: no endpoint context, so the hook resolves the
+    // store from the auth instance.
+    const auth: any = await (manager as any).getOrCreateAuth();
+    await (await auth.$context).internalAdapter.deleteUser(user.id);
+
+    expect(userRow(engine, email)).toBeUndefined();
+    expect(unlinkedProviders(engine, user.id)).toEqual([]);
   });
 });
