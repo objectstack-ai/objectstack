@@ -657,6 +657,14 @@ Sort field and direction pair
 | **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | The value type a formula field displays (number / text / boolean / date) |
 | **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | The roll-up a summary field displays — the object field's own `{ object, field, function, … }` |
 | **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes |
+| **minRows** | `number` | optional | A `grid` field's minimum row count: its Remove action is disabled at this many rows (no minimum when unset). Read only by the `grid` widget |
+| **maxRows** | `number` | optional | A `grid` field's maximum row count: its Add and Duplicate actions are disabled, and no blank entry row is drawn, at this many rows (no maximum when unset). Read only by the `grid` widget |
+| **allowAdd** | `boolean` | optional | Whether a `grid` field offers Add, and each row's Duplicate (a duplicate is an add): on unless `false`. A read-only or disabled grid offers neither. Read only by the `grid` widget |
+| **allowDelete** | `boolean` | optional | Whether a `grid` field offers each row's Delete: on unless `false`. A read-only or disabled grid never offers it. Read only by the `grid` widget |
+| **allowReorder** | `boolean` | optional | Whether a `grid` field's rows can be reordered by dragging: on unless `false`. A read-only or disabled grid never offers it. Read only by the `grid` widget |
+| **totalField** | `string` | optional | The CHILD column a `grid` field sums into its footer total — the `name` of one of its `columns`; no total shows when unset. Not the PARENT field a master-detail or `record:line_items` sum is saved to: those blocks spell that `totalField` and the child column `amountField`, and the grid writes no parent field. Read only by the `grid` widget |
+| **addLabel** | `string` | optional | Label of a `grid` field's Add button, also named in its empty state (the locale's own wording when unset). A plain string. Read only by the `grid` widget |
+| **sortField** | `string` | optional | A field on each row that a `grid` field stamps with the row's index (0, 1, 2, …) on every change, so the order a drag-reorder leaves is saved with the rows (rows carry no position when unset). A row field, not one of `columns`: a column of that name has its typed value overwritten. Read only by the `grid` widget |
 
 ### Nested Shape: `ObjectFormProps.sections[number]`
 
