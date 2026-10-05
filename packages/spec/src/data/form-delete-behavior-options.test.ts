@@ -175,7 +175,7 @@ const FORMS = [
 
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('#11410 — `deleteBehavior` is never offered a value the schema refuses', () => {
+describe('`deleteBehavior` is never offered a value the schema refuses', () => {
   describe('the derived option source, which is why an explicit list is required', () => {
     it('offers all three values, and defaults to the one a master_detail refuses', () => {
       const node = derivedDeleteBehaviorNode();

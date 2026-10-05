@@ -134,6 +134,17 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        * `packageId`, `mode` or `force`, because the import route takes no
        * `?package`, `?mode` or `?force`.
        *
+       * [#21841] …and one field that door does not send: the import's own
+       * `writeFace`, stated here by the server and never read from the
+       * caller's options. A re-import that would drop or retype a field the
+       * stored object still carries is refused by the save's destructive-change
+       * gate, and the import route relays that refusal. Without a face the
+       * refusal ended "re-submit with ?force=true", a parameter this route does
+       * not read; `'external-import'` makes it name the remedies that exist
+       * from here (a new `name`, or `PUT /api/v1/meta/object/:name?force=true`).
+       * ⛔ Not a `force`: the refusal stays, and acknowledging a destructive
+       * change stays on the metadata door.
+       *
        * A GETTER, so the save door is asked for when an import runs: the
        * service reads this slot before the draft and refuses with its own
        * "requires a writable metadata store" when it is absent — before any
@@ -145,7 +156,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
         const door = metadataSaveDoor();
         if (!door) return undefined;
         return async (name: string, definition: Record<string, unknown>) => {
-          await door.saveMetaItem({ type: 'object', name, item: definition });
+          await door.saveMetaItem({ type: 'object', name, item: definition, writeFace: 'external-import' });
         };
       },
       /**

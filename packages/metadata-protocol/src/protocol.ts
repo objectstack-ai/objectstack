@@ -1978,7 +1978,8 @@ interface StoredRowPlace {
  * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
  * (`getMetaItem`, its draft-preview arm, `getMetaItemLayered`) asks the store
  * candidate by candidate, and {@link mergePackageAwareOverlay} (the list's
- * active and draft-preview merges) asks the rows it already read. Before
+ * active and draft-preview merges, a list scoped to a package included, whose
+ * package-less rows enter as stand-ins, #21817) asks the rows it already read. Before
  * #21804 the list took the LATEST of a package's row and the package-less row
  * in row order, so in one order the list served the package-less body for a
  * package whose by-name read served the package's own row.
@@ -2026,6 +2027,18 @@ function servedOverlayRowCandidates(address: {
  *     the LATEST contribution wins, as before.
  *   • A name with NO package-owned row resolves to its latest package-less
  *     contribution — the pre-existing env-wide behaviour, unchanged.
+ *   • [#21817] A list scoped to one package passes the package-less rows in
+ *     its scope as STAND-INS (`standIn` on a record). A stand-in serves a
+ *     slot the package seats, by the same served-row resolution, so the
+ *     scoped list's slot is what `getMetaItem` naming the package serves:
+ *     the package's own row, else the package-less row. A stand-in never
+ *     seats a slot itself, so the scoped list still lists only the items the
+ *     package ships. A slot that only stand-ins reach is emitted with its
+ *     latest stand-in and recorded in `unseated`, and an item recorded there
+ *     that arrives as a base item counts as a stand-in again: a later layer
+ *     (the draft preview, the MetadataService listing) may still seat that
+ *     slot, and the caller drops what is still recorded once the last layer
+ *     has merged.
  *
  * `transform(data, prev)` runs on each `records` body before it enters the
  * merge (view-identity healing, draft tagging); `prev` is the base row it
@@ -2047,27 +2060,33 @@ function servedOverlayRowCandidates(address: {
  * its buckets are unchanged.
  *
  * @param type Canonical (singular) metadata type of every row being merged.
+ * @param unseated [#21817] The scoped list's record of stand-ins no
+ *        contribution has seated yet (see the stand-in bullet above).
  */
 function mergePackageAwareOverlay(
     type: string,
     baseItems: unknown[],
-    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace }>,
+    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
     rowsRead?: { readonly organizationId: string | undefined },
+    unseated?: WeakSet<object>,
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
-    // `stored` marks a contribution that is a stored row the caller read.
-    type Contribution = { pkg: string | undefined; item: any; stored?: StoredRowPlace };
+    // `stored` marks a contribution that is a stored row the caller read;
+    // `standIn` one that serves a slot without seating it ([#21817]).
+    type Contribution = { pkg: string | undefined; item: any; stored?: StoredRowPlace; standIn?: true };
     const buckets = new Map<string, Contribution[]>();
     const order: string[] = []; // first-seen slot order → stable output
     const slotOf = (item: unknown, name: unknown): string => {
         const disc = itemDiscriminator(type, item);
         return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
     };
-    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace) => {
+    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace, standIn?: boolean) => {
         let list = buckets.get(slot);
         if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
-        list.push(stored ? { pkg, item, stored } : { pkg, item });
+        const c: Contribution = stored ? { pkg, item, stored } : { pkg, item };
+        if (standIn) c.standIn = true;
+        list.push(c);
     };
     // [#21804] The stored row the served-row resolution picks for package
     // `real` among a slot's contributions: the first candidate of
@@ -2086,10 +2105,11 @@ function mergePackageAwareOverlay(
     for (const raw of baseItems) {
         const item = raw as any;
         if (item && typeof item === 'object' && 'name' in item) {
-            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item);
+            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item,
+                undefined, unseated?.has(item));
         }
     }
-    for (const { data, packageId, stored } of records) {
+    for (const { data, packageId, stored, standIn } of records) {
         const body = data as any;
         if (!(body && typeof body === 'object' && 'name' in body)) continue;
         // The base row this record shadows at its own slot (for view-identity
@@ -2102,12 +2122,24 @@ function mergePackageAwareOverlay(
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined);
+        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined, standIn);
     }
 
     const out: unknown[] = [];
     for (const slot of order) {
         const list = buckets.get(slot)!;
+        // [#21817] Only stand-ins reach this slot: no item of the package is
+        // here (yet), so the stand-in is held back, not served as one.
+        if (list.every((c) => c.standIn)) {
+            // The stand-in the one candidate order picks among the stored
+            // rows here, else (no stored row: a stand-in held back by an
+            // earlier merge) the latest.
+            let held = rowsRead ? servedStoredRow(list, undefined) : undefined;
+            if (held === undefined) held = list[list.length - 1].item;
+            unseated?.add(held);
+            out.push(held);
+            continue;
+        }
         const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
         if (reals.length === 0) {
             out.push(list[list.length - 1].item); // latest package-less row wins
@@ -4801,6 +4833,24 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * field. The compound door's parity argument is a statement about ONE pair of
  * routes that spell one name two ways; it is not a general licence, and the
  * dispatcher is not the third member of that pair.
+ *
+ * ## [#21841] The external-table import, and why it went the dispatcher's way
+ *
+ * "Import as Object" (`@objectstack/service-datasource`) saves through this
+ * gate since #21788, so a re-import that would shrink an object it created is
+ * refused here and relayed as `400 EXTERNAL_IMPORT_ERROR`. The import route
+ * reads no `force`, so the default clause sent that caller round in a circle.
+ * It states `'external-import'` and gets a clause of its own rather than a
+ * `force`, for the reasons the dispatcher did and one more: the route has no
+ * twin that reads `?force`, and no first-party caller re-imports through it
+ * (the console's import dialog saves its draft through
+ * `PUT /api/v1/meta/object/:name`, the very door this clause names), so a
+ * `force` there would be a new capability with nothing pulling on it. Unlike
+ * the dispatcher, a door that DOES read `?force` exists for the same item, so
+ * the clause names it instead of only telling the caller to reconcile.
+ *
+ * ⛔ Same warning as above: the import is not a twin of the `PUT` door, and
+ * giving it a `force` to "match" would be a new surface, not a repair.
  */
 /**
  * [commit 82cb6e849 / commit d806081dd] Which write door a `saveMetaItem` refusal is being
@@ -4833,8 +4883,16 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * case rather than a hypothetical — which is why {@link specValidationFindings}
  * lists the two faces on one `case` instead of letting `'meta-dispatch'` fall
  * to a default that was never written for it.
+ *
+ * ⚠️ [#21841] `'external-import'` differs from `'meta-dispatch'` on that SAME
+ * second question, in the other direction: the import route relays a refusal
+ * as `sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', message)` and nothing else,
+ * so no `issues[]` reaches its caller and the message is the sole carrier of
+ * the findings. It therefore stays OUT of {@link specValidationFindings}'
+ * trimming case and keeps the full-prose default — the polarity that comment
+ * defends, working as designed for a door added after it.
  */
-type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch';
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch' | 'external-import';
 
 function destructiveChangeRemedy(
     face: MetadataWriteFace | undefined,
@@ -4865,6 +4923,20 @@ function destructiveChangeRemedy(
             return `this save cannot be forced: the dispatcher's \`PUT /meta\` accepts no \`force\`. `
                 + `Re-submit '${name}' with a body that keeps the fields and types named above, `
                 + `or reconcile that stored item first.`;
+        case 'external-import':
+            // [#21841] "Import as Object" (`@objectstack/service-datasource`),
+            // relayed by the import route as `400 EXTERNAL_IMPORT_ERROR`. That
+            // route reads no `force` and was deliberately not given one (see the
+            // section above `MetadataWriteFace`). Both remedies are things the
+            // caller can do from where they stand: import the table under a
+            // name nothing stores yet, or save the changed definition through
+            // the metadata door, which reads `?force=true` for this very item
+            // and is where a destructive change is acknowledged on purpose.
+            // Same grammar as the two faces above — name the door, deny the
+            // mechanism, then prescribe.
+            return `this import cannot be forced: the external-table import route accepts no \`force\`. `
+                + `Import the table under a new \`name\`, or save the changed definition of '${name}' `
+                + `through \`PUT /api/v1/meta/object/${name}?force=true\`, which accepts the destructive change on purpose.`;
         default:
             return 're-submit with ?force=true to proceed.';
     }
@@ -8863,6 +8935,17 @@ export class ObjectStackProtocolImplementation implements
         // scoped to a package reads its rows with that package only, so it
         // reads the package-agnostic set too (the overlay cache answers it).
         let lockRows: readonly any[] = [];
+        // [#21817] A list scoped to a package serves, in each slot the package
+        // seats, the row `getMetaItem` naming that package serves: the
+        // package's own row, else the package-less row (ADR-0048), by the one
+        // candidate order ({@link servedOverlayRowCandidates}). Its row read
+        // names the package, so the package-less rows come from the
+        // package-agnostic read above, filtered back to the package-less ones.
+        // They enter each merge as stand-ins ({@link mergePackageAwareOverlay}):
+        // a stand-in serves a slot the package seats and never seats one, so
+        // the list's membership stays the items the package ships. A stand-in
+        // no layer seated is recorded here and dropped after the last merge.
+        const unseated = packageId ? new WeakSet<object>() : undefined;
         try {
             // [#21442] The row set this read consults — the overlay cache
             // included — is {@link readActiveOverlayRows}, and each row is
@@ -8872,7 +8955,8 @@ export class ObjectStackProtocolImplementation implements
             // scope for one caller.
             const records = await this.readActiveOverlayRows(request, orgId);
             lockRows = packageId ? await this.readActiveOverlayRows({ type: request.type }, orgId) : records;
-            if (records && records.length > 0) {
+            const standInRows = packageId ? lockRows.filter((row) => (row?.package_id ?? null) === null) : [];
+            if ((records && records.length > 0) || standInRows.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
                 const overlays = this.storedOverlayEntries(request, records);
 
@@ -8899,7 +8983,14 @@ export class ObjectStackProtocolImplementation implements
                 const placed = mergeable.map(({ data, packageId: recPkg, organizationId: recOrg, type: recType }) => ({
                     data, packageId: recPkg, stored: { organizationId: recOrg, type: recType },
                 }));
-                items = mergePackageAwareOverlay(request.type, items, placed, (data, prev) => {
+                // [#21817] The package-less rows, placed the same way, as
+                // stand-ins: the same parse and the same shipped-flow rule.
+                const standIns = this.storedOverlayEntries(request, standInRows)
+                    .filter(({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name))
+                    .map(({ data, organizationId: recOrg, type: recType }) => ({
+                        data, packageId: undefined, stored: { organizationId: recOrg, type: recType }, standIn: true,
+                    }));
+                items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns], (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -8917,7 +9008,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                }, { organizationId: orgId });
+                }, { organizationId: orgId }, unseated);
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -8957,14 +9048,30 @@ export class ObjectStackProtocolImplementation implements
                 // `records`, the one the by-name read asks, so the two doors
                 // answer the same row for the name. An item the registry or a
                 // package supplies under the name is still replaced, as before.
-                if (isView) {
+                //
+                // [#21817] In a list scoped to a package, a package-less row
+                // of the name stands in ahead of the expansion too: the by-name
+                // read naming the package serves that row before it asks any
+                // expansion. The expansion still seats the slot, so a stand-in
+                // held back by the merge is served there, as the package's.
+                if (isView && records.length > 0) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
                         if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
                     }
                     const ownRowNames = this.namesWithOwnStoredRow(records);
+                    const standInNames = this.namesWithOwnStoredRow(standInRows);
                     for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
                         if (ownRowNames.has(vi.name as string)) continue;
+                        const held = byName.get(vi.name as string) as Record<string, unknown> | undefined;
+                        if (held !== undefined && standInNames.has(vi.name as string)) {
+                            // Seated: a copy the `unseated` record does not hold,
+                            // stamped as the merge stamps a stand-in.
+                            if (unseated?.has(held)) {
+                                byName.set(vi.name as string, held._packageId === undefined ? { ...held, _packageId: packageId } : { ...held });
+                            }
+                            continue;
+                        }
                         byName.set(vi.name as string, vi);
                     }
                     items = Array.from(byName.values());
@@ -9015,27 +9122,36 @@ export class ObjectStackProtocolImplementation implements
         // process-wide registry or to non-preview reads.
         if (request.previewDrafts) {
             try {
-                const queryDrafts = async (oid: string | null): Promise<any[]> => {
+                const queryDrafts = async (oid: string | null, pkg: string | undefined): Promise<any[]> => {
                     const whereClause: Record<string, unknown> = { type: request.type, state: 'draft', organization_id: oid };
-                    if (packageId) whereClause.package_id = packageId;
+                    if (pkg) whereClause.package_id = pkg;
                     let rs = await this.engine.find('sys_metadata', { where: whereClause });
                     if (!rs || rs.length === 0) {
                         const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                         if (alt) {
                             const altWhere: Record<string, unknown> = { type: alt, state: 'draft', organization_id: oid };
-                            if (packageId) altWhere.package_id = packageId;
+                            if (pkg) altWhere.package_id = pkg;
                             rs = await this.engine.find('sys_metadata', { where: altWhere });
                         }
                     }
                     return rs ?? [];
                 };
-                const draftRecords = [...(await queryDrafts(null)), ...(orgId ? await queryDrafts(orgId) : [])];
-                if (draftRecords.length > 0) {
+                const draftRecords = [...(await queryDrafts(null, packageId)), ...(orgId ? await queryDrafts(orgId, packageId) : [])];
+                // [#21817] A list scoped to a package previews the package-less
+                // drafts as stand-ins, as its active arm does: the
+                // package-agnostic draft read, filtered back to the
+                // package-less rows. The by-name preview arm naming the
+                // package serves that draft when the package has none.
+                const standInDraftRecords = packageId
+                    ? [...(await queryDrafts(null, undefined)), ...(orgId ? await queryDrafts(orgId, undefined) : [])]
+                        .filter((record) => (record?.package_id ?? null) === null)
+                    : [];
+                if (draftRecords.length > 0 || standInDraftRecords.length > 0) {
                     // ADR-0048 (#1828) — package-aware draft overlay (parity with
                     // the active-overlay merge above): a package-scoped draft
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
-                    const drafts = draftRecords.map((record) => {
+                    const placeDraft = (record: any) => {
                         const data = this.convertStoredItem(
                             String(record.type ?? request.type),
                             typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
@@ -9052,14 +9168,18 @@ export class ObjectStackProtocolImplementation implements
                             type: String(record.type ?? request.type),
                         };
                         return { data, packageId: recPkg, stored };
-                    });
+                    };
+                    const drafts = [
+                        ...draftRecords.map(placeDraft),
+                        ...standInDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
+                    ];
                     // [#7774] Same bundle slot as the active merge above — a
                     // draft of one locale must preview over that locale, not
                     // over the whole bundle.
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    }, { organizationId: orgId });
+                    }, { organizationId: orgId }, unseated);
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -9144,10 +9264,20 @@ export class ObjectStackProtocolImplementation implements
                             packageId: ((it as any)?._packageId ?? undefined) as string | undefined,
                         })),
                     );
+                    // [#21817] A stand-in still held back here takes the
+                    // package's runtime item of its slot as the item it serves
+                    // (the latest contribution, stamped as the package's): a
+                    // seated copy, which `unseated` does not hold.
                 }
             }
         } catch {
             // MetadataService not available or doesn't support this type
+        }
+
+        // [#21817] A stand-in no layer seated is a package-less row of an item
+        // the package does not ship: it is not in the package's list.
+        if (unseated) {
+            items = (items as any[]).filter((it) => !(it && typeof it === 'object' && unseated.has(it)));
         }
 
         // Hide metadata owned by a disabled package. `listItems` already drops

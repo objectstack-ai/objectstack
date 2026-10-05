@@ -339,3 +339,83 @@ describe('Pure helpers', () => {
     expect(doc.content).not.toContain('r1'); // id excluded
   });
 });
+
+// An index document is searchable text served to every reader its source
+// admits, so it never carries a credential-class field (the set the engine
+// masks on read) or an `internal: true` field (the set it omits) — under `*`,
+// or when a source names one explicitly. The field sets come from the same
+// collectors the write-response helper uses. Synthetic values.
+describe('recordToDocument withholds credential-class and internal fields', () => {
+  const CREDENTIAL = 'synthetic-credential-a27f';
+  const INTERNAL = 'synthetic-internal-6e30';
+  const schema = {
+    name: 'probe_doc',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      title: { name: 'title', type: 'text' },
+      notes: { name: 'notes', type: 'textarea' },
+      api_token: { name: 'api_token', type: 'secret' },
+      passphrase: { name: 'passphrase', type: 'password' },
+      lookup_digest: { name: 'lookup_digest', type: 'text', internal: true },
+    },
+  };
+  const record = () => ({
+    id: 'r1', title: 'Visible', notes: 'Body',
+    api_token: CREDENTIAL, passphrase: `${CREDENTIAL}-p`, lookup_digest: INTERNAL,
+  });
+  const source = (contentFields: string[], metadataFields: string[] = []): KnowledgeSource => ({
+    id: 's1', label: 's1', adapter: 'memory',
+    source: { kind: 'object', object: 'probe_doc', contentFields, metadataFields } as ObjectKnowledgeSource,
+  });
+
+  it("skips them under '*'", () => {
+    const src = source(['*']);
+    const doc = recordToDocument(src, src.source as ObjectKnowledgeSource, record(), schema);
+    expect(doc.content).toBe('Visible\n\nBody');
+    expect(JSON.stringify(doc)).not.toContain(CREDENTIAL);
+    expect(JSON.stringify(doc)).not.toContain(INTERNAL);
+  });
+
+  it('skips them when named explicitly as content or metadata', () => {
+    const src = source(['title', 'api_token', 'lookup_digest'], ['passphrase', 'notes']);
+    const doc = recordToDocument(src, src.source as ObjectKnowledgeSource, record(), schema);
+    expect(doc.content).toBe('Visible');
+    expect(doc.metadata).toEqual({ notes: 'Body' });
+    expect(JSON.stringify(doc)).not.toContain(CREDENTIAL);
+    expect(JSON.stringify(doc)).not.toContain(INTERNAL);
+  });
+
+  it('the event-sync path reads the schema off the bound engine', async () => {
+    const getSchema = vi.fn((name: string) => (name === 'probe_doc' ? schema : undefined));
+    const svc = new KnowledgeService({ dataEngine: { find: vi.fn(), getSchema } as unknown as IDataEngine });
+    const adapter = makeAdapter('memory');
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(source(['*']));
+    await svc.handleRecordUpsert('probe_doc', record());
+    expect(getSchema).toHaveBeenCalledWith('probe_doc');
+    const [docs] = adapter.upsertSpy.mock.calls[0] as unknown as [KnowledgeDocument[]];
+    expect(docs[0].content).toBe('Visible\n\nBody');
+    expect(JSON.stringify(docs)).not.toContain(CREDENTIAL);
+    expect(JSON.stringify(docs)).not.toContain(INTERNAL);
+  });
+
+  it('the reindex walk reads the schema off the bound engine', async () => {
+    const getSchema = vi.fn((name: string) => (name === 'probe_doc' ? schema : undefined));
+    const find = vi.fn(async () => [record()]);
+    const svc = new KnowledgeService({ dataEngine: { find, getSchema } as unknown as IDataEngine });
+    const adapter = makeAdapter('memory');
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(source(['*']));
+    const res = await svc.reindexSource('s1');
+    expect(res.indexed).toBe(1);
+    const [docs] = adapter.upsertSpy.mock.calls[0] as unknown as [KnowledgeDocument[]];
+    expect(JSON.stringify(docs)).not.toContain(CREDENTIAL);
+    expect(JSON.stringify(docs)).not.toContain(INTERNAL);
+  });
+
+  it('without a schema nothing is withheld here', () => {
+    const src = source(['title', 'notes']);
+    const doc = recordToDocument(src, src.source as ObjectKnowledgeSource, { id: 'r1', title: 'A', notes: 'B' });
+    expect(doc.content).toBe('A\n\nB');
+  });
+});

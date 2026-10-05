@@ -19,6 +19,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { BulkDataEventSchema, DataEventSchema } from '@objectstack/spec/api';
+import { SECRET_MASK } from '@objectstack/spec/data';
 import type {
     IDataEngine,
     IRealtimeService,
@@ -1096,6 +1097,64 @@ describe('AutoEnqueuer — organization dimension (#13566)', () => {
         await flush();
         expect(selected(calls)).toEqual([]);
         expect(warn).toHaveBeenCalledTimes(2);
+        await ae.stop();
+    });
+});
+
+// The outbound body (sent off-box and stored as the delivery row's payload)
+// applies the write-response non-exposure rules to the record bodies, by the
+// same helper: credential-class fields masked, `internal: true` fields
+// omitted. Defence in depth beside the engine's own event-body projection, so
+// these events are built UNPROJECTED on purpose. Synthetic values.
+describe('AutoEnqueuer outbound body — credential mask and internal-field omission', () => {
+    const CREDENTIAL = 'synthetic-credential-e83b';
+    const INTERNAL = 'synthetic-internal-4c6d';
+    const schemaFor = (name: string) => name !== 'contact' ? undefined : {
+        name: 'contact',
+        fields: {
+            id: { name: 'id', type: 'text' },
+            name: { name: 'name', type: 'text' },
+            api_token: { name: 'api_token', type: 'secret' },
+            lookup_digest: { name: 'lookup_digest', type: 'text', internal: true },
+        },
+    };
+
+    async function boot() {
+        const engine = new FakeEngine({ sys_webhook: [webhook()] });
+        (engine as unknown as { getSchema: typeof schemaFor }).getSchema = schemaFor;
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+        return { realtime, calls, ae };
+    }
+
+    it('masks credential fields and omits internal fields in `after`', async () => {
+        const { realtime, calls, ae } = await boot();
+        await realtime.publish(event('created', 'contact', {
+            id: 'c-1', name: 'Alice', api_token: CREDENTIAL, lookup_digest: INTERNAL,
+        }));
+        await flush();
+        expect(calls).toHaveLength(1);
+        const body = calls[0].payload as any;
+        expect(body.after).toEqual({ id: 'c-1', name: 'Alice', api_token: SECRET_MASK });
+        expect(JSON.stringify(body)).not.toContain(CREDENTIAL);
+        expect(JSON.stringify(body)).not.toContain(INTERNAL);
+        await ae.stop();
+    });
+
+    it('projects `changes` too, and leaves the shared event untouched', async () => {
+        const { realtime, calls, ae } = await boot();
+        const ev = event('updated', 'contact', { id: 'c-2', name: 'Bob', api_token: CREDENTIAL });
+        (ev.payload as any).changes = { api_token: CREDENTIAL, lookup_digest: INTERNAL };
+        await realtime.publish(ev);
+        await flush();
+        const body = calls[0].payload as any;
+        expect(body.changes).toEqual({ api_token: SECRET_MASK });
+        expect(body.after.api_token).toBe(SECRET_MASK);
+        // The realtime bus hands the same event to every subscriber.
+        expect((ev.payload as any).after.api_token).toBe(CREDENTIAL);
+        expect((ev.payload as any).changes.lookup_digest).toBe(INTERNAL);
         await ae.stop();
     });
 });

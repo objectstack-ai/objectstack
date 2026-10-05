@@ -50,6 +50,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { OrganizationsPlugin } from './organizations-plugin.js';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 // ⛔ No entitlement grant: the open package has no licence gate to satisfy
 // (ADR-0132 boundary 3).
@@ -371,5 +372,52 @@ describe('walled + invite-only: the multi-org default-org bootstrap never joins 
       'the sys_user insert did not reach the default-org bootstrap at all',
     ).toBeGreaterThan(readsBefore);
     expect(inserts).toEqual([]);
+  });
+});
+
+// ADR-0093 D7 — the walled wiring calls the SAME once-gate as the single-org
+// AuthPlugin: the operator's owner bind is decided once, recorded in the
+// `sys_migration` ledger, and a removed owner membership is never re-bound by a
+// later bootstrap trigger.
+describe('walled: the default-org owner bind is decided once (ADR-0093 D7)', () => {
+  it('after the recorded bind, removing the owner membership sticks across later triggers', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    resetPlatformAdminEmailMemo();
+    const store: Record<string, Row[]> = {
+      sys_permission_set: seededPermissionSets(),
+      sys_user_permission_set: [],
+      sys_user: [{ id: 'usr_ops', email: OWNER_EMAIL, email_verified: true, created_at: '2026-03-03T00:00:00.000Z' }],
+      sys_organization: [],
+      sys_member: [],
+      sys_migration: [],
+    };
+    const { ql, inserts, middlewares } = makeEngine(store);
+    // The deployment ledger: registered, read by primary key.
+    ql.getObject = (name: string) => (name in store ? { name } : undefined);
+    ql.findOne = vi.fn(async (object: string, query: any) => {
+      assertEngineFindOnePredicate(object, query);
+      return (store[object] ?? []).find((r) => r.id === query?.where?.id) ?? null;
+    });
+    const { ctx, trigger } = makeCtx(ql);
+    const plugin = new OrganizationsPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await trigger('kernel:bootstrapped');
+    await trigger('kernel:ready');
+    const memberInserts = () => inserts.filter((i) => i.object === 'sys_member');
+
+    // CONTROL: the first bootstrap binds the operator and records the decision.
+    expect(memberInserts()).toHaveLength(1);
+    expect(memberInserts()[0]!.data).toMatchObject({ user_id: 'usr_ops', role: 'owner' });
+    expect(store.sys_migration!.map((r) => r.id)).toEqual(['adr-0093-default-org-owner-bind']);
+
+    // The owner's membership is removed; every later trigger binds nobody.
+    store.sys_member!.length = 0;
+    const bootstrapMw = middlewares[middlewares.length - 1];
+    await bootstrapMw({ object: 'sys_user', operation: 'update', data: { id: 'usr_ops', email_verified: true } }, async () => {});
+    await trigger('kernel:ready');
+    expect(memberInserts()).toHaveLength(1);
+    expect(store.sys_member).toHaveLength(0);
   });
 });

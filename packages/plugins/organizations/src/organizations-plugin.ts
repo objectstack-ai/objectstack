@@ -3,8 +3,8 @@
 import { Plugin, PluginContext } from '@objectstack/core';
 import { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
 import type { OrgScopingEngine } from './org-scoping-engine.js';
-import { isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';
-import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { createEnsureDefaultOrganizationOnce, isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';
+import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
 import { assertWalledMembershipPolicyDeclared } from './membership-policy-gate.js';
 import {
   organizationsObjects,
@@ -468,9 +468,18 @@ export class OrganizationsPlugin implements Plugin {
 
     // ── Default-org bootstrap on kernel:ready + on admin grant ────────
     if (this.opts.ensureDefaultOrganization) {
+      // ADR-0093 D7 — the SAME once-gate the single-org AuthPlugin uses: the
+      // owner bind (and the seed-ownership handoff that follows it) is decided
+      // once, recorded in the `sys_migration` ledger and latched in-process;
+      // after that a missing default organization is recreated without
+      // binding anyone, so a removed owner's membership stays removed.
+      const ensureOnce = createEnsureDefaultOrganizationOnce({
+        logger: ctx.logger,
+        claimSeedOwnership: claimOrgSeedOwnership,
+      });
       const runEnsure = async () => {
         try {
-          const res = await ensureDefaultOrganization(ql, { logger: ctx.logger });
+          const res = await ensureOnce(ql);
           if (res.defaultOrgCreated) {
             ctx.logger.info(
               `[org-scoping] created Default Organization ${res.defaultOrgId} for platform admin`,

@@ -21,7 +21,7 @@ import {
   numericColumnFor,
 } from './numeric-column-representation';
 
-describe('#16318 — the numeric physical-representation table', () => {
+describe('the numeric physical-representation table — one table the driver and the migration generators both read', () => {
   it('names every member of NUMERIC_VALUE_TYPES and nothing else', () => {
     expect(Object.keys(NUMERIC_COLUMN_REPRESENTATION).sort()).toEqual([...NUMERIC_VALUE_TYPES].sort());
   });

@@ -120,6 +120,7 @@ export function keysetWalk<T extends Record<string, unknown>>(
 
   async function* pages(): AsyncGenerator<T[]> {
     let cursor: unknown = undefined;
+    let previousFirst: unknown = undefined;
     for (;;) {
       const want = options.max == null ? pageSize : Math.min(pageSize, options.max - scanned);
       if (want <= 0) {
@@ -163,10 +164,21 @@ export function keysetWalk<T extends Record<string, unknown>>(
       // this page again, forever. Production drivers execute the predicate;
       // a test double or a future reader that quietly drops it would otherwise
       // hang rather than fail, and a hang is the one failure nobody can read.
-      if (cursor !== undefined && !(String(last) > String(cursor))) {
+      //
+      // Judged by EQUALITY, never by order: the driver orders the key by its
+      // own collation (PG/MySQL collations do not sort strings the way JS
+      // compares them), so "did not advance" is "came back as the same key",
+      // or the same page again — never "is not greater in JS string order",
+      // which would report a perfectly healthy walk as truncated.
+      const first = emit[0]?.[key];
+      if (
+        cursor !== undefined &&
+        (String(last) === String(cursor) || (previousFirst !== undefined && String(first) === String(previousFirst)))
+      ) {
         truncated = true;
         return;
       }
+      previousFirst = first;
       cursor = last;
 
       // A short page means the source is exhausted.
