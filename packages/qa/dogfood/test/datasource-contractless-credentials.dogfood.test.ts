@@ -24,7 +24,10 @@
  *     boot) is served by every read door with its non-secret configuration and
  *     none of its credentials — `/meta` (item, list, published, layers,
  *     history), the datasource admin routes, the generic data door over
- *     `sys_metadata` / `sys_metadata_history`, and the audit ledger's copy.
+ *     `sys_metadata` / `sys_metadata_history`, and the audit ledger's copy;
+ *  3. the admin edit door carries a withheld value forward only where the read
+ *     path would still withhold it: a pair's value beside a renamed label is
+ *     dropped, not stored where the next read would serve it.
  *
  * The harness mounts the datasource admin SERVICE but not its REST routes, and
  * no audit writer; this file mounts both itself, exactly as `os serve` does
@@ -236,4 +239,49 @@ describe('contractless-driver datasource credentials: refused at write, withheld
     expect(door.status, door.text).toBe(200);
     expect(leaked(door.text)).toEqual([]);
   });
+
+  it('4 — the edit door carries a withheld value forward only where the read path still withholds it', async () => {
+    // A pair's `value` is credential material only while its label names one.
+    // Seed a legacy row whose pairs sit under plain record keys, read the edit
+    // form, rename each label to a non-credential name, and save.
+    const EDIT = { proxy: 'pin-dogfood-proxybearer-4e07', probe: 'pin-dogfood-probekey-b31c' } as const;
+    const body = {
+      ...CLEAN_BODY,
+      origin: 'runtime',
+      config: {
+        host: MARKER,
+        proxyHeader: { name: 'Authorization', value: `Bearer ${EDIT.proxy}` },
+        probe: { key: 'X-Api-Key', value: EDIT.probe },
+      },
+    };
+    const ql: any = await stack.kernel.getServiceAsync('objectql');
+    for (const row of await stored('sys_metadata')) {
+      await ql.update('sys_metadata', { metadata: JSON.stringify(body) }, { where: { id: row.id }, context: SYSTEM });
+    }
+    const atRest = async () => JSON.stringify(await stored('sys_metadata'));
+    // Precondition: both values are at rest.
+    expect(await atRest()).toContain(EDIT.proxy);
+    expect(await atRest()).toContain(EDIT.probe);
+    await stack.stop();
+    await boot();
+
+    const form = JSON.parse((await call('GET', `/datasources/${NAME}`)).text);
+    const config = structuredClone((form.datasource ?? form.data?.datasource ?? form).config);
+    expect(config.proxyHeader).toEqual({ name: 'Authorization' });
+    config.proxyHeader.name = 'X-Trace';
+    config.probe.key = 'Accept';
+    const saved = await call('PATCH', `/datasources/${NAME}`, { config });
+    expect(saved.status, saved.text).toBe(200);
+
+    const rest = await atRest();
+    expect(rest, 'the edit reached the stored row (positive control)').toContain('X-Trace');
+    expect(rest).not.toContain(EDIT.proxy);
+    expect(rest).not.toContain(EDIT.probe);
+    for (const path of [`/datasources/${NAME}`, `/meta/datasource/${NAME}`]) {
+      const res = await call('GET', path);
+      expect.soft(res.status, path).toBe(200);
+      expect.soft(res.text, path).not.toContain(EDIT.proxy);
+      expect.soft(res.text, path).not.toContain(EDIT.probe);
+    }
+  }, 180_000);
 });

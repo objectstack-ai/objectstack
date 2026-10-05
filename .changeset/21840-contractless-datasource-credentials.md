@@ -88,8 +88,10 @@ own `config.<path>` — array elements included (`config.servers.0.password`):
   `serviceaccountjson`, `privkey`, `pfx`, `sslkey`, `tlskey`, `basicauth`, `bearerauth`,
   `digestauth`, …); a one-word key starting with `max`, `min`, `num`, `total` or
   `count` is not. **A bare `key` (or `keys`) in an object** is credential material
-  only inside a credential-shaped, header-ish (a key one of whose words is `header` or
-  `headers`) or TLS holder (a key one of whose words is `ssl`, `tls`, `mtls`, `x509`,
+  only inside a credential-shaped holder, a header-ish holder (a key one of whose words
+  is `header` or `headers`) when the object holding `key` is that holder's map and not
+  an element of a list under it — `headers: { key }` is the header named `key`,
+  `headers: [{ key: 'Authorization' }]` a pair's label — or a TLS holder (a key one of whose words is `ssl`, `tls`, `mtls`, `x509`,
   `pfx`, `pkcs12` or starts with `cert`: `ssl: { key, cert, ca }`), or when its value
   looks like key material: a string — or a list element — that looks like a secret
   (`looksLikeSecretValue`: at least 16 characters with no whitespace that mix
@@ -180,7 +182,11 @@ driver, every position the write door refuses — both doors read ONE walk
 `Map` or `Set` are dropped (inside an array element too: spliced from the end of its
 array, nulled when siblings follow it), and a credential embedded in a string is
 removed from it — a JSON-encoded string keeps its other members, a header line keeps
-its name, and a string the rewrite cannot clear is served empty. That covers `/api/v1/meta/datasource` (item, list,
+its name, and a string the rewrite cannot clear is served empty. What is served holds
+no finding itself — it is what an untouched Save hands the write door: the projection
+is judged again until it is clean (a pair's `key` label left alone directly under a
+header-ish key goes too), and one that has not settled after 8 passes is served
+empty. That covers `/api/v1/meta/datasource` (item, list,
 `/published`, `/layers`, history), `/api/v1/datasources` (item and list), the generic
 data door over `sys_metadata` / `sys_metadata_history`, and the audit ledger's and
 activity feed's copies of those rows (new copies at write time; for copies written

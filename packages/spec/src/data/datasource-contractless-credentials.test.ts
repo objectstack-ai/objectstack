@@ -842,3 +842,33 @@ describe('the round-4 readings stay bounded', () => {
     expect(elapsed(() => embeddedCredentialOf('token = $1 '.repeat(5_000)))).toBeLessThan(2000);
   });
 });
+
+describe('what the read door serves is what the write door accepts back', () => {
+  const PEM = '-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----';
+  it.each([
+    ['a `key:`-labelled pair in a headers list keeps its label', { headers: [{ key: 'Authorization', value: 'Bearer x' }, { key: 'Accept', value: 'json' }] }],
+    ['a `key:`-labelled pair directly under a header-ish key', { probeHeader: { key: 'X-Api-Key', value: 'k-1' } }],
+    ['a `name:`-labelled pair under a plain key', { proxy: { name: 'Authorization', value: 'Bearer x' } }],
+    ['TLS options', { ssl: { key: PEM, cert: 'c', passphrase: 'pp' } }],
+    ['a header map', { headers: { key: 'abc', Authorization: 'Bearer x', Accept: 'json' } }],
+    ['strings', { dsn: 'admin:pw@db/app', note: 'Accept: json\nAuthorization: Bearer x', blob: PEM }],
+  ])('%s', (_label, config) => {
+    const served = redactDatasourceConfig(DRIVER, config).config;
+    expect(findContractlessCredentials(served)).toEqual([]);
+    expect(refusals(served)).toEqual([]);
+  });
+
+  it('a `key:` label in a list element is a label, not the header named `key`', () => {
+    const served = redactDatasourceConfig(DRIVER, { headers: [{ key: 'Authorization', value: 'Bearer x' }] });
+    expect(served.config).toEqual({ headers: [{ key: 'Authorization' }] });
+    expect(refusals({ headers: [{ key: 'Authorization' }] })).toEqual([]);
+    // control: in a header map, `key` is the header named `key`
+    expect(refusals({ headers: { key: 'Authorization' } })).toEqual(['config.headers.key']);
+  });
+
+  it('a label left alone under a header-ish key is withheld too, and named among the withheld paths', () => {
+    const served = redactDatasourceConfig(DRIVER, { probeHeader: { key: 'X-Api-Key', value: 'k-1' } });
+    expect(served.config).toEqual({ probeHeader: {} });
+    expect(served.redactedKeys).toEqual(['probeHeader.key', 'probeHeader.value']);
+  });
+});

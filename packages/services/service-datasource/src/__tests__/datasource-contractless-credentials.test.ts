@@ -269,9 +269,9 @@ describe('a value is carried forward only where the read path would still withho
   const STORED = {
     host: 'wh.internal',
     proxyHeader: { name: 'Authorization', value: 'Bearer px-1' },
-    probeHeader: { key: 'X-Api-Key', value: 'pk-2' },
+    probe: { key: 'X-Api-Key', value: 'pk-2' },
   };
-  const SERVED = { host: 'wh.internal', proxyHeader: { name: 'Authorization' }, probeHeader: { key: 'X-Api-Key' } };
+  const SERVED = { host: 'wh.internal', proxyHeader: { name: 'Authorization' }, probe: { key: 'X-Api-Key' } };
   const restore = (patch: Record<string, unknown>) => restoreRedactedConfig(DRIVER, patch, STORED) as Record<string, unknown>;
 
   it('control: an untouched Save carries both values forward', () => {
@@ -281,7 +281,7 @@ describe('a value is carried forward only where the read path would still withho
   it('a label renamed to a non-credential name: the value is dropped, not served', () => {
     const out = restore({ ...structuredClone(SERVED), proxyHeader: { name: 'X-Trace' } });
     expect(out.proxyHeader).toEqual({ name: 'X-Trace' });
-    expect(out.probeHeader).toEqual(STORED.probeHeader);
+    expect(out.probe).toEqual(STORED.probe);
     expect(JSON.stringify(out)).not.toContain('px-1');
   });
 
@@ -292,8 +292,8 @@ describe('a value is carried forward only where the read path would still withho
   });
 
   it('a `key:` label renamed: the value is dropped, not served', () => {
-    const out = restore({ ...structuredClone(SERVED), probeHeader: { key: 'Accept' } });
-    expect(out.probeHeader).toEqual({ key: 'Accept' });
+    const out = restore({ ...structuredClone(SERVED), probe: { key: 'Accept' } });
+    expect(out.probe).toEqual({ key: 'Accept' });
     expect(out.proxyHeader).toEqual(STORED.proxyHeader);
     expect(JSON.stringify(out)).not.toContain('pk-2');
   });
@@ -308,7 +308,7 @@ describe('a value is carried forward only where the read path would still withho
     const read = await service.getDatasource('w');
     const config = structuredClone(read!.config) as Record<string, unknown>;
     config.proxyHeader = { name: 'X-Trace' };
-    config.probeHeader = {};
+    config.probe = {};
     await service.updateDatasource('w', { config });
     const again = await service.getDatasource('w');
     expect(JSON.stringify(again)).not.toMatch(/px-1|pk-2/);

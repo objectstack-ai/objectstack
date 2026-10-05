@@ -1382,6 +1382,8 @@ interface WalkContext {
   leafKey: string | undefined;
   /** The key of the object (or of the array holding the object) the node sits in. */
   holderKey: string | undefined;
+  /** The node's object is an ELEMENT of a list (`headers: [{ key, value }]`), not a map (`headers: { key }`). */
+  element: boolean;
 }
 
 /**
@@ -1421,12 +1423,14 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
     const leafKey = key ?? ctx.leafKey;
     let named = key !== undefined && isCredentialShapedConfigKey(key);
     // A bare `key` is credential-shaped only where it can mean key material:
-    // inside a credential-shaped, header-ish or TLS holder, or holding a value
+    // inside a credential-shaped or TLS holder, in a header MAP (`headers:
+    // { key: … }`, the header named `key` — not a list element, which is a
+    // pair's label: `headers: [{ key: 'Authorization' }]`), or holding a value
     // that looks like key material — never `{ key: 'email' }`.
     if (named && isBareKeyName(key as string) && !ctx.enclosing) {
       const holder = ctx.holderKey;
       named = (holder !== undefined
-        && (isCredentialShapedConfigKey(holder) || isHeaderishKey(holder) || isKeyMaterialHolder(holder)))
+        && (isCredentialShapedConfigKey(holder) || (isHeaderishKey(holder) && !ctx.element) || isKeyMaterialHolder(holder)))
         || bareKeyHoldsSecret(value);
     }
     // The descriptor exemption applies to LEAF values only (a string, a
@@ -1481,11 +1485,11 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
           }
           return;
         }
-        visit(undefined, element, elementPath, { enclosing, leafKey, holderKey }, at + 1);
+        visit(undefined, element, elementPath, { enclosing, leafKey, holderKey, element: false }, at + 1);
       });
       return;
     }
-    walkObject(value as Record<string, unknown>, path, { enclosing, leafKey: undefined, holderKey }, at + 1);
+    walkObject(value as Record<string, unknown>, path, { enclosing, leafKey: undefined, holderKey, element: key === undefined }, at + 1);
   };
 
   const walkObject = (node: Record<string, unknown>, path: string[], ctx: WalkContext, at: number): void => {
@@ -1509,7 +1513,7 @@ function collectFindings(root: unknown, depth: number): ContractlessCredentialFi
     }
   };
 
-  const top: WalkContext = { enclosing: false, leafKey: undefined, holderKey: undefined };
+  const top: WalkContext = { enclosing: false, leafKey: undefined, holderKey: undefined, element: false };
   if (Array.isArray(root)) visit(undefined, root, [], top, depth);
   else if (root && typeof root === 'object' && !isBinary(root) && !(root instanceof Map) && !(root instanceof Set)) {
     walkObject(root as Record<string, unknown>, [], top, depth);
@@ -1609,18 +1613,39 @@ function withholdFindings<T>(root: T, findings: readonly ContractlessCredentialF
  * when siblings follow it); a string with an embedded credential is rewritten
  * without it ({@link redactEmbeddedCredentials}). Every position is reported,
  * array indices included, so a write-path inverse can restore exactly what was
- * withheld. Pure: the input is never mutated, and returned by reference when
- * nothing is withheld.
+ * withheld. The projection is judged again until it holds no finding — what
+ * is served is what an untouched Save hands the write door — and one that has
+ * not settled after {@link MAX_WITHHOLD_PASSES} passes is withheld whole.
+ * Pure: the input is never mutated, and returned by reference when nothing is
+ * withheld.
  */
 export function withholdContractlessCredentials(config: Record<string, unknown>): {
   config: Record<string, unknown>;
   paths: (readonly string[])[];
 } {
-  const findings = findContractlessCredentials(config);
+  let findings = findContractlessCredentials(config);
   if (findings.length === 0) return { config, paths: [] };
-  const out = withholdFindings(structuredClone(config), findings, 0);
-  const paths = findings
-    .map((finding) => finding.path)
-    .sort((a, b) => (a.join('.') < b.join('.') ? -1 : a.join('.') > b.join('.') ? 1 : 0));
+  let out = structuredClone(config);
+  const seen = new Map<string, readonly string[]>();
+  // What is served must itself hold no finding — it is what an untouched Save
+  // hands the write door. A withheld position can leave a sibling that reads
+  // as credential material on its own (a pair's `key` label without its
+  // `value`, directly under a header-ish key), so the projection is judged
+  // again until it is clean; each pass only removes, and a projection that
+  // will not settle is withheld whole.
+  for (let pass = 0; findings.length > 0; pass += 1) {
+    for (const finding of findings) seen.set(JSON.stringify(finding.path), finding.path);
+    if (pass === MAX_WITHHOLD_PASSES) {
+      for (const key of Object.keys(out)) seen.set(JSON.stringify([key]), [key]);
+      out = {};
+      break;
+    }
+    out = withholdFindings(out, findings, 0);
+    findings = findContractlessCredentials(out);
+  }
+  const paths = [...seen.values()].sort((a, b) => (a.join('.') < b.join('.') ? -1 : a.join('.') > b.join('.') ? 1 : 0));
   return { config: out, paths };
 }
+
+/** Past this many passes, a projection that still holds a finding is withheld whole (see {@link withholdContractlessCredentials}). */
+const MAX_WITHHOLD_PASSES = 8;
