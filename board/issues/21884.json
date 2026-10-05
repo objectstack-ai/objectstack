@@ -1,0 +1,26 @@
+{
+  "number": 21884,
+  "kind": "issue",
+  "title": "[finding] the object-schema FLS mask drops an action whose param names a field of ANOTHER object (`objectOverride`), so a delegated_admin is served no `invite_user` though the invite door admits them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T14:19:57Z",
+  "updated_at": "2026-10-05T14:19:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21884",
+  "body": "Filing-gate class ① (a defect with a named location, measured on a real boot). Filed by `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017) from the #21795 dev's report `5996276927` (PR #21883), out-of-scope finding 1. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What a user sees\n\nA `delegated_admin` may invite members: `POST /api/v1/auth/organization/invite-member` as that principal answers **200**. But `GET /api/v1/meta/object/sys_user` serves that principal **no `invite_user` action**, so the console withholds an affordance the server admits. A plain `member` is masked the same way, correctly in effect but for the wrong reason. Owners and admins get the action. Measured by the #21795 dev on a real showcase boot. It predates PR #21883.\n\n## Where\n\n- `packages/metadata-core/src/object-schema-fls-references.ts`, `presentationEntry` (about `:362-388` at `origin/main` `5e0b489bca`). Any key of an action other than its column-style lists is scanned with `mentionsDenied`. A param is read as a reference to a field of THIS object, so an action whose param's `field` equals a denied field is dropped (the docblock at `:65-71` says so).\n- `packages/platform-objects/src/identity/sys-user.object.ts:101`: `sys_user.invite_user` declares the param `{ field: 'role', objectOverride: 'sys_member', required: true }`. Its `field` names `sys_member.role`, not `sys_user.role`.\n- The served `sys_user` fields for `delegated_admin` and `member` lack `role` (FLS denies it to them), so the mask drops `invite_user`. It treats `role` as a reference to `sys_user.role` and ignores `objectOverride`.\n\n## Why it is a defect\n\nADR-0106 drops an entry that \"reads a denied field\" because serving it without that part would change what it does. A param with `objectOverride` reads a field of another object, which this object's field mask does not govern. Dropping the action here withholds a working affordance; it protects nothing.\n\n**Reach:** the identity screens for delegated admins, and any authored action whose param carries `objectOverride` onto a field name this object masks for the caller. Not a security leak: the mask over-withholds, it never over-serves.\n\n## Fix direction (not ruled)\n\n- The mask judges a param's `field` against the `objectOverride` object's field set when `objectOverride` is present, and does not count it as a reference to this object's fields.\n- A pin holds both sides:\n  - a `delegated_admin` is served `invite_user` on `sys_user`;\n  - an action whose param names a denied field of THIS object is still dropped.\n\n**Who acts:** the lane triage routes it to. `packages/metadata-core` reads as `domain:engine`.\n\nDedupe: `mcp__github__search_issues` (repo-scoped, semantic, closed included):\n- `action param objectOverride field-level security mask drops action invite_user sys_user role delegated_admin` → 0 hits;\n- `object schema FLS references action dropped param field denied objectOverride ignored` → 3 hits: #7743, #6603 and #3682 (ADR-0106's implementation). None is this defect.\n\nDedupe words: `objectOverride FLS mask invite_user` · `schema mask action param other object` · `delegated_admin invite affordance withheld`"
+}

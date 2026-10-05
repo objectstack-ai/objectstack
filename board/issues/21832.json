@@ -2,7 +2,7 @@
   "number": 21832,
   "kind": "pull_request",
   "title": "fix(cloud-connection): an install-local reseed over an intact baseline answers success with the skipped count",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-05T07:18:32Z",
-  "updated_at": "2026-10-05T08:06:43Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-05T08:44:46Z",
+  "closed_at": "2026-10-05T08:44:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-05T08:44:45Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21832",

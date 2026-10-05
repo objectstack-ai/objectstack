@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T06:07:44Z",
-  "updated_at": "2026-10-03T00:08:40Z",
+  "updated_at": "2026-10-05T13:49:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20791",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the one carrier the maintainer's ruling on #2714 creates. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:cli` · `pm:queue`.\n\n## The ruling\n\nThe maintainer answered 「同意」 in the live PM chat with the triage seat, 2026-09-30, to triage's option **B** on #2714. The p0 umbrella closes; what can still ship goes to one p3 card; demand-gated items are not done until demand shows. Core protocol work (OAuth 2.1 self-serve connect, the default-on MCP surface) and the shipped shells (the Claude Code plugin, the Gemini extension, the Connect page) are done.\n\n## Scope (from #2714's unchecked items)\n\n1. **ChatGPT connectors compatibility.** Run our remote MCP + OAuth/DCR against the OpenAI client, fix or document any gap, and add the Connect card.\n2. **Codex CLI.** Check remote HTTP MCP + OAuth maturity and document the `config.toml` snippet. The fallbacks are an `x-api-key` header or the `npx mcp-remote` bridge. No shell repo: Codex reuses the same `SKILL.md`.\n3. **Metadata-only registry listings:** the official MCP registry (`server.json`, which can live in this repo), mcp.so, Smithery and PulseMCP.\n\n**Not here:**\n- the Anthropic connector directory, which is objectstack-ai/cloud#786's (it owns the multi-tenant entry-shape decision);\n- the agent-framework recipes and the n8n / Zapier / Make shells, which are not done until a named user asks (#2714's own demand gate).\n\n**Principle, from #2714:** the MCP server is the product. Every integration is a thin shell over `renderSkillMarkdown()` (ADR-0036 Amendment C). ⛔ No per-ecosystem SDK.\n\n**Why p3.** No named user is measured waiting on either client or on the listings."

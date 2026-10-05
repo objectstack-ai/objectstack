@@ -1,0 +1,32 @@
+{
+  "number": 21863,
+  "kind": "issue",
+  "title": "[finding] three \"declared, not enforced yet\" rows in the metadata-form reconciliation ledger are stale: `field.picklist`, `action.onSuccess` and `action.outcomeMessages` read `live`, and none has had its offer decided",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T10:11:54Z",
+  "updated_at": "2026-10-05T13:36:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21863",
+  "body": "Ruled: 5995552118 · letters 1A 2B · 2026-10-05T13:35Z\n\nFiling-gate class ① (stale author- and agent-facing text contradicted by a measured ledger verdict). Filed by `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017) while it landed #21765 (PR #21854, record `5992359662`). ⛔ Not graded or routed here, ⛔ not a claim.\n\n## Where\n\n`packages/spec/src/system/metadata-form-zod-reconciliation.test.ts` at `origin/main` `2df3d13d16`, in the group \"Declared, not enforced yet — no offer until it is enforced\" (from `:386`):\n\n| row | its `why` says | `liveness/*.json` on `origin/main` reads |\n|:--|:--|:--|\n| `field` `picklist` (`:399`) | \"liveness verdict `planned` (the server-side resolution that serves a picklist-bound field its options is not landed)\" | `live`, verified 2026-10-01, evidence `packages/objectql/src/registry.ts#resolvePicklistOptions` (landed by #21047, the runtime of #19519) |\n| `action` `onSuccess` (`:406`) | \"both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet\" | both children `live`, verified 2026-09-27, objectui `ActionRunner#handlePostExecution` / `#navigateOnSuccess` (flipped by #20296) |\n| `action` `outcomeMessages` (`:413`) | \"liveness verdict `planned` (#21095: the console reader … is a later link of the same ruling)\" | `live`, verified 2026-10-03, objectui `ActionRunner#composeSuccessMessage` |\n\nThe group's other two rows were not measured here: `object` `externalSharingModel` still reads `planned`, and `view` `groups` has no `liveness/view.json` row to read.\n\n## Why it is owed\n\nThe ledger's own rule (`:307-309`): \"The not-enforced-yet rows hold only while the verdict does. Once a key is enforced its row is stale: delete it and decide the offer then — that decision belongs to the enforcement, not to this gate.\"\n\nNo gate reads a `why`, so nothing behaves wrong. But each of the three rows now states a false premise to the next author or agent who reads why the key is missing from Studio's form.\n\n**Deleting the row alone is refused.** On #21765 the dev deleted the analogous `imageField` row and the test answered \"accepted by the Zod but unauthorable in the form — offer it, or add a root ledger entry\" (report `5988698813`). Each row therefore needs one of two things — ruled by the director seat (5995552118): `onSuccess` and `outcomeMessages` take the offer (1A: a `composite` row and a `widget: 'json'` row), `picklist` takes the reason (2B: the ruled class \"authored through its own editor\", naming the object designer's picker):\n- an offer: a form row, or, for a structured value, a designed control;\n- a reason under a ledger class that names the key.\n\n**Precedents for the offer half:**\n- #20920 (`useGrouping`, a scalar, offered and its row deleted);\n- PR #21398 (`agent.structuredOutput`, offered and its row deleted);\n- #21765 item 3 (PR #21854, `imageField`, offered on the director seat's ruling A `5989738766`).\n\nAll three were scalars or near-scalars. Two of these keys are not:\n- `onSuccess` is an object (`navigate`, `openIn`);\n- `outcomeMessages` is a map from outcome key to `I18nLabel`.\n\nThat puts both on the #19332 axis (structured controls that need a designed widget, ruling record `5861442317`).\n\n`picklist` names a picklist metadata item. Its own row already says \"the field designer offering a picklist is a later Studio phase\", which reads as a decision taken under epic #18164 rather than one owed here. That deserves a check.\n\n**History of the `onSuccess` row:**\n- #20339 recorded it as site 1. Its triage (`5861237191`) left the re-wording to \"the next spec-lane PR that touches the file\".\n- Since then, PRs #21214, #21398, #21451, #21547 and this seat's own #21854 have each touched the file without carrying it.\n- `outcomeMessages` and `picklist` went stale later, by #21095's and #21047's own flips.\n\n## The fix (shape, not ruled)\n\n- **Smallest, text only:** re-word the three `why`s to \"enforced (`live`, …); not offered in the form pending a ruling\", as #20339 proposed for site 1. One test file. `skip-changeset`, since no `*.test.ts` ships.\n- **The offer decision**, per key: offer it, or name the class it belongs to. That is a form-surface question, on the #19332 / #19333 axis. It may need the maintainer's or the director seat's ruling for the two structured keys. This card does not answer it.\n\n**Who acts:** `domain:spec`, once triage routes the card.\n\nDedupe: `mcp__github__search_issues` (repo-scoped, semantic, closed included):\n- `action form onSuccess outcomeMessages omit row stale reconciliation offer metadata form` → 0 hits;\n- `Studio action form offer onSuccess navigate openIn outcomeMessages` → 2 hits (#20296, the flip; #7309, unrelated);\n- `field form offer picklist reconciliation omit row not enforced yet stale live` → 4 hits (#20920, the precedent; #19519, the picklist runtime; #21281 and #20951, unrelated).\n\n0 duplicates. #20339 is closed `completed` with site 1 left to ride, so this card is that site's carrier.\n\nDedupe words: `reconciliation not enforced yet stale omit row` · `onSuccess outcomeMessages picklist form offer` · `metadata-form-zod-reconciliation live verdict why`"
+}
