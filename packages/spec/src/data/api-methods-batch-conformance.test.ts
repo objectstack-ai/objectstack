@@ -61,8 +61,17 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `2e818d0b5`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-10-04: `ObjectGrid.tsx` and `hooks/useBulkExecutor.ts` are
+  // (`.objectui-sha` = `9dfaca654`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-10-05: on the hop off `2e818d0b5`, `ObjectGrid.tsx` changed
+  // in three type docblocks only (9 insertions, 6 deletions: objectui#8347
+  // re-wording its `BaseSchema` index-signature notes in the past tense), all
+  // above the selection block, which only MOVED by +3:
+  // `ObjectGrid.tsx:4813-4840` here (`4810-4837` at `2e818d0b5`), still
+  // hashing to `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the
+  // block), re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `2e818d0b5` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `2e818d0b5`, 2026-10-04:
+  // `ObjectGrid.tsx` and `hooks/useBulkExecutor.ts` are
   // byte-identical across the hop off `ab1879721` (`git diff --quiet`), so
   // every anchor held unmoved. Re-measured at `ab1879721`, 2026-10-03. On the
   // hop off `89cad75d5`, `ObjectGrid.tsx` changed

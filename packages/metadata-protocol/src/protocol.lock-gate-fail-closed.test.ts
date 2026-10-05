@@ -158,6 +158,19 @@ function engineWithTransientLockReadFault(opts: {
     const raise = opts.error ?? connectionRefused;
     let reads = 0;
 
+    // [#21761] One `sys_metadata` read counter for both read verbs: the gate
+    // selects its rows with `find` (every row of the item in scope), the
+    // served-row read uses `findOne`, and whichever comes first is read #1.
+    const sysMetadataRead = (verb: 'find' | 'findOne', query: any): typeof row | null => {
+        reads += 1;
+        calls.push(`${verb}:sys_metadata#${reads}`);
+        if (opts.failFirstRead && reads === 1) throw raise();
+        if (opts.noOverlayRow) return null;
+        if (query?.where?.state === 'draft') return null;
+        // Only the item's own rows: the double answers no other query with it.
+        if (query?.where?.name !== undefined && query.where.name !== row.name) return null;
+        return row;
+    };
     const engine: any = {
         registry: registry(opts.registryItems ?? {}),
         findOne: vi.fn(async (object: string, query: any) => {
@@ -166,14 +179,16 @@ function engineWithTransientLockReadFault(opts: {
                 calls.push(`findOne:${object}`);
                 return null;
             }
-            reads += 1;
-            calls.push(`findOne:sys_metadata#${reads}`);
-            if (opts.failFirstRead && reads === 1) throw raise();
-            if (opts.noOverlayRow) return null;
-            if (query?.where?.state === 'draft') return null;
-            return row;
+            return sysMetadataRead('findOne', query);
         }),
-        find: vi.fn(async (object: string) => { calls.push(`find:${object}`); return []; }),
+        find: vi.fn(async (object: string, query: any) => {
+            if (object !== 'sys_metadata' || query?.where?.name === undefined) {
+                calls.push(`find:${object}`);
+                return [];
+            }
+            const found = sysMetadataRead('find', query);
+            return found ? [found] : [];
+        }),
         insert: vi.fn(async (object: string, values: any) => {
             calls.push(`insert:${object}`);
             if (object === 'sys_metadata_audit') auditRows.push(values);
@@ -196,6 +211,13 @@ function engineWithTransientLockReadFault(opts: {
     };
     return { engine, calls, auditRows };
 }
+
+/**
+ * The gate's own overlay read, the first `sys_metadata` read of a save or a
+ * delete. [#21761] A `find`: the gate selects its lock from every row of the
+ * item in scope, not from the one row `findOne` returns.
+ */
+const GATE_READ = 'find:sys_metadata#1';
 
 /** A protocol in TENANT scope — control-plane (`environmentId` undefined) skips both gates. */
 function protocolFor(h: Harness) {
@@ -264,7 +286,7 @@ describe('[#5706] an unreadable lock state refuses the write instead of allowing
         // The regression, verbatim: this used to resolve `{ success: true }`.
         expectNoOverlayWrite(h);
         // It really was the GATE's read that failed — it is the first one.
-        expect(h.calls[0]).toBe('findOne:sys_metadata#1');
+        expect(h.calls[0]).toBe(GATE_READ);
     });
 
     it('delete is refused with 503 on the same unreadable lock state', async () => {
@@ -274,7 +296,7 @@ describe('[#5706] an unreadable lock state refuses the write instead of allowing
 
         expectStoreUnavailable(caught);
         expectNoOverlayWrite(h);
-        expect(h.calls[0]).toBe('findOne:sys_metadata#1');
+        expect(h.calls[0]).toBe(GATE_READ);
     });
 
     it('a `full` lock is protected on both gates by the same read', async () => {
@@ -357,7 +379,7 @@ describe('[#5706] the benign unprovisioned store is still not an outage', () => 
         const res: any = await save(protocolFor(h));
 
         expect(res.success).toBe(true);
-        expect(h.calls[0]).toBe('findOne:sys_metadata#1');
+        expect(h.calls[0]).toBe(GATE_READ);
     });
 
     it('first boot: delete is likewise not turned into a 503', async () => {
@@ -395,7 +417,7 @@ describe('[#5706] artifact-level locks are unaffected — they never reach the o
         expect(caught.code).toBe('ITEM_LOCKED');
         expect(caught.message).toContain('source=artifact');
         // The overlay read was never even attempted — artifact wins first.
-        expect(h.calls).not.toContain('findOne:sys_metadata#1');
+        expect(h.calls).not.toContain(GATE_READ);
     });
 
     it('a packaged `no-delete` lock still refuses a delete with 403, even mid-outage', async () => {
@@ -410,7 +432,7 @@ describe('[#5706] artifact-level locks are unaffected — they never reach the o
         expect(caught.status).toBe(403);
         expect(caught.code).toBe('ITEM_LOCKED');
         expect(caught.message).toContain('source=artifact');
-        expect(h.calls).not.toContain('findOne:sys_metadata#1');
+        expect(h.calls).not.toContain(GATE_READ);
     });
 
     it('an artifact-backed item with NO packaged lock still consults the overlay — and fails closed', async () => {
@@ -430,6 +452,6 @@ describe('[#5706] artifact-level locks are unaffected — they never reach the o
         const caught = await rejection(() => save(protocolFor(h)));
 
         expectStoreUnavailable(caught);
-        expect(h.calls).toContain('findOne:sys_metadata#1');
+        expect(h.calls).toContain(GATE_READ);
     });
 });

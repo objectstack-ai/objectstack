@@ -1364,9 +1364,10 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
-   * `2e818d0b5`, re-read 2026-10-04: `core/src/actions/ActionRunner.ts` is
-   * byte-identical to `ab1879721`, where it was read 2026-10-03, so the anchor
-   * below held unmoved). The reader is objectui#11344 (objectui
+   * `9dfaca654`, re-read 2026-10-05: `core/src/actions/ActionRunner.ts` is
+   * byte-identical to `2e818d0b5`, re-read there 2026-10-04, and to
+   * `ab1879721`, where it was read 2026-10-03, so the anchor below held
+   * unmoved). The reader is objectui#11344 (objectui
    * `c476be0e0`): `ActionRunner.composeSuccessMessage`
    * (`core/src/actions/ActionRunner.ts:1497`) picks `outcomeMessages[outcome]`
    * off the handler's return value, falls back to `successMessage` and then to
