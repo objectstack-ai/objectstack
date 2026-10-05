@@ -376,7 +376,7 @@ describe('§2 off-shape values are refused with the code and the path', () => {
     expect(say({ defaultValue: 'X' })).toMatch(/block's\s+`initialValues`/);
     expect(say({ id: 'a1' })).toMatch(/identified by its `name`/);
     expect(say({ fields: ['b'] })).toMatch(/Group fields with the block's `sections`/);
-    expect(say({ min_rows: 1 })).toMatch(/retired snake_case spelling of `minRows`/);
+    expect(say({ min_rows: 1 })).toMatch(/^ {2}• .*`min_rows`.*`minRows`/m);
     expect(say({ helpText: 'x' })).toMatch(/`helpText` → `description`/);
     expect(say({ validation: { required: true } })).toMatch(/the MESSAGE a required field shows/);
     expect(say({ validation: { pattern: { value: '^a', message: 'x' } } })).toMatch(/field's own `pattern` string/);
@@ -509,13 +509,20 @@ describe('§5 the grid widget\'s eight field-level keys, camelCase since objects
   const field = (member: Record<string, unknown>) =>
     parse('object-form', { customFields: [{ name: 'items', type: 'grid', ...member }] });
 
+  /** The prescription bullets of a refusal (`strictUnknownKeyError` renders each as one `  • ` line). */
+  const bullets = (message: string): string[] => message.split('\n').filter((line) => line.startsWith('  • '));
+
   it.each(GRID_KEYS)('`%s` is refused by name, its prescription naming `%s`', (snake, camel, value) => {
     const r = field({ [snake]: value });
     expect(issues(r)).toEqual([{ code: 'unrecognized_keys', path: 'customFields.0' }]);
     const message = firstMessage(r);
-    expect(message).toContain(`on this inline form field: \`${snake}\`.`);
-    expect(message).toContain(`\`${snake}\` is the \`grid\` widget's retired snake_case spelling of \`${camel}\``);
-    expect(message).toContain(`Rename the key to \`${camel}\`; its value stays the same.`);
+    // Named subjects, not copy: the first line names the written key, and the one bullet names it and its
+    // camelCase replacement.
+    expect(message.split('\n')[0]).toContain(`\`${snake}\``);
+    const [bullet, ...rest] = bullets(message);
+    expect(rest).toEqual([]);
+    expect(bullet).toContain(`\`${snake}\``);
+    expect(bullet).toContain(`\`${camel}\``);
     // The key the prescription names is one the field accepts, with the very value written.
     const renamed = field({ [camel]: value });
     expect(issues(renamed)).toEqual([]);
@@ -523,16 +530,16 @@ describe('§5 the grid widget\'s eight field-level keys, camelCase since objects
   });
 
   it('two retired spellings on one field get one bullet each, each naming its own camelCase key', () => {
-    const message = firstMessage(field({ allow_add: false, sort_field: 'position' }));
-    expect(message.match(/^ {2}• /gm)).toHaveLength(2);
-    expect(message).toContain('spelling of `allowAdd`');
-    expect(message).toContain('spelling of `sortField`');
+    const lines = bullets(firstMessage(field({ allow_add: false, sort_field: 'position' })));
+    expect(lines).toHaveLength(2);
+    expect(lines.filter((l) => l.includes('`allow_add`') && l.includes('`allowAdd`'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('`sort_field`') && l.includes('`sortField`'))).toHaveLength(1);
   });
 
   it('a section\'s inline entry refuses a retired spelling with the same prescription', () => {
     const r = parse('object-form', { sections: [{ fields: [{ name: 'items', type: 'grid', total_field: 'amount' }] }] });
     expect(issues(r)).toEqual([{ code: 'invalid_union', path: 'sections.0.fields.0' }]);
-    expect(messages(r)).toContain('retired snake_case spelling of `totalField`');
+    expect(messages(r)).toMatch(/^ {2}• .*`total_field`.*`totalField`/m);
   });
 
   it.each(GRID_KEYS)('`%s` → `%s` takes the widget\'s value type and refuses another', (_snake, camel, _value, wrong) => {
@@ -553,9 +560,11 @@ describe('§5 the grid widget\'s eight field-level keys, camelCase since objects
   it('`totalField` on the inline grid field is the CHILD column summed, the opposite of the same spelling on the child-collection blocks', () => {
     const description = (schema: unknown) => (schema as { description?: string }).description ?? '';
     const grid = description(runtimeField().shape.totalField);
-    expect(grid).toMatch(/^The CHILD column a `grid` field sums into its footer total/);
-    expect(grid).toMatch(/Not the PARENT field a master-detail or `record:line_items` sum is saved to/);
-    expect(grid).toMatch(/the child column `amountField`/);
+    // The first sentence is the contract: the CHILD column, summed into the footer.
+    expect(grid).toMatch(/^The CHILD column [^.]*\bfooter\b/);
+    // And it names the homonym it is not, and the sibling key that IS this value.
+    expect(grid).toMatch(/\bNot the PARENT field\b/);
+    expect(grid).toContain('`amountField`');
 
     const lineItems = description((RecordLineItemsProps as unknown as { shape: Record<string, unknown> }).shape.totalField);
     const detailEntry = description(objectOf(ObjectMasterDetailFormPropsSchema.shape.details).shape.totalField);
