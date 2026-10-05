@@ -3,7 +3,9 @@
 import {
     Plugin,
     PluginContext,
+    artifactPackageId,
     createPluginPermissionEnforcer,
+    resolveArtifactPackageOrder,
     wireAuthoredTranslationSync,
     type PluginPermissionEnforcer,
 } from '@objectstack/core';
@@ -24,6 +26,7 @@ import type { IMetadataService, IObjectQLEngine, II18nService } from '@objectsta
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
+import { applyProtection } from '@objectstack/spec/shared';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { bindAppArtifactHandlers, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
@@ -662,6 +665,84 @@ export class AppPlugin implements Plugin {
         return out;
     }
 
+    /**
+     * Every code-defined datasource this artifact declares, each paired with
+     * the coordinates of the package that declares it — what `start()` hands
+     * `applyProtection` when it registers the datasource.
+     *
+     * [#21889] The federation service reads those coordinates back: its
+     * `getNamespace` (`@objectstack/service-datasource`) takes the datasource's
+     * `_packageId` to the engine registry's package record, whose
+     * `manifest.namespace` is the ADR-0028 prefix an object imported over the
+     * datasource must carry. Registered without coordinates, a code-defined
+     * datasource resolved no namespace: the import accepted an unprefixed
+     * name and the draft emitted one.
+     *
+     * The owner is read the way the metadata plugin's artifact door reads it
+     * (ADR-0130 D4, `packages/metadata/src/plugin.ts`), and for its reasons:
+     *
+     *  - `packages` ABSENT: the artifact is its one package's body, so every
+     *    datasource takes the manifest's id, the key `registerApp` installs the
+     *    package under. The list is `this.collections.datasources`, the one
+     *    this registration has always read (D7).
+     *  - `packages` PRESENT: each body's datasources take THAT body's id
+     *    (`artifactPackageId`, the one spelling `registerApp` keys on), in the
+     *    order `resolveArtifactPackageOrder` gives. ⛔ Never the artifact's
+     *    top-level manifest id on every entry: on a composed artifact that id
+     *    is one member's, and stamping it everywhere hands one package another
+     *    package's datasources (#14599). ⛔ Never a name-to-package index over
+     *    the flattened list either: that is a second resolution path for
+     *    ownership, and a dangling one fails silently.
+     *  - A datasource no body declares (an artifact composed from a stack that
+     *    already carried `packages` and one that did not) falls back to the
+     *    artifact's own manifest id, as the door's residual sweep does, and is
+     *    logged, because the artifact's two halves disagree.
+     */
+    private codeDefinedDatasourceOwners(ctx: PluginContext): Array<{
+        datasource: any;
+        owner: { packageId?: string; packageVersion?: string };
+    }> {
+        const listOf = (dsDefs: unknown): any[] =>
+            Array.isArray(dsDefs)
+                ? dsDefs
+                : dsDefs && typeof dsDefs === 'object'
+                    ? Object.entries(dsDefs).map(([name, def]) => ({ name, ...(def as any) }))
+                    : [];
+        const coordsOf = (body: any) => ({
+            packageId: artifactPackageId(body),
+            packageVersion: typeof body?.version === 'string' ? body.version : undefined,
+        });
+        const own = coordsOf(this.bundle.manifest || this.bundle);
+        const declared = listOf(this.collections.datasources);
+
+        if ((this.bundle as { packages?: unknown }).packages === undefined) {
+            return declared.map((datasource) => ({ datasource, owner: own }));
+        }
+
+        const owned: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }> = [];
+        const claimed = new Set<unknown>();
+        for (const body of resolveArtifactPackageOrder(this.bundle)) {
+            const owner = coordsOf(body);
+            for (const datasource of listOf((body as { datasources?: unknown } | null)?.datasources)) {
+                claimed.add(datasource?.name);
+                owned.push({ datasource, owner });
+            }
+        }
+        const residual = declared.filter((datasource) => !claimed.has(datasource?.name));
+        if (residual.length > 0) {
+            ctx.logger.warn(
+                `[AppPlugin] artifact '${own.packageId ?? '<none>'}' carries ${residual.length} top-level `
+                + 'datasource(s) that none of its package bodies declare: '
+                + `${residual.map((d) => `'${String(d?.name)}'`).join(', ')}. They were registered under `
+                + "the artifact's own manifest id because no package in the artifact claims them, so the "
+                + 'ADR-0028 namespace an import over them must carry is that package\'s. Rebuild the '
+                + 'artifact with one `composeStacks` run so every datasource sits in the body that owns it.',
+            );
+            owned.push(...residual.map((datasource) => ({ datasource, owner: own })));
+        }
+        return owned;
+    }
+
     start = async (ctx: PluginContext) => {
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
@@ -747,9 +828,17 @@ export class AppPlugin implements Plugin {
                     | { registerInMemory?: (t: string, n: string, d: unknown) => void }
                     | undefined;
                 if (typeof metadata?.registerInMemory === 'function') {
-                    for (const ds of dsList) {
+                    // [#21889] Each one stamped with the package that declares
+                    // it (ADR-0010 `_packageId` / `_packageVersion`), through the
+                    // one stamping helper both other load paths use. See
+                    // `codeDefinedDatasourceOwners` for who that package is.
+                    for (const { datasource: ds, owner } of this.codeDefinedDatasourceOwners(ctx)) {
                         if (!ds?.name) continue;
-                        metadata.registerInMemory('datasource', ds.name, { ...ds, origin: 'code' });
+                        metadata.registerInMemory(
+                            'datasource',
+                            ds.name,
+                            applyProtection({ ...ds, origin: 'code' }, owner),
+                        );
                     }
                     ctx.logger.info('Registered code-defined datasources in metadata registry', {
                         appId,
