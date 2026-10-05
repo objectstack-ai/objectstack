@@ -65,7 +65,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { organizationIdForMetaRead } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, organizationIdForMetaRead } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -139,6 +139,8 @@ function makeHarness(rows: StoredRow[]) {
     };
     const engine: any = {
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            // `check:engine-double-contract` — refuses what the real engine refuses.
+            assertEngineFindOnePredicate(table, opts);
             if (table !== 'sys_metadata') return undefined;
             return matching(table, opts)[0];
         },
