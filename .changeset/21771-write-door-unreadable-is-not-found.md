@@ -6,7 +6,7 @@ fix(plugin-security)!: on the write doors, a row the caller cannot read answers 
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) a write-door answer and a write-door verdict, no authorable surface: the by-id write pre-image check now asks every principal whether it can read the row it addressed, and answers a row it cannot read with the read door's existing not-found. No authorable key, spelling, export, error code or stored shape is added, retired or renamed; every stored row and every metadata item keeps parsing and is read the same way, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a write door's answer (not already-registered); and the change is a door verdict, not a TypeScript declaration (not runtime-interface-only or type-surface-only). -->
+<!-- adr-0087: registered by-id-write-unreadable-row-not-found -->
 
 **BREAKING**: a by-id update or delete of a row the caller cannot read now answers `404 RECORD_NOT_FOUND`, with exactly the body an id that names no row gets, for every principal class. On the write doors, "hidden" and "gone" are now one answer to a caller who cannot read the row. It ships as `minor` under the launch-window convention for accept-set narrowings. No export is added or removed, and no error code is new.
 
