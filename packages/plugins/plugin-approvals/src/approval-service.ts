@@ -280,6 +280,28 @@ export interface ApprovalMessagingSurface {
   }): Promise<unknown>;
 }
 
+/**
+ * What an approval notification hands to the messaging service: the
+ * `EmitInput` payload fields the delivered notification is built from, plus a
+ * reminder's one-tap decision links.
+ *
+ * `body` is the text the recipient reads under the title. Messaging builds the
+ * inbox row's `body_md`, and each channel's fallback rendering, from
+ * `payload.body` and no other field, so the text is declared here rather than
+ * left to a free-form bag: a call site that spells it any other way does not
+ * compile. Spelled `message`, it once reached every recipient as an empty body.
+ */
+type ApprovalNotificationPayload = {
+  /** The headline. */
+  readonly title: string;
+  /** The text under the headline. */
+  readonly body: string;
+  /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
+  readonly actionUrl: string;
+  /** Approve / Reject links on a reminder to a concrete approver (ADR-0043). */
+  readonly actions?: ReadonlyArray<{ readonly label: string; readonly url: string }>;
+};
+
 /** Minimum time between submitter reminders on one request. */
 export const REMIND_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 
@@ -1373,7 +1395,7 @@ export class ApprovalService implements IApprovalService {
   private async notify(input: {
     topic: string;
     audience: string[];
-    payload?: Record<string, unknown>;
+    payload: ApprovalNotificationPayload;
     dedupKey?: string;
     source?: { object: string; id: string };
     actorContext?: ExecutionContext;
@@ -1388,7 +1410,7 @@ export class ApprovalService implements IApprovalService {
     // the console inbox to auto-open the drawer.
     let payload = event.payload;
     if (
-      payload?.actionUrl === '/system/approvals'
+      payload.actionUrl === '/system/approvals'
       && event.source?.object === 'sys_approval_request'
       && event.source.id
     ) {
@@ -3073,7 +3095,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-${id}-${sub.to}`,
         payload: {
           title: 'Approval routed to you (out-of-office cover)',
-          message: `You are covering an approval on ${input.object}/${input.recordId} while ${sub.from} is out of office.`,
+          body: `You are covering an approval on ${input.object}/${input.recordId} while ${sub.from} is out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -3084,7 +3106,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
         payload: {
           title: 'Approval routed to your delegate',
-          message: `An approval on ${input.object}/${input.recordId} was routed to ${sub.to} while you are out of office.`,
+          body: `An approval on ${input.object}/${input.recordId} was routed to ${sub.to} while you are out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4206,7 +4228,7 @@ export class ApprovalService implements IApprovalService {
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
-            message: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
+            body: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
             actionUrl: '/system/approvals',
           },
         });
@@ -4249,7 +4271,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
-          message: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
+          body: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4509,7 +4531,7 @@ export class ApprovalService implements IApprovalService {
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
         title: 'Approval handed to you',
-        message: `You are now an approver on ${raw.object_name}/${raw.record_id}.`,
+        body: `You are now an approver on ${raw.object_name}/${raw.record_id}.`,
         actionUrl: '/system/approvals',
       },
     });
@@ -4568,7 +4590,7 @@ export class ApprovalService implements IApprovalService {
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
             title: 'Approval reminder',
-            message: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+            body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
             actionUrl: '/system/approvals',
             actions: [
               { label: 'Approve', url: this.actionLinkUrl(tokens.approve) },
@@ -4591,7 +4613,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
           title: 'Approval reminder',
-          message: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+          body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4785,7 +4807,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'More information requested',
-          message: input.comment.trim(),
+          body: input.comment.trim(),
           actionUrl: '/system/approvals',
         },
       });
@@ -4832,7 +4854,7 @@ export class ApprovalService implements IApprovalService {
       source: { object: 'sys_approval_request', id: requestId },
       payload: {
         title: 'New comment on an approval',
-        message: input.comment.trim(),
+        body: input.comment.trim(),
         actionUrl: '/system/approvals',
       },
     });
@@ -5877,7 +5899,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval escalated to you',
-          message: `An overdue approval on ${raw.object_name}/${raw.record_id} was escalated to you.`,
+          body: `An overdue approval on ${raw.object_name}/${raw.record_id} was escalated to you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -5895,7 +5917,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval SLA breached',
-          message: `A decision on ${raw.object_name}/${raw.record_id} is overdue.`,
+          body: `A decision on ${raw.object_name}/${raw.record_id} is overdue.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -5908,7 +5930,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Your approval request breached its SLA',
-          message: `${raw.object_name}/${raw.record_id}: escalation action '${action}' was taken.`,
+          body: `${raw.object_name}/${raw.record_id}: escalation action '${action}' was taken.`,
           actionUrl: '/system/approvals',
         },
       });

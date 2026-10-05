@@ -545,7 +545,7 @@ describe('MemoryDriverSpec', () => {
 // never on a bare `toThrow()` — both shapes ARE `strictObject`, so a bare throw
 // assertion would pass identically on the unrecognized-key error the tombstone
 // exists to replace, which is exactly the case that cannot carry a rename.
-describe('memory persistence auto-save interval carries its unit (#15680)', () => {
+describe('memory persistence auto-save interval carries its unit', () => {
   it('REFUSES the retired `autoSaveInterval` on the file arm, with the rename in the message', () => {
     const result = FilePersistenceConfigSchema.safeParse({ type: 'file', autoSaveInterval: 5000 });
     expect(result.success).toBe(false);

@@ -82,7 +82,7 @@ describe('ActionParamSchema', () => {
   // Before this, `reference` was an unknown key: zod stripped it silently and
   // the param dialog degraded to a "paste the record id (UUID)" text input,
   // with no signal that the authored config had been dropped.
-  describe('inline lookup reference target (#3405)', () => {
+  describe('inline lookup reference target — `reference`, the FieldSchema spelling', () => {
     it('keeps `reference` on an inline lookup param', () => {
       const result = ActionParamSchema.parse({
         name: 'inspector',
@@ -117,7 +117,7 @@ describe('ActionParamSchema', () => {
   // parsing and shipped a control that ignored the author's config. Strict mode
   // turns that class of typo into a loud, fixable parse error
   // (ADR-0078 no-silently-inert-metadata, ADR-0049 enforce-or-remove).
-  describe('unknown keys are rejected, not stripped (#3405 part 3)', () => {
+  describe('unknown keys are rejected, not stripped', () => {
     const unknownKeyIssue = (param: Record<string, unknown>) => {
       const result = ActionParamSchema.safeParse(param);
       expect(result.success).toBe(false);
@@ -138,7 +138,7 @@ describe('ActionParamSchema', () => {
         .toContain('`default_value` → `defaultValue`');
     });
 
-    it('points the runtime lookup-target spellings at `reference` (the #3405 slip)', () => {
+    it('points the runtime lookup-target spellings at `reference`, the one key an author writes', () => {
       for (const key of ['reference_to', 'referenceTo', 'targetObject']) {
         expect(unknownKeyIssue({ name: 'p', type: 'lookup', reference: 'sys_user', [key]: 'sys_user' })!.message)
           .toContain(`\`${key}\` → \`reference\``);
@@ -214,7 +214,7 @@ describe('requiresFeature lowering', () => {
     expect(() => ActionParamSchema.parse({ name: 'x', requiresFeature: 'phoneNumbr' })).toThrow();
   });
 
-  it('rejects an AST-only visible loudly (ADR-0078) — at the SLOT since #15811, not at the lowering', () => {
+  it('rejects an AST-only visible loudly (ADR-0078) — at the SLOT, which needs a `source` to evaluate, not at the lowering', () => {
     // ADR-0078's promise ("rejects an AST-only or non-CEL `visible` loudly") is
     // unchanged; what moved is WHICH rule refuses, and it moved earlier. The
     // lowering only ever ran when `requiresFeature` was present, so an AST-only
@@ -239,7 +239,7 @@ describe('requiresFeature lowering', () => {
       .toContain('visible');
   });
 
-  it('a blank-`source` visible no longer reaches the lowering at all (#17631\u2019s shape, closed at the door)', () => {
+  it('a blank-`source` visible no longer reaches the lowering at all (the never-parsing gate it once built, closed at the door)', () => {
     // The lowering used to compose a feature gate AROUND a blank source and
     // produce `(   ) && features.admin == true` — a predicate that can never
     // parse, built by the guard that exists to reject exactly that. The slot
@@ -1113,7 +1113,7 @@ describe('ActionSchema - ai block (ADR-0011)', () => {
 // acceptance the retirement removes, and there is no spelling of `aria` the
 // action shape accepts any more. The prescription itself, and the carriers it
 // names, are pinned with the rest of the family in `aria-carrier-tombstones.test.ts`.
-describe('Action ARIA Integration (retired — #20323)', () => {
+describe('Action ARIA Integration (retired — no action surface ever read it)', () => {
   it('refuses an action carrying `aria`, with the tombstone prescription', () => {
     const result = ActionSchema.safeParse({
       name: 'accessible_action',
@@ -1242,7 +1242,7 @@ describe('ActionSchema - order', () => {
 // Protocol Improvement Tests: execute → target migration & target validation
 // ============================================================================
 
-describe('ActionSchema — the `execute` alias is REMOVED (#3855)', () => {
+describe('ActionSchema — the `execute` alias is REMOVED', () => {
   // #3713 → #3742 → #3855: `execute` was the deprecated alias of `target`. It
   // was lowered into `target` at parse time and dropped from the output; as of
   // protocol 17 it is gone from the spec entirely.
@@ -1362,7 +1362,7 @@ describe('ActionSchema - target validation', () => {
  * would still ask it. #4352's ruling puts the rejection ON the publish gate,
  * which is what these pin.
  */
-describe('ActionSchema - the publish gate resolves to it (#4352)', () => {
+describe('ActionSchema - the publish gate resolves to it, so a `body` off `script` is refused at publish', () => {
   const contradictory = {
     name: 'open_docs',
     label: 'Open Docs',
@@ -1451,7 +1451,7 @@ describe('ActionSchema - target required for non-script types', () => {
     expect(() => ActionSchema.parse({ name: 'api_ok', label: 'API', type: 'api', target: '/api/endpoint' })).not.toThrow();
   });
 
-  it('rejects a non-script type bound through the removed `execute` alias (#3855)', () => {
+  it('rejects a non-script type bound through the removed `execute` alias', () => {
     // Before protocol 17 this parsed: `execute` was lowered into `target`, so a
     // flow action bound through the alias worked. The alias is gone, so the
     // action now fails BOTH on the removed key and on its missing `target` —
@@ -1510,7 +1510,7 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
   // refusal SAYS WHY and what to do instead. A bare `.toThrow()` would pass on
   // zod's generic "invalid option" message and would not notice the error map
   // being dropped, which is the whole mechanism here.
-  describe('[#6888] `global_nav` is retired', () => {
+  describe('`global_nav` is retired — it rendered nowhere', () => {
     it('is no longer a member of the vocabulary', () => {
       expect([...ACTION_LOCATIONS]).not.toContain('global_nav');
       // Anti-vacuity: the constant we just probed is the real one and still
@@ -1609,7 +1609,7 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
   });
 });
 
-describe('#3896 close-out — retired shortcut/bulkEnabled', () => {
+describe('audit close-out — retired shortcut/bulkEnabled, capability claims nothing enforced', () => {
   it('REJECTS the retired `shortcut` and names the real keyboard stack', () => {
     let message = '';
     try {
@@ -1647,7 +1647,7 @@ describe('#3896 close-out — retired shortcut/bulkEnabled', () => {
  * directly, because the defect #5016 records was not "the sub-schema strips it"
  * but "the key never survives the door an author's metadata actually crosses".
  */
-describe('#5016 — action param option vocabulary', () => {
+describe('action param option vocabulary — declared only where a renderer delivers it', () => {
   const gatedAction = {
     name: 'escalate',
     label: 'Escalate',

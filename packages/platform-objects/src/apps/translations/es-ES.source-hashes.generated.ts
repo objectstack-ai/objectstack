@@ -18,13 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_account._actions.link_social.params.provider.options.apple": "cfdc41e15ed6699b",
-  "objects.sys_account._actions.link_social.params.provider.options.discord": "12f931cc062e76ae",
-  "objects.sys_account._actions.link_social.params.provider.options.facebook": "7eea009178f5b807",
-  "objects.sys_account._actions.link_social.params.provider.options.github": "2971d247eb4e6abc",
-  "objects.sys_account._actions.link_social.params.provider.options.gitlab": "bc3dbbf4b650e600",
-  "objects.sys_account._actions.link_social.params.provider.options.google": "6fadcd05bb8da367",
-  "objects.sys_account._actions.link_social.params.provider.options.microsoft": "17309efbdb1ec122",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.error.label": "786fed84bd8d5a32",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",

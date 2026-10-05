@@ -1772,6 +1772,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Requiere función",
         helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
       },
+      requiresMembershipReach: {
+        label: "Requiere alcance de membresía",
+        helpText: "El endpoint de la organización al que llama esta acción, de modo que solo se ofrece a los miembros cuyo grado alcanza ese endpoint. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
+      },
       requiredPermissions: {
         label: "Permisos requeridos",
         helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La ruta de acciones de la plataforma rechaza a cualquier otro con 403 (acciones script, flow y modal, y la vía MCP/IA), y se le oculta el botón. Una acción de type api llama directamente a su endpoint, así que ese endpoint debe volver a comprobarlas."

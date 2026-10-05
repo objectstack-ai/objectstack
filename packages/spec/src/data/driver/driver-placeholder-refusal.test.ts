@@ -92,7 +92,7 @@ const FAMILY = [
     valid: {}, literal: './data/objectstack.db', placeholder: '${DATA_DIR}/objectstack.db' },
 ] as const;
 
-describe.each(FAMILY)('$name — unresolved placeholder refusal (#8336)', (f) => {
+describe.each(FAMILY)('$name — unresolved placeholder refusal', (f) => {
   it('refuses a `${…}` placeholder, naming the key, the defect and the working escapes', () => {
     const result = f.schema.safeParse({ ...f.valid, [f.key]: f.placeholder });
     expect(result.success).toBe(false);
@@ -134,7 +134,7 @@ describe.each(FAMILY)('$name — unresolved placeholder refusal (#8336)', (f) =>
   });
 });
 
-describe('mongo `options` passthrough — the deep judgement (#8336)', () => {
+describe('mongo `options` passthrough — the deep placeholder judgement', () => {
   const base = { database: 'events', host: 'mongo.internal' };
 
   it('refuses a `${…}` value at its exact path inside the record', () => {
@@ -196,7 +196,7 @@ const MEMORY_PERSISTENCE_FAMILY = [
     literal: 'objectstack:memory-db', placeholder: '${STORAGE_KEY}' },
 ] as const;
 
-describe.each(MEMORY_PERSISTENCE_FAMILY)('$name — unresolved placeholder refusal (#8495)', (f) => {
+describe.each(MEMORY_PERSISTENCE_FAMILY)('$name — unresolved placeholder refusal', (f) => {
   it('refuses a `${…}` placeholder, pathed under `persistence`, naming the key and the defect', () => {
     const result = MemoryConfigSchema.safeParse(f.valid(f.placeholder));
     expect(result.success).toBe(false);
@@ -231,7 +231,7 @@ describe.each(MEMORY_PERSISTENCE_FAMILY)('$name — unresolved placeholder refus
   });
 });
 
-describe('memory `initialData` stays UNJUDGED — the deliberate #8336 exclusion holds (#8495)', () => {
+describe('memory `initialData` stays UNJUDGED — the deliberate seed-data exclusion holds', () => {
   it('a literal `${…}` in a record value is legitimate DATA and keeps parsing', () => {
     // The mother ruling's memory-driver exclusion was argued from exactly this:
     // `initialData` carries arbitrary record values, where `${…}` may be the
@@ -251,7 +251,7 @@ describe('memory `initialData` stays UNJUDGED — the deliberate #8336 exclusion
   });
 });
 
-describe('DatasourceSchema — the memory refusal reaches the authored artefact (#8495)', () => {
+describe('DatasourceSchema — the memory refusal reaches the authored artefact', () => {
   it('re-paths the refusal under `config.persistence.path` for the author', () => {
     const result = DatasourceSchema.safeParse({
       name: 'scratch',
@@ -266,7 +266,7 @@ describe('DatasourceSchema — the memory refusal reaches the authored artefact 
   });
 });
 
-describe('DatasourceSchema — the refusal reaches the authored artefact (#8336)', () => {
+describe('DatasourceSchema — the refusal reaches the authored artefact', () => {
   it('re-paths the refusal under `config.<key>` for the author', () => {
     const result = DatasourceSchema.safeParse({
       name: 'prod',
@@ -280,7 +280,7 @@ describe('DatasourceSchema — the refusal reaches the authored artefact (#8336)
     expect(issue!.message).toContain('placeholders are not resolved here');
   });
 
-  it('a driver with no shipped contract keeps its config unjudged — the honest #4410 boundary', () => {
+  it('a driver with no shipped contract keeps its config unjudged — the honest boundary of config validation', () => {
     // A plugin-contributed driver's config is validated against nothing
     // (config-registry.zod.ts: "we validate what we can construct"), so a
     // placeholder there is NOT refused — the platform has no schema to judge
@@ -294,7 +294,7 @@ describe('DatasourceSchema — the refusal reaches the authored artefact (#8336)
   });
 });
 
-describe('composition with the #8082 userinfo check', () => {
+describe('composition with the URL userinfo check', () => {
   it('a URL violating both facts reports both — placeholder AND embedded credential', () => {
     const result = PostgresConfigSchema.safeParse({
       url: 'postgresql://svc:${DB_PASSWORD}@db.internal:5432/prod',
@@ -306,7 +306,7 @@ describe('composition with the #8082 userinfo check', () => {
   });
 });
 
-describe('containsUnresolvedPlaceholder — the shared value-level judgement (#8336)', () => {
+describe('containsUnresolvedPlaceholder — the shared value-level judgement', () => {
   it('matches a complete `${…}` span wherever it sits, whatever it contains', () => {
     expect(containsUnresolvedPlaceholder('${DB_HOST}')).toBe(true);
     expect(containsUnresolvedPlaceholder('postgresql://${DB_HOST}/db')).toBe(true);

@@ -53,7 +53,7 @@ const REFUSED_SHAPES: readonly (readonly [string, unknown])[] = [
   ['an array of malformed rules', [{ nonsense: true }]],
 ];
 
-describe('#19514 — defaultFilters refuses what filter refuses', () => {
+describe('defaultFilters refuses what filter refuses', () => {
   it.each(REFUSED_SHAPES.map(([label, value]) => [label, value] as const))(
     'refuses %s at the defaultFilters path',
     (_label, value) => {

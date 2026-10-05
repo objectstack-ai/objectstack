@@ -28,6 +28,7 @@ import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
 import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
+import { MEMBERSHIP_REACH_NAMES, lowerRequiresMembershipReach } from '../identity/membership-reach';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
@@ -1032,8 +1033,6 @@ const actionObject = () => strictObject({
    * - `${param.X}` — value collected from the action's params dialog.
    * - `${ctx.X}` — values from the action context: `ctx.origin`
    *   (window.origin), `ctx.recordId`, `ctx.user.id`, `ctx.org.id`, etc.
-   * Used by redirect-style actions like `link_social`, where the target is
-   * e.g. `/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account`.
    * Renderers MUST `encodeURIComponent` interpolated values before
    * substituting them into URL query positions.
    */
@@ -1481,6 +1480,16 @@ const actionObject = () => strictObject({
    * `@objectstack/spec/kernel`.
    */
   requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this action; lowered into `visible` at parse time.'),
+  /**
+   * Declarative membership-grade gate (ADR-0108 D1) — the grade twin of
+   * `requiresFeature`. Names a row of `MEMBERSHIP_REACH` (`@objectstack/spec/identity`):
+   * the organization endpoint this action calls. Lowered at parse time into
+   * `visible` over `current_user.positions` — one term per grade that reaches
+   * the endpoint, in the names `mapMembershipRole` projects them to —
+   * AND-composed with an explicit `visible`, and stripped from the output.
+   * UI courtesy: the endpoint's own door stays the authority.
+   */
+  requiresMembershipReach: z.enum(MEMBERSHIP_REACH_NAMES).optional().describe('Organization endpoint (a MEMBERSHIP_REACH row) whose membership-grade gate this action follows; lowered into `visible` over current_user.positions at parse time.'),
   /**
    * Whether the action is offered but refused. Same three arms as `visible`
    * ({@link ActionConditionInputSchema}) — a disabled action stays on screen
@@ -2217,7 +2226,12 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   path: ['undoable'],
 }).superRefine(refuseDeclarativeUpdateContradictions)
   .superRefine(refuseInertOutcomeMessages)
-  .transform((data, ctx) => lowerRequiresFeature(data, ctx)));
+  // Grade gate first, feature gate last: `requiresFeature` composes onto
+  // whatever `visible` it finds, so this order keeps `features.*` the final
+  // term — the convention the platform-objects feature-gate guard reads. One
+  // transform, not two: a second pipe stage would move every refinement this
+  // chain carries one level deeper in the emitted schema graph.
+  .transform((data, ctx) => lowerRequiresFeature(lowerRequiresMembershipReach(data, ctx), ctx)));
 
 export type Action = z.input<typeof ActionSchema>;
 /** Post-parse shape of {@link Action} — defaults applied, transforms run (ADR-0122). */
