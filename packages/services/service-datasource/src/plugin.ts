@@ -73,7 +73,22 @@ export class ExternalDatasourceServicePlugin implements Plugin {
 
   async init(ctx: PluginContext): Promise<void> {
     const engine = safeGetService<IDataEngine>(ctx, 'data');
-    const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
+
+    /**
+     * [#21876] The `'metadata'` service: every datasource and package read
+     * below, and the catalog write, go through it. Objects are read from the
+     * engine's registry instead ([#21842], `objectRegistry` below).
+     *
+     * Resolved where it is used, never at `init()`, like `metadataSaveDoor`.
+     * `objectstack start` composes no metadata plugin: its `'metadata'`
+     * service is the kernel's in-memory fallback, which the kernel registers
+     * after every plugin's `init()`, just before the start phase. Read here,
+     * it was absent for the life of the process, so `external/validate`
+     * answered no rows and the boot gate checked zero federated objects
+     * (AGENTS.md, "Startup registry reads"). Each reader keeps its own answer
+     * for a deployment that has no metadata service at all.
+     */
+    const metadata = (): MetadataServiceLike | undefined => safeGetService<MetadataServiceLike>(ctx, 'metadata');
 
     const introspect: ExternalDatasourceServiceConfig['introspect'] =
       this.options.introspect ??
@@ -126,7 +141,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
 
     const config: ExternalDatasourceServiceConfig = {
       introspect,
-      getDatasource: async (n) => (await metadata?.get('datasource', n)) as DatasourceLike | undefined,
+      getDatasource: async (n) => (await metadata()?.get('datasource', n)) as DatasourceLike | undefined,
       // [#21842] Both object reads come from the one registry, so the sweep
       // judges the very definitions it listed. See `objectRegistry`.
       getObject: async (n) => objectRegistry()?.getObject(n) as ObjectLike | undefined,
@@ -134,13 +149,18 @@ export class ExternalDatasourceServicePlugin implements Plugin {
       // Persist the refreshed snapshot as an `external_catalog` metadata record
       // so the boot gate + Studio's schema browser can read it without
       // re-introspecting. No-op when the metadata service can't write.
-      ...(metadata?.register
-        ? {
-            persistCatalog: async (catalog) => {
-              await metadata.register!('external_catalog', catalog.name, catalog);
-            },
-          }
-        : {}),
+      //
+      // [#21876] A GETTER, for the reason `persistObject` below is one: the
+      // service reads this slot when a refresh runs, so the metadata service
+      // registered by then is the one written to. ⛔ Not a spread: a spread
+      // decided at `init()` whether the slot existed at all.
+      get persistCatalog(): ExternalDatasourceServiceConfig['persistCatalog'] {
+        const service = metadata();
+        if (!service?.register) return undefined;
+        return async (catalog) => {
+          await service.register!('external_catalog', catalog.name, catalog);
+        };
+      },
       /**
        * Runtime "Import as Object" (ADR-0015 Addendum): save the federated
        * object through the metadata door's own save, so it is exactly what a
@@ -161,6 +181,17 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        * `packageId`, `mode` or `force`, because the import route takes no
        * `?package`, `?mode` or `?force`.
        *
+       * [#21841] …and one field that door does not send: the import's own
+       * `writeFace`, stated here by the server and never read from the
+       * caller's options. A re-import that would drop or retype a field the
+       * stored object still carries is refused by the save's destructive-change
+       * gate, and the import route relays that refusal. Without a face the
+       * refusal ended "re-submit with ?force=true", a parameter this route does
+       * not read; `'external-import'` makes it name the remedies that exist
+       * from here (a new `name`, or `PUT /api/v1/meta/object/:name?force=true`).
+       * ⛔ Not a `force`: the refusal stays, and acknowledging a destructive
+       * change stays on the metadata door.
+       *
        * A GETTER, so the save door is asked for when an import runs: the
        * service reads this slot before the draft and refuses with its own
        * "requires a writable metadata store" when it is absent — before any
@@ -172,7 +203,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
         const door = metadataSaveDoor();
         if (!door) return undefined;
         return async (name: string, definition: Record<string, unknown>) => {
-          await door.saveMetaItem({ type: 'object', name, item: definition });
+          await door.saveMetaItem({ type: 'object', name, item: definition, writeFace: 'external-import' });
         };
       },
       /**
@@ -202,12 +233,13 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        */
       getNamespace: async (datasource: string) => {
         try {
-          const ds = (await metadata?.get('datasource', datasource)) as
+          const service = metadata();
+          const ds = (await service?.get('datasource', datasource)) as
             | { _packageId?: unknown }
             | undefined;
           const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
           if (!pkgId || pkgId === 'sys_metadata') return undefined;
-          const pkg = (await metadata?.get('package', pkgId)) as
+          const pkg = (await service?.get('package', pkgId)) as
             | { manifest?: { namespace?: unknown } }
             | undefined;
           const ns = pkg?.manifest?.namespace;

@@ -49,6 +49,7 @@ export const SysTeam = ObjectSchema.create({
       // Gate every team mutation on the multi-org flag so the affordances
       // disappear in single-org (mirrors sys_organization.create_organization).
       requiresFeature: 'organization',
+      requiresMembershipReach: 'create_team',
       successMessage: 'Team created',
       refreshAfter: true,
       params: [
@@ -70,6 +71,7 @@ export const SysTeam = ObjectSchema.create({
       recordIdParam: 'teamId',
       bodyShape: { wrap: 'data' },
       requiresFeature: 'organization',
+      requiresMembershipReach: 'update_team',
       successMessage: 'Team updated',
       refreshAfter: true,
       params: [
@@ -89,6 +91,7 @@ export const SysTeam = ObjectSchema.create({
       target: '/api/v1/auth/organization/remove-team',
       recordIdParam: 'teamId',
       requiresFeature: 'organization',
+      requiresMembershipReach: 'remove_team',
       confirmText: 'Delete this team? Members will lose any team-scoped access. This cannot be undone.',
       successMessage: 'Team deleted',
       refreshAfter: true,

@@ -90,7 +90,7 @@ const rejectOnObject = (patch: Record<string, unknown>): string => reject(Object
 // ===========================================================================
 // 1. The doors — a parse must exist, or none of the rest means anything
 // ===========================================================================
-describe('#4001 批 20 — the doors these shapes are reachable through', () => {
+describe('批 20, unknown keys refused — the doors these shapes are reachable through', () => {
   it('the `object` metadata type resolves to a registered schema (the save-time 422 door)', () => {
     expect(getMetadataTypeSchema('object')).toBeDefined();
   });
@@ -121,7 +121,7 @@ describe('#4001 批 20 — the doors these shapes are reachable through', () => 
     accept(ObjectExtensionSchema, { extend: 'contact', fields: {} });
   });
 
-  it('the root itself was already closed — this batch is the level BELOW it (#1535/#4519/#4522)', () => {
+  it('the root itself was already closed, on parse as well as create() — this batch is the level BELOW it', () => {
     expect(rejectOnObject({ notAnObjectKey: 1 })).toContain('notAnObjectKey');
   });
 });
@@ -129,7 +129,7 @@ describe('#4001 批 20 — the doors these shapes are reachable through', () => 
 // ===========================================================================
 // 2. Every closed site, at its own path, through its real carrier
 // ===========================================================================
-describe('#4001 批 20 — closed sites reject unknown keys where they live', () => {
+describe('批 20 — closed sites reject unknown keys where they live', () => {
   it('`access` — the ADR-0066 D2 exposure posture', () => {
     accept(ObjectAccessConfigSchema, { default: 'private' });
     expect(reject(ObjectAccessConfigSchema, { default: 'private', notAnAccessKey: 1 })).toContain('notAnAccessKey');
@@ -184,7 +184,7 @@ describe('#4001 批 20 — closed sites reject unknown keys where they live', ()
     expect(rejectOnObject({ systemFields: { tenant: true, notASystemFieldKey: 1 } })).toContain('notASystemFieldKey');
   });
 
-  it('⚠️ `systemFields` is the batch\'s ONE #5014 flattening — pinned honestly, including the part that does not reach the author', () => {
+  it('⚠️ `systemFields` is the batch\'s ONE union flattened to a bare `Invalid input` — pinned honestly, including the part that does not reach the author', () => {
     // This site is a union (`z.literal(false) | {…}`), so its rejection is an
     // `invalid_union` whose OWN message is the bare "Invalid input" — the
     // curated prescription is real, but it sits one level down in
@@ -226,7 +226,7 @@ describe('#4001 批 20 — closed sites reject unknown keys where they live', ()
 // ===========================================================================
 // 3. The curation — every alias and guidance entry is a CLAIM (finding 18)
 // ===========================================================================
-describe('#4001 批 20 — curation is anchored to the sibling contract that makes it true', () => {
+describe('批 20, unknown keys refused — curation is anchored to the sibling contract that makes it true', () => {
   it('the bare rejection already names the surface and echoes the key — curation is an upgrade, not a precondition', () => {
     const msg = rejectOnObject({ publicSharing: { enabled: true, notASharingKey: 1 } });
     expect(msg).toContain('publicSharing');
@@ -278,7 +278,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
     // not. Nothing here asserts anything about what `LifecycleSchema` ACCEPTS,
     // which is unchanged (the `onlyWhen`-vs-rotation `superRefine` carries the
     // same dialect-specific reason and is deliberately left alone).
-    it('`lifecycle.storage.maxAge` points SIDEWAYS at `retention` — and qualifies the mechanism it contrasts, which is SQLite-only (#6631)', () => {
+    it('`lifecycle.storage.maxAge` points SIDEWAYS at `retention` — and qualifies the mechanism it contrasts, which is SQLite-only', () => {
       const rotating = { strategy: 'rotation', shards: 7, unit: 'day' } as const;
       const msg = rejectOnObject({ lifecycle: { class: 'telemetry', storage: { ...rotating, maxAge: '7d' } } });
 
@@ -308,7 +308,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).not.toContain('does not reap by age');
     });
 
-    it("`lifecycle.storage.strategy`'s description carries the same qualifier — `(O(1) reclaim)` is a property of SQLite, not of the strategy (#6631)", () => {
+    it("`lifecycle.storage.strategy`'s description carries the same qualifier — `(O(1) reclaim)` is a property of SQLite, not of the strategy", () => {
       const doc = LifecycleSchema.shape.storage.unwrap().shape.strategy.description ?? '';
 
       // Anti-vacuity: an empty description satisfies every negative assertion
@@ -348,7 +348,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
     // handoff) quietly does nothing. The assertions below are anchored to the
     // injection authority rather than to the sentence, so the prescription can
     // only stay green while it still describes what really happens.
-    it("`systemFields.owner`'s prescription matches the injection authority — `'org'` SKIPS `owner_id`, it does not pick a different principal (#6365)", () => {
+    it("`systemFields.owner`'s prescription matches the injection authority — `'org'` SKIPS `owner_id`, it does not pick a different principal", () => {
       // The authority `applySystemFields` consumes (`resolveInjectedSystemColumns`).
       // `'org'` sits with `'none'` on the withheld side, not opposite it.
       expect(resolveInjectedSystemColumns({ ...OBJ, ownership: 'org' }).owner).toBe(false);
@@ -377,7 +377,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).toContain('business_unit');
     });
 
-    it('`systemFields.ownership` names BOTH ownership anchors — since #5677 the property governs `owning_business_unit_id` too (#6365)', () => {
+    it('`systemFields.ownership` names BOTH ownership anchors — since the unit anchor is injected, the property governs `owning_business_unit_id` too', () => {
       const msg = rejectOnObject({ systemFields: { tenant: true, ownership: 'none' } });
       expect(msg).toContain('TOP-LEVEL');
       expect(msg).toContain('owner_id');
@@ -419,7 +419,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).toContain('VIEW');
     });
 
-    it('the two `userActions` vocabularies stay disjoint — re-checked mechanically, not assumed (#11195)', () => {
+    it('the two `userActions` vocabularies stay disjoint, the three adopted view keys included — re-checked mechanically, not assumed', () => {
       // The enumeration above is prose and can drift; this reads the VIEW
       // block's real shape. The object block's five verbs are transcribed —
       // they are pinned individually across this file — and the overlap is
@@ -436,7 +436,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       }
     });
 
-    it('`userActions.group` / `.hideFields` / `.rowColor` name the VIEW block, same as `sort` (#11459)', () => {
+    it('`userActions.group` / `.hideFields` / `.rowColor` name the VIEW block, same as `sort`', () => {
       // The three keys adopted onto the view's vocabulary by commit b37231883 got only
       // the generic unknown-key rejection on the object block — no curated
       // pointer — until this card added one, mirroring `sort`/`search`/
@@ -525,7 +525,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
 // ===========================================================================
 // 4. The formerly-held `IndexSchema` — closed once its producer converged
 // ===========================================================================
-describe('#4001 批 20 — `IndexSchema` is closed (the held 14th site, after objectui#4772)', () => {
+describe('批 20 — `IndexSchema` is closed (the held 14th site, once the console index editor converged on it)', () => {
   it('declared keys still parse, at every spelling ADR-0120 declares', () => {
     accept(IndexSchema, { fields: ['name'] });
     accept(IndexSchema, { name: 'idx_probe', fields: ['name'], unique: true });
@@ -560,7 +560,7 @@ describe('#4001 批 20 — `IndexSchema` is closed (the held 14th site, after ob
     expect(reject(IndexSchema, { fields: ['name'], notAnIndexKey: 1 })).not.toContain('database layer');
   });
 
-  it('the `type`/`partial` tombstones SURVIVE the strict close — their prescription, not `unrecognized_keys` (#5114 class)', () => {
+  it('the `type`/`partial` tombstones SURVIVE the strict close — their prescription, not `unrecognized_keys`', () => {
     // The tombstones are declared keys, so the strict unknown-key path never
     // sees them; each still answers its own migration text. Losing that prose
     // to a generic strict rejection would be a regression the close must not

@@ -2462,7 +2462,7 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
     expect(SaveMetaItemRequestSchema.safeParse({ ...base, mode: 'draft' }).success).toBe(true);
     expect(SaveMetaItemRequestSchema.safeParse({ ...base, mode: 'publish' }).success).toBe(true);
     expect(SaveMetaItemRequestSchema.safeParse({ ...base, mode: 'stage' }).success).toBe(false);
-    for (const face of ['package-duplicate', 'meta-envelope', 'meta-dispatch'] as const) {
+    for (const face of ['package-duplicate', 'meta-envelope', 'meta-dispatch', 'external-import'] as const) {
       expect(SaveMetaItemRequestSchema.safeParse({ ...base, writeFace: face }).success).toBe(true);
     }
     expect(SaveMetaItemRequestSchema.safeParse({ ...base, writeFace: 'rest' }).success).toBe(false);

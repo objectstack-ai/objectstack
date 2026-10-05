@@ -82,8 +82,6 @@ const EXEMPT_FILES = new Map([
   ['packages/metadata-protocol/src/metadata-diagnostics.ts', 'D6c spec-validation diagnostics'],
   ['packages/objectql/src/build-probes.test.ts', 'D6c build-probe diagnostics tests'],
   ['packages/objectql/src/metadata-diagnostics.test.ts', 'D6c diagnostics tests'],
-  ['packages/objectql/scripts/dry-run-hash-compat.ts', 'D6c findings report of a dev script'],
-  ['packages/objectql/src/dry-run-hash-compat.test.ts', 'D6c findings report tests'],
   // Zod's own vocabulary, and this file's own samples
   ['packages/spec/src/shared/error-map.zod.ts', "Zod issue codes, not ours"],
   ['packages/spec/src/api/odata.zod.ts', "OData's own error vocabulary, a foreign protocol"],

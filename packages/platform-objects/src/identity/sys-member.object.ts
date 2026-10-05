@@ -99,6 +99,9 @@ export const SysMember = ObjectSchema.create({
       // multi-org (ADR-0093 D9: single-org sessions carry an active org
       // via plugin-auth's default-org bootstrap).
       requiresFeature: 'organization',
+      // ...and the grades that reach the endpoint (ADR-0108 D1): owner,
+      // admin and delegated_admin — a plain member is not offered it.
+      requiresMembershipReach: 'invite_member',
       successMessage: 'Invitation sent',
       refreshAfter: true,
       params: [
@@ -153,6 +156,10 @@ export const SysMember = ObjectSchema.create({
       // single-org mode now guarantees via plugin-auth's default-org
       // bootstrap. Same gate on every membership mutation below.
       requiresFeature: 'organization',
+      // ⛔ No `requiresMembershipReach`, deliberately: this URL is
+      // ObjectStack's mount over better-auth's server-only `addMember`, gated
+      // on PLATFORM-admin standing (ADR-0068), not on a membership grade — so
+      // it is no row of the reach table, and an org owner is refused it too.
       successMessage: 'Member added',
       refreshAfter: true,
       params: [
@@ -171,6 +178,7 @@ export const SysMember = ObjectSchema.create({
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
       requiresFeature: 'organization',
+      requiresMembershipReach: 'update_member_role',
       successMessage: 'Member role updated',
       refreshAfter: true,
       params: [
@@ -188,6 +196,7 @@ export const SysMember = ObjectSchema.create({
       target: '/api/v1/auth/organization/remove-member',
       recordIdParam: 'memberIdOrEmail',
       requiresFeature: 'organization',
+      requiresMembershipReach: 'remove_member',
       confirmText: 'Remove this member from the organization? They will lose access to all org resources.',
       successMessage: 'Member removed',
       refreshAfter: true,
@@ -209,8 +218,10 @@ export const SysMember = ObjectSchema.create({
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
       bodyExtra: { role: 'owner' },
-      // The residual row predicate stays hand-written; the feature gate is
-      // AND-composed onto it by the requiresFeature lowering.
+      // The residual row predicate stays hand-written; the grade gate and
+      // then the feature gate are AND-composed onto it by the lowerings.
+      // Owner only: better-auth refuses to SET the creator role unless the
+      // caller holds it, whatever an admin's statements say.
       // `has()` guards the SPARSE action face (#8990): this is a `list_item`
       // action, so a member list that does not project `role` would abort the
       // predicate at key resolution and drop the button silently. `has()`
@@ -218,6 +229,7 @@ export const SysMember = ObjectSchema.create({
       // `materializeDeclaredFields` in `@objectstack/objectql`).
       visible: "has(record.role) && record.role != 'owner'",
       requiresFeature: 'organization',
+      requiresMembershipReach: 'transfer_ownership',
       confirmText: 'Transfer ownership of this organization to the selected member? You will be demoted to admin and lose owner-only privileges.',
       successMessage: 'Ownership transferred',
       refreshAfter: true,

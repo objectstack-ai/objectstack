@@ -235,6 +235,7 @@ async function ensureCredentialAccount(
 async function ensureDemoUser(
   ctx: ApprovalDemoContext,
   user: { id: string; name: string; email: string; phone_number?: string },
+  organizationId: string | null,
 ): Promise<string | undefined> {
   const existing = await findOne(ctx, 'sys_user', { email: user.email });
   if (existing?.id) return String(existing.id);
@@ -246,6 +247,12 @@ async function ensureDemoUser(
     // never provisioned and its surfaces render empty.
     await ctx.ql.insert('sys_user', { ...user }, { context: SYS });
     ctx.logger?.info?.('[showcase] approval-demo persona provisioned', { email: user.email });
+    // This raw insert never crosses the platform's user-creation seam, so the
+    // membership a created user gets there (ADR-0093 D7: decided at creation)
+    // is written here, once, by the code that creates the persona. A persona
+    // that already exists is left as it is — its membership was decided when
+    // it was created.
+    if (organizationId) await ensureDemoMembership(ctx, user.id, organizationId);
     return user.id;
   } catch (err) {
     // Non-fatal, and the whole persona is lost when it happens: with no row
@@ -257,6 +264,24 @@ async function ensureDemoUser(
       error: err instanceof Error ? err.message : String(err),
     });
     return undefined;
+  }
+}
+
+/** Bind a freshly created persona to the admin's organization as a plain member. */
+async function ensureDemoMembership(ctx: ApprovalDemoContext, userId: string, organizationId: string): Promise<void> {
+  const existing = await findOne(ctx, 'sys_member', { user_id: userId, organization_id: organizationId });
+  if (existing) return;
+  try {
+    await ctx.ql.insert(
+      'sys_member',
+      { id: `mem_showcase_${userId}`, organization_id: organizationId, user_id: userId, role: 'member' },
+      { context: SYS },
+    );
+  } catch (err) {
+    ctx.logger?.warn?.('[showcase] approval-demo persona membership failed (persona has no organization)', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -350,11 +375,11 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     await assignPositions(ctx, adminId, ADMIN_APPROVAL_POSITIONS, organizationId, 'admin');
     // Mei holds no approval position, which makes her a clean *submitter* — a
     // requester who is never also one of her own approvers.
-    const submitterId = (await ensureDemoUser(ctx, PHONE_DEMO_USER)) ?? null;
+    const submitterId = (await ensureDemoUser(ctx, PHONE_DEMO_USER, organizationId)) ?? null;
     // The auditor persona backs the `finance` group of the per-group demo. It
     // deliberately holds ONLY `auditor`, so the two groups have distinct
     // holders and the request stays open until each group has answered.
-    const auditorId = await ensureDemoUser(ctx, AUDITOR_DEMO_USER);
+    const auditorId = await ensureDemoUser(ctx, AUDITOR_DEMO_USER, organizationId);
     if (auditorId) await assignPositions(ctx, auditorId, ['auditor'], organizationId, 'auditor');
 
     // [#9308 fixture 1] Make both personas SIGN-INABLE. Provisioning them as

@@ -63,7 +63,7 @@ import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
 // mechanism for a second producer, and commit aa5994e17 landed this service's key
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
-import { isGrantActive } from '@objectstack/core';
+import { isGrantActive, omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 import {
   filterApproversWhoCanRead,
   resolveApproverDirectoryOrg,
@@ -279,6 +279,28 @@ export interface ApprovalMessagingSurface {
     actorId?: string;
   }): Promise<unknown>;
 }
+
+/**
+ * What an approval notification hands to the messaging service: the
+ * `EmitInput` payload fields the delivered notification is built from, plus a
+ * reminder's one-tap decision links.
+ *
+ * `body` is the text the recipient reads under the title. Messaging builds the
+ * inbox row's `body_md`, and each channel's fallback rendering, from
+ * `payload.body` and no other field, so the text is declared here rather than
+ * left to a free-form bag: a call site that spells it any other way does not
+ * compile. Spelled `message`, it once reached every recipient as an empty body.
+ */
+type ApprovalNotificationPayload = {
+  /** The headline. */
+  readonly title: string;
+  /** The text under the headline. */
+  readonly body: string;
+  /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
+  readonly actionUrl: string;
+  /** Approve / Reject links on a reminder to a concrete approver (ADR-0043). */
+  readonly actions?: ReadonlyArray<{ readonly label: string; readonly url: string }>;
+};
 
 /** Minimum time between submitter reminders on one request. */
 export const REMIND_COOLDOWN_MS = 4 * 60 * 60 * 1000;
@@ -1373,7 +1395,7 @@ export class ApprovalService implements IApprovalService {
   private async notify(input: {
     topic: string;
     audience: string[];
-    payload?: Record<string, unknown>;
+    payload: ApprovalNotificationPayload;
     dedupKey?: string;
     source?: { object: string; id: string };
     actorContext?: ExecutionContext;
@@ -1388,7 +1410,7 @@ export class ApprovalService implements IApprovalService {
     // the console inbox to auto-open the drawer.
     let payload = event.payload;
     if (
-      payload?.actionUrl === '/system/approvals'
+      payload.actionUrl === '/system/approvals'
       && event.source?.object === 'sys_approval_request'
       && event.source.id
     ) {
@@ -3038,7 +3060,7 @@ export class ApprovalService implements IApprovalService {
       current_step: input.nodeId,
       current_step_index: 0,
       pending_approvers: approvers.join(','),
-      payload_json: input.record != null ? JSON.stringify(input.record) : null,
+      payload_json: input.record != null ? JSON.stringify(this.snapshotRecord(input.object, input.record)) : null,
       flow_run_id: input.runId,
       flow_node_id: input.nodeId,
       node_config_json: JSON.stringify(configSnapshot),
@@ -3073,7 +3095,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-${id}-${sub.to}`,
         payload: {
           title: 'Approval routed to you (out-of-office cover)',
-          message: `You are covering an approval on ${input.object}/${input.recordId} while ${sub.from} is out of office.`,
+          body: `You are covering an approval on ${input.object}/${input.recordId} while ${sub.from} is out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -3084,7 +3106,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
         payload: {
           title: 'Approval routed to your delegate',
-          message: `An approval on ${input.object}/${input.recordId} was routed to ${sub.to} while you are out of office.`,
+          body: `An approval on ${input.object}/${input.recordId} was routed to ${sub.to} while you are out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4206,7 +4228,7 @@ export class ApprovalService implements IApprovalService {
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
-            message: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
+            body: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
             actionUrl: '/system/approvals',
           },
         });
@@ -4249,7 +4271,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
-          message: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
+          body: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4509,7 +4531,7 @@ export class ApprovalService implements IApprovalService {
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
         title: 'Approval handed to you',
-        message: `You are now an approver on ${raw.object_name}/${raw.record_id}.`,
+        body: `You are now an approver on ${raw.object_name}/${raw.record_id}.`,
         actionUrl: '/system/approvals',
       },
     });
@@ -4568,7 +4590,7 @@ export class ApprovalService implements IApprovalService {
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
             title: 'Approval reminder',
-            message: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+            body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
             actionUrl: '/system/approvals',
             actions: [
               { label: 'Approve', url: this.actionLinkUrl(tokens.approve) },
@@ -4591,7 +4613,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
           title: 'Approval reminder',
-          message: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+          body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4785,7 +4807,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'More information requested',
-          message: input.comment.trim(),
+          body: input.comment.trim(),
           actionUrl: '/system/approvals',
         },
       });
@@ -4832,7 +4854,7 @@ export class ApprovalService implements IApprovalService {
       source: { object: 'sys_approval_request', id: requestId },
       payload: {
         title: 'New comment on an approval',
-        message: input.comment.trim(),
+        body: input.comment.trim(),
         actionUrl: '/system/approvals',
       },
     });
@@ -5877,7 +5899,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval escalated to you',
-          message: `An overdue approval on ${raw.object_name}/${raw.record_id} was escalated to you.`,
+          body: `An overdue approval on ${raw.object_name}/${raw.record_id} was escalated to you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -5895,7 +5917,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval SLA breached',
-          message: `A decision on ${raw.object_name}/${raw.record_id} is overdue.`,
+          body: `A decision on ${raw.object_name}/${raw.record_id} is overdue.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -5908,11 +5930,42 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Your approval request breached its SLA',
-          message: `${raw.object_name}/${raw.record_id}: escalation action '${action}' was taken.`,
+          body: `${raw.object_name}/${raw.record_id}: escalation action '${action}' was taken.`,
           actionUrl: '/system/approvals',
         },
       });
     }
+  }
+
+  // ── Record snapshot ──────────────────────────────────────────
+
+  /**
+   * The subject record as `payload_json` stores it: credential-class fields
+   * MASKED and `internal: true` fields OMITTED, by the one helper every
+   * external write response goes through (`omitInternalFieldsFromWriteResponse`,
+   * `@objectstack/core`) — the same answer a read of the row gives.
+   *
+   * The record arrives from the flow's `$record`, which the record-change
+   * trigger builds off the engine's own write result, and that result keeps the
+   * stored row whole for privileged in-process callers. The snapshot is the
+   * opposite case: it is stored, and served to approvers and submitters below
+   * the write boundary (the serve-time redaction in `payload-redaction.ts`
+   * narrows by field-level security, and cannot know a value is a stored
+   * credential). Defence in depth beside the engine's own event-body projection.
+   *
+   * Pure: projects a shallow copy, never the caller's record. No schema (an
+   * engine double without `getSchema`, an unregistered object) projects
+   * nothing — the same posture as the helper itself.
+   */
+  private snapshotRecord(object: string, record: unknown): unknown {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    let schema: unknown;
+    try {
+      schema = this.engine.getSchema?.(object);
+    } catch { /* schema unavailable — nothing to project against */ }
+    const copy = { ...(record as Record<string, unknown>) };
+    omitInternalFieldsFromWriteResponse(schema, copy);
+    return copy;
   }
 
   // ── Display enrichment ───────────────────────────────────────

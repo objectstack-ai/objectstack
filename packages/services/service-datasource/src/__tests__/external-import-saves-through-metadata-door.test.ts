@@ -23,6 +23,11 @@
  *  - the import reaches `saveMetaItem` with the request the metadata door
  *    sends for an `object` (env-wide: `object` is not org-overridable), and
  *    registers through no second path;
+ *  - [#21841] that request states the import's own write face,
+ *    `'external-import'`, so a destructive re-import's refusal prescribes the
+ *    remedies that exist from the import route rather than a `?force=true` it
+ *    never reads; the face is the server's, and an import's options cannot
+ *    carry a `force` or a face of their own into the save;
  *  - the save door is resolved when the import runs, not at `init()` — a
  *    protocol registered after this plugin still receives the save;
  *  - a save the door refuses refuses the import with the door's own error;
@@ -99,13 +104,35 @@ describe('importObject saves through the metadata door (#21788)', () => {
     const result = await (await federation(h)).importObject('warehouse', 'customers', { name: 'ext_cust' });
 
     expect(saveMetaItem).toHaveBeenCalledTimes(1);
-    expect(saveMetaItem).toHaveBeenCalledWith({ type: 'object', name: 'ext_cust', item: result.definition });
+    expect(saveMetaItem).toHaveBeenCalledWith({
+      type: 'object',
+      name: 'ext_cust',
+      item: result.definition,
+      writeFace: 'external-import',
+    });
     expect(result.definition).toMatchObject({
       name: 'ext_cust',
       datasource: 'warehouse',
       external: { remoteName: 'customers' },
     });
     expect(h.register).not.toHaveBeenCalled();
+  });
+
+  it('[#21841] states the face itself: options carrying a `force` or a face reach the save as neither', async () => {
+    const h = harness();
+    const saveMetaItem = vi.fn(async () => ({ success: true }));
+    h.services.set('protocol', { saveMetaItem });
+
+    // What a caller can put in the import body. `ImportObjectOpts` declares
+    // neither key, so they arrive here only as untyped wire input.
+    const smuggled = { name: 'ext_cust', force: true, writeFace: 'meta-envelope' } as Record<string, unknown>;
+    await (await federation(h)).importObject('warehouse', 'customers', smuggled);
+
+    expect(saveMetaItem).toHaveBeenCalledTimes(1);
+    const request = (saveMetaItem.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    expect(request.writeFace).toBe('external-import');
+    expect('force' in request).toBe(false);
+    expect(Object.keys(request).sort()).toEqual(['item', 'name', 'type', 'writeFace']);
   });
 
   it('resolves the save door when the import runs, so a protocol registered after init still receives it', async () => {

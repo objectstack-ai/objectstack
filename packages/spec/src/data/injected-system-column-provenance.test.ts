@@ -50,7 +50,7 @@ const local = () => ({
   fields: { email: { type: 'text', label: 'Email' } },
 });
 
-describe('[#8116] provenance derivation at its spec home', () => {
+describe('provenance derivation at its spec home — where the author-time linter can reach it', () => {
   it('marks all seven anchors unprovisioned on an external object, none on the local twin', () => {
     expect(unprovisionedInjectedColumns(external()).sort()).toEqual([...SEVEN_ANCHORS].sort());
     expect(unprovisionedInjectedColumns(local())).toEqual([]);
@@ -93,7 +93,7 @@ describe('[#8116] provenance derivation at its spec home', () => {
     expect(platformProvisionsStorage(undefined)).toBe(true);
   });
 
-  it('isInjectedColumnDefinition (newly public, #8116) reproduces the strip/provenance identity verdict', () => {
+  it('isInjectedColumnDefinition (newly public) reproduces the strip/provenance identity verdict', () => {
     // Byte-identical copy of a table ⇒ the platform's anchor.
     expect(isInjectedColumnDefinition({ ...OWNER_FIELD_DEF }, OWNER_FIELD_DEF)).toBe(true);
     // Any mismatch — extra key, changed value, unrecognisable shape ⇒ the

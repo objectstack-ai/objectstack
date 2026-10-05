@@ -166,7 +166,7 @@ describe('PostgresConfigSchema', () => {
     expect(result.error!.issues[0]!.message).toContain('`user` → `username`');
   });
 
-  it('refuses config with environment variable patterns — placeholders are not resolved here (#8336)', () => {
+  it('refuses config with environment variable patterns — placeholders are not resolved here', () => {
     // INVERTED acceptance pin. This test used to pin (#7990 census) that
     // placeholder-shaped strings PARSE for non-credential keys — recording the
     // measured fact that nothing resolves them and they reach the client
@@ -210,7 +210,7 @@ describe('PostgresConfigSchema', () => {
  * uniformly (metadata-protocol's `422 INVALID_METADATA`, whose `issues[]`
  * carry these zod codes verbatim).
  */
-describe('PostgresConfigSchema.url pg-grammar enforcement (#9091)', () => {
+describe('PostgresConfigSchema.url pg-grammar enforcement', () => {
   it("refuses libpq's multi-host DSN — the form `pg` measurably cannot open", () => {
     // Measured on pg@8.22.0 / pg-connection-string@2.14.0: both `parse` and
     // `ConnectionParameters` throw `TypeError [ERR_INVALID_URL]` on this exact
@@ -341,7 +341,7 @@ describe('PostgresConfigSchema.url pg-grammar enforcement (#9091)', () => {
     }
   });
 
-  it("leaves mongo's multi-host form untouched — the shared helper's leniency it must keep (#8696)", () => {
+  it("leaves mongo's multi-host form untouched — the shared helper's leniency it must keep", () => {
     // The #9091 parse check is per-driver BY DESIGN: for mongo the multi-host
     // DSN is a real, working, documented shape. Pin that it still parses.
     const result = MongoConfigSchema.safeParse({

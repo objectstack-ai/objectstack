@@ -86,6 +86,10 @@ function makeEngine(seed: { users?: Array<{ id: string }>; members?: Array<{ use
       return [];
     }),
     findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
+    // The deployment ledger the one-time backfill records itself in is
+    // present; it holds no record yet (`findOne` answers null), so the pass
+    // runs on this boot.
+    getObject: vi.fn((name: string) => ({ name })),
   };
 }
 
@@ -163,7 +167,9 @@ describe('auth.membership_policy — the setting', () => {
   } = {}) => {
     settingsStore.values = opts.settings ?? {};
     const engine = opts.engine ?? makeEngine();
-    const defaultOrgId = vi.fn(async () => opts.defaultOrgId ?? 'org_default');
+    // `null` is a real answer (no unambiguous target), so only an omitted
+    // option falls back to the default organization.
+    const defaultOrgId = vi.fn(async () => ('defaultOrgId' in opts ? (opts.defaultOrgId ?? null) : 'org_default'));
     (mockContext.getService as any).mockImplementation((name: string) => {
       if (name === 'manifest') return { register: vi.fn() };
       if (name === 'settings') return makeSettings();
@@ -324,7 +330,10 @@ describe('auth.membership_policy — the setting', () => {
     // read sites that happen to agree today. This one fails the moment either
     // path goes back to reading a captured copy, whatever value it holds.
     const engine = makeEngine({ users: [{ id: 'usr_legacy_1' }] });
-    const { manager } = await boot({ engine });
+    // No target organization and no organization at all: the kernel:ready pass
+    // stays undecided, so the `app:seeded` pass below runs (and reads the
+    // policy) instead of being latched off as already decided.
+    const { manager } = await boot({ engine, defaultOrgId: null });
     const spy = vi.spyOn(manager, 'getMembershipPolicy');
 
     await signUpHook(manager)({ id: 'usr_new' });

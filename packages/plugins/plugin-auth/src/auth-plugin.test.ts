@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthPlugin } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
@@ -1470,6 +1471,8 @@ describe('AuthPlugin', () => {
         sys_user: [{ id: 'admin' }],
         sys_member: [],
         sys_organization: [],
+        // The deployment ledger the one-time pass records itself in.
+        sys_migration: [],
       };
       const matches = (row: any, where: any) =>
         Object.entries(where ?? {}).every(([k, v]) => {
@@ -1479,9 +1482,14 @@ describe('AuthPlugin', () => {
       return {
         tables,
         registerMiddleware: vi.fn(),
+        getObject: vi.fn((name: string) => (name in tables ? { name } : undefined)),
         find: vi.fn(async (object: string, q: any) =>
           (tables[object] ?? []).filter((r) => matches(r, q?.where)).slice(0, q?.limit ?? 100),
         ),
+        findOne: vi.fn(async (object: string, q: any) => {
+          assertEngineFindOnePredicate(object, q);
+          return (tables[object] ?? []).find((r) => matches(r, q?.where)) ?? null;
+        }),
         insert: vi.fn(async (object: string, data: any) => {
           (tables[object] ??= []).push(data);
           return data;
@@ -1524,20 +1532,177 @@ describe('AuthPlugin', () => {
       expect(mockContext.hook).toHaveBeenCalledWith('app:seeded', expect.any(Function));
     });
 
-    it('binds a user seeded after kernel:ready when app:seeded fires', async () => {
+    it('app:seeded runs the one-time pass when kernel:ready had no target organization yet', async () => {
+      // No platform admin at kernel:ready ⇒ no default organization ⇒ the
+      // pass has no target, decides nothing and records nothing.
+      ql.tables.sys_user_permission_set = [];
       await boot();
-      // Boot: default org created, admin bound as owner, first backfill pass
-      // sees no member-less users.
       await hookCapture.trigger('kernel:ready');
-      expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
+      expect(ql.tables.sys_organization).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(0);
 
-      // A background seed inserts a member-less user AFTER kernel:ready.
+      // A background seed inserts a member-less user, and the organization
+      // appears before the seed settles.
       ql.tables.sys_user.push({ id: 'seeded_u2' });
+      ql.tables.sys_organization.push({ id: 'org_default', slug: 'default' });
 
       await hookCapture.trigger('app:seeded');
 
       const seededMember = ql.tables.sys_member.find((m: any) => m.user_id === 'seeded_u2');
       expect(seededMember).toMatchObject({ user_id: 'seeded_u2', role: 'member' });
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toEqual(['adr-0093-membership-backfill']);
+    });
+
+    it('a restart after memberships are removed re-binds nobody — the admin included', async () => {
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      ql.tables.sys_user.push({ id: 'member_u4' });
+      ql.tables.sys_member.push({ id: 'm_u4', organization_id: 'x', user_id: 'member_u4', role: 'member' });
+      expect(ql.tables.sys_migration.map((r: any) => r.id).sort()).toEqual([
+        'adr-0093-default-org-owner-bind',
+        'adr-0093-membership-backfill',
+      ]);
+
+      // Both memberships are removed, then the process restarts.
+      ql.tables.sys_member.length = 0;
+      hookCapture = createHookCapture();
+      mockContext.hook = hookCapture.hookFn;
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      await hookCapture.trigger('app:seeded');
+
+      expect(ql.tables.sys_member).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(2);
+    });
+
+    const fireBootstrapWrite = async (opCtx: any) => {
+      for (const [mw] of ql.registerMiddleware.mock.calls) {
+        await mw(opCtx, async () => {});
+      }
+    };
+
+    it('the default-org-created trigger runs the one-time pass', async () => {
+      // No platform admin at kernel:ready: no organization, the pass has no
+      // target and records nothing.
+      ql.tables.sys_user_permission_set = [];
+      ql.tables.sys_user.push({ id: 'early_u5' });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_organization).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(0);
+
+      // The admin's grant lands: the bootstrap creates the organization, and
+      // that moment runs the pass — no restart, no app:seeded.
+      ql.tables.sys_user_permission_set.push({ id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', organization_id: null });
+      await fireBootstrapWrite({ object: 'sys_user_permission_set', operation: 'insert' });
+      await vi.waitFor(() => {
+        expect(ql.tables.sys_member.find((m: any) => m.user_id === 'early_u5')).toMatchObject({ role: 'member' });
+      });
+      expect(ql.tables.sys_migration.map((r: any) => r.id).sort()).toEqual([
+        'adr-0093-default-org-owner-bind',
+        'adr-0093-membership-backfill',
+      ]);
+    });
+
+    it('unreadable ledger + an existing default organization + an unbound admin: the admin is NOT bound', async () => {
+      ql.tables.sys_organization.push({ id: 'org_existing', slug: 'default' });
+      const realFindOne = ql.findOne.getMockImplementation();
+      ql.findOne.mockImplementation(async (object: string, q: any) => {
+        if (object === 'sys_migration') throw new Error('ledger read failed');
+        return realFindOne(object, q);
+      });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.find((m: any) => m.user_id === 'admin')).toBeUndefined();
+      expect(ql.tables.sys_migration).toHaveLength(0);
+    });
+
+    it('fresh install, ledger UNREADABLE: the org is created, nobody is bound, and the next readable trigger decides', async () => {
+      const realFindOne = ql.findOne.getMockImplementation();
+      let ledgerDown = true;
+      ql.findOne.mockImplementation(async (object: string, q: any) => {
+        if (object === 'sys_migration' && ledgerDown) throw new Error('ledger read failed');
+        return realFindOne(object, q);
+      });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(0);
+
+      // The ledger answers again: the bind is decided now, once, and recorded.
+      ledgerDown = false;
+      await fireBootstrapWrite({ object: 'sys_user', operation: 'update', data: { email_verified: true } });
+      expect(ql.tables.sys_member).toEqual([expect.objectContaining({ user_id: 'admin', role: 'owner' })]);
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-default-org-owner-bind');
+    });
+
+    it('fresh install, NO ledger on the kernel: the org is created and its owner bound on that call', async () => {
+      ql.getObject.mockImplementation((name: string) => (name === 'sys_migration' ? undefined : { name }));
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toEqual([expect.objectContaining({ user_id: 'admin', role: 'owner' })]);
+
+      // Removed, then a later trigger in a new process: the org exists, so
+      // the no-ledger rule binds nobody.
+      ql.tables.sys_member.length = 0;
+      hookCapture = createHookCapture();
+      mockContext.hook = hookCapture.hookFn;
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
+    it('a failed ledger write is latched in-process: a second trigger re-binds nobody', async () => {
+      const realInsert = ql.insert.getMockImplementation();
+      ql.insert.mockImplementation(async (object: string, data: any) => {
+        if (object === 'sys_migration') throw new Error('ledger read-only');
+        return realInsert(object, data);
+      });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
+      expect(ql.tables.sys_migration).toHaveLength(0);
+      expect(mockContext.logger.error).toHaveBeenCalled();
+
+      // Memberships are removed, a member-less user appears, and every
+      // trigger fires again in the same process.
+      ql.tables.sys_member.length = 0;
+      ql.tables.sys_user.push({ id: 'later_u6' });
+      await fireBootstrapWrite({ object: 'sys_user', operation: 'insert' });
+      await hookCapture.trigger('app:seeded');
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
+    it('recorded owner bind + a deleted default organization: the organization is recreated, nobody is bound', async () => {
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-default-org-owner-bind');
+      ql.tables.sys_organization.length = 0;
+      ql.tables.sys_member.length = 0;
+      await fireBootstrapWrite({ object: 'sys_user', operation: 'insert' });
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
+    it('once the pass is recorded, a later trigger binds nobody', async () => {
+      await boot();
+      // Boot: default org created, admin bound as owner, the one-time pass
+      // runs and records itself.
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-membership-backfill');
+
+      // A member-less user now exists — the shape a membership removal leaves.
+      ql.tables.sys_user.push({ id: 'removed_u3' });
+
+      await hookCapture.trigger('app:seeded');
+      await hookCapture.trigger('kernel:ready');
+
+      expect(ql.tables.sys_member.find((m: any) => m.user_id === 'removed_u3')).toBeUndefined();
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-membership-backfill');
     });
 
     it('OS_SKIP_MEMBERSHIP_BACKFILL=1 disables the app:seeded re-run', async () => {

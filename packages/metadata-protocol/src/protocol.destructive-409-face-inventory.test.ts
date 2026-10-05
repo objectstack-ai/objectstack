@@ -49,8 +49,9 @@
  * | 5 | `migrateStoredMetadata` (this file's protocol) | any    | **true** | no — `force` | (`rows[].reason`) | n/a |
  * | 6 | {@link ObjectStackProtocolImplementation.duplicatePackage} | `row.type` incl. `object` | no | **yes** | `failed[].error` on a **200** | ⛔ **NO — sole carrier** |
  * | 7 | `plugin-security` permission-set projection ×4 | `'permission'` | no | no — type | n/a | n/a |
+ * | 8 | `@objectstack/service-datasource` external-table import (`persistObject`) | `'object'` | never — the import route reads no `force` | **yes** | the import route's `400 EXTERNAL_IMPORT_ERROR`, message only | ⛔ **NO — sole carrier** |
  *
- * Rows 1-3 and 6 are pinned below. Rows 4, 5 and 7 are eliminated by a
+ * Rows 1-3, 6 and 8 are pinned below. Rows 4, 5 and 7 are eliminated by a
  * constant in the call itself (a literal `type`, or `force: true`), which is
  * why they are argued rather than pinned: there is no runtime state that could
  * make them reach the gate.
@@ -158,6 +159,25 @@
  * ⛔ The split is the ruling. A later reader who "harmonises" the two — either
  * by giving the dispatcher a `force` or by taking row 2's back out — is undoing
  * a decision, not tidying an inconsistency.
+ *
+ * ## [#21841] Row 8 — the external-table import, a face of its own
+ *
+ * "Import as Object" saves through this very `saveMetaItem` since #21788, so a
+ * re-import that would shrink an object it already created reaches the gate.
+ * The import route relays every throw as `400 EXTERNAL_IMPORT_ERROR` with the
+ * message alone, and it reads no `force`, so the default clause sent a caller
+ * round in a circle exactly as rows 2, 3 and 6 once did. It went row 3's way,
+ * not row 2's: the route has no twin that reads `?force`, and no first-party
+ * caller re-imports through it (the console's import dialog saves its draft
+ * through `PUT /meta/object/:name`), so threading a `force` would be a new
+ * capability with no pull. `'external-import'` names the two remedies that
+ * exist instead — a new `name`, or the metadata door with `?force=true` — and
+ * section 6 below pins it.
+ *
+ * Row 8 is also a second SOLE CARRIER beside row 6: the route's envelope has
+ * no `issues`, so the findings prose reaches the caller through the message
+ * alone. That is one more reason the commit 809e61221 verdict stands, and it is
+ * why `'external-import'` keeps the 422's default, full-prose clause.
  *
  * ⛔ Never a bare `toThrow()` here. `duplicatePackage` does not throw, it
  * REPORTS, and what the report says IS the defect; and for the throw itself
@@ -308,6 +328,14 @@ const DUPLICATE_REMEDY_HEAD = 'this copy cannot be forced';
  * See section 5.
  */
 const DISPATCH_REMEDY_HEAD = 'this save cannot be forced';
+/**
+ * [#21841] …and as the external-table IMPORT renders it — the fourth answer.
+ * Unlike the dispatcher, a door that DOES read `?force` exists for this very
+ * object, so the clause sends the caller there by name. See section 6.
+ */
+const IMPORT_REMEDY_HEAD = 'this import cannot be forced';
+/** The metadata door the import face prescribes, spelled for the fixture's item. */
+const IMPORT_REMEDY_DOOR = 'PUT /api/v1/meta/object/crm_task?force=true';
 /** One finding's prose, as `detectDestructiveObjectChanges` words it. */
 const FINDING_PROSE = "Field 'b' removed — existing data in this column will become inaccessible.";
 
@@ -687,5 +715,112 @@ describe('[#11095] [GUARD] the `meta-dispatch` face prescribes a remedy that doo
         expect(dispatch.message).toBe(envelope.message);
         // The trim is still in force here — no finding restated in the sentence.
         for (const i of dispatch.issues) expect(dispatch.message).not.toContain(i.message);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. [#21841] [GUARD] Inventory row 8 — the external-table import face, which
+//    names the door that DOES read `force` for this object
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#21841] [GUARD] the `external-import` face prescribes remedies that exist', () => {
+    it('declares the ADR-0112 envelope — the refusal itself is unchanged', async () => {
+        const err = await destructiveRefusal('external-import');
+
+        // This card moves a SENTENCE. The import route restamps the envelope as
+        // `400 EXTERNAL_IMPORT_ERROR`, but what it relays is this refusal, so the
+        // producer's own code, status and findings must not move under it.
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'field_removed', field: 'b' }),
+        ]));
+    });
+
+    it('⛔ never tells the caller to re-submit the import with `?force=true`', async () => {
+        const err = await destructiveRefusal('external-import');
+
+        // The defect, stated as the assertion that fails without the fix: the
+        // import route reads no `force`, so this sentence sent a caller round.
+        expect(err.message).not.toContain(PUT_REMEDY);
+        expect(err.message).not.toContain('re-submit with ?force=true');
+    });
+
+    it('names the door, denies the mechanism, then prescribes the two remedies that exist', async () => {
+        const err = await destructiveRefusal('external-import');
+
+        expect(err.message).toContain(IMPORT_REMEDY_HEAD);
+        expect(err.message).toContain('accepts no `force`');
+        // Remedy one: the import itself, under a name nothing stores yet.
+        expect(err.message).toContain('under a new `name`');
+        // Remedy two: the metadata door, which reads `?force` for this item.
+        expect(err.message).toContain(IMPORT_REMEDY_DOOR);
+    });
+
+    it('[#10886 non-effect] the per-field findings prose is still there, untrimmed', async () => {
+        const err = await destructiveRefusal('external-import');
+
+        // Row 8 is a sole carrier (the route relays the message alone), so the
+        // findings must stay in the sentence on this face above all.
+        expect(err.message).toContain(FINDING_PROSE);
+        expect(err.message).toContain('would drop or transform existing data');
+    });
+
+    it('⛔ the four faces are a SWITCH — the new one moved none of the others', async () => {
+        const [plain, envelope, dispatch, imported] = await Promise.all([
+            destructiveRefusal(),
+            destructiveRefusal('meta-envelope'),
+            destructiveRefusal('meta-dispatch'),
+            destructiveRefusal('external-import'),
+        ]);
+
+        expect(plain.message).toContain(PUT_REMEDY);
+        expect(envelope.message).toContain(PUT_REMEDY);
+        expect(dispatch.message).toContain(DISPATCH_REMEDY_HEAD);
+        for (const other of [plain, envelope, dispatch]) {
+            expect(other.message).not.toContain(IMPORT_REMEDY_HEAD);
+        }
+        expect(imported.message).not.toContain(DISPATCH_REMEDY_HEAD);
+        expect(imported.message).not.toContain(DUPLICATE_REMEDY_HEAD);
+    });
+
+    /**
+     * ⭐ The coupling, from the other side of section 5's.
+     *
+     * `'meta-dispatch'` had to JOIN the 422's trimming case because its door
+     * carries `issues[]`. The import route does not: it answers
+     * `sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', message)` and nothing else,
+     * so the 422's findings reach that caller through the message alone. The
+     * import face must therefore stay OUT of the trimming case and keep the
+     * full-prose default. Adding it there would delete the author's findings
+     * from that wire with every 409 assertion above still green.
+     */
+    it('⛔ [COUPLING] the new face changes the 409 clause and NOTHING about the 422', async () => {
+        const { protocol } = makeKernel({ seed: [objectRow('crm_task', ['a', 'b', 'c', 'd'])] });
+        const invalid = async (writeFace?: string) => {
+            try {
+                await protocol.saveMetaItem({
+                    type: 'view',
+                    name: 'task_list',
+                    item: {
+                        name: 'task_list', object: 'task', type: 'list', label: 'Tasks',
+                        columns: [{ field: 'title', summary: { type: 'sum', fieldd: 'amount' } }],
+                    },
+                    ...(writeFace ? { writeFace } : {}),
+                });
+            } catch (e: any) { return e; }
+            throw new Error('expected saveMetaItem to refuse the invalid body');
+        };
+
+        const plain = await invalid();
+        const imported = await invalid('external-import');
+
+        expect(imported.code).toBe('INVALID_METADATA');
+        expect(imported.status).toBe(422);
+        // Byte-for-byte the default clause, which restates the findings (its
+        // first three; the fixture has fewer) in the sentence itself.
+        expect(imported.message).toBe(plain.message);
+        expect(imported.issues.length).toBeGreaterThan(0);
+        for (const i of imported.issues.slice(0, 3)) expect(imported.message).toContain(i.message);
     });
 });

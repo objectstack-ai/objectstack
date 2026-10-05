@@ -14,7 +14,7 @@ import { resolveInjectedSystemColumns } from './injected-system-columns';
 // — because only that package can import both; this file pins the derivation's
 // own contract, which is what author-time consumers read.
 // ---------------------------------------------------------------------------
-describe('resolveInjectedSystemColumns (#5378)', () => {
+describe('resolveInjectedSystemColumns — the injected columns, so author-time validation resolves them too', () => {
   const business = { name: 'crm_contact', fields: { name: { type: 'text' } } };
 
   it('gives a default business object every system column', () => {

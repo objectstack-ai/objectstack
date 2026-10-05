@@ -567,6 +567,14 @@ describe('@objectstack/platform-objects', () => {
 describe('feature-gate lowering matrix (#2874)', () => {
   const ORG = 'features.organization != false';
   const MULTI_ORG = 'features.multiOrgEnabled != false';
+  // The org-admin rows also carry `requiresMembershipReach`, whose lowering
+  // runs FIRST and puts the membership-grade term ahead of the feature gate:
+  // one `'<projected grade>' in current_user.positions` term per grade the
+  // reach table admits to the endpoint (ADR-0108 D1). Spelled out here rather
+  // than computed, so this matrix pins the bytes the console evaluates.
+  const INVITE = "('org_owner' in current_user.positions || 'org_admin' in current_user.positions || 'delegated_admin' in current_user.positions)";
+  const ADMINS = "('org_owner' in current_user.positions || 'org_admin' in current_user.positions)";
+  const OWNER = "'org_owner' in current_user.positions";
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
     ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
@@ -575,23 +583,25 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'change_slug', MULTI_ORG],
-    ['SysUser', SysUser, 'invite_user', ORG],
+    ['SysUser', SysUser, 'invite_user', `${INVITE} && ${ORG}`],
     ['SysUser', SysUser, 'create_user', 'features.admin == true'],
     // [#11544] Third mirror of `invite_user` — the Members tab's own copy of
     // the email-invite entry. Same gate as the sys_user / sys_invitation rows.
-    ['SysMember', SysMember, 'invite_user', ORG],
+    ['SysMember', SysMember, 'invite_user', `${INVITE} && ${ORG}`],
+    // No grade term: add-member is gated on platform-admin standing, not on a
+    // membership grade, so the action carries no `requiresMembershipReach`.
     ['SysMember', SysMember, 'add_member', ORG],
-    ['SysMember', SysMember, 'update_member_role', ORG],
-    ['SysMember', SysMember, 'remove_member', ORG],
-    ['SysMember', SysMember, 'transfer_ownership', `(has(record.role) && record.role != 'owner') && ${ORG}`],
-    ['SysInvitation', SysInvitation, 'invite_user', ORG],
-    ['SysInvitation', SysInvitation, 'cancel_invitation', ORG],
-    ['SysInvitation', SysInvitation, 'resend_invitation', ORG],
-    ['SysTeam', SysTeam, 'create_team', ORG],
-    ['SysTeam', SysTeam, 'update_team', ORG],
-    ['SysTeam', SysTeam, 'remove_team', ORG],
-    ['SysTeamMember', SysTeamMember, 'add_team_member', ORG],
-    ['SysTeamMember', SysTeamMember, 'remove_team_member', ORG],
+    ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
+    ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
+    ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
+    ['SysInvitation', SysInvitation, 'invite_user', `${INVITE} && ${ORG}`],
+    ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
+    ['SysInvitation', SysInvitation, 'resend_invitation', `${INVITE} && ${ORG}`],
+    ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
+    ['SysTeam', SysTeam, 'update_team', `${ADMINS} && ${ORG}`],
+    ['SysTeam', SysTeam, 'remove_team', `${ADMINS} && ${ORG}`],
+    ['SysTeamMember', SysTeamMember, 'add_team_member', `${ADMINS} && ${ORG}`],
+    ['SysTeamMember', SysTeamMember, 'remove_team_member', `${ADMINS} && ${ORG}`],
     // #2874 P2b — audit gates: capability-dependent actions that previously
     // shipped UNGATED (rendered even with the backing plugin off, then 404'd).
     ['SysUser', SysUser, 'ban_user', 'features.admin == true'],
@@ -629,6 +639,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     for (const [, object] of systemObjects) {
       for (const action of object.actions ?? []) {
         expect(action).not.toHaveProperty('requiresFeature');
+        expect(action).not.toHaveProperty('requiresMembershipReach');
         for (const param of (action as { params?: readonly unknown[] }).params ?? []) {
           expect(param).not.toHaveProperty('requiresFeature');
         }

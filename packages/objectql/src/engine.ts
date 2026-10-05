@@ -119,6 +119,11 @@ import {
   // The data door's object-existence 404, shared for the same reason: an
   // in-process verb refuses a name the registry does not resolve with it.
   objectNotFoundError,
+  // The one write-response non-exposure helper (credential mask + `internal`
+  // omission); a record-change event body is an external exit of the same
+  // write, so it is projected through the same rule — see
+  // {@link projectEventRecordBody}.
+  omitInternalFieldsFromWriteResponse,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -3363,6 +3368,33 @@ function redactEventMetadataBody(
   }
   const { [STORED_METADATA_BODY_COLUMN]: _withheld, ...rest } = body;
   return rest;
+}
+
+/**
+ * Project a `data.record.*` event body (`after` / `changes`) through the
+ * generic-data-path non-exposure rules — credential-class fields MASKED,
+ * `internal: true` fields OMITTED — by the ONE helper every external write
+ * response already goes through (`omitInternalFieldsFromWriteResponse`,
+ * `@objectstack/core`). ⛔ Never a second copy of that rule here.
+ *
+ * The event is an external exit of the write: its subscribers (outbound
+ * deliveries, search indexes, flows that snapshot the record) store or forward
+ * what they receive to readers below the write boundary, so the body carries
+ * what a read of the same row would answer — never the stored value the
+ * engine's own write result keeps whole for the privileged in-process caller.
+ *
+ * Pure with respect to the write result: the helper deletes and assigns in
+ * place, so it runs on a fresh shallow copy and the caller's record (the
+ * engine's return value) is never touched.
+ */
+function projectEventRecordBody(
+  schema: unknown,
+  body: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (body === undefined) return body;
+  const copy = { ...body };
+  omitInternalFieldsFromWriteResponse(schema, copy);
+  return copy;
 }
 
 /** `DataEvent.userId` — the acting user, when the execution context names one. */
@@ -7572,17 +7604,23 @@ export class ObjectQL implements IObjectQLEngine {
 
     try {
       const timestamp = new Date().toISOString();
-      const changes = redactEventMetadataBody(object, eventRecordBody(input.changes), input.after);
-      const after = redactEventMetadataBody(object, eventRecordBody(input.after), input.after);
+      const schema = this._registry.getObject(object);
+      // Credential mask + `internal` omission on both bodies, the same rule
+      // the write response gets ({@link projectEventRecordBody}).
+      const changes = projectEventRecordBody(
+        schema,
+        redactEventMetadataBody(object, eventRecordBody(input.changes), input.after),
+      );
+      const after = projectEventRecordBody(
+        schema,
+        redactEventMetadataBody(object, eventRecordBody(input.after), input.after),
+      );
       const userId = eventUserId(input.context);
       // [#14970] The RECORD's organization, off the row itself — ⛔ never
       // `input.context.tenantId`, which is the CALLER's. See
       // {@link eventOrganizationId}; omitted, never `''`/`undefined`, because
       // absence has exactly one spelling in the schema.
-      const organizationId = eventOrganizationId(
-        this._registry.getObject(object),
-        input.organizationRow,
-      );
+      const organizationId = eventOrganizationId(schema, input.organizationRow);
       const event: DataEvent = DataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.record.${action}`,

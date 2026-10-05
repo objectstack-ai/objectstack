@@ -179,6 +179,28 @@ describe('keysetWalk', () => {
     expect(calls).toBeLessThan(5);
   });
 
+  it('a driver collation that orders keys differently from JS strings is NOT truncation', async () => {
+    // A case-insensitive collation (the PG/MySQL default shape) sorts 'b02'
+    // before 'C03' before 'd04', while JS string order puts 'C03' first. The
+    // reader seeks by ITS collation; the walk must only ask whether the
+    // cursor came back the same, never whether it is greater in JS order.
+    const keys = ['a01', 'b02', 'C03', 'd04', 'E05'];
+    const collate = (x: string, y: string) => x.toLowerCase().localeCompare(y.toLowerCase());
+    const walk = keysetWalk<Row>(
+      async (q) => {
+        const gt = (q.where as any)?.id?.$gt as string | undefined;
+        return keys
+          .filter((k) => gt === undefined || collate(k, gt) > 0)
+          .sort(collate)
+          .slice(0, q.limit)
+          .map((id) => ({ id, status: 'open' }));
+      },
+      { pageSize: 2 },
+    );
+    expect(await collect(walk)).toEqual(keys);
+    expect(walk.truncated).toBe(false);
+  });
+
   it('stops instead of spinning when a row has no key', async () => {
     const store = makeStore([{ id: 'r01', status: 'open' }, { id: undefined as any, status: 'open' }]);
     const walk = keysetWalk<Row>(

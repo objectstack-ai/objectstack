@@ -1088,5 +1088,18 @@ export const ShowcaseTranslationBundle = {
         },
       },
     },
+    // The reassign wizard: the flow's name in the runner header and
+    // completion toast, its one screen's heading and its field label.
+    flows: {
+      showcase_reassign_wizard: {
+        label: '重新分配任务',
+        screens: {
+          collect: {
+            title: '新负责人',
+            fields: { new_assignee: { label: '新负责人' } },
+          },
+        },
+      },
+    },
   },
 };

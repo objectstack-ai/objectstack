@@ -1396,7 +1396,8 @@ const PHANTOM_PIN_DEBT = {};
 //   54  package-root tool configs -- `vitest.config.ts` x32, `tsup.config.ts`
 //       x16, `objectstack.config.ts` x5, `vitest.integration.config.ts` x1
 //   11  files in a SOURCE DIRECTORY -- `scripts/i18n-extract.config.ts` x8,
-//       `packages/objectql/scripts/dry-run-hash-compat.ts`,
+//       `packages/objectql/scripts/dry-run-hash-compat.ts` (deleted since,
+//       with its directory, in #21853),
 //       `packages/plugins/plugin-auth/examples/basic-usage.ts`,
 //       `packages/cli/test/helpers/serve-process.ts`
 //
@@ -1425,11 +1426,12 @@ const PHANTOM_PIN_DEBT = {};
 //   trusts").
 //
 //   AGAINST -- a `vitest.config.ts` is unchecked TypeScript exactly as much as
-//   `scripts/dry-run-hash-compat.ts` is, and this line can be walked around by
-//   moving a file UP into the package root. That is a real hole and it is left
-//   open knowingly, not overlooked: closing it is a decision about 42 packages'
-//   conventions rather than about this gate, and it is filed as its own card
-//   rather than decided here by whoever happened to be holding this one.
+//   a file in an unread source directory is, and this line can be walked
+//   around by moving a file UP into the package root. That is a real hole and
+//   it is left open knowingly, not overlooked: closing it is a decision about
+//   42 packages' conventions rather than about this gate, and it is filed as
+//   its own card rather than decided here by whoever happened to be holding
+//   this one.
 //
 // SHRINK-ONLY and CLOSED to new entries, like PHANTOM_PIN_DEBT above. A package
 // that grows a new unread source directory fails SOURCES_COVERED; it does not
@@ -1440,8 +1442,10 @@ const PHANTOM_PIN_DEBT = {};
 //
 // SEEDED AT 10, from the census above minus the one entry this gate's own PR
 // repaired: `packages/objectql/scripts` -- the directory the finding was filed
-// about -- now has `packages/objectql/tsconfig.scripts.json` named in that
-// package's `typecheck` script, and type-checks clean. Each remaining reason
+// about -- got `packages/objectql/tsconfig.scripts.json` named in that
+// package's `typecheck` script, and type-checked clean. Both are gone since:
+// the directory's only file, a finished one-time audit, was deleted with them
+// in #21853, so nothing there is left to read. Each remaining reason
 // carries what the directory MEASURES, taken with the package's own config and
 // `rootDir` neutralised (it emits nothing) against a built dependency closure on
 // main @ 5886ee6d22. Those counts are prose, deliberately: nothing here compares
@@ -1492,8 +1496,9 @@ const PHANTOM_PIN_DEBT = {};
 //   `moduleResolution: bundler`, DOM `lib` and `exclude` are argued in its own
 //   header as things that package needs; none of the eight needs any of them,
 //   because these configs already spell their relative imports with `.js`.
-//   The shape these eight copy is the minimal one -- `packages/objectql`
-//   (#10756) and `packages/plugins/plugin-auth` (#10869).
+//   The shape these eight copy is the minimal one -- `packages/plugins/
+//   plugin-auth` (#10869); the first instance, `packages/objectql`'s (#10756),
+//   was deleted with its directory in #21853.
 //
 // THE NINTH CONFIG JOINED THE EIGHT (#15050), completing what this section
 // used to say was deliberately deferred. `packages/services/

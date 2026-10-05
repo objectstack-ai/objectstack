@@ -1,0 +1,315 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The org-admin affordances on the organization's member, invitation and team
+ * lists follow the caller's MEMBERSHIP GRADE — measured on a real boot, on the
+ * wire, from the same three things the console combines.
+ *
+ * The defect this pins: every one of these actions was gated on the
+ * `organization` capability alone, so a plain member was offered "Invite
+ * User", "Remove Member", "Create Team" … and the server then refused each with
+ * 403. The server was right; the button had no declared way to ask the same
+ * question. The actions now declare `requiresMembershipReach: '<endpoint>'`,
+ * which the spec lowers at parse time into `visible` over
+ * `current_user.positions` from ONE reach table (`MEMBERSHIP_REACH`) — the
+ * table plugin-auth's `membership-reach-table.test.ts` pins equal to the door.
+ *
+ * ## What this measures
+ *
+ * For four principals in one organization — the owner, an `admin`, a
+ * `delegated_admin` and a plain `member` — it reads:
+ *
+ *  1. the SERVED session face (`GET /auth/get-session`): the `positions` the
+ *     console binds as `current_user`;
+ *  2. the SERVED capability flags (`GET /auth/config`): the `features` the
+ *     console binds;
+ *  3. the SERVED action metadata (`GET /meta/object/<name>`) of `sys_member`,
+ *     `sys_invitation`, `sys_team`, `sys_team_member` and `sys_user`;
+ *
+ * and evaluates each served `visible` against them with
+ * `@objectstack/formula`'s `celEngine`, the engine the console itself uses
+ * (the same composite the approvals override pin uses). The expected sets are
+ * spelled out below rather than computed from the table, so a table that
+ * drifted would not grade itself.
+ *
+ * Both halves are asserted for every principal — what it IS offered and what it
+ * is NOT — because a pin of only the first would stay green if a predicate
+ * degenerated to a constant `true`, and only the second if it degenerated to
+ * `false`. A handful of door probes then show the verdicts are the door's own:
+ * a hidden affordance is one the server refuses, a shown one is one it admits.
+ *
+ * Harness note: `bootStack` disables the default-org bootstrap, so this file
+ * mints the organization and sets membership roles in system context — the
+ * shape `delegated-admin-invite.dogfood.test.ts` uses, and the only writer
+ * better-auth-managed tables accept (ADR-0092).
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import showcaseStack from '@objectstack/example-showcase';
+import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { celEngine } from '@objectstack/formula';
+
+const SYSTEM_CTX = { isSystem: true };
+
+type Grade = 'owner' | 'admin' | 'delegated_admin' | 'member';
+type ServedAction = { name: string; visible?: unknown };
+
+/** The org-admin affordances that call `/organization/invite-member`. */
+const INVITE_MEMBER = [
+  'sys_user.invite_user',
+  'sys_member.invite_user',
+  'sys_invitation.invite_user',
+  'sys_invitation.resend_invitation',
+] as const;
+/** The ones whose endpoints better-auth grants to `owner` / `admin` only. */
+const ADMIN_ONLY = [
+  'sys_member.update_member_role',
+  'sys_member.remove_member',
+  'sys_invitation.cancel_invitation',
+  'sys_team.create_team',
+  'sys_team.update_team',
+  'sys_team.remove_team',
+  'sys_team_member.add_team_member',
+  'sys_team_member.remove_team_member',
+] as const;
+/** Setting the creator role on a member: the owner alone. */
+const OWNER_ONLY = ['sys_member.transfer_ownership'] as const;
+const ALL = [...INVITE_MEMBER, ...ADMIN_ONLY, ...OWNER_ONLY];
+
+const EXPECTED: Record<Grade, readonly string[]> = {
+  owner: ALL,
+  admin: [...INVITE_MEMBER, ...ADMIN_ONLY],
+  delegated_admin: INVITE_MEMBER,
+  member: [],
+};
+
+/** The projected name each grade must carry on the session face. */
+const PROJECTED: Record<Grade, string> = {
+  owner: 'org_owner',
+  admin: 'org_admin',
+  delegated_admin: 'delegated_admin',
+  member: 'org_member',
+};
+
+const OBJECTS = ['sys_member', 'sys_invitation', 'sys_team', 'sys_team_member', 'sys_user'] as const;
+
+async function findRows(ql: any, object: string, where: any, limit = 50): Promise<any[]> {
+  const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
+  return Array.isArray(rows) ? rows : (rows?.records ?? []);
+}
+
+/** The sign-up reconciler's membership row lands after the signup transaction. */
+async function waitForMembership(ql: any, userId: string): Promise<any> {
+  for (let i = 0; i < 40; i++) {
+    const rows = await findRows(ql, 'sys_member', { user_id: userId }, 5);
+    if (rows.length > 0) return rows[0];
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`no sys_member row appeared for ${userId}`);
+}
+
+describe('org-admin affordances follow the membership grade (served metadata × served session)', () => {
+  let stack: VerifyStack;
+  let ql: any;
+  let orgId: string;
+  const tokens = {} as Record<Grade, string>;
+  const sessionUser = {} as Record<Grade, Record<string, unknown>>;
+  const served = {} as Record<Grade, Map<string, ServedAction>>;
+  let features: Record<string, unknown>;
+  /** A representative row per object — the binding a row action is evaluated against. */
+  const rowOf = {} as Record<string, Record<string, unknown>>;
+  let plainMemberRowId: string;
+  let pendingInvitationId: string;
+
+  beforeAll(async () => {
+    stack = await bootStack(showcaseStack, {});
+    tokens.owner = await stack.signIn(); // the seeded dev admin
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+
+    const org = await ql.insert('sys_organization', { name: 'Reach Org', slug: 'reach-org' }, { context: SYSTEM_CTX });
+    orgId = String(org.id);
+
+    const [ownerUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
+    const ownerMembers = await findRows(ql, 'sys_member', { user_id: ownerUser.id }, 5);
+    if (ownerMembers.length > 0) {
+      await ql.update('sys_member', { id: ownerMembers[0].id, organization_id: orgId, role: 'owner' }, { context: SYSTEM_CTX });
+    } else {
+      await ql.insert('sys_member', { user_id: ownerUser.id, organization_id: orgId, role: 'owner' }, { context: SYSTEM_CTX });
+    }
+
+    for (const [grade, email] of [
+      ['admin', 'reach.admin@example.com'],
+      ['delegated_admin', 'reach.delegate@example.com'],
+      ['member', 'reach.member@example.com'],
+    ] as const) {
+      tokens[grade] = await stack.signUp(email, 'Reach!Pass123', `Reach ${grade}`);
+      const [user] = await findRows(ql, 'sys_user', { email }, 1);
+      const membership = await waitForMembership(ql, String(user.id));
+      expect(membership.role).toBe('member'); // the reconciler's default
+      if (grade !== 'member') {
+        await ql.update('sys_member', { id: membership.id, role: grade }, { context: SYSTEM_CTX });
+      } else {
+        plainMemberRowId = String(membership.id);
+      }
+    }
+
+    // Rows for the row actions to bind against: a pending invitation, a team,
+    // and a team membership — created through the doors, as the owner.
+    const invite = await stack.apiAs(tokens.owner, 'POST', '/auth/organization/invite-member', {
+      email: 'reach.pending@example.com', role: 'member', organizationId: orgId,
+    });
+    expect(invite.status, await invite.clone().text()).toBe(200);
+    pendingInvitationId = String(((await invite.json()) as { id: string }).id);
+    const team = await stack.apiAs(tokens.owner, 'POST', '/auth/organization/create-team', { name: 'Reach Team', organizationId: orgId });
+    expect(team.status, await team.clone().text()).toBe(200);
+
+    const [memberRow] = await findRows(ql, 'sys_member', { id: plainMemberRowId }, 1);
+    const [invitationRow] = await findRows(ql, 'sys_invitation', { id: pendingInvitationId }, 1);
+    const [teamRow] = await findRows(ql, 'sys_team', { organization_id: orgId }, 1);
+    rowOf.sys_member = memberRow;
+    rowOf.sys_invitation = invitationRow;
+    rowOf.sys_team = teamRow;
+    rowOf.sys_team_member = { team_id: teamRow.id, user_id: memberRow.user_id };
+    rowOf.sys_user = {};
+
+    const config = await stack.apiAs(tokens.member, 'GET', '/auth/config');
+    expect(config.status).toBe(200);
+    features = ((await config.json()) as { data: { features: Record<string, unknown> } }).data.features;
+
+    for (const grade of Object.keys(PROJECTED) as Grade[]) {
+      const session = await stack.apiAs(tokens[grade], 'GET', '/auth/get-session');
+      expect(session.status).toBe(200);
+      sessionUser[grade] = ((await session.json()) as { user: Record<string, unknown> }).user;
+      served[grade] = new Map();
+      for (const object of OBJECTS) {
+        const meta = await stack.apiAs(tokens[grade], 'GET', `/meta/object/${object}`);
+        expect(meta.status, `${grade} reads /meta/object/${object}`).toBe(200);
+        const body = (await meta.json()) as { item?: { actions?: ServedAction[] } };
+        for (const action of body.item?.actions ?? []) served[grade].set(`${object}.${action.name}`, action);
+      }
+    }
+  }, 240_000);
+
+  afterAll(async () => {
+    await stack?.stop?.();
+  });
+
+  /**
+   * The grade gate's verdict for one principal: the predicate as SERVED (read
+   * from the owner's copy, which the metadata-plane field mask leaves whole),
+   * evaluated against THAT principal's served session and the served flags.
+   */
+  const gateAdmits = (grade: Grade, site: string): boolean => {
+    const action = served.owner.get(site);
+    if (!action) throw new Error(`served metadata has no action ${site}`);
+    if (action.visible === undefined) return true;
+    const result = celEngine.evaluate(action.visible as never, {
+      record: rowOf[site.split('.')[0]],
+      user: sessionUser[grade] as never,
+      extra: { features },
+    });
+    if (!result.ok) throw new Error(`${site} faulted for ${grade}: ${JSON.stringify(result)}`);
+    return result.value === true;
+  };
+
+  /**
+   * What the console offers: an action served TO that principal whose served
+   * predicate admits it. The served copy is the principal's own — a different
+   * text from the owner's would be a defect this reads as such.
+   */
+  const offered = (grade: Grade, site: string): boolean => {
+    const own = served[grade].get(site);
+    if (!own) return false;
+    expect(own.visible, `${site} serves one predicate to every grade`).toEqual(served.owner.get(site)?.visible);
+    return gateAdmits(grade, site);
+  };
+
+  /**
+   * The one site the metadata-plane field mask (ADR-0106) withholds below
+   * tenant-admin grade: `sys_user.invite_user`'s `role` param names
+   * `sys_user.role`, a field those callers cannot read, so the whole action is
+   * dropped from their `/meta/object/sys_user` — independently of this gate.
+   * Every other site must be served to every grade, or a verdict below would be
+   * the mask's rather than the gate's.
+   */
+  const MASKED_BELOW_TENANT_ADMIN = ['sys_user.invite_user'];
+
+  it('the session face carries each grade under its projected name, and no other grade', () => {
+    // The capability half of every composed predicate is ON here, so each
+    // verdict below is decided by the grade term alone.
+    expect(features.organization).toBe(true);
+    for (const [grade, projected] of Object.entries(PROJECTED) as Array<[Grade, string]>) {
+      const positions = sessionUser[grade].positions as string[];
+      expect(positions, grade).toContain(projected);
+      for (const other of Object.values(PROJECTED).filter((p) => p !== projected)) {
+        expect(positions, `${grade} must not carry ${other}`).not.toContain(other);
+      }
+    }
+  });
+
+  it.each(Object.keys(EXPECTED) as Grade[])('the gate admits %s to exactly the org-admin affordances of its grade', (grade) => {
+    expect(ALL.filter((site) => gateAdmits(grade, site))).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site)));
+  });
+
+  it.each(Object.keys(EXPECTED) as Grade[])('%s is offered, on its own served metadata, exactly those it is served', (grade) => {
+    const unserved = ALL.filter((site) => !served[grade].has(site));
+    const tenantAdmin = grade === 'owner' || grade === 'admin';
+    expect(unserved).toEqual(tenantAdmin ? [] : MASKED_BELOW_TENANT_ADMIN);
+    const shown = ALL.filter((site) => offered(grade, site));
+    expect(shown).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site) && !unserved.includes(site)));
+  });
+
+  it('a plain member sees none of them on the member, invitation and team lists', () => {
+    for (const site of ALL) expect(offered('member', site), site).toBe(false);
+  });
+
+  it('add_member carries no grade term — its door is platform-admin standing, not a membership grade', () => {
+    const source = String((served.member.get('sys_member.add_member')?.visible as { source?: string })?.source);
+    expect(source).not.toContain('current_user.positions');
+  });
+
+  it('each verdict matches the door: hidden means refused, shown means admitted', async () => {
+    /** A door refusal: 403 with the vendor's own code — never a bare status. */
+    const refused = async (res: Response, code: string) => {
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe(code);
+    };
+
+    // invite-member: the plain member is refused, the delegate is admitted.
+    await refused(await stack.apiAs(tokens.member, 'POST', '/auth/organization/invite-member', {
+      email: 'reach.from-member@example.com', role: 'member', organizationId: orgId,
+    }), 'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION');
+    const delegateInvite = await stack.apiAs(tokens.delegated_admin, 'POST', '/auth/organization/invite-member', {
+      email: 'reach.from-delegate@example.com', role: 'member', organizationId: orgId,
+    });
+    expect(delegateInvite.status, await delegateInvite.clone().text()).toBe(200);
+
+    // resend IS invite-member: the delegate is admitted there too.
+    const delegateResend = await stack.apiAs(tokens.delegated_admin, 'POST', '/auth/organization/invite-member', {
+      email: 'reach.pending@example.com', role: 'member', organizationId: orgId, resend: true,
+    });
+    expect(delegateResend.status, await delegateResend.clone().text()).toBe(200);
+
+    // cancel-invitation: the delegate is refused (`create` without `cancel`).
+    await refused(await stack.apiAs(tokens.delegated_admin, 'POST', '/auth/organization/cancel-invitation', {
+      invitationId: pendingInvitationId,
+    }), 'YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION');
+
+    // create-team: the plain member and the delegate are refused, the admin admitted.
+    await refused(
+      await stack.apiAs(tokens.member, 'POST', '/auth/organization/create-team', { name: 'From Member', organizationId: orgId }),
+      'YOU_ARE_NOT_ALLOWED_TO_CREATE_TEAMS_IN_THIS_ORGANIZATION',
+    );
+    await refused(
+      await stack.apiAs(tokens.delegated_admin, 'POST', '/auth/organization/create-team', { name: 'From Delegate', organizationId: orgId }),
+      'YOU_ARE_NOT_ALLOWED_TO_CREATE_TEAMS_IN_THIS_ORGANIZATION',
+    );
+    const adminTeam = await stack.apiAs(tokens.admin, 'POST', '/auth/organization/create-team', { name: 'From Admin', organizationId: orgId });
+    expect(adminTeam.status, await adminTeam.clone().text()).toBe(200);
+
+    // transfer ownership (set the creator role): the admin is refused.
+    await refused(await stack.apiAs(tokens.admin, 'POST', '/auth/organization/update-member-role', {
+      memberId: plainMemberRowId, role: 'owner', organizationId: orgId,
+    }), 'YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER');
+  }, 60_000);
+});

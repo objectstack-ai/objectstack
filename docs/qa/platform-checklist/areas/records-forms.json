@@ -2983,7 +2983,7 @@
       "title": "Async import job: terminal state + per-row results, undo removes exactly the imported rows, cancel mid-job leaves a coherent partial",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2992,30 +2992,27 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an import-job-capable client wired into the console AND an object with an async-import route (framework packages/rest/src/rest-route-ledger.ts: POST /api/v1/data/:object/import/jobs, /import/jobs/:jobId/{cancel,undo,results})",
-          "the objectui import specs, which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html"
+          "an import-job-capable client wired into the console AND an object with an async-import route (framework packages/rest/src/rest-route-ledger.ts: POST /api/v1/data/:object/import/jobs, /import/jobs/:jobId/{cancel,undo,results}) — the STOCK console already satisfies the client half (run #21845, console pin 2e818d0b51ec); no extra wiring is needed",
+          "the objectui import specs, which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
+          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): in an objectui checkout, run e2e/import-console/import-console-undo.spec.ts with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under)"
         ],
         "knownGaps": [
-          "the async import + undo/cancel path is gated: e2e/import-console/import-console-undo.spec.ts skips unless IMPORT_CONSOLE_LIVE=1 with an import-job-capable client wired; e2e/import-harness/import-undo.spec.ts skips unless the harness origin serves /live.html — on a stock showcase boot these do not run, so record blocked(fixture)",
+          "CLOSED for runs by the live-gated console spec in requires (#21845): e2e/import-console/import-console-undo.spec.ts skips unless IMPORT_CONSOLE_LIVE=1, and its goto path needs the /_console mount — with both supplied it runs against the stock console. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts still skips unless the harness origin serves /live.html; it is optional evidence, and the API half below needs no gate at all",
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
-      "blocked": {
-        "by": "fixture",
-        "ref": "IMPORT_CONSOLE_LIVE / import-harness gate — objectui e2e/import-console/import-console-undo.spec.ts self-skips unless IMPORT_CONSOLE_LIVE=1 and an import-job-capable client is wired; PENDING-GAPS §C import-job-undo-cancel"
-      },
       "steps": [
-        "run the pinned specs gated on: IMPORT_CONSOLE_LIVE=1 pnpm exec playwright test e2e/import-console/import-console-undo.spec.ts (and the harness twin e2e/import-harness/import-undo.spec.ts); capture the suite output as the primary evidence",
-        "when the gate is available: POST /api/v1/data/:object/import/jobs with a marker-tagged CSV; poll GET /api/v1/data/import/jobs/:jobId until terminal; GET /api/v1/data/import/jobs/:jobId/results for per-row results",
+        "run the console spec with its gate on, from the scratch copy whose goto path is /_console/apps/{app}/{object} (fixtures.requires): IMPORT_CONSOLE_LIVE=1 pnpm exec playwright test <scratch copy of e2e/import-console/import-console-undo.spec.ts> (the harness twin e2e/import-harness/import-undo.spec.ts only where /live.html is served); capture the suite output, naming the objectui revision, as the primary evidence",
+        "API half (no gate needed): create with POST /api/v1/data/:object/import/jobs with a marker-tagged CSV — every other job route lives under /api/v1/data/import/jobs: poll progress at GET /api/v1/data/import/jobs/:jobId until terminal; GET /api/v1/data/import/jobs/:jobId/results for per-row results; poll GET /api/v1/data/import/jobs/:jobId until terminal; GET /api/v1/data/import/jobs/:jobId/results for per-row results",
         "count marker rows via a filtered GET before and after the import; then POST /api/v1/data/import/jobs/:jobId/undo and re-count",
-        "GET /api/v1/data/import/jobs and confirm the job list distinguishes undoable/non-undoable and reverted state ({ jobId, undoable, revertedAt, createdAt }) so the fresh job is findable",
+        "GET /api/v1/data/import/jobs and confirm the job list distinguishes undoable/non-undoable and reverted state ({ jobId, undoable, revertedAt, createdAt } — revertedAt is ABSENT from an entry until that job is reverted, not null) so the fresh job is findable",
         "start a fresh import and POST /api/v1/data/import/jobs/:jobId/cancel mid-job; inspect the row set for coherence"
       ],
       "acceptance": [
         {
           "clause": "an async import creates an UNDOABLE job that reaches a terminal state and exposes per-row results",
           "oracle": "test",
-          "verify": "the job list shows { jobId, undoable:true, revertedAt:null } and GET /import/jobs/:jobId/results returns per-row outcomes (pinned by import-console-undo.spec.ts / import-undo.spec.ts under their gate)",
+          "verify": "the job list shows { jobId, undoable:true } with revertedAt ABSENT (the key is omitted until the job is reverted — read absence, not null, as not-yet-reverted) and GET /import/jobs/:jobId/results returns per-row outcomes (pinned by import-console-undo.spec.ts / import-undo.spec.ts under their gate)",
           "evidence": "the gated spec output + the jobs/results reads"
         },
         {
@@ -3033,14 +3030,14 @@
         {
           "clause": "the job list distinguishes undoable/non-undoable and reverted state so a run can find the fresh undoable job it created",
           "oracle": "api",
-          "verify": "GET /api/v1/data/import/jobs returns entries with { jobId, undoable, revertedAt, createdAt } (the specs filter on j.undoable && !j.revertedAt)",
+          "verify": "GET /api/v1/data/import/jobs returns entries with { jobId, undoable, createdAt }, plus revertedAt once a job is reverted — the key is absent, not null, before that (the specs filter on j.undoable && !j.revertedAt, which reads both the same)",
           "evidence": "the jobs list read"
         }
       ],
       "negative": [
         "an undo that deletes MORE than the imported rows (or leaves some behind) is a FAIL — exactly the imported set, no more, no less (the async threshold vs undo-capture mismatch is the exact bug the specs exist for)",
         "a cancel that leaves half-written rows (partial row, dangling FK) is a FAIL — coherent partial only",
-        "reporting the item PASS off a skipped (gated-out) spec is a FAIL — a skip is blocked(fixture), never a green tick"
+        "reporting the item PASS off a skipped (gated-out) spec is a FAIL — a skip means IMPORT_CONSOLE_LIVE=1 was not set (or the goto path missed the /_console mount); it is never a green tick"
       ],
       "traps": [
         "seed-data-thin",
@@ -3053,7 +3050,8 @@
       "source": [
         "framework: packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId] — re-pointed #18104: jobId is a route PATH PARAMETER, carried in this file only inside a route string)",
         "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts",
-        "PENDING-GAPS §C import-job-undo-cancel"
+        "PENDING-GAPS §C import-job-undo-cancel",
+        "#21845 (follow-up run: the console spec passed twice with its live gate on, and the API half passed)"
       ],
       "history": [
         {
@@ -3067,6 +3065,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-05",
+          "change": "blocked lifted: run #21845 found that the stock console already satisfies the 'import-job-capable client' gate (console pin 2e818d0b51ec) and passed the objectui console spec twice with IMPORT_CONSOLE_LIVE=1 from a scratch copy whose goto path is /_console/apps/{app}/{object}, plus the API half. That recipe is written into fixtures.requires and the gate knownGap is marked CLOSED-for-runs, not deleted. The API step now says that creation is POST /api/v1/data/:object/import/jobs and that progress, results, cancel, undo and the list all live under /api/v1/data/import/jobs. The job-list reads now treat revertedAt as absent, not null, until the job is reverted — the old { revertedAt:null } shape would fail a healthy list (card #21851 entry 4)",
+          "ref": "#21845"
         }
       ]
     },

@@ -128,7 +128,9 @@ describe('backfillMemberships', () => {
   it('binds only the member-less users (single/auto)', async () => {
     const engine = makeEngine({
       users: [{ id: 'u1' }, { id: 'u2' }, { id: 'u3' }],
-      members: [{ organization_id: 'org_default', user_id: 'u2' }],
+      // A stored membership carries its primary key; the backfill's keyset
+      // walk seeks on it, and a row without one cannot be paged past.
+      members: [{ id: 'm2', organization_id: 'org_default', user_id: 'u2' } as any],
     });
     const res = await backfillMemberships(engine, {
       policy: 'auto',

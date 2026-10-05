@@ -4058,7 +4058,16 @@ export class AuthManager {
       // The factory is created by better-auth's createAdapterFactory and
       // automatically applies modelName/fields transformations declared in
       // the betterAuth config above.
-      return createObjectQLAdapterFactory(this.config.dataEngine);
+      return createObjectQLAdapterFactory(this.config.dataEngine, {
+        // ADR-0093 D7 — the adapter is the one place that sees the created
+        // user's id INSIDE the creating endpoint call; staging it here lets the
+        // session seam recognise that user without reading the row back.
+        onRecordCreated: async (objectName, row) => {
+          if (objectName !== 'sys_user') return;
+          const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+          this.stageUserCreatedInRequest(tryGetCurrentAuthEndpointContext(), row?.id);
+        },
+      });
     }
 
     // Fallback warning if no dataEngine is provided
@@ -4313,7 +4322,9 @@ export class AuthManager {
    *    signup, admin create-user, bulk import, SSO JIT);
    *  - `session.create.before`, which settles the membership before resolving
    *    the session's active organization so a user's FIRST session is not
-   *    minted tenant-less (#8247 rule 2 / #8245).
+   *    minted tenant-less (#8247 rule 2 / #8245) — and ONLY for a session
+   *    minted in the request that created the user (ADR-0093 D7: membership is
+   *    decided at creation; see {@link isCreatedInThisRequest}).
    *
    * Assembling the deps at each call site instead would let the two drift on
    * the axis that matters most: the POLICY. `getMembershipPolicy()` reads a
@@ -4353,6 +4364,46 @@ export class AuthManager {
       // bookkeeping must never break user creation or session creation.
       return undefined;
     }
+  }
+
+  /**
+   * [ADR-0093 D7] The users created in each in-flight better-auth request,
+   * keyed by that request's endpoint context — the object better-auth hands
+   * every database hook of one endpoint call and that `objectql-adapter`'s
+   * `onRecordCreated` reads from the same call. Values are user ids.
+   *
+   * Why the session seam needs it: `user.create.after` is deferred past the
+   * creation's transaction, so the session a sign-up mints is created BEFORE
+   * the reconciler has bound anyone. The session seam therefore settles the
+   * membership itself — but only for the user this same request created. Any
+   * other member-less user signing in is not mid-creation, and membership is
+   * decided at creation, never re-decided at sign-in.
+   *
+   * The id is captured from the adapter's own `create` result, so recognising
+   * the user needs no read of the store (a read that, on a driver writing
+   * through another connection, could miss the row).
+   *
+   * A `WeakMap` because the scope IS the request: the entry dies with the
+   * endpoint context, so nothing staged here can outlive the call that staged
+   * it and be read by a later sign-in.
+   */
+  private usersCreatedInRequest = new WeakMap<object, Set<string>>();
+
+  /** Record that the current request created the user `userId`. */
+  private stageUserCreatedInRequest(ctx: unknown, userId: unknown): void {
+    if (!ctx || typeof ctx !== 'object' || typeof userId !== 'string' || !userId) return;
+    let staged = this.usersCreatedInRequest.get(ctx);
+    if (!staged) {
+      staged = new Set();
+      this.usersCreatedInRequest.set(ctx, staged);
+    }
+    staged.add(userId);
+  }
+
+  /** Is `userId` a user the current request created? In-memory only. */
+  private isCreatedInThisRequest(ctx: unknown, userId: string): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return this.usersCreatedInRequest.get(ctx)?.has(userId) === true;
   }
 
   // ── [#11739] Audience posture — admission gate + self-registration grant ──
@@ -7367,7 +7418,7 @@ export class AuthManager {
       return row?.organization_id;
     };
 
-    const defaultActiveOrg = async (session: any) => {
+    const defaultActiveOrg = async (session: any, ctx: any) => {
       try {
         if (!session || session.activeOrganizationId) return;
         const userId = session.userId;
@@ -7409,13 +7460,24 @@ export class AuthManager {
         // sessions with no active organization, which is the LEGAL state the
         // #8247 ruling declares — this removes a race, never a policy.
         //
+        // ⛔ AND IT RUNS ONLY FOR A USER WHOSE CREATION IS IN THIS REQUEST.
+        // ADR-0093 D7: membership is decided at creation. A member-less user
+        // signing in later is not a race to close — whatever left them without
+        // a membership (the policy, or an administrator) has already decided,
+        // and a sign-in must not decide again. The creation seam
+        // (the adapter's `create`, via `onRecordCreated`) stages the new
+        // user's id in the request's endpoint context; only a session minted
+        // in that same request for that same user settles here
+        // (`isCreatedInThisRequest`).
+        //
         // Cost is paid only where there is something to fix: a caller who
-        // already holds a membership never reaches this branch, and a
-        // deployment that binds nobody stops at the reconciler's own policy /
-        // target-org check without touching the store. The re-read is gated on
-        // an outcome that means a membership now EXISTS, so the common
-        // no-bind login costs no extra query at all.
-        if (!orgId) {
+        // already holds a membership never reaches this branch, every other
+        // sign-in stops at an in-memory lookup, and a deployment that
+        // binds nobody stops at the reconciler's own policy / target-org check
+        // without touching the store. The re-read is gated on an outcome that
+        // means a membership now EXISTS, so the common no-bind login costs no
+        // extra query at all.
+        if (!orgId && this.isCreatedInThisRequest(ctx, userId)) {
           const outcome = await this.settleMembership(userId);
           if (outcome === 'bound' || outcome === 'yielded') {
             orgId = await selectActiveOrg(reader, userId);
@@ -7440,7 +7502,7 @@ export class AuthManager {
               // The host hook fully handled it → keep its result shape.
               if (draft?.activeOrganizationId) return { data: draft };
             }
-            return (await defaultActiveOrg(draft)) ?? (draft === session ? undefined : { data: draft });
+            return (await defaultActiveOrg(draft, ctx)) ?? (draft === session ? undefined : { data: draft });
           }
         : hostSessionBefore;
 

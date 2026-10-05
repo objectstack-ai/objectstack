@@ -139,6 +139,12 @@
       "evidence": "packages/spec/src/kernel/public-auth-features.ts (lowerRequiresFeature), wired as a .transform() in packages/spec/src/ui/action.zod.ts",
       "note": "Author-facing sugar, consumed AT PARSE TIME: lowered into the (already-live) `visible` predicate per the PUBLIC_AUTH_FEATURES registry semantics and stripped from the output, so no downstream consumer ever sees it. Guarded by the #2874 drift + completeness tests (plugin-auth public-feature-registry.test.ts, platform-objects feature-gate-guard.test.ts)."
     },
+    "requiresMembershipReach": {
+      "status": "live",
+      "verifiedAt": "2026-10-05",
+      "evidence": "packages/spec/src/identity/membership-reach.ts#lowerRequiresMembershipReach (the lowering, composed inside the ActionSchema .transform() in packages/spec/src/ui/action.zod.ts, ahead of lowerRequiresFeature)",
+      "note": "Author-facing sugar, consumed AT PARSE TIME exactly as `requiresFeature` is: lowered into the (already-live) `visible` predicate over `current_user.positions` from the MEMBERSHIP_REACH table (one term per grade that reaches the named organization endpoint, in the names mapMembershipRole projects them to) and stripped from the output, so no downstream consumer ever sees the key. The table is pinned equal to the roles map plugin-auth hands better-auth by packages/plugins/plugin-auth/src/membership-reach-table.test.ts; packages/qa/dogfood/test/org-admin-affordance-reach.dogfood.test.ts boots the showcase and evaluates the served predicates against each grade's served session."
+    },
     "requiredPermissions": {
       "status": "live",
       "verifiedAt": "2026-08-28",
