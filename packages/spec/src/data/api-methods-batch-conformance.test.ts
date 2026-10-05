@@ -199,7 +199,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
     "ADR-0092 D2's identity write guard admits). No console surface multi-selects " +
     'API keys — the grid renders no checkbox column because the object grants no ' +
     'delete affordance — and a promoted bulk revoke would fan out per row through ' +
-    'the action runner rather than hitting /batch (#7802).',
+    'the action runner rather than hitting /batch.',
   // #15873 — maintainer ruling 2026-09-07 (decision batch #64, option (a),
   // verbatim 「同意」): the data door admits `update` so an administrator can set
   // the four platform-owned columns (`require_mfa`, `parent_organization_id`,
@@ -227,12 +227,12 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // both stand.
   sys_organization:
     'Administrators set the platform-owned columns through single-record PATCH ' +
-    'and the derived update-mode import door (#15873 ruled `update`; both are ' +
+    'and the derived update-mode import door (a ruling grants `update`; both are ' +
     'column-clamped per row by ADR-0092 D2). `bulk` — /batch and the *Many ' +
     'routes — is not granted: no console surface multi-selects organizations ' +
     '(the list view declares no bulk actions and the object grants no delete ' +
     'affordance), and a promoted bulk edit would fan out per row through the ' +
-    'action runner rather than hitting /batch (#7802).',
+    'action runner rather than hitting /batch.',
 };
 
 /** Every `*.object.ts` under `packages/`, skipping build output and deps. */
@@ -292,7 +292,7 @@ function collectWhitelists(): Whitelist[] {
 
 const WHITELISTS = collectWhitelists();
 
-describe('apiMethods conformance — single-record writes imply batch (#3026)', () => {
+describe('apiMethods conformance — single-record writes imply batch', () => {
   it('scans a plausible number of declarations (guards a silently empty sweep)', () => {
     // A scan that matches nothing passes every assertion below vacuously — the
     // exact failure mode this file exists to prevent. Pin a floor instead.

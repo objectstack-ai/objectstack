@@ -11,7 +11,7 @@ import {
 import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod';
 import { nextUtcCalendarDay } from './calendar-day';
 
-describe('date-range preset vocabulary (#4614, re-homed by #8793)', () => {
+describe('date-range preset vocabulary — one source of truth, read by both the UI and the data side', () => {
   it('declares exactly the thirteen shipped preset names, in filter-bar order', () => {
     // Pinned literally: this list is a published vocabulary (dashboard
     // defaultRange / date-filter defaultValue accept it, filter comparands
@@ -163,7 +163,7 @@ function prescribedDayCount(startDay: string, endDay: string): number {
   return (midnightUtc(exclusiveEnd as string) - midnightUtc(startDay)) / DAY_MS;
 }
 
-describe('the prescribed window covers exactly the days the preset names (#17014)', () => {
+describe('the prescribed window covers exactly the days the preset names', () => {
   it('states an expected window for every declared preset, and for nothing else', () => {
     // The fence: a preset added to the vocabulary without a stated extent
     // fails here rather than silently inheriting whichever end convention its

@@ -187,7 +187,7 @@ describe('classifyFilterToken — the record-context token', () => {
  * abolish, and it hit the author backwards: `{TODAY}` was refused by name while
  * `{TODAY()}` quietly returned the wrong rows.
  */
-describe('classifyFilterToken — brace-wrapped by intent (#5586)', () => {
+describe('classifyFilterToken — brace-wrapped by intent', () => {
   // Each of these is a shape an author reaches for when migrating from another
   // system's macro syntax: call syntax, kebab-case, natural language, a dotted
   // path. All four used to classify as `null`.

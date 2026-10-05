@@ -36,6 +36,7 @@ vi.mock('@objectstack/spec/data', async (importOriginal) => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { LocalManifestSource } from './local-manifest-source.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -155,10 +156,11 @@ describe('reseed honest result', () => {
         expect(res.payload?.success).toBe(true);
         expect(res.payload?.data).toMatchObject({ inserted: 2, updated: 0, withSampleData: true });
 
-        // The ledger now reflects that sample data is present.
-        const listRes = await rawApp.routes.get('GET /api/v1/marketplace/install-local')!(makeC({}));
-        const entry = listRes.payload.data.items.find((i: any) => i.manifestId === 'app.test.proj');
-        expect(entry?.withSampleData).toBe(true);
+        // The ledger's install-time record flips. Read from the ledger itself:
+        // the GET listing no longer serves this record — it answers from the
+        // caller's own rows (#21775), and the seed loader here is a stub that
+        // writes none.
+        expect(new LocalManifestSource(dir).read('app.test.proj').entry?.withSampleData).toBe(true);
     });
 
     it('partial success (some rows + some errors) still reports the error count', async () => {

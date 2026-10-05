@@ -33,7 +33,11 @@
 //      fired once per seed row, and the audit plugin wrote one `delete` row each;
 //   4. the reseed then succeeds (28 inserted);
 //   5. under an organization wall, a purge in one organization leaves another
-//      organization's 28 seed rows exactly where they were.
+//      organization's 28 seed rows exactly where they were;
+//   6. without a wall, the install-local listing's `withSampleData` — derived
+//      from the rows since #21775 — answers what the ledger records after the
+//      install, the purge and the reseed (the walled half, per organization
+//      and across a restart, is `install-local-listing-sample-data.dogfood.test.ts`).
 //
 // Boots fixture stacks of its own (custom plugins, a walled posture), so it
 // stays out of `SHARED_SHOWCASE`.
@@ -47,7 +51,7 @@ import showcaseStack from '@objectstack/example-showcase';
 import crmStack from '@objectstack/example-crm';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AuditPlugin } from '@objectstack/plugin-audit';
-import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
+import { LocalManifestSource, MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { buildShapedArtifact } from './build-shaped-artifact.js';
@@ -117,6 +121,16 @@ async function json(res: Response): Promise<{ status: number; body: any }> { // 
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
+/** The listing's `withSampleData` for the CRM package, beside the ledger's install-wide record of it. */
+async function listedBesideRecord(stack: VerifyStack, token: string, storageDir: string): Promise<{ listed: unknown; recorded: unknown }> {
+  const listing = await json(await stack.apiAs(token, 'GET', BASE));
+  const items: Array<{ manifestId?: string; withSampleData?: unknown }> = listing.body?.data?.items ?? [];
+  return {
+    listed: items.find((i) => i.manifestId === CRM)?.withSampleData,
+    recorded: new LocalManifestSource(storageDir).read(CRM).entry?.withSampleData,
+  };
+}
+
 describe('dogfood: install-local purge on the single-tenant posture — the card\'s own boot', () => {
   let stack: VerifyStack;
   let storageDir: string;
@@ -131,6 +145,7 @@ describe('dogfood: install-local purge on the single-tenant posture — the card
   let survivors: string[];
   let seen: { before: string[]; after: string[] };
   let auditedDeletes: string[];
+  const listing: Record<'afterInstall' | 'afterPurge' | 'afterReseed', { listed: unknown; recorded: unknown }> = {} as never;
 
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-install-local-purge-'));
@@ -143,6 +158,7 @@ describe('dogfood: install-local purge on the single-tenant posture — the card
     install = await json(await stack.apiAs(token, 'POST', BASE, installBody()));
     afterInstall = await countSeeded(ql);
     seedRowKeys = await rowKeys(ql);
+    listing.afterInstall = await listedBesideRecord(stack, token, storageDir);
 
     // A user-authored row in a seeded object, written through the REST door.
     const user = await stack.apiAs(token, 'POST', '/data/crm_account', { name: 'User Authored Co', industry: 'technology' });
@@ -157,9 +173,11 @@ describe('dogfood: install-local purge on the single-tenant posture — the card
       .filter((r) => r.object_name in SEEDED)
       .map((r) => `${r.object_name}#${r.record_id}`)
       .sort();
+    listing.afterPurge = await listedBesideRecord(stack, token, storageDir);
 
     reseed = await json(await stack.apiAs(token, 'POST', `${BASE}/${CRM}/reseed-sample-data`, {}));
     afterReseed = await countSeeded(ql);
+    listing.afterReseed = await listedBesideRecord(stack, token, storageDir);
   }, 300_000);
 
   afterAll(async () => {
@@ -194,6 +212,14 @@ describe('dogfood: install-local purge on the single-tenant posture — the card
     expect(reseed.status, JSON.stringify(reseed.body)).toBe(200);
     expect(reseed.body?.data).toMatchObject({ inserted: SEED_TOTAL, errors: 0, withSampleData: true });
     expect(afterReseed).toEqual({ ...SEEDED, crm_account: SEEDED.crm_account + 1 });
+  });
+
+  it('without a wall, the listing derived from the rows answers what the ledger records: true, false, true', () => {
+    expect(listing).toEqual({
+      afterInstall: { listed: true, recorded: true },
+      afterPurge: { listed: false, recorded: false },
+      afterReseed: { listed: true, recorded: true },
+    });
   });
 });
 

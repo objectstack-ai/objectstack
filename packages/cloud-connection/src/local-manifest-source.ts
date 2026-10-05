@@ -42,15 +42,26 @@ export interface InstalledManifestEntry {
     manifest: any;
     installedAt: string;
     installedBy: string | null;
-    /** Whether the bundled seed datasets have been loaded into the kernel
-     *  database. True after install (seedNow=true) or an explicit reseed;
-     *  false after a purge. Persisted so the UI can show "Add" vs "Re-seed". */
+    /** Install-time record: true after an install that seeded, a reseed or a
+     *  rehydrate heal that landed rows; false after a purge. ONE value per
+     *  install, NOT per organization — under an organization wall it records
+     *  whichever organization seeded or purged last.
+     *
+     *  ⛔ Not the answer to "does this caller's organization have the sample
+     *  data?". The GET listing derives that per request from the caller's own
+     *  rows (MarketplaceInstallLocalPlugin.sampleDataInScope, #21775) and does
+     *  not read this field. */
     withSampleData?: boolean;
     /** True only after an explicit purge-sample-data call. The rehydrate-time
      *  sample-data healer (see MarketplaceInstallLocalPlugin.maybeHealSampleData)
      *  must not resurrect demo rows the user deliberately removed — an empty
      *  table after a purge is desired state, not data loss. Cleared again by
-     *  install/reseed runs that land rows. */
+     *  install/reseed runs that land rows.
+     *
+     *  Like `withSampleData`, ONE value per install, not per organization.
+     *  The healer is its one reader, and under an organization wall the healer
+     *  heals nothing at all, so this field decides something only without a
+     *  wall, where the install is one tenant. */
     sampleDataPurged?: boolean;
     /**
      * [ADR-0120 D5e] The installer's answer to the `isolated`-posture question

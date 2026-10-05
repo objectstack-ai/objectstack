@@ -69,7 +69,7 @@ describe('nextUtcCalendarDay', () => {
  * compiled to that day's midnight and missed the rest of it. Year 0100 is the
  * control that always answered, and 2026 the everyday one.
  */
-describe('[#20550] years 0001..0099 are calendar days, not 1900..1999', () => {
+describe('years 0001..0099 are calendar days, not 1900..1999', () => {
   /** day · the day after it */
   const DAYS: ReadonlyArray<readonly [string, string]> = [
     ['0001-01-01', '0001-01-02'],
@@ -117,7 +117,7 @@ describe('[#20550] years 0001..0099 are calendar days, not 1900..1999', () => {
  * no upper bound. The answer is neither `null` ("not a calendar day", which
  * would compile the day's midnight and miss the rest of it) nor a string.
  */
-describe('[#20600] the last supported day answers UNBOUNDED_ABOVE', () => {
+describe('the last supported day answers UNBOUNDED_ABOVE', () => {
   it('9999-12-31 answers UNBOUNDED_ABOVE — not a five-digit day, not null', () => {
     const next = nextUtcCalendarDay('9999-12-31');
     expect(next).toBe(UNBOUNDED_ABOVE);

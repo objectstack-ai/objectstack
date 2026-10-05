@@ -1031,15 +1031,15 @@
     },
     {
       "id": "platform-core.app-management-toggle",
-      "title": "App management: the launcher/App Switcher filters by active+hidden and isDefault drives post-login landing — but the AppManagementPage toggle is a client-only stub today",
+      "title": "App management: the launcher/App Switcher filters by active+hidden, isDefault drives post-login landing, and AppManagementPage writes through the metadata API — a code-package app refuses Disable/Set-default with an error toast, and its Delete is a reset:false no-op the page must not report as a deletion",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a plain member (fresh runtime sign-up — member_default)"
+        "a plain member (invite + sign-up — the stock auth posture is invite_only, so a self-service sign-up is refused; member_default)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -1047,17 +1047,17 @@
           "a writable package to author an app overlay into (POST /api/v1/packages) so the active/isDefault EFFECT can be exercised at the metadata layer — the seeded showcase/platform apps are read-only code packages (ADR-0070)"
         ],
         "knownGaps": [
-          "AppManagementPage's Enable/Disable/Set-default/Delete/Bulk handlers are CLIENT-ONLY STUBS today (objectui apps/console/src/pages/system/AppManagementPage.tsx — every handler is a toast.success() + refresh() carrying a 'TODO: Replace with real API call when backend supports app management' marker; no request is issued and no metadata changes). So the page's toggle CANNOT prove the effect — the launcher/landing behavior is exercised at the metadata layer instead, and the stub is recorded as an expected-fail probe (RUNNER rule 3: a stub that reports success is the finding)"
+          "AppManagementPage's Enable/Disable/Set-default/Delete/Bulk handlers write through the metadata API (objectui apps/console/src/pages/system/AppManagementPage.tsx — meta.saveItem → PUT /api/v1/meta/app/{name}, meta.deleteItem → DELETE /api/v1/meta/app/{name}; wired by objectui 3b7d1cc6d7, #4233 / #4300, before the 17.6.0 console pin) and report success only once the call resolves. The seeded showcase/platform apps are read-only code-package apps: on them Disable and Set-default answer 403 NOT_OVERRIDABLE, and Delete answers 200 reset:false, which changes nothing. So the launcher/landing EFFECT is still exercised at the metadata layer on a writable-package overlay, and the page is probed for honest reporting on the refusals"
         ]
       },
       "steps": [
         "establish the launcher filter is real: the App Switcher (objectui AppSwitcher.tsx) lists only apps with active !== false && hidden !== true. Confirm the Account app (hidden:true — account.app.ts) is ABSENT from the switcher while reachable via the avatar dropdown; Setup/Studio/showcase present",
-        "prove DISABLE-effect at the metadata layer (the UI toggle is a stub): author an app overlay with active:false into a writable package (POST /api/v1/packages + PUT /api/v1/meta/app/<name> active:false, publish) → confirm it leaves the App Switcher/launcher for end users (absent); flip active:true → it returns",
+        "prove DISABLE-effect at the metadata layer: author an app overlay with active:false into a writable package (POST /api/v1/packages + PUT /api/v1/meta/app/<name> active:false, publish) → confirm it leaves the App Switcher/launcher for end users (absent); flip active:true → it returns",
         "prove DEFAULT→landing: the isDefault app drives post-login landing — confirm login lands on the current default app, and that changing which app is isDefault (at the metadata layer) changes the post-login landing route",
         "member view: as a plain member the App Switcher shows only accessible apps (Setup/Studio absent by App.requiredPermissions); disabled/hidden apps also absent",
         "open Setup → Apps → Applications (AppManagementPage) as admin; it lists configured apps with Active/Default badges and per-row controls",
-        "EXPECTED-FAIL / known-stub probe: click Disable on a seeded app in AppManagementPage → a success toast appears BUT no request is issued (empty network) and GET /api/v1/meta/app shows the app still active on reload. Record the toast-without-persistence; do NOT credit the app as disabled off the toast",
-        "same probe for Set-default and Delete: the toast fires, the metadata is unchanged on reload"
+        "honest-reporting probe on a seeded (code-package) app: click Disable in AppManagementPage → the page issues PUT /api/v1/meta/app/{name}, which answers 403 NOT_OVERRIDABLE; an error toast carries the server's reason, and GET /api/v1/meta/app shows the app unchanged on reload",
+        "same probe for Set-default (PUT → 403 NOT_OVERRIDABLE, error toast, metadata unchanged) and Delete (DELETE /api/v1/meta/app/{name} → 200 with reset:false, a no-op: the app is still listed on reload, and the page must NOT report it deleted). Then click Disable on the writable-package app from step 2 and confirm the toggle takes real effect (the launcher drops it)"
       ],
       "acceptance": [
         {
@@ -1091,27 +1091,28 @@
           "evidence": "the page screenshot"
         },
         {
-          "clause": "EXPECTED-FAIL / known-stub probe — AppManagementPage's Disable/Set-default/Delete are client-only stubs: clicking Disable issues NO request (empty network) and GET /api/v1/meta/app is UNCHANGED on reload, while a success toast is shown. A run records the stub and MUST NOT tick 'disabled for end users' off the toast",
+          "clause": "AppManagementPage writes through PUT/DELETE /api/v1/meta/app/{name}: on a code-package app Disable/Set-default return 403 NOT_OVERRIDABLE with an error toast and /meta/app is unchanged on reload; Delete returns 200 reset:false (a no-op) and the page must not report the app as deleted.",
           "oracle": "network",
-          "verify": "the network trace shows no PATCH/DELETE on the click; /meta/app unchanged on reload; the toast fired (AppManagementPage TODO handlers)",
-          "evidence": "the absent request + the unchanged meta + the toast"
+          "verify": "the network trace shows the PUT for Disable and for Set-default answering 403 NOT_OVERRIDABLE and the DELETE answering 200 with reset:false; an error toast for each refused PUT; /meta/app unchanged on reload; after the Delete, no 'deleted' success and the app still listed. ⚠️ At objectui 9dfaca6543 handleDelete shows the '{name} deleted' success toast whenever deleteItem resolves, without reading reset, so expect the Delete half to FAIL there (the open candidate the run's verifier recorded). Score it as observed; do not soften the clause",
+          "evidence": "the three write traces + the toasts + the unchanged meta + the post-Delete page"
         }
       ],
       "negative": [
-        "ticking 'app disabled' off the AppManagementPage success toast is a FALSE PASS — the handler is a stub (no backend), the effect must be proven at the metadata/launcher layer",
+        "no control on AppManagementPage reports success for a write the server refused: a 403 on a code-package app surfaces as an error toast and leaves /meta/app unchanged; a writable app's toggle takes real effect.",
         "the App Switcher showing a hidden (Account) or inactive app to end users is a FAIL of the launcher filter",
         "post-login landing that ignores isDefault is a FAIL"
       ],
       "traps": ["wrong-persona", "stale-console-bundle", "hydration-race"],
       "source": [
-        "objectui apps/console/src/pages/system/AppManagementPage.tsx (the stubbed Enable/Disable/Set-default/Delete/Bulk handlers — TODO 'when backend supports app management')",
+        "objectui apps/console/src/pages/system/AppManagementPage.tsx (the handlers write through meta.saveItem / meta.deleteItem — PUT / DELETE /api/v1/meta/:type/:name, objectui 3b7d1cc6d7, #4233 / #4300 — and report success only after the call resolves; handleDelete does not read reset)",
         "objectui packages/app-shell/src/layout/AppSwitcher.tsx (activeApps = active !== false && hidden !== true)",
         "packages/platform-objects/src/apps/account.app.ts (hidden:true example)",
         "packages/runtime/src/route-ledger.ts (PUT /meta/app/:name, POST /packages/:id/publish — the metadata layer that actually changes app active/default)",
         "ADR-0048 (app package routing / launcher)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — launcher active+hidden filter and isDefault→landing proven at the metadata layer, with the AppManagementPage toggle recorded as a client-only stub (expected-fail probe) rather than faked", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — launcher active+hidden filter and isDefault→landing proven at the metadata layer, with the AppManagementPage toggle recorded as a client-only stub (expected-fail probe) rather than faked", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-05", "change": "clause 6, negative 1, the stub knownGap, steps 2, 6 and 7 and the title re-pointed (stale, #21784 VF5). objectui 3b7d1cc6d7 (#4233 / #4300, 2026-08-11) wired AppManagementPage to real saveItem / deleteItem before the 17.6.0 console pin, so the 'client-only stub' clause was already stale at 17.6.0. The clause uses the verifier's wording, and negative 1 is derived from it: the page writes through PUT/DELETE /api/v1/meta/app/{name}, a code-package app refuses Disable/Set-default with 403 NOT_OVERRIDABLE, and Delete answers 200 reset:false, a no-op. The 'must not report the app as deleted' half is expected to fail at objectui 9dfaca6543, because handleDelete toasts success without reading reset; the clause says so rather than softening. The member persona now reads invite + sign-up (stock invite_only)", "ref": "#21797" }
       ]
     },
     {
@@ -1816,15 +1817,15 @@
     },
     {
       "id": "platform-core.marketplace-console-honesty",
-      "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load'), Installed Apps drives the real same-origin lifecycle, and the admin guard is checked before runtime resolution",
+      "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load') for every viewer ahead of the admin guard, Installed Apps drives the real same-origin lifecycle, and an enabled runtime turns a non-admin away with access-denied",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a plain member (fresh runtime sign-up — member_default)"
+        "a plain member (invite + sign-up — the stock auth posture is invite_only, so a self-service sign-up is refused; member_default)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -1841,7 +1842,7 @@
         "boot B: navigate directly to /apps/setup/system/marketplace — the page renders the MarketplaceDisabled card (data-testid marketplace-disabled): muted informational styling, a hint addressed to the operator naming the action, a Back-home button. Screenshot",
         "boot B: open the Installed Apps page — the installed CRM entry renders with its manifest identity; drive reseed and purge from the page and capture the same-origin POSTs to /api/v1/marketplace/install-local/:manifestId/{reseed,purge}-sample-data on the wire",
         "boot A (default), as admin: the group_apps nav now carries BOTH Browse Marketplace and Installed Apps plus Cloud Connection (nav_cloud_connection); open the browse page — if the control plane is reachable the catalog renders; if not, record blocked(environment) for the catalog leg only (the page mounting and asking is this kernel's part)",
-        "as the plain member on either boot: navigate directly to /apps/setup/system/marketplace — the ADMIN GUARD answers first (#5583 order: MarketplaceAccessDenied, not MarketplaceDisabled and not a load spinner), because access is decided before runtime-config resolution",
+        "as the plain member on boot A (marketplace enabled): navigate directly to /apps/setup/system/marketplace — once the admin verdict resolves (MarketplaceResolving holds only until then) the page renders MarketplaceAccessDenied, never an indefinite spinner and never the destructive card; then open a package URL (…/system/marketplace/:packageId) and confirm the package page issues no package request for the member. On boot B the same URLs render the MarketplaceDisabled card for the member too: objectui#5557 moved the disabled return AHEAD of the !isAdmin guard, because 'there is no marketplace here' is true of every viewer",
         "on boot B reload the disabled page several times: confirm no transient red 'Failed to load' card paints before the disabled card settles (the objectui#5533/#5557 resolving-state work — MarketplaceResolving covers the gap)"
       ],
       "acceptance": [
@@ -1864,10 +1865,10 @@
           "evidence": "the network trace + the page screenshot"
         },
         {
-          "clause": "guard order (#5583): a non-admin hitting the marketplace URL gets the access-denied state BEFORE any runtime resolution — never the disabled card (which would leak configuration posture to a persona that may not read it) and never an indefinite spinner",
+          "clause": "on a marketplace-enabled boot a non-admin gets MarketplaceAccessDenied (no spinner, no package fetch); on a features.marketplace=false boot every viewer, member included, gets the MarketplaceDisabled card — never a destructive error (objectui#5557).",
           "oracle": "screenshot",
-          "verify": "the member's direct navigation renders MarketplaceAccessDenied on both boots; run as the member's own session (wrong-persona)",
-          "evidence": "the member screenshots on both boots"
+          "verify": "the member's direct navigation, in the member's own session (wrong-persona): boot A renders MarketplaceAccessDenied after the resolving state, and the package page's network capture shows no package request (both fetch effects there are gated on isAdmin — MarketplacePackagePage); boot B renders the MarketplaceDisabled card. The catalog page's own list fetch is NOT admin-gated at objectui 9dfaca6543 (MarketplacePage load() runs whenever the marketplace is enabled), so 'no package fetch' is read on the package page",
+          "evidence": "the member screenshots on both boots + the boot-A package-page network capture"
         },
         {
           "clause": "no transient failure flash: reloading the disabled page never paints a red failure card in the window before the runtime config resolves (the resolving state covers it)",
@@ -1879,12 +1880,12 @@
       "negative": [
         "the disabled runtime rendering 'Failed to load marketplace' (the pre-#5504 card, whose hint pointed operators back at the template that told them to set `off`) is the regression this item exists for",
         "a Browse Marketplace nav entry on the offline boot is a dead page — a FAIL of the nav-ownership rule even if the entry renders a nice error",
-        "a member shown the disabled/configuration card instead of access-denied is a #5583 guard-order FAIL",
+        "on the marketplace-enabled boot, a member shown anything but MarketplaceAccessDenied (the destructive card, an indefinite spinner, a package request from the package page) is a guard-order FAIL; on the offline boot the member's MarketplaceDisabled card is CORRECT by design (objectui#5557) — scoring it as a guard-order failure is the superseded #5583 reading",
         "ticking the disabled-state clause off a failed request (rather than the server-reported features.marketplace === false) is exactly the inference isMarketplaceEnabled() refuses to make — do not make it for the product"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "absence-inference", "wrong-persona"],
       "source": [
-        "objectui packages/app-shell/src/console/marketplace/MarketplaceDisabled.tsx (the configuration-conclusion card, #5504 — its header states the whole design rationale), MarketplaceAccessDenied.tsx + MarketplacePackagePage.tsx and MarketplacePage.tsx (guard/disabled resolution order, #5583), MarketplaceResolving.tsx (the no-flash window, #5533/#5557), marketplaceApi.ts (isMarketplaceEnabled reads the server-pushed runtime config, never infers from failure)",
+        "objectui packages/app-shell/src/console/marketplace/MarketplaceDisabled.tsx (the configuration-conclusion card, #5504 — its header states the whole design rationale), MarketplaceAccessDenied.tsx + MarketplacePackagePage.tsx and MarketplacePage.tsx (resolution order: the MarketplaceDisabled return ahead of the !isAdmin guard, objectui#5557 — MarketplacePackagePage first, in 2573ff434; the admin guard ahead of the loading and load-failure branches, #5583), MarketplaceResolving.tsx (the no-flash window, #5533/#5557), marketplaceApi.ts (isMarketplaceEnabled reads the server-pushed runtime config, never infers from failure)",
         "packages/cloud-connection/src/marketplace-ui.ts#MARKETPLACE_BROWSE_UI_BUNDLE (MARKETPLACE_BROWSE_UI_BUNDLE → nav_marketplace_browse owned by the proxy; MARKETPLACE_INSTALLED_UI_BUNDLE → nav_marketplace_installed + the marketplace_installed page owned by install-local)",
         "packages/cloud-connection/src/cloud-connection-ui.ts#CLOUD_CONNECTION_NAV_CONTRIBUTIONS (CLOUD_CONNECTION_NAV_CONTRIBUTIONS → nav_cloud_connection)",
         "objectui apps/console/src/AppContent.tsx (marketplace routes registered by DefaultAppContent for every host)",
@@ -1896,6 +1897,12 @@
           "date": "2026-08-30",
           "change": "new — the browser half of the sweep's four-angle marketplace hit, split from the api-lane lifecycle item. Grounded against the objectui marketplace console: the #5504 MarketplaceDisabled configuration-conclusion card and its 'never inferred from a failed request' rule, the #5583 admin-guard-before-runtime-resolution order, the resolving-state no-flash window, and the framework-side nav bundle ownership (entries live and die with their capability)",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-05",
+          "change": "clause 4, step 5, negative 3, the title and the source re-pointed (stale by design, #21782 VF4). objectui d524bde29 (#5557 via #5582, 2026-08-21) moved the MarketplaceDisabled return ahead of the !isAdmin guard (MarketplacePage; MarketplacePackagePage in 2573ff434), so on a no-marketplace runtime every viewer gets the Disabled card. This landed before 17.6.0, and revision 1 was authored against the superseded #5583 ordering. The verifier's wording is used for the clause, and negative 3 flips with it. Re-read at objectui 9dfaca6543: unchanged. One measured nuance is recorded in the verify text: 'no package fetch' holds on the package page, whose fetch effects are isAdmin-gated, while the catalog page's list fetch is not admin-gated. The member persona now reads invite + sign-up (stock invite_only)",
+          "ref": "#21797"
         }
       ]
     },
@@ -1976,12 +1983,12 @@
       "title": "Docs portal render: /docs lists the installed corpus, a doc body renders with working intra-corpus links, a flat-doc URL redirects to its canonical in-book path, the per-app index scopes to one package, and a lesser persona's rendered tree equals the API's pruned subset — never a blank region",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a plain member (fresh runtime sign-up — member_default)"
+        "a plain member (invite + sign-up — the stock auth posture is invite_only, so a self-service sign-up is refused; member_default)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -1997,7 +2004,7 @@
         "open a doc through the tree (BookSidebar → /docs/<book-slug>/<name>): the body renders; click an intra-corpus cross-reference — it resolves inside the portal viewer, not to a 404 or an external route",
         "flat-doc permalink: navigate to /docs/<doc-name> (one segment, not a book slug) — DocsSlug redirects to the canonical /docs/<home-book>/<name> (every doc has a home book; identity stays single-coordinate per ADR-0046 §4/§6)",
         "app-scoped index: open /apps/<packageId>/docs — AppDocsIndex lists ONLY that package's docs (grouping derives the package from the name's namespace prefix, doc-groups.ts); open one through it (/apps/<packageId>/docs/<name>)",
-        "as the plain member: the sidebar Documentation entry is PRESENT (it lives in the base home items, visible to all users, not the admin cluster — UnifiedSidebar); open /docs and capture the rendered tree",
+        "as the plain member: open the top-bar Help menu (the '?' button, aria-label 'Help & Documentation' — AppHeader) and confirm it offers 'All documentation' (→ /docs). This menu is the documentation entry every persona has: /home has no sidebar for anyone (HomeLayout deliberately omits it), and UnifiedSidebar — whose home navigation carries a Documentation item — is mounted only inside ConsoleLayout, which sets the app context. Follow the entry to /docs and capture the rendered tree",
         "UI-mirror diff: fetch the book tree(s) via the API as the SAME member and diff the member's RENDERED entries against the API's pruned subset — equal sets; then open every entry the member's tree offers: each resolves, none errors (the UI half of platform-core.docs-audience-gate clause 3 — a nav entry that refuses on click is the exact defect the per-entry filter exists to prevent)",
         "screenshot-first throughout: any empty region is re-checked on a settled reload before being read as missing"
       ],
@@ -2027,10 +2034,10 @@
           "evidence": "the listing diff + the opened doc"
         },
         {
-          "clause": "the Documentation entry is visible to ALL personas (base home nav, not the admin cluster), and the lesser persona's rendered tree equals the API's pruned subset for that persona with every offered entry resolving — the UI mirrors the server's audience gate, neither wider nor narrower",
+          "clause": "the Documentation entry (top-bar Help menu -> All documentation -> /docs) is offered to every persona, and the member's rendered /docs tree equals the member's API-pruned subset with every entry opening without 401/403.",
           "oracle": "dom",
-          "verify": "the member's sidebar shows the entry; the member's rendered-tree vs member-API diff is empty; every member-visible entry opens without a 401/403 (run in the member's own session — auth-state-leak)",
-          "evidence": "member sidebar screenshot + the equal-set diff + per-entry open statuses"
+          "verify": "the member's opened Help menu (screenshot first) offers All documentation and it navigates to /docs; the member's rendered-tree vs member-API diff is empty; every member-visible entry opens without a 401/403 (run in the member's own session — auth-state-leak)",
+          "evidence": "member Help-menu screenshot + the equal-set diff + per-entry open statuses"
         },
         {
           "clause": "no blank region anywhere in the portal walk: index, book landing, reader and app-scoped index each render content or a NAMED empty state",
@@ -2050,7 +2057,7 @@
         "objectui apps/console/src/App.tsx (/docs → DocsLayout with index/:slug/:slug/:name children) + AppContent.tsx,176-185 (app-scoped /apps/:packageId/docs — AppDocsIndex + the same DocsLayout children)",
         "objectui apps/console/src/pages/{DocsLayout,DocsIndex,DocsSlug,BookSidebar,AppDocsIndex}.tsx (DocsSlug: a non-book segment is a flat doc name, redirected to /docs/<home-book>/<name>)",
         "objectui apps/console/src/pages/doc-groups.ts (grouping by namespace prefix — the package is derived from the doc name, ADR-0046)",
-        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (the Documentation entry in the BASE home items — visible to all users by design, with the comment saying so)",
+        "objectui packages/app-shell/src/layout/AppHeader.tsx (the Help & Documentation menu: 'All documentation' → /docs for every persona, plus a contextual \"This app's docs\" entry when the current app ships docs) + packages/app-shell/src/console/home/HomeLayout.tsx (/home deliberately omits the sidebar). UnifiedSidebar's home navigation also lists Documentation, but it renders only inside ConsoleLayout, which sets the app context, so it is not the entry this item scores",
         "ADR-0046 §6 (documentation spine; §6.2.1 derived membership; §6.4 implicit per-package book), ADR-0048 (package container docs)",
         "platform-core.docs-audience-gate (the API-side gate this item's clause 4 mirrors — its clause 3 is the server half of the same contract)"
       ],
@@ -2060,6 +2067,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep from a two-angle hit (console-UI + built-in-apps): the docs PORTAL UI had no item while its API-side gate (docs-audience-gate, v14.1) did. The load-bearing clause is the UI mirror: the lesser persona's rendered tree must equal the API's pruned subset and every offered entry must resolve — asserting the portal neither widens nor breaks the server's audience gate. since v16 by judgment: the portal predates the v17 window (the DocsLayout book-slug reshape is newer than the portal itself)",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-05",
+          "change": "clause 5, step 5 and the member persona re-pointed (assertion defect, #21782 VF4). The clause sought the Documentation entry in a /home sidebar that no persona has: HomeLayout deliberately omits the sidebar, and UnifiedSidebar's home navigation renders only inside ConsoleLayout, which forces the app context. The entry every persona has is the top-bar Help menu → All documentation → /docs (AppHeader). The verifier's wording is used for the clause. The member persona now reads invite + sign-up, because the stock auth posture is invite_only. Re-read at objectui 9dfaca6543: unchanged from the run's 2e818d0b51ec",
+          "ref": "#21797"
         }
       ]
     },
@@ -2242,76 +2255,68 @@
     },
     {
       "id": "platform-core.home-admin-cluster-links",
-      "title": "Home admin cluster + System hub: every shell-hard-coded Administration link and every hub card resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), the five legacy system/* URLs redirect to their canonical object routes, hub counts reconcile against the API with honest error states, and a non-admin's home nav is Home + Documentation only",
+      "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect to their canonical object routes, and a member's shell offers no Administration entry",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123 — isWorkspaceAdmin)",
-        "a plain member (fresh runtime sign-up — member_default)"
+        "a plain member (invite + sign-up — the stock auth posture is invite_only, so a self-service sign-up is refused; member_default)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a stock boot — the cluster and hub are shell-hard-coded (not metadata), so no showcase-specific fixture; the hub counts need the seeded sys_user/sys_organization/sys_position/sys_permission_set/sys_audit_log rows any --seed-admin boot provides"
+          "a stock boot — the Administration target list is shell-hard-coded (not metadata), so no showcase-specific fixture; the settings hub lists the settings manifests the server returns for the signed-in user"
         ],
         "knownGaps": [
-          "the pinning suites (objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx and AppContent.legacyRedirects.test.tsx) live entirely in the objectui repo — not runnable from this checkout (the standing 23-item fact); the browser walk below is the from-here oracle"
+          "the pinning suites (objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx and AppContent.legacyRedirects.test.tsx) live entirely in the objectui repo — not runnable from this checkout (the standing 23-item fact); the browser walk below is the from-here oracle",
+          "the Administration cluster has NO rendering surface at the pin: UnifiedSidebar's home navigation (base Home + Documentation, and the isWorkspaceAdmin-gated sys-administration group) is mounted only inside ConsoleLayout, which sets the app context, and /home renders HomeLayout, which deliberately omits the sidebar. So the cluster's 9 entries are walked as target URLs (the same URLs other producers emit — the zero-app empty state's System Settings button, the home Quick Action, legacy bookmarks), never as clicks; a run that hunts for the cluster in a sidebar reads its absence as a defect (#21782 VF4)"
         ]
       },
       "steps": [
-        "as admin, open /home: the Administration cluster renders. Enumerate its entries against the source list — sys-settings → /apps/setup/system, sys-apps → …/system/apps, sys-marketplace → …/system/marketplace, sys-objects → /apps/setup/metadata/object, sys-datasources → /apps/setup/metadata/datasource, sys-users → …/system/users, sys-orgs → …/system/organizations, sys-roles → …/system/roles, sys-config → …/system/settings (9 entries; the two metadata-admin ones deliberately point at the canonical /metadata/:type routes, #3660/#3739)",
-        "click EVERY cluster entry: each lands on a real page — screenshot first, then assert no RouteNotFound, no 'No Apps Configured' empty state, and above all no RecordDetailView rendering for an object literally named 'system' (the historical failure: short words fell through to the record-id tail — objectui#3655's two measured landings)",
-        "open the System hub (/apps/setup/system): every card renders; click every card destination the same way. ⚠️ ONE carve-out: the 'AI Approvals' card is defect K2's subject — on an agent-less boot it renders ungated and its page polls a dead 501 endpoint; ai.console-ai-surface-gating owns that card's expected-fail scoring, so THIS walk records the observation and defers that single card's verdict there (never double-file K2)",
+        "as admin, enumerate the Administration target list from source — UnifiedSidebar's adminItems: sys-settings → /apps/setup/system, sys-apps → …/system/apps, sys-marketplace → …/system/marketplace, sys-objects → /apps/setup/metadata/object, sys-datasources → /apps/setup/metadata/datasource, sys-users → …/system/users, sys-orgs → …/system/organizations, sys-roles → …/system/roles, sys-config → …/system/settings (9 entries; the two metadata-admin ones deliberately point at the canonical /metadata/:type routes, #3660/#3739). No sidebar renders this list at the pin (see knownGaps), so it is walked as URLs",
+        "navigate to EVERY target URL directly: each lands on a real page — screenshot first, then assert no RouteNotFound, no 'No Apps Configured' empty state, and above all no RecordDetailView rendering for an object literally named 'system' (the historical failure: short words fell through to the record-id tail — objectui#3655's two measured landings)",
+        "open /apps/setup/system: it redirects in ONE hop to /apps/setup/system/settings (SystemLandingRedirect — the SystemHubPage card wall, its cards and count badges, was retired by objectui#3743, carried out in objectui#10507), where SettingsHub lists the settings manifests the server returns for this user; click every hub entry the same way. The ungated bare system/ai-approvals route is ai.console-ai-surface-gating's subject, not this walk's",
         "legacy redirects: navigate directly to /apps/setup/system/users, …/organizations, …/roles, …/positions, …/permissions — each redirects to its canonical object route per the #3655 map (users→sys_user, organizations→sys_organization list, roles→sys_position [ADR-0090 D3 rename — 'Roles' and 'Positions' are one surface], positions→sys_position, permissions→sys_permission_set) and the landing page renders",
-        "counts reconcile: read the hub's five badges (Users / Organizations / Positions / Permission Sets / Audit Logs) and diff each against a direct API count of sys_user / sys_organization / sys_position / sys_permission_set / sys_audit_log AS THE SAME ADMIN",
-        "honest failure shape: confirm the badge semantics — a 404'd object renders 0; a non-404 failure (denied/offline) renders NO badge rather than a confident 0 (objectui#3679: null omits the badge; per-call, so one denied object costs only its own number)",
-        "as the plain member, open /home: the nav is Home + Documentation ONLY — no Administration cluster (isWorkspaceAdmin gate); the server-side half (Setup app refusal for the member) is platform-core.builtin-apps-nav-render clause 2/3 — cross-reference, do not re-score here"
+        "as the plain member, open /home and one app: the shell offers no Administration entry anywhere — /home has no sidebar (HomeLayout omits it) and the top-bar Help menu offers documentation only; the server-side half (Setup app refusal for the member) is platform-core.builtin-apps-nav-render clause 2/3 — cross-reference, do not re-score here"
       ],
       "acceptance": [
         {
-          "clause": "all 9 Administration entries resolve to real pages: no RouteNotFound, no dead fall-through to a RecordDetailView for 'system', no 'No Apps Configured' dead end (the #3590 fresh-env case: sys-settings targets /apps/setup/system, which resolves in BOTH the no-app and app-bearing branches)",
+          "clause": "all 9 Administration target URLs (UnifiedSidebar adminItems — a source list with no rendering surface at the pin, walked as URLs) resolve to real pages: no RouteNotFound, no dead fall-through to a RecordDetailView for 'system', no 'No Apps Configured' dead end (the #3590 fresh-env case: sys-settings targets /apps/setup/system, which resolves in BOTH the no-app and app-bearing branches)",
           "oracle": "screenshot",
-          "verify": "per-entry screenshot-then-DOM walk; the entry list diffed against UnifiedSidebar's adminItems source so a grown/renamed entry is caught, not silently outside the walk",
-          "evidence": "the 9 per-entry screenshots + the entry-list diff"
+          "verify": "per-URL screenshot-then-DOM walk; the URL list diffed against UnifiedSidebar's adminItems source so a grown/renamed entry is caught, not silently outside the walk",
+          "evidence": "the 9 per-URL screenshots + the entry-list diff"
         },
         {
-          "clause": "every System hub card destination resolves the same way — these exact links dead-ended twice before (objectui#3655 history), which is why the whole surface is walked, not sampled; the 'AI Approvals' card alone is excluded from this clause's verdict (defect K2, scored by ai.console-ai-surface-gating)",
+          "clause": "every Settings-hub entry reached from /apps/:app/system (which redirects in one hop to /system/settings) resolves to a live page.",
           "oracle": "screenshot",
-          "verify": "per-card walk of SystemHubPage's destinations, the AI Approvals card recorded-not-scored",
-          "evidence": "the per-card verdict table"
+          "verify": "the navigation trace for /apps/setup/system shows the single redirect to …/system/settings; then a per-entry walk of SettingsHub's entries, screenshot before DOM",
+          "evidence": "the redirect trace + the per-entry verdict table"
         },
         {
-          "clause": "the five legacy system/* URLs redirect per the #3655 map and land on rendering pages — bookmarks and the hub's own emitted URLs keep working; roles lands on sys_position (the ADR-0090 rename, one surface under two vocabularies), permissions on sys_permission_set (decision A: rules-and-assignments is layer 2)",
+          "clause": "the five legacy system/* URLs redirect per the #3655 map and land on rendering pages — bookmarks and the URLs the retired hub once emitted keep working; roles lands on sys_position (the ADR-0090 rename, one surface under two vocabularies), permissions on sys_permission_set (decision A: rules-and-assignments is layer 2)",
           "oracle": "network",
           "verify": "the navigation trace per legacy URL shows the redirect target object route; the landing renders",
           "evidence": "the five redirect traces + landings"
         },
         {
-          "clause": "hub counts reconcile against the API for the same principal, and the failure shape is honest: 404 → 0, any other failure → NO badge (null), never a confident wrong number — per object, so one denial costs one badge",
-          "oracle": "api",
-          "verify": "badge-vs-API diff for the five counts; if a count cannot be provoked into failing, score the honest-failure half from the rendered state only when a real failure occurs and record none-encountered otherwise",
-          "evidence": "the count table + the failure-shape note"
-        },
-        {
-          "clause": "the member's home nav is Home + Documentation only — the Administration cluster is admin-gated in the shell, and the server refusal behind it is already proven by the builtin-apps item (both-sides split across the two items, neither double-scored)",
+          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; Help menu offers Documentation); the server refusal is proven by the builtin-apps item.",
           "oracle": "dom",
-          "verify": "the member's rendered home nav (own session — wrong-persona) contains exactly the two base entries",
-          "evidence": "the member nav screenshot + DOM excerpt"
+          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries only",
+          "evidence": "the member screenshots + DOM excerpt"
         }
       ],
       "negative": [
-        "a cluster link or hub card landing on RouteNotFound or a RecordDetailView for 'system' is the exact regression class this item pins (it shipped twice) — FAIL and extract",
+        "an Administration target URL or settings-hub entry landing on RouteNotFound or a RecordDetailView for 'system' is the exact regression class this item pins (it shipped twice) — FAIL and extract",
         "a legacy system/* URL answering 404 instead of redirecting breaks every bookmark from the pre-slimming console — FAIL",
-        "a hub badge rendering 0 for a DENIED read (rather than omitting the badge) is the #3679 conflation — an administrator cannot tell 'none' from 'unknown' — FAIL of the honesty clause",
-        "the Administration cluster rendering for a non-admin is a client-courtesy leak; capture it AND check the server half (the member still cannot obtain setup) before deciding severity"
+        "an Administration entry rendering anywhere in a non-admin's shell is a client-courtesy leak; capture it AND check the server half (the member still cannot obtain setup) before deciding severity"
       ],
       "traps": ["wrong-persona", "hydration-race", "stale-console-bundle"],
       "source": [
-        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (homeNavigation: base Home + Documentation for everyone; the isWorkspaceAdmin-gated adminItems cluster with the #3590 /system targeting note and the #3660/#3739 canonical-metadata-route notes)",
-        "objectui apps/console/src/pages/system/SystemHubPage.tsx (the five counts verified against the framework registry; sys_permission_set decided by #3655; null-on-error / 0-on-404 badge semantics, #3670/#3679)",
+        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (homeNavigation: base Home + Documentation, and the isWorkspaceAdmin-gated adminItems cluster with the #3590 /system targeting note and the #3660/#3739 canonical-metadata-route notes — the target list this item walks; mounted only by ConsoleLayout, which sets the app context) + packages/app-shell/src/console/home/HomeLayout.tsx (/home deliberately omits the sidebar)",
+        "objectui apps/console/src/AppContent.tsx (SystemLandingRedirect: the bare …/system landing forwards to …/system/settings; SystemHubPage — its cards and count badges — retired by objectui#3743, carried out in objectui#10507) + apps/console/src/pages/settings/SettingsHub.tsx (the registry-driven hub: the settings manifests the server returns for this user)",
         "objectui apps/console/src/AppContent.tsx (SystemObjectRedirect — the five legacy URLs, the #3655 object map with the ADR-0090 roles→sys_position note, and the measured pre-fix landings) + the exported systemRoutes fragment",
         "objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx + AppContent.legacyRedirects.test.tsx (the objectui-side pins — see knownGaps)",
         "platform-core.builtin-apps-nav-render (owns the server-side Setup refusal for the member — this item owns the shell-hard-coded home cluster, which that item does not touch)"
@@ -2322,6 +2327,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (built-in-apps angle): the shell-hard-coded home Administration cluster and SystemHubPage sit OUTSIDE every merged-nav walk (builtin-apps-nav-render walks meta/app payloads; these links are React source, not metadata), and their history shows exactly this class dead-ending twice (objectui#3655). Grounding refined the register: the cluster is 9 entries (the register named 7 — Object Manager and Datasources are also in the source list), and the hub's five counts carry the #3679 null-vs-0 honesty semantics now pinned as their own clause",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-05",
+          "change": "whole-item revision for three clauses #21782 failed (VF4). Clause 2 (stale): objectui 9eea12a2b (objectui#10507, fixing objectui#3743) deleted SystemHubPage before 17.6.0, and /apps/:app/system is now SystemLandingRedirect, one hop to /system/settings, so the clause walks the settings hub (verifier's wording). Clause 4 (retired): the hub count badges went with SystemHubPage, so the clause is dropped, with its badge-honesty negative and the two badge steps. Clause 5 (assertion defect): no /home sidebar exists for any persona, because HomeLayout omits it and UnifiedSidebar is mounted only by ConsoleLayout, which forces the app context; the member clause now asserts that no Administration entry is offered anywhere (verifier's wording). The verifier also found that the Administration cluster itself has no stable rendering surface, so steps 1-3 and 7, clause 1 and negatives 1 and 4 (now 1 and 3) walk the 9 adminItems as target URLs. A knownGap records why. The member persona now reads invite + sign-up (stock invite_only). Re-read at objectui 9dfaca6543: unchanged from the run's 2e818d0b51ec",
+          "ref": "#21797"
         }
       ]
     },

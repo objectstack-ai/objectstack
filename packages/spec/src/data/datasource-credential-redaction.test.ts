@@ -67,7 +67,7 @@ describe('derivation pin: the moved module derives EXACTLY what the service-data
     expect(refusedCredentialKeys('not-a-real-driver')).toEqual([]);
   });
 
-  it('full redactable set, byte-equal per driver (the #8300 drift guard)', () => {
+  it('full redactable set, byte-equal per driver (the drift guard on the one credential-key definition)', () => {
     // These literals ARE the pin: they reproduce, key for key and in order,
     // what `service-datasource`'s `redactableConfigKeys` answered on
     // origin/main at the move. Changing them is changing the platform's
@@ -229,7 +229,7 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
     }
   });
 
-  it('redaction preserves the USERNAME byte-for-byte — the #8876 half of the same alignment', () => {
+  it('redaction preserves the USERNAME byte-for-byte — the username half of the same alignment', () => {
     // `urlUserinfoUsername` shares the password half's boundary parse by
     // construction; this pins the redactor to the same grammar from the other
     // side: stripping the password must never move or rewrite the username the
@@ -240,7 +240,7 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
   });
 });
 
-describe('redactUrlCredentialQueryParams — the #8337 read half', () => {
+describe('redactUrlCredentialQueryParams — the read half: a credential query parameter is never served back', () => {
   it('strips the credential pair whole and serves the parameter-absent shape', () => {
     expect(redactUrlCredentialQueryParams('libsql://x.turso.io?authToken=eyJhbGci.x.y'))
       .toBe('libsql://x.turso.io');
@@ -294,7 +294,7 @@ describe('write-door alignment, query half: redactUrlCredentials removes exactly
     }
   });
 
-  it('redactDatasourceConfig serves a stored `?authToken=` row parameter-free, naming `url` (the #8337 served-back-cleartext regression)', () => {
+  it('redactDatasourceConfig serves a stored `?authToken=` row parameter-free, naming `url` (the served-back-cleartext regression)', () => {
     const { config, redactedKeys } = redactDatasourceConfig('turso', {
       url: 'libsql://x.turso.io?authToken=eyJhbGci.x.y',
       syncUrl: 'libsql://x.turso.io?tls=1&authToken=eyJhbGci.x.y',
@@ -315,7 +315,7 @@ describe('write-door alignment, query half: redactUrlCredentials removes exactly
   });
 });
 
-describe('passthrough secret redaction (#9040) — the nested spellings the key-name scrub cannot see', () => {
+describe('passthrough secret redaction — the nested spellings the key-name scrub cannot see', () => {
   const STORED = {
     url: 'mongodb://app@mongo.internal:27017/events',
     options: {
@@ -335,7 +335,7 @@ describe('passthrough secret redaction (#9040) — the nested spellings the key-
     expect(redactedKeys).toEqual(['options.auth.password']);
   });
 
-  it('scrubs a stored legacy `driver: "mongo"` row identically — aliases resolve (#6345)', () => {
+  it('scrubs a stored legacy `driver: "mongo"` row identically — aliases resolve', () => {
     const { redactedKeys } = redactDatasourceConfig('mongo', STORED);
     expect(redactedKeys).toEqual(['options.auth.password']);
   });

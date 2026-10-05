@@ -194,7 +194,7 @@ describe('DataEngineUpdateOptionsSchema', () => {
     expect(options).toBeDefined();
   });
 
-  it('REJECTS the retired `upsert` flag, with the fix in the message (#8057)', () => {
+  it('REJECTS the retired `upsert` flag, with the fix in the message', () => {
     // Tombstoned, not deleted: the schema is not `.strict()`, so a plain
     // deletion would silently strip the key — the exact accepted-and-dropped
     // silence #8057 removes. `retiredKey()` makes the removal audible.
@@ -389,7 +389,7 @@ describe('EngineQueryOptionsSchema', () => {
 
   // ── `search`: both spellings, canonical one first (#7178) ────────────
 
-  it('accepts the BARE query string — the canonical ADR-0061 D1 spelling (#7178)', () => {
+  it('accepts the BARE query string — the canonical ADR-0061 D1 spelling', () => {
     // This is the pin that was RED before #7178: the schema declared only the
     // structured form, so the spelling the executor actually serves, every
     // surface sends, and `BaseQuerySchema.search` already accepts was rejected
@@ -398,7 +398,7 @@ describe('EngineQueryOptionsSchema', () => {
     expect(options.search).toBe('acme corp');
   });
 
-  it('still accepts the structured FullTextSearch form — the Tier-2 knobs (#7178)', () => {
+  it('still accepts the structured FullTextSearch form — the Tier-2 knobs', () => {
     const options = EngineQueryOptionsSchema.parse({
       search: { query: 'acme corp', fields: ['name', 'industry'] },
     });
@@ -407,7 +407,7 @@ describe('EngineQueryOptionsSchema', () => {
     expect((options.search as { fields?: string[] }).fields).toEqual(['name', 'industry']);
   });
 
-  it('accepts search alongside searchFields, in both spellings (#7178)', () => {
+  it('accepts search alongside searchFields, in both spellings', () => {
     expect(EngineQueryOptionsSchema.parse({
       search: 'acme', searchFields: ['name'],
     }).searchFields).toEqual(['name']);
@@ -416,14 +416,14 @@ describe('EngineQueryOptionsSchema', () => {
     }).searchFields).toEqual(['name']);
   });
 
-  it('rejects a search that is neither a string nor a FullTextSearch (#7178)', () => {
+  it('rejects a search that is neither a string nor a FullTextSearch', () => {
     // The union widens the accept face by exactly one spelling — it does not
     // open the key to anything.
     expect(() => EngineQueryOptionsSchema.parse({ search: 42 })).toThrow();
     expect(() => EngineQueryOptionsSchema.parse({ search: { fields: ['name'] } })).toThrow();
   });
 
-  it('matches BaseQuerySchema.search — the two sibling schemas agree (#7178)', () => {
+  it('matches BaseQuerySchema.search — the two sibling schemas agree', () => {
     // The whole point of the repair: what QuerySchema accepts for `search`,
     // the engine options schema accepts too. `DriverQuery` (= Omit<QueryAST,
     // 'object'>) is assignable to `EngineQueryOptionsParsed` again because of
@@ -434,7 +434,7 @@ describe('EngineQueryOptionsSchema', () => {
     }
   });
 
-  it('rejects the removed cursor/distinct keys with the query.* prescriptions (#4286)', () => {
+  it('rejects the removed cursor/distinct keys with the query.* prescriptions', () => {
     expect(() => EngineQueryOptionsSchema.parse({ cursor: { id: 'x' } }))
       .toThrow(/query\.cursor.*removed/s);
     expect(() => EngineQueryOptionsSchema.parse({ distinct: true }))
@@ -460,7 +460,7 @@ describe('EngineUpdateOptionsSchema', () => {
     expect(options.multi).toBe(true);
   });
 
-  it('REJECTS the retired `upsert` flag with the same #8057 tombstone as the legacy schema', () => {
+  it('REJECTS the retired `upsert` flag with the same tombstone as the legacy schema', () => {
     expect(() =>
       EngineUpdateOptionsSchema.parse({
         where: { status: 'inactive' },
@@ -507,7 +507,7 @@ describe('EngineAggregateOptionsSchema', () => {
   // and the credential-aggregation guard walks it); the declaration used to
   // say `string[]`, so every correct caller had to cast. These pin the
   // declaration to the enforced contract, in both directions.
-  it('accepts structured { field, dateGranularity, alias } groupBy buckets (#8032)', () => {
+  it('accepts structured { field, dateGranularity, alias } groupBy buckets', () => {
     const result = EngineAggregateOptionsSchema.safeParse({
       groupBy: ['region', { field: 'closed_at', dateGranularity: 'quarter' }, { field: 'owner_id', alias: 'owner' }],
       aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
@@ -624,7 +624,7 @@ describe('DataEngineFindRequestSchema', () => {
     expect(request.query?.where).toBeDefined();
   });
 
-  it('folds legacy params into their canonical keys and drops the aliases (#3795, #4346)', () => {
+  it('folds legacy params into their canonical keys and drops the aliases', () => {
     const request = DataEngineFindRequestSchema.parse({
       method: 'find',
       object: 'account',
@@ -651,7 +651,7 @@ describe('DataEngineFindRequestSchema', () => {
     }
   });
 
-  it('lowers the record sort spellings while folding (#3795)', () => {
+  it('lowers the record sort spellings while folding', () => {
     const named = DataEngineFindRequestSchema.parse({
       method: 'find',
       object: 'account',
@@ -670,7 +670,7 @@ describe('DataEngineFindRequestSchema', () => {
     ]);
   });
 
-  it('tolerates a redundant identical spelling, refuses a conflicting one (#3795)', () => {
+  it('tolerates a redundant identical spelling, refuses a conflicting one', () => {
     const redundant = DataEngineFindRequestSchema.parse({
       method: 'find',
       object: 'account',
@@ -690,7 +690,7 @@ describe('DataEngineFindRequestSchema', () => {
     }
   });
 
-  it('refuses a conflicting value on every alias pair (#3795, #4346)', () => {
+  it('refuses a conflicting value on every alias pair', () => {
     const cases: Array<Record<string, unknown>> = [
       { filter: { a: 1 }, where: { b: 2 } },
       { select: ['a'], fields: ['b'] },
@@ -719,7 +719,7 @@ describe('DataEngineFindOneRequestSchema', () => {
     expect(request.method).toBe('findOne');
   });
 
-  it('folds legacy params into canonical keys (backward compat input, #3795)', () => {
+  it('folds legacy params into canonical keys (backward compat input)', () => {
     const request = DataEngineFindOneRequestSchema.parse({
       method: 'findOne',
       object: 'account',
@@ -786,7 +786,7 @@ describe('DataEngineUpdateRequestSchema', () => {
     expect(request.id).toBe('123');
   });
 
-  it('folds a legacy filter into where (backward compat input, #3795)', () => {
+  it('folds a legacy filter into where (backward compat input)', () => {
     const request = DataEngineUpdateRequestSchema.parse({
       method: 'update',
       object: 'account',
@@ -829,7 +829,7 @@ describe('DataEngineDeleteRequestSchema', () => {
     expect(request.id).toBe('123');
   });
 
-  it('folds a legacy filter into where (backward compat input, #3795)', () => {
+  it('folds a legacy filter into where (backward compat input)', () => {
     const request = DataEngineDeleteRequestSchema.parse({
       method: 'delete',
       object: 'account',
@@ -881,7 +881,7 @@ describe('DataEngineCountRequestSchema', () => {
     expect(request.query?.where).toBeDefined();
   });
 
-  it('folds a legacy filter into where (backward compat input, #3795)', () => {
+  it('folds a legacy filter into where (backward compat input)', () => {
     const request = DataEngineCountRequestSchema.parse({
       method: 'count',
       object: 'account',
@@ -894,7 +894,7 @@ describe('DataEngineCountRequestSchema', () => {
     expect(request.query && 'filter' in request.query).toBe(false);
   });
 
-  it('refuses filter + where with different values (#3795)', () => {
+  it('refuses filter + where with different values', () => {
     const result = DataEngineCountRequestSchema.safeParse({
       method: 'count',
       object: 'account',
@@ -1182,7 +1182,7 @@ describe('Integration Tests', () => {
 
 });
 
-describe('DroppedFieldsEventSchema.reason (#3407, widened by #6437)', () => {
+describe('DroppedFieldsEventSchema.reason — why a write dropped submitted fields, widened past the readonly pair', () => {
   // The ACCEPTANCE surface: this enum is what validates on the protocol
   // responses that carry `droppedFields` (`api/batch.zod.ts`,
   // `api/protocol.zod.ts`), so the accepted set is the contract, not a label.
@@ -1195,7 +1195,7 @@ describe('DroppedFieldsEventSchema.reason (#3407, widened by #6437)', () => {
     }
   });
 
-  it('primary_key is the value the engine reports for the ruled-non-id strip (#6262/#6433, #6435)', () => {
+  it('primary_key is the value the engine reports when it strips a payload id it ruled is not an identifier', () => {
     const parsed = DroppedFieldsEventSchema.parse({
       object: 'task', fields: ['id'], reason: 'primary_key',
     });
