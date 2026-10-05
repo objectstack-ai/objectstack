@@ -654,7 +654,12 @@ describe('[ADR-0106] the shared contract table, driven through the bare projecti
     for (const testCase of OBJECT_SCHEMA_MASK_CASES.filter((c) => c.expect.kind === 'fields')) {
         it(testCase.id, () => {
             const readable = testCase.readable as readonly string[];
-            const { document } = applyObjectSchemaMask(FLS_CONTRACT_OBJECT, project([...readable]));
+            // Related as an exit relates it: the contract's double answers the
+            // same set for every object, `contact` included (#21884).
+            const posture: ObjectSchemaMaskPosture = {
+                kind: 'project', readable: new Set(readable), related: new Map([['contact', new Set(readable)]]),
+            };
+            const { document } = applyObjectSchemaMask(FLS_CONTRACT_OBJECT, posture);
             assertObjectSchemaMaskCase('applyObjectSchemaMask', testCase, { kind: 'document', document });
         });
     }
