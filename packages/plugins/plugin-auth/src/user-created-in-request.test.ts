@@ -77,6 +77,16 @@ describe('the creating request is recognised from the adapter create result (ADR
     expect(userReads).toHaveLength(0);
   });
 
+  it('a request that created one user does not settle a DIFFERENT pre-existing member-less user', async () => {
+    const { engine, hooks, createUser } = await setup();
+    engine.tables.sys_user.push({ id: 'usr_preexisting', email: 'pre@example.com' });
+    const request = {};
+    await createUser(request);
+    const result = await hooks.session.create.before({ userId: 'usr_preexisting' }, request);
+    expect(result?.data?.activeOrganizationId).toBeUndefined();
+    expect(engine.tables.sys_member).toHaveLength(0);
+  });
+
   it('CONTROL: the same user signing in from another request is not settled', async () => {
     const { engine, hooks, createUser } = await setup();
     const created = await createUser({});

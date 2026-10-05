@@ -41,10 +41,7 @@ import {
   DEFAULT_AUTH_BASE_PATH,
   type AuthManagerOptions,
 } from './auth-manager.js';
-import {
-  ensureDefaultOrganization,
-  isDefaultOrganizationBootstrapTrigger,
-} from './ensure-default-organization.js';
+import { isDefaultOrganizationBootstrapTrigger } from './ensure-default-organization.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
@@ -54,13 +51,8 @@ import {
   MEMBERSHIP_POLICIES,
   type MembershipPolicy,
 } from './reconcile-membership.js';
-import {
-  buildLedgerDecisionRecord,
-  DEFAULT_ORG_OWNER_BIND_MIGRATION_ID,
-  readLedgerDecision,
-  recordLedgerDecision,
-  runOneTimeMembershipBackfill,
-} from './membership-backfill-ledger.js';
+import { runOneTimeMembershipBackfill } from './membership-backfill-ledger.js';
+import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
 import {
   registerIdentityWriteGuard,
   registerManagedUpdateWhitelist,
@@ -1155,44 +1147,17 @@ export class AuthPlugin implements Plugin {
     // whose membership was already decided at their creation.
     let runBackfillOnDefaultOrg: ((source: string) => Promise<void>) | undefined;
     if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
-      // ADR-0093 D7 — the platform admin's owner bind is decided ONCE, by the
-      // bootstrap that first resolves it, and recorded in the `sys_migration`
-      // ledger; after that this hook binds nobody, so a later removal of the
-      // admin's membership stands. Without a readable ledger the bind happens
-      // only on the call that CREATES the default organization (fresh
-      // installs keep working; an existing organization is never re-bound).
-      let ownerBindDecided = false;
+      // ADR-0093 D7 — the platform admin's owner bind is decided ONCE
+      // (`default-org-bootstrap-once.ts`, the gate the walled wiring in
+      // `@objectstack/organizations` calls too): recorded in the
+      // `sys_migration` ledger and latched in-process, after which this hook
+      // still recreates a missing default organization but binds nobody.
+      const ensureOnce = createEnsureDefaultOrganizationOnce({ logger: ctx.logger });
       const runEnsure = async () => {
         try {
           const ql = ctx.getService<IDataEngine>('objectql');
           if (!ql) return;
-          if (ownerBindDecided) return;
-          const reading = await readLedgerDecision(ql, DEFAULT_ORG_OWNER_BIND_MIGRATION_ID);
-          if (reading === 'recorded') {
-            ownerBindDecided = true;
-            return;
-          }
-          const res = await ensureDefaultOrganization(ql, {
-            logger: ctx.logger,
-            bindOnlyOnCreate: reading !== 'absent',
-          });
-          // Decided: the admin was bound now, or already held a membership.
-          // `no_admin` and the two failed writes leave it open for the next pass.
-          if (reading === 'absent' && (res.memberCreated || res.reason === 'admin_already_in_org')) {
-            ownerBindDecided = await recordLedgerDecision(
-              ql,
-              buildLedgerDecisionRecord(
-                DEFAULT_ORG_OWNER_BIND_MIGRATION_ID,
-                {
-                  outcome: res.memberCreated ? 'bound' : 'admin-already-member',
-                  ...(res.defaultOrgId ? { organizationId: res.defaultOrgId } : {}),
-                },
-                new Date().toISOString(),
-              ),
-              'default organization owner bind',
-              ctx.logger,
-            );
-          }
+          const res = await ensureOnce(ql);
           if (res.defaultOrgCreated) {
             ctx.logger.info(
               `[auth] created Default Organization ${res.defaultOrgId} for the platform admin (single-org)`,
@@ -1246,8 +1211,14 @@ export class AuthPlugin implements Plugin {
       // `app:seeded` from multiple app bundles) don't race the same scan and
       // trip the (organization_id, user_id) unique index into warn noise.
       let backfillChain: Promise<void> = Promise.resolve();
+      // Latched once the one-time pass has decided in this process — read
+      // from the ledger, or carried out now. A record that failed to land
+      // ('ran-unrecorded') does not unlatch it: a second trigger in this
+      // process must not run the pass again (ADR-0093 D7).
+      let backfillDecided = false;
       const runBackfill = (source: string): Promise<void> => {
         backfillChain = backfillChain.then(async () => {
+          if (backfillDecided) return;
           try {
             // #5152 — the policy this pass runs under is a SETTING, so bind the
             // namespace before reading it. This hook is registered in `init()`
@@ -1281,6 +1252,9 @@ export class AuthPlugin implements Plugin {
               },
               ctx.logger,
             );
+            if (outcome.status === 'ran' || outcome.status === 'ran-unrecorded' || outcome.status === 'already-run') {
+              backfillDecided = true;
+            }
             const res = outcome.backfill;
             if (res && res.bound > 0) {
               ctx.logger.info(

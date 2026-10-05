@@ -158,6 +158,12 @@ export interface EnsureDefaultOrganizationOptions {
    * back a membership that was removed. Default `false`.
    */
   bindOnlyOnCreate?: boolean;
+  /**
+   * ADR-0093 D7 — `false` once the owner bind has been decided: the default
+   * organization is still (re)created when it is missing, but nobody is bound
+   * to it and no seed ownership is handed over. Default `true`.
+   */
+  bindOwner?: boolean;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -414,6 +420,11 @@ export async function ensureDefaultOrganization(
     }
     defaultOrgId = orgRow?.id ?? newOrgId;
     defaultOrgCreated = true;
+  }
+
+  if (options.bindOwner === false) {
+    // The owner bind was decided earlier (ADR-0093 D7) — never re-decided.
+    return { defaultOrgCreated, defaultOrgId, memberCreated: false, reason: 'owner_bind_decided' };
   }
 
   // 5. Bind the admin as owner.

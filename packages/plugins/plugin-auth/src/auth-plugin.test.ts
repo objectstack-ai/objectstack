@@ -1575,6 +1575,93 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_migration).toHaveLength(2);
     });
 
+    const fireBootstrapWrite = async (opCtx: any) => {
+      for (const [mw] of ql.registerMiddleware.mock.calls) {
+        await mw(opCtx, async () => {});
+      }
+    };
+
+    it('the default-org-created trigger runs the one-time pass', async () => {
+      // No platform admin at kernel:ready: no organization, the pass has no
+      // target and records nothing.
+      ql.tables.sys_user_permission_set = [];
+      ql.tables.sys_user.push({ id: 'early_u5' });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_organization).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(0);
+
+      // The admin's grant lands: the bootstrap creates the organization, and
+      // that moment runs the pass — no restart, no app:seeded.
+      ql.tables.sys_user_permission_set.push({ id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', organization_id: null });
+      await fireBootstrapWrite({ object: 'sys_user_permission_set', operation: 'insert' });
+      await vi.waitFor(() => {
+        expect(ql.tables.sys_member.find((m: any) => m.user_id === 'early_u5')).toMatchObject({ role: 'member' });
+      });
+      expect(ql.tables.sys_migration.map((r: any) => r.id).sort()).toEqual([
+        'adr-0093-default-org-owner-bind',
+        'adr-0093-membership-backfill',
+      ]);
+    });
+
+    it('unreadable ledger + an existing default organization + an unbound admin: the admin is NOT bound', async () => {
+      ql.tables.sys_organization.push({ id: 'org_existing', slug: 'default' });
+      const realFindOne = ql.findOne.getMockImplementation();
+      ql.findOne.mockImplementation(async (object: string, q: any) => {
+        if (object === 'sys_migration') throw new Error('ledger read failed');
+        return realFindOne(object, q);
+      });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.find((m: any) => m.user_id === 'admin')).toBeUndefined();
+      expect(ql.tables.sys_migration).toHaveLength(0);
+    });
+
+    it('CONTROL: unreadable ledger on a fresh install still creates the organization and binds its owner', async () => {
+      const realFindOne = ql.findOne.getMockImplementation();
+      ql.findOne.mockImplementation(async (object: string, q: any) => {
+        if (object === 'sys_migration') throw new Error('ledger read failed');
+        return realFindOne(object, q);
+      });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toEqual([expect.objectContaining({ user_id: 'admin', role: 'owner' })]);
+    });
+
+    it('a failed ledger write is latched in-process: a second trigger re-binds nobody', async () => {
+      const realInsert = ql.insert.getMockImplementation();
+      ql.insert.mockImplementation(async (object: string, data: any) => {
+        if (object === 'sys_migration') throw new Error('ledger read-only');
+        return realInsert(object, data);
+      });
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
+      expect(ql.tables.sys_migration).toHaveLength(0);
+      expect(mockContext.logger.error).toHaveBeenCalled();
+
+      // Memberships are removed, a member-less user appears, and every
+      // trigger fires again in the same process.
+      ql.tables.sys_member.length = 0;
+      ql.tables.sys_user.push({ id: 'later_u6' });
+      await fireBootstrapWrite({ object: 'sys_user', operation: 'insert' });
+      await hookCapture.trigger('app:seeded');
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
+    it('recorded owner bind + a deleted default organization: the organization is recreated, nobody is bound', async () => {
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-default-org-owner-bind');
+      ql.tables.sys_organization.length = 0;
+      ql.tables.sys_member.length = 0;
+      await fireBootstrapWrite({ object: 'sys_user', operation: 'insert' });
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
     it('once the pass is recorded, a later trigger binds nobody', async () => {
       await boot();
       // Boot: default org created, admin bound as owner, the one-time pass

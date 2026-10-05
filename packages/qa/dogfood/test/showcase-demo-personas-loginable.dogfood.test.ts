@@ -118,6 +118,18 @@ describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
     }
   });
 
+  it('each persona is created INTO the admin\'s organization — a raw-inserted user gets its membership from its creator', async () => {
+    const adminMembers = rowsOf(await ql.find('sys_member', { where: { user_id: adminId }, limit: 5, context: SYS }));
+    expect(adminMembers.length, 'the dev admin holds a membership the seed resolves its organization from').toBeGreaterThan(0);
+    const adminOrgs = adminMembers.map((m) => String(m.organization_id));
+    for (const persona of [PHONE_DEMO_USER, AUDITOR_DEMO_USER]) {
+      const members = rowsOf(await ql.find('sys_member', { where: { user_id: persona.id }, limit: 5, context: SYS }));
+      expect(members.length, `${persona.email} has an organization`).toBe(1);
+      expect(adminOrgs, `${persona.email} is a member of the admin's organization`).toContain(String(members[0]!.organization_id));
+      expect(members[0]!.role, `${persona.email} is a plain member`).toBe('member');
+    }
+  });
+
   it('each persona holds a credential account resolvable under the SAME key better-auth uses for the admin', async () => {
     const adminAccount = await credentialAccountOf(adminId);
     // The control: better-auth really does write an account of this shape for
