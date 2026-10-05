@@ -33,7 +33,9 @@ import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stam
 import {
   PLATFORM_IDP_PROVIDER_ID,
   clearUnlinkTombstone,
+  clearUserUnlinkTombstones,
   recordUnlinkTombstone,
+  type LinkingInternalAdapter,
   refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
 import type { IDataEngine } from '@objectstack/core';
@@ -1605,6 +1607,7 @@ export class AuthManager {
         validateUserInfo: async (data: any, ctx: any) =>
           (await refuseImplicitAccountLink(data, ctx, {
             requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
+            resolveAdapter: () => this.linkingAdapter(),
             logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
           })) ?? this.validateAudienceAdmission(data, ctx),
       },
@@ -4496,6 +4499,21 @@ export class AuthManager {
     return (this.config as any)?.account?.accountLinking?.requireLocalEmailVerified !== false;
   }
 
+  /**
+   * better-auth's internal adapter read off the auth instance — the store for
+   * the implicit-linking hooks when a call carries no endpoint context (a
+   * server-side `auth.api.*` call or an internal-adapter write).
+   */
+  private async linkingAdapter(): Promise<LinkingInternalAdapter | undefined> {
+    try {
+      const auth: any = await this.getOrCreateAuth();
+      const context = await auth?.$context;
+      return context?.internalAdapter as LinkingInternalAdapter | undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** OAuth providerIds that are OPERATOR-REGISTERED identity authorities (enterprise `oidcProviders`, incl. the cloud platform IdP). */
   private enterpriseOAuthProviderIds(): ReadonlySet<string> {
     const ids = new Set<string>();
@@ -7352,10 +7370,13 @@ export class AuthManager {
     // rule 3). While the record stands an implicit link is refused, so a link
     // that lands here is an explicit one. Failure to clear is functional (the
     // user sees a refusal on their next implicit sign-in and can re-link), so
-    // it is reported at `warn` and never fails the link.
+    // it is reported at `warn` and never fails the link. It runs FIRST, ahead
+    // of the identity-source stamp, so a stamp failure can never leave a
+    // landed link still refused.
+    const resolveLinkingAdapter = () => this.linkingAdapter();
     const clearUnlink = async (account: any, ctx: any) => {
       try {
-        await clearUnlinkTombstone(account, ctx);
+        await clearUnlinkTombstone(account, ctx, resolveLinkingAdapter);
       } catch (e) {
         this.config.logger?.warn?.('[auth] could not clear the unlink record after a link', {
           error: (e as Error)?.message,
@@ -7363,8 +7384,8 @@ export class AuthManager {
       }
     };
     const stamp = async (account: any, ctx: any) => {
-      await this.stampIdentitySource(account, ctx);
       await clearUnlink(account, ctx);
+      await this.stampIdentitySource(account, ctx);
     };
     const hostAccountAfter = (host as any)?.account?.create?.after;
     const after = hostAccountAfter
@@ -7375,23 +7396,49 @@ export class AuthManager {
       : stamp;
 
     // A user's unlink is recorded so the provider cannot re-link implicitly
-    // (implicit-account-linking.ts, rule 3). A record that does not land
-    // leaves the unlink answering 200 while the provider still re-links on
-    // the next sign-in — the protection the user asked for is silently
-    // absent — so the failure is reported at `error`, once per unlink.
-    const hostAccountDeleteAfter = (host as any)?.account?.delete?.after;
-    const accountDeleteAfter = async (account: any, ctx: any) => {
-      const result = hostAccountDeleteAfter ? await hostAccountDeleteAfter(account, ctx) : undefined;
+    // (implicit-account-linking.ts, rule 3) — BEFORE the account row goes, so
+    // that a record which cannot be written aborts the unlink: a throw from a
+    // `delete.before` hook propagates out of better-auth's delete, the unlink
+    // answers an error and the identity stays linked. Fail closed: an unlink
+    // that answered success without its record would leave the provider free
+    // to re-link on the next sign-in. Reported at `error`, once per refusal.
+    // A host `delete.before` runs first; its `false` (abort) is honoured
+    // before anything is recorded.
+    const hostAccountDeleteBefore = (host as any)?.account?.delete?.before;
+    const accountDeleteBefore = async (account: any, ctx: any) => {
+      const result = hostAccountDeleteBefore ? await hostAccountDeleteBefore(account, ctx) : undefined;
+      if (result === false) return false;
       try {
-        await recordUnlinkTombstone(account, ctx);
+        await recordUnlinkTombstone(account, ctx, resolveLinkingAdapter);
       } catch (e) {
         this.audienceLogError(
-          '[auth] unlink record NOT written: the provider can still re-link this account implicitly ' +
-            'on its next sign-in although the unlink answered success. Check the auth store ' +
-            '(sys_verification) is writable, then have the user unlink again.',
+          '[auth] unlink refused: its record could not be written, so the provider stays linked. ' +
+            'Without the record the provider could re-link this account implicitly on its next sign-in. ' +
+            'Check the auth store (sys_verification) is writable, then unlink again.',
           { providerId: account?.providerId, error: (e as Error)?.message },
         );
+        throw e;
       }
+      return result;
+    };
+
+    // A deleted user leaves no unlink record behind (implicit-account-linking.ts).
+    // A record that outlives its user is inert — a new user never has the
+    // deleted user's id — so a failure is reported at `warn` and never fails
+    // the deletion.
+    const clearUserUnlinks = async (user: any, ctx: any) => {
+      try {
+        await clearUserUnlinkTombstones(user, ctx, resolveLinkingAdapter);
+      } catch (e) {
+        this.config.logger?.warn?.('[auth] could not clear the unlink record of a deleted user', {
+          error: (e as Error)?.message,
+        });
+      }
+    };
+    const hostUserDeleteAfter = (host as any)?.user?.delete?.after;
+    const userDeleteAfter = async (user: any, ctx: any) => {
+      const result = hostUserDeleteAfter ? await hostUserDeleteAfter(user, ctx) : undefined;
+      await clearUserUnlinks(user, ctx);
       return result;
     };
 
@@ -7600,7 +7647,7 @@ export class AuthManager {
         },
         delete: {
           ...((host as any)?.account?.delete ?? {}),
-          after: accountDeleteAfter,
+          before: accountDeleteBefore,
         },
       },
       user: {
@@ -7609,6 +7656,10 @@ export class AuthManager {
           ...((host as any)?.user?.create ?? {}),
           before: userBefore,
           after: userAfter,
+        },
+        delete: {
+          ...((host as any)?.user?.delete ?? {}),
+          after: userDeleteAfter,
         },
       },
       session: {

@@ -28,7 +28,8 @@
  *  3. **A user's unlink is honoured.** After a user unlinks provider P, an
  *     implicit sign-in through P must not quietly re-create the link — that
  *     would make unlinking decorative. The unlink is recorded
- *     ({@link unlinkTombstoneIdentifier}); implicit linking for that
+ *     ({@link unlinkTombstoneIdentifier}, written before the unlink and
+ *     failing it closed); implicit linking for that
  *     user + provider is refused while the record stands; an EXPLICIT,
  *     session-authenticated link-social is still allowed and clears it.
  *     This applies to every provider, the cloud one included: the cloud
@@ -105,16 +106,22 @@ const UNLINK_TOMBSTONE_PREFIX = 'account-unlinked';
 /**
  * The unlink record's lifetime. A record must outlive any realistic gap
  * between an unlink and the next sign-in; it ends earlier only when the user
- * re-links explicitly. better-auth's verification store sweeps rows by
- * `expiresAt`, so the value has to be finite.
+ * re-links explicitly or the user is deleted. better-auth's verification
+ * store sweeps rows by `expiresAt`, so the value has to be finite.
  */
 const UNLINK_TOMBSTONE_TTL_MS = 100 * 365 * 24 * 60 * 60 * 1000;
 
 /** The provider that never takes part in linking (email + password). */
 const CREDENTIAL_PROVIDER_ID = 'credential';
 
-export function unlinkTombstoneIdentifier(userId: string, providerId: string): string {
-  return `${UNLINK_TOMBSTONE_PREFIX}:${userId}:${providerId}`;
+/**
+ * ONE record per user, listing every provider the user unlinked and has not
+ * re-linked explicitly. Per user rather than per user + provider so that a
+ * user's deletion can clear all of them by identifier — the verification
+ * store offers no prefix delete.
+ */
+export function unlinkTombstoneIdentifier(userId: string): string {
+  return `${UNLINK_TOMBSTONE_PREFIX}:${userId}`;
 }
 
 export interface ImplicitLinkInput {
@@ -152,26 +159,62 @@ export function linkSourceProviderId(source: unknown): string | undefined {
 }
 
 /** The slice of better-auth's `internalAdapter` this module uses. */
-interface LinkingInternalAdapter {
+export interface LinkingInternalAdapter {
   findUserById(id: string): Promise<{ emailVerified?: boolean } | null>;
-  findVerificationValue(identifier: string): Promise<unknown | null>;
+  findVerificationValue(identifier: string): Promise<{ value?: unknown } | null>;
   createVerificationValue(data: { identifier: string; value: string; expiresAt: Date }): Promise<unknown>;
   deleteVerificationByIdentifier(identifier: string): Promise<void>;
 }
 
-const internalAdapterOf = (ctx: unknown): LinkingInternalAdapter | undefined =>
+/**
+ * Resolves the store for a hook or gate call. The endpoint context carries it
+ * on a request; a server-side call (`auth.api.*` without a request, or an
+ * internal-adapter write) may carry none, so the caller supplies a fallback
+ * read off the auth instance itself.
+ */
+export type LinkingAdapterResolver = (ctx: unknown) => Promise<LinkingInternalAdapter | undefined>;
+
+export const internalAdapterOf = (ctx: unknown): LinkingInternalAdapter | undefined =>
   (ctx as { context?: { internalAdapter?: LinkingInternalAdapter } } | undefined)?.context?.internalAdapter;
 
 /**
- * Is the current request the callback of an EXPLICIT link (`/link-social`)?
- * Reads the OAuth state the callback parsed; see the module header for why
- * `link` cannot be supplied by the client.
+ * The providers a user's unlink record lists. A record whose value cannot be
+ * read is an ERROR, not an empty list: answering "nothing unlinked" for a
+ * record that exists would re-open exactly what the record closes.
  */
-async function isExplicitLinkFlow(): Promise<boolean> {
+async function readUnlinkedProviders(adapter: LinkingInternalAdapter, userId: string): Promise<string[]> {
+  const row = await adapter.findVerificationValue(unlinkTombstoneIdentifier(userId));
+  if (!row) return [];
+  const parsed = JSON.parse(String(row.value)) as { providers?: unknown };
+  if (!Array.isArray(parsed?.providers) || !parsed.providers.every((p) => typeof p === 'string')) {
+    throw new Error('unlink record: unreadable value');
+  }
+  return parsed.providers as string[];
+}
+
+async function writeUnlinkedProviders(adapter: LinkingInternalAdapter, userId: string, providers: string[]): Promise<void> {
+  const identifier = unlinkTombstoneIdentifier(userId);
+  await adapter.deleteVerificationByIdentifier(identifier);
+  if (providers.length === 0) return;
+  await adapter.createVerificationValue({
+    identifier,
+    value: JSON.stringify({ userId, providers, updatedAt: new Date().toISOString() }),
+    expiresAt: new Date(Date.now() + UNLINK_TOMBSTONE_TTL_MS),
+  });
+}
+
+/**
+ * Is the current request the callback of an EXPLICIT link (`/link-social`)
+ * for THIS user? Reads the OAuth state the callback parsed; see the module
+ * header for why `link` cannot be supplied by the client. The state's user
+ * must also be the user the link is being written for — a state naming
+ * anyone else is not an explicit link of this account.
+ */
+async function isExplicitLinkFlow(userId: string): Promise<boolean> {
   try {
     const { getOAuthState } = await import('better-auth/api');
     const state = (await getOAuthState()) as { link?: { userId?: unknown } } | null;
-    return typeof state?.link?.userId === 'string';
+    return typeof state?.link?.userId === 'string' && state.link.userId === userId;
   } catch {
     // No request state (not inside an OAuth flow) ⇒ not an explicit link.
     return false;
@@ -180,6 +223,7 @@ async function isExplicitLinkFlow(): Promise<boolean> {
 
 export interface ImplicitLinkGateOptions {
   requireLocalEmailVerified: boolean;
+  resolveAdapter?: LinkingAdapterResolver;
   logInfo?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -196,21 +240,21 @@ export async function refuseImplicitAccountLink(
   options: ImplicitLinkGateOptions,
 ): Promise<{ error: string; errorDescription: string } | undefined> {
   if (data?.source?.action !== 'link-account') return undefined;
-  if (await isExplicitLinkFlow()) return undefined;
   const providerId = linkSourceProviderId(data.source);
   const userId = typeof data.user?.id === 'string' ? (data.user.id as string) : undefined;
-  const adapter = internalAdapterOf(ctx);
+  if (userId && (await isExplicitLinkFlow(userId))) return undefined;
+  const adapter = internalAdapterOf(ctx) ?? (await options.resolveAdapter?.(ctx));
   if (!providerId || !userId || !adapter) {
     throw new Error('implicit account link: provider, user or store unavailable — refusing');
   }
-  const tombstone = await adapter.findVerificationValue(unlinkTombstoneIdentifier(userId, providerId));
+  const unlinked = await readUnlinkedProviders(adapter, userId);
   const local = await adapter.findUserById(userId);
   if (!local) throw new Error('implicit account link: local user not found — refusing');
   const verdict = decideImplicitLink({
     providerId,
     localEmailVerified: local.emailVerified === true,
     requireLocalEmailVerified: options.requireLocalEmailVerified,
-    unlinkedByUser: tombstone != null,
+    unlinkedByUser: unlinked.includes(providerId),
   });
   if (verdict.allow) return undefined;
   options.logInfo?.('[auth] implicit account link refused', { providerId, reason: verdict.reason });
@@ -224,38 +268,70 @@ export async function refuseImplicitAccountLink(
 }
 
 /**
- * `account.delete.after` half: a user's own unlink (`/unlink-account`)
- * leaves a record that keeps the provider from re-linking implicitly. Other
- * deletions (user removal, admin tooling) leave none.
+ * `account.delete.before` half: a user's own unlink (`/unlink-account`)
+ * records the provider BEFORE the account row is deleted. It throws when the
+ * record cannot be written, and a throw from a `delete.before` hook aborts
+ * the delete, so the unlink answers an error and the identity stays linked —
+ * fail closed. An unlink that succeeded without its record would leave the
+ * provider free to re-link implicitly while the user believes it gone. (A
+ * record written for a delete that then fails is harmless: the record is read
+ * only when NO account for the provider is linked.) Other deletions (user
+ * removal, admin tooling) record nothing.
+ *
+ * The record lives in better-auth's verification store. On a deployment that
+ * configures a `secondaryStorage` without `verification.storeInDatabase`,
+ * that store is the secondary storage: the record then lasts only as long as
+ * the cache keeps it, and an evicted record re-opens implicit linking for
+ * that provider. ObjectStack wires no `secondaryStorage`, so the record is a
+ * database row.
  */
-export async function recordUnlinkTombstone(account: unknown, ctx: unknown): Promise<void> {
+export async function recordUnlinkTombstone(
+  account: unknown,
+  ctx: unknown,
+  resolveAdapter?: LinkingAdapterResolver,
+): Promise<void> {
   const a = account as { userId?: unknown; providerId?: unknown } | null;
   const path = (ctx as { path?: unknown } | undefined)?.path;
   if (path !== '/unlink-account') return;
   if (typeof a?.userId !== 'string' || typeof a?.providerId !== 'string') return;
   if (a.providerId === CREDENTIAL_PROVIDER_ID) return;
-  const adapter = internalAdapterOf(ctx);
+  const adapter = internalAdapterOf(ctx) ?? (await resolveAdapter?.(ctx));
   if (!adapter) throw new Error('unlink record: store unavailable');
-  const identifier = unlinkTombstoneIdentifier(a.userId, a.providerId);
-  await adapter.deleteVerificationByIdentifier(identifier);
-  await adapter.createVerificationValue({
-    identifier,
-    value: JSON.stringify({ userId: a.userId, providerId: a.providerId, unlinkedAt: new Date().toISOString() }),
-    expiresAt: new Date(Date.now() + UNLINK_TOMBSTONE_TTL_MS),
-  });
+  const providers = await readUnlinkedProviders(adapter, a.userId);
+  if (providers.includes(a.providerId)) return;
+  await writeUnlinkedProviders(adapter, a.userId, [...providers, a.providerId]);
 }
 
 /**
- * `account.create.after` half: a link that lands clears the unlink record.
- * While the record stands an implicit link is refused, so a link that lands
- * is an explicit one (or an operator act) — exactly the "until the user
- * re-links" end the ruling sets.
+ * `account.create.after` half: a link that lands removes its provider from
+ * the unlink record. While the provider is listed an implicit link is
+ * refused, so a link that lands is an explicit one (or an operator act) —
+ * exactly the "until the user re-links" end the ruling sets.
  */
-export async function clearUnlinkTombstone(account: unknown, ctx: unknown): Promise<void> {
+export async function clearUnlinkTombstone(
+  account: unknown,
+  ctx: unknown,
+  resolveAdapter?: LinkingAdapterResolver,
+): Promise<void> {
   const a = account as { userId?: unknown; providerId?: unknown } | null;
   if (typeof a?.userId !== 'string' || typeof a?.providerId !== 'string') return;
   if (a.providerId === CREDENTIAL_PROVIDER_ID) return;
-  const adapter = internalAdapterOf(ctx);
+  const adapter = internalAdapterOf(ctx) ?? (await resolveAdapter?.(ctx));
   if (!adapter) return;
-  await adapter.deleteVerificationByIdentifier(unlinkTombstoneIdentifier(a.userId, a.providerId));
+  const providers = await readUnlinkedProviders(adapter, a.userId);
+  if (!providers.includes(a.providerId)) return;
+  await writeUnlinkedProviders(adapter, a.userId, providers.filter((p) => p !== a.providerId));
+}
+
+/** `user.delete.after` half: a deleted user leaves no unlink record behind. */
+export async function clearUserUnlinkTombstones(
+  user: unknown,
+  ctx: unknown,
+  resolveAdapter?: LinkingAdapterResolver,
+): Promise<void> {
+  const id = (user as { id?: unknown } | null)?.id;
+  if (typeof id !== 'string') return;
+  const adapter = internalAdapterOf(ctx) ?? (await resolveAdapter?.(ctx));
+  if (!adapter) throw new Error('unlink record: store unavailable');
+  await adapter.deleteVerificationByIdentifier(unlinkTombstoneIdentifier(id));
 }

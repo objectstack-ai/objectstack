@@ -1,13 +1,23 @@
 ---
-'@objectstack/plugin-auth': patch
+'@objectstack/plugin-auth': minor
 ---
 
-Implicit account linking on external sign-in (OAuth, OIDC, SSO) now requires the library's standard local-ownership condition: an external identity links implicitly to an existing local user only when that local user's email is verified. The platform's own identity provider (`objectstack-cloud`) keeps its documented exception, and a user's unlink is honoured.
+fix(plugin-auth)!: implicit account linking on external sign-in requires the library's standard local-ownership condition; the platform identity provider keeps its documented exception; an unlink is honoured
 
-Clause-②: no
+Clause-②: no (narrowing)
 
-- **Local ownership.** An external sign-in whose email matches an existing local user whose email is not verified is refused with `error=account_not_linked`. That is the same code better-auth's own refusal produces. No link is written and the local user stays unverified. A verified local user links as before.
-- **Platform identity provider.** `objectstack-cloud` still links to an unverified local user, because it seeds the environment owner's row without a mailbox round-trip.
-- **Unlink is honoured.** After a user unlinks a provider, an implicit sign-in through that provider no longer links the identity again, for any provider. An explicit, signed-in link from account settings (`/link-social`) is still allowed and ends the refusal.
-- **Operator override.** `account.accountLinking.requireLocalEmailVerified` is now read as follows. Unset (the default) means the rules above. `true` applies the strict check to every provider, including `objectstack-cloud`. `false` turns off only the local-verification check and keeps the unlink rule.
+<!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows when an external sign-in links implicitly to an existing local user, and nothing an author wrote needs rewriting. The one config key it reads, account.accountLinking.requireLocalEmailVerified, keeps its name and gains an explicit opt-out meaning. -->
+
+**BREAKING for deployments that relied on external sign-in (OAuth, OIDC, SSO) linking implicitly to a local user whose email is not verified.**
+
+**What changed.**
+
+- An external sign-in links implicitly to an existing local user only when that local user's email is verified. Otherwise the sign-in is refused with `error=account_not_linked`, the same code better-auth's own refusal produces. No link is written and the local user stays unverified. A verified local user links as before.
+- The platform's own identity provider (`objectstack-cloud`) keeps its documented exception and still links to an unverified local user, because it seeds the environment owner's row without a mailbox round-trip.
+- After a user unlinks a provider, an implicit sign-in through it no longer links the identity again, for any provider. An explicit, signed-in link from account settings (`/link-social`) is still allowed and ends the refusal. If the unlink cannot be recorded, the unlink itself is refused and the provider stays linked. Deleting a user removes the user's unlink records.
+- `account.accountLinking.requireLocalEmailVerified` now reads as follows. Unset (the default) means the rules above. `true` applies the strict check to every provider, including `objectstack-cloud`. `false` turns off only the local-verification check and keeps the unlink rule.
+
+**What to do after upgrading.**
+
+- A user refused this way signs in with their existing method, then links the provider from account settings, or verifies their email first.
 - To let unverified local users link implicitly again, set `account.accountLinking.requireLocalEmailVerified: false`. Before you do, read the library's warning about account takeover.
