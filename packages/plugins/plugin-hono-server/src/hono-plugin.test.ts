@@ -313,6 +313,17 @@ describe('HonoServerPlugin', () => {
             expect(corsConfigCapture.last.allowHeaders).toContain('If-Match');
         });
 
+        it('should allow X-Share-Password by default (share-link password header, #21839)', async () => {
+            corsConfigCapture.last = undefined;
+
+            const plugin = new HonoServerPlugin();
+            await plugin.init(context as PluginContext);
+
+            // The header form keeps the password out of URLs; a preflight that
+            // does not allow it leaves a cross-origin client only the query form.
+            expect(corsConfigCapture.last.allowHeaders).toContain('X-Share-Password');
+        });
+
         it('should merge user-supplied exposeHeaders with set-auth-token default', async () => {
             corsConfigCapture.last = undefined;
 

@@ -11,8 +11,19 @@
  * carries for WebContainer): N=16384, r=16, p=1, a 64-byte key, a 16-byte
  * random salt passed as its hex string, and the password NFKC-normalised.
  * Same algorithm and parameters, so a share-link password is exactly as
- * expensive to brute-force from a database dump as a sign-in password. The
- * implementation is `node:crypto`'s scrypt — no new dependency.
+ * expensive to brute-force from a database dump as a sign-in password.
+ *
+ * ## Two implementations, one hash
+ *
+ * On Node the key is derived by `node:crypto`'s scrypt. WebContainer
+ * (StackBlitz) reports itself as Node but polyfills `node:crypto.scrypt`
+ * incompletely, so there — detected exactly as `plugin-auth`'s
+ * `isWebContainerRuntime()` detects it — the key is derived by
+ * `@noble/hashes/scrypt` instead, the same pure-JS scrypt `plugin-auth` swaps
+ * in for account passwords on that host. Same parameters, same salt input,
+ * same output bytes: a hash minted by either verifies under the other, so a
+ * link created in a WebContainer keeps working when the app is deployed. The
+ * pure-JS module is loaded only on that host; elsewhere it is never imported.
  *
  * ## The legacy forms, and why they are upgraded on read rather than migrated
  *
@@ -47,7 +58,38 @@ const CURRENT_PREFIX = 'scrypt$';
 const LEGACY_SHA256_PREFIX = 'sha256$';
 const LEGACY_PLAINTEXT_PREFIX = 'weak$';
 
+/**
+ * WebContainer (StackBlitz) detection — the same three signals `plugin-auth`'s
+ * `isWebContainerRuntime()` and `service-settings`' local crypto provider read.
+ */
+function isWebContainerRuntime(): boolean {
+  const proc = (globalThis as { process?: { versions?: Record<string, unknown>; env?: Record<string, unknown> } })
+    .process;
+  return (
+    Boolean(proc?.versions?.webcontainer) ||
+    (typeof proc?.env?.SHELL === 'string' && proc.env.SHELL.includes('jsh')) ||
+    Boolean(proc?.env?.STACKBLITZ)
+  );
+}
+
+/** The pure-JS scrypt, with exactly the parameters {@link deriveKeyNode} passes. */
+async function deriveKeyPureJs(password: string, saltHex: string): Promise<Buffer> {
+  const { scryptAsync } = await import('@noble/hashes/scrypt.js');
+  const key = await scryptAsync(password.normalize('NFKC'), saltHex, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+    dkLen: SCRYPT_KEY_BYTES,
+    maxmem: SCRYPT_MAXMEM,
+  });
+  return Buffer.from(key);
+}
+
 function deriveKey(password: string, saltHex: string): Promise<Buffer> {
+  return isWebContainerRuntime() ? deriveKeyPureJs(password, saltHex) : deriveKeyNode(password, saltHex);
+}
+
+function deriveKeyNode(password: string, saltHex: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     scrypt(
       password.normalize('NFKC'),

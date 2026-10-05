@@ -22,7 +22,12 @@
  *  - the `x-share-password` header is accepted on both public routes, the
  *    `?password=` query parameter still is, and a wrong password is refused
  *    through either form;
- *  - no log line carries the presented password.
+ *  - no log line carries the presented password;
+ *  - both public routes answer `Cache-Control: no-store` and
+ *    `Vary: X-Share-Password` on every outcome, and the authenticated routes
+ *    do not;
+ *  - the pure-JS scrypt the WebContainer path uses and `node:crypto`'s produce
+ *    interchangeable hashes.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -98,15 +103,15 @@ async function drive(
     headers?: Record<string, string>;
     body?: unknown;
   } = {},
-): Promise<{ status: number; body: any }> {
+): Promise<{ status: number; body: any; headers: Record<string, string | string[]> }> {
   const handler = http.routes.get(key);
   if (!handler) throw new Error(`no handler for ${key}`);
-  const captured = { status: 200, body: undefined as any };
+  const captured = { status: 200, body: undefined as any, headers: {} as Record<string, string | string[]> };
   const res: IHttpResponse = {
     json: vi.fn((data: any) => { captured.body = data; }) as any,
     send: vi.fn() as any,
     status: vi.fn((code: number) => { captured.status = code; return res; }) as any,
-    header: vi.fn(() => res) as any,
+    header: vi.fn((name: string, value: string | string[]) => { captured.headers[name] = value; return res; }) as any,
   };
   const req: IHttpRequest = {
     params: opts.params ?? {},
@@ -470,5 +475,43 @@ describe('[#21839] how the password travels in', () => {
     }
     expect(loggedText(logger)).not.toContain(PASSWORD);
     expect(loggedText(logger)).not.toContain('wrong one 21839');
+  });
+});
+
+describe('[#21839] the public routes are never cached', () => {
+  function expectNoStore(res: { headers: Record<string, string | string[]> }, label: string) {
+    expect(res.headers['Cache-Control'], label).toBe('no-store');
+    expect(res.headers.Vary, label).toBe('X-Share-Password');
+  }
+
+  it.each(['resolve', 'messages'] as const)('/%s sends no-store + Vary on success and on every refusal', async (route) => {
+    const booted = await boot();
+    const link = await booted.service.createLink(
+      { object: 'ai_conversations', recordId: 'conv_1', password: PASSWORD },
+      CREATOR,
+    );
+    const key = `GET ${B}/:token/${route}`;
+    const ok = await drive(booted.http, key, { params: { token: link.token }, headers: { 'x-share-password': PASSWORD } });
+    expect(ok.status).toBe(200);
+    expectNoStore(ok, 'success');
+
+    const bare = await drive(booted.http, key, { params: { token: link.token } });
+    expect(bare.status).not.toBe(200);
+    expectNoStore(bare, 'no password');
+
+    const wrong = await drive(booted.http, key, { params: { token: link.token }, query: { password: 'nope 21839' } });
+    expect(wrong.status).not.toBe(200);
+    expectNoStore(wrong, 'wrong password');
+
+    const unknown = await drive(booted.http, key, { params: { token: 'no-such-token-21839' } });
+    expect(unknown.status).toBe(404);
+    expectNoStore(unknown, 'unknown token');
+  });
+
+  it('the authenticated list route is not given the public headers', async () => {
+    const { http } = await boot();
+    const res = await drive(http, `GET ${B}`);
+    expect(res.headers['Cache-Control']).toBeUndefined();
+    expect(res.headers.Vary).toBeUndefined();
   });
 });

@@ -30,7 +30,7 @@
  * and renders the response read-only.
  */
 
-import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
@@ -149,6 +149,27 @@ function presentedPassword(req: IHttpRequest): string | undefined {
   return typeof header === 'string' ? header : undefined;
 }
 
+/**
+ * [#21839] Response headers both public routes (`/resolve` and `/messages`)
+ * answer with, on every outcome.
+ *
+ * `Cache-Control: no-store` — the body is a record released by a capability
+ * token (and, for a protected link, by a password); no browser or shared cache
+ * may keep a copy of it, nor of a refusal that would be replayed after the
+ * link changes. `Vary: X-Share-Password` — the answer depends on that request
+ * header, so any cache that does not honour `no-store` must at least never
+ * serve one presenter's answer to another. The dispatcher twin
+ * (`runtime/src/domains/share-links.ts`) sends the same pair.
+ */
+const SHARE_LINK_PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'Cache-Control': 'no-store',
+  Vary: 'X-Share-Password',
+});
+
+function setPublicResponseHeaders(res: IHttpResponse): void {
+  for (const [name, value] of Object.entries(SHARE_LINK_PUBLIC_RESPONSE_HEADERS)) res.header(name, value);
+}
+
 /** Strip `redactFields` from a record (also removes from nested arrays of objects). */
 function applyRedaction(record: any, redactFields: string[]): any {
   if (!record || typeof record !== 'object' || redactFields.length === 0) return record;
@@ -248,6 +269,7 @@ export function registerShareLinkRoutes(
   // No `ctxOf` here — the token IS the authorisation. We still allow
   // probes from a signed-in user so audience=signed_in is satisfiable.
   http.get(`${base}/:token/resolve`, (async (req, res) => {
+    setPublicResponseHeaders(res);
     try {
       const q = req.query ?? {};
       // [Finding-2] The `audience: 'signed_in'` gate must key off the VERIFIED
@@ -381,6 +403,7 @@ export function registerShareLinkRoutes(
   // following the same pattern.
   // ──────────────────────────────────────────────────────────────
   http.get(`${base}/:token/messages`, (async (req, res) => {
+    setPublicResponseHeaders(res);
     try {
       const resolved = await service.resolveToken(req.params.token, {
         providedPassword: presentedPassword(req),
