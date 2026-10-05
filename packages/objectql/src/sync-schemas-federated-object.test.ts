@@ -138,14 +138,22 @@ describe('ObjectQL.syncSchemas() — a federated object is not a DDL target (#21
   });
 });
 
+// These pins are about the named object's own ERROR, so they never count the
+// whole log: whether the federated objects beside it log anything is pin 1's
+// question, and these must not answer it a second time.
 describe('ObjectQL.syncSchemas() — the #4632 ERROR still fires for every other refused sync', () => {
+  /** The per-object ERROR whose structured context names `object`. */
+  function errorFor(rec: ReturnType<typeof recordingLogger>, object: string) {
+    return rec.at('error').filter((r) => (r.args[1] as { object?: string } | undefined)?.object === object);
+  }
+
   it('an internal object whose driver refuses DDL is still reported at ERROR, with its Error and context', async () => {
     const rec = recordingLogger();
     const { engine } = engineWith(rec.logger, 'permission denied for schema public', [...FEDERATED, INVOICE]);
 
     await engine.syncSchemas();
 
-    const errors = rec.at('error');
+    const errors = errorFor(rec, 'invoice');
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain("'invoice'");
     expect(errors[0].args[0]).toBeInstanceOf(Error);
@@ -163,9 +171,11 @@ describe('ObjectQL.syncSchemas() — the #4632 ERROR still fires for every other
 
     await engine.syncSchemas();
 
-    expect(erroredObjects(rec)).toEqual(['stray_ledger']);
-    expect(rec.at('error')[0].args[0]).toBeInstanceOf(ExternalSchemaModeViolationError);
-    expect(external.calls.filter((c) => c.includes(':syncSchema:'))).toEqual(['showcase_external:syncSchema:stray_ledger']);
+    const errors = errorFor(rec, 'stray_ledger');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].args[0]).toBeInstanceOf(ExternalSchemaModeViolationError);
+    expect(errors[0].args[1]).toEqual({ object: 'stray_ledger', tableName: 'stray_ledger', driver: 'showcase_external' });
+    expect(external.calls).toContain('showcase_external:syncSchema:stray_ledger');
   });
 });
 
