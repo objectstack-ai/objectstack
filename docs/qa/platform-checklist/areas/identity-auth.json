@@ -151,7 +151,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -176,7 +176,7 @@
         "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
         "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
         "discovery documents: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server (both mounted at the APP ROOT, not under /api/v1/auth — RFC 8414 / OIDC require it, auth-plugin.ts) and record the issuer + advertised endpoints",
-        "self-service identity mutations: POST /api/v1/auth/change-email (authed) and POST /api/v1/auth/delete-user (authed) — capture each, plus the anonymous forge of both",
+        "self-service identity mutations: POST /api/v1/auth/change-email (authed) and POST /api/v1/auth/delete-user (authed) — capture each, plus the anonymous forge of both. delete-user is deliberately unwired (auth-route-ledger disposition 'disabled': user.deleteUser is not configured, maintainer ruling on #7735), so expect 404 to every caller",
         "for each variant: re-boot with the method OFF, then (a) GET /auth/config and confirm the advertisement is gone, (b) screenshot the login page and confirm the affordance is gone, (c) fire the method's endpoint anyway and confirm a server-side refusal",
         "record the per-variant verdict table (on-side result, off-side result, advertisement parity)"
       ],
@@ -236,10 +236,10 @@
           "evidence": "the two discovery-document responses + the jwks cross-check"
         },
         {
-          "clause": "self-service change-email and delete-user are authed-only mutations: POST /api/v1/auth/change-email and POST /api/v1/auth/delete-user succeed for the signed-in user and are refused for the anonymous forge (better-auth also routes delete-user through GET /api/v1/auth/delete-user/callback confirmation before the row is gone)",
+          "clause": "POST /auth/change-email succeeds for the signed-in user and answers 401 to the anonymous forge; POST /auth/delete-user is deliberately unwired (ledger disposition 'disabled') and answers 404 to every caller, authed or not.",
           "oracle": "api",
-          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed); both endpoints answer 401 to the anonymous forge",
-          "evidence": "the authed responses + the two anonymous refusals"
+          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 both authed and anonymous (as does its GET /delete-user/callback half) — the ledger books it 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
+          "evidence": "the change-email responses (authed + anonymous) + the two delete-user 404s"
         }
       ],
       "negative": [
@@ -273,7 +273,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-method sign-in proof with both-sides gate checks and advertisement parity, grounded in the spec's plugin config + public feature registry", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-20", "change": "scoped scan-functionality (扫描功能) sweep: the 2FA clause asserted the interrupt but cited no pin — added packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts to source and noted in the clause verify + variant row that cookie-lane completion is pinned end-to-end by that test (cite per rule 6 instead of re-deriving). Enrollment lifecycle around the gate now owned by the four new identity-auth.two-factor-* items. No restructuring", "ref": "claude/new-session-0pv25p" }
+        { "revision": 3, "date": "2026-08-20", "change": "scoped scan-functionality (扫描功能) sweep: the 2FA clause asserted the interrupt but cited no pin — added packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts to source and noted in the clause verify + variant row that cookie-lane completion is pinned end-to-end by that test (cite per rule 6 instead of re-deriving). Enrollment lifecycle around the gate now owned by the four new identity-auth.two-factor-* items. No restructuring", "ref": "claude/new-session-0pv25p" },
+        { "revision": 4, "date": "2026-10-05", "change": "clause 10 and step 9 re-pointed: the delete-user half only (stale, #21784 VF4). plugin-auth's auth-route-ledger books POST /api/v1/auth/delete-user with disposition 'disabled': user.deleteUser is deliberately unconfigured (auth-manager), per the maintainer ruling of 2026-08-12 on #7735, so it answers 404 to every caller. The clause dates from revision 1 (2026-08-07) and predates the ruling. The verifier's wording is used. The change-email half is unchanged", "ref": "#21797" }
       ]
     },
     {
@@ -1895,7 +1896,7 @@
       "title": "Workspace switcher: org chrome follows posture × membership count (nothing under single; read-only indicator at one membership; switcher at two), and a switch is a full-document reload after which every tenant-scoped read answers from the new org",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin (provisions the second org)"],
@@ -1917,7 +1918,7 @@
         "under `group` posture, open the dropdown and capture the labeling: 'Working organization' + the writes-here/reads-span-all hint (data-testid workspace-switcher-group-hint, WorkspaceSwitcher.tsx); under `isolated` it reads 'Switch organization'",
         "switch to the second org: the client calls switchOrganization (POST /api/v1/auth/organization/set-active, auth-route-ledger.ts) and then performs a FULL-DOCUMENT navigation to the console root (window.location.href = resolveRootUrl(), WorkspaceSwitcher.tsx) — capture that it is a document reload, not a SPA transition",
         "after the reload: GET /api/v1/auth/organization/get-active-member confirms the new active org; re-drive one tenant-scoped data read and one /meta read and confirm they answer from the NEW org — pick one row/app id that exists only in the OLD org and prove its absence (the org change drops the whole metadata cache, objectui#4486, MetadataProvider.tsx)",
-        "failure leg: as the member, forge POST /api/v1/auth/organization/set-active with an org id they hold NO membership in; capture the server refusal and confirm the active org is unchanged (get-active-member) and the UI never renders the foreign org as active"
+        "failure leg: as the member, forge POST /api/v1/auth/organization/set-active with an org id they hold NO membership in; capture the server refusal (403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION) and read get-active-member: the foreign org is never active. better-auth clears the session's active org on this refusal, so 'none' is an expected reading, not a fault. Confirm the UI never renders the foreign org as active"
       ],
       "acceptance": [
         {
@@ -1951,10 +1952,10 @@
           "evidence": "the two dropdown screenshots"
         },
         {
-          "clause": "a forged or failed switch refuses cleanly: set-active to a non-membership org is refused server-side, the active org is unchanged, and the UI surfaces an error rather than rendering the foreign org as active",
+          "clause": "set-active to a non-membership org answers 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, the foreign org never becomes active (get-active-member returns the prior org or none — better-auth clears the active org on refusal), and the UI surfaces an error.",
           "oracle": "api",
-          "verify": "the forged set-active non-2xx + an unchanged get-active-member + the UI state after the failure",
-          "evidence": "the refusal + the unchanged active-org read + the screenshot"
+          "verify": "the forged set-active answers 403 with code USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION; get-active-member afterwards names the prior org or none — NEVER the foreign org (better-auth 1.7.3's setActiveOrganization sets the session's active org to null before throwing, and plugin-auth mounts the route unwrapped: auth-route-ledger disposition 'sdk'); the UI after the failure shows an error and never the foreign org",
+          "evidence": "the refusal + the post-refusal active-org read + the screenshot"
         }
       ],
       "negative": [
@@ -1975,7 +1976,8 @@
         "packages/types/src/env.ts#resolveTenancyPosture (resolveTenancyPosture: OS_TENANCY_POSTURE, invalid value refuses boot; unset falls back to `single` unless legacy multi-org env)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 1): the workspace-switch surface had no item. CORRECTED against source from the register's 'single membership → indicator' hypothesis: the indicator is posture-gated (postureHasOrgWall — group/isolated only), so the stock `single` boot renders NO org chrome at all and the whole matrix needs an OS_TENANCY_POSTURE boot; encoded the three-cell affordance matrix, the deliberate full-document reload, the #4486 cache-drop read-follow proof, group-posture labeling, and the forged-switch refusal", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 1): the workspace-switch surface had no item. CORRECTED against source from the register's 'single membership → indicator' hypothesis: the indicator is posture-gated (postureHasOrgWall — group/isolated only), so the stock `single` boot renders NO org chrome at all and the whole matrix needs an OS_TENANCY_POSTURE boot; encoded the three-cell affordance matrix, the deliberate full-document reload, the #4486 cache-drop read-follow proof, group-posture labeling, and the forged-switch refusal", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-10-05", "change": "clause 6 and step 8 re-pointed (assertion defect, #21784 VF4). The switch fails closed, and the defect is not of the authorization class. better-auth 1.7.3's setActiveOrganization (plugins/organization/routes/crud-org) calls adapter.setActiveOrganization(token, null) before it throws 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, and plugin-auth mounts the route unwrapped (auth-route-ledger 'sdk'). So the active org becomes none, never the foreign org, and 'unchanged' was the wrong assertion. The verifier's wording is used. The verifier's optional follow-up, wrapping the vendor call to keep the previous org, would be a product enhancement, not this item's concern", "ref": "#21797" }
       ]
     }
   ]

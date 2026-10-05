@@ -327,7 +327,7 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -336,7 +336,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the writable-package contrast side (step 5, acceptance clause 3) needs a writable target package — obtained at runtime via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base'), not a stock fixture"
+          "the writable-package contrast side (step 5, acceptance clause 3) needs a writable BASE package: a scratch base created at runtime through POST /api/v1/packages, not a stock fixture. ⛔ Not POST /packages/:id/duplicate: requireDuplicableSource refuses a code-package source with 422 DUPLICATE_SOURCE_NOT_A_BASE (#14451), and com.example.showcase is a code package"
         ]
       },
       "steps": [
@@ -344,7 +344,7 @@
         "screenshot the surface; then read the DOM state of the edit affordances (checkboxes, Save)",
         "attempt the edit through the UI anyway (click a checkbox / Save) and capture what the client does",
         "forge the write directly: PUT /api/v1/meta/object/<packaged object name> with a trivial field change, as the same admin session",
-        "POST /packages/com.example.showcase/duplicate {targetPackageId: <scratch id>} (ADR-0070 D4 'duplicate base' — the platform's supported writable-base route) to clone the showcase base into a writable target, then repeat the same PUT against an object in that writable package to prove the guard discriminates by package writability, not by blanket denial"
+        "POST /api/v1/packages to create a scratch writable base package, author an object into it (PUT /api/v1/meta/object/<scratch object>?package=<scratch id>), then repeat the same trivial-change PUT against that object to prove the guard discriminates by package writability, not by blanket denial. ⛔ Do not duplicate com.example.showcase: POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE, because the source must be a base (#14451)"
       ],
       "acceptance": [
         {
@@ -354,16 +354,16 @@
           "evidence": "screenshot + disabled-state DOM read"
         },
         {
-          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items) — UI absence never suffices (ADR-0124 D1)",
+          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (NOT_OVERRIDABLE for the bare PUT — object is not org-overridable; WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items, when the write names ?package=) — UI absence never suffices (ADR-0124 D1)",
           "oracle": "api",
-          "verify": "PUT response status >=400 and error.code ∈ {WRITABLE_PACKAGE_REQUIRED, ITEM_LOCKED} (packages/spec/src/api/error-code-ledger.zod.ts, @objectstack/metadata-protocol entry)",
+          "verify": "PUT response status >=400 and error.code ∈ {NOT_OVERRIDABLE, WRITABLE_PACKAGE_REQUIRED, ITEM_LOCKED} (packages/spec/src/api/error-code-ledger.zod.ts, @objectstack/metadata-protocol entry) — record which spelling of the PUT produced which code",
           "evidence": "PUT trace"
         },
         {
-          "clause": "the same PUT against a writable object — obtained through the platform's own duplicate-base route, not a stock fixture — SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
+          "clause": "the same PUT against an object in a writable base package (created via POST /api/v1/packages — not duplicate, which refuses code sources per #14451) succeeds for the same admin and a follow-up GET shows the change.",
           "oracle": "api",
-          "verify": "POST /packages/com.example.showcase/duplicate (ADR-0070 D4) to clone the showcase base into a writable target package, then PUT on an object in that target answers 2xx and a follow-up GET shows the change",
-          "evidence": "both traces"
+          "verify": "POST /api/v1/packages creates the scratch base; the PUT on an object authored into it answers 2xx, and a follow-up GET shows the change",
+          "evidence": "the package-create, PUT and GET traces"
         },
         {
           "clause": "the denied write leaves the packaged object byte-identical (persistence of the lock)",
@@ -383,7 +383,7 @@
         "#3358 §5",
         "packages/spec/src/api/error-code-ledger.zod.ts (@objectstack/metadata-protocol codes)",
         "ADR-0010 §3.3 (_lock)",
-        "packages/runtime/src/domains/packages.ts#packages (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "packages/runtime/src/domains/packages.ts#requireDuplicableSource (POST /packages/:id/duplicate refuses a code-package source with 422 DUPLICATE_SOURCE_NOT_A_BASE, #14451 — so the writable contrast is a scratch base created through POST /api/v1/packages)",
         "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
@@ -404,6 +404,12 @@
           "date": "2026-08-31",
           "change": "retargeted the writable-package contrast side (step 5, acceptance clause 3) at the platform's supported runtime path per the maintainer ruling on #9788 (2026-08-19, 「接受你的所有建议」; reaffirmed 2026-08-25, 「其他接受」): the stock showcase does NOT boot with a writable package, so the runner instead clones the showcase base via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base') to get the writable contrast object. Added a fixtures.requires line naming the runtime route explicitly, since the item previously left the writable side as an unqualified 'a WRITABLE (draft/app-local) object'. Mirrors the sibling half landed for automation.rollup-summary-filter (PR #11913, bb62d4d08).",
           "ref": "#9788"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-05",
+          "change": "clause 3, step 5, the fixture line and clause 2's code set re-pointed (stale, #21784 VF4; the lane had it as an assertion defect, and the verifier's disposition is used). POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE: requireDuplicableSource (runtime/src/domains/packages.ts, #14451) refuses a code-package source. This predates 17.6.0 (and 17.5.0), and it supersedes the duplicate route revision 3 adopted under the #9788 ruling. The clause uses the verifier's wording: the writable contrast is a scratch base created through POST /api/v1/packages. Clause 2's code set adds NOT_OVERRIDABLE, the bare PUT's answer, per the run's FE7 (ITEM_LOCKED only with ?package=)",
+          "ref": "#21797"
         }
       ]
     },
@@ -1206,7 +1212,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1226,17 +1232,17 @@
         "generate 3 attributable events with distinct action/actor/object: (a) a fresh member SIGNS IN (action 'login', actor = the member); (b) as admin DELETE a showcase_task via /api/v1/data/showcase_task/<id> (action 'delete', object_name showcase_task, record_id set); (c) write a setting (action 'config_change')",
         "open /system/audit-log; wait for the table to settle; screenshot",
         "locate all three events in the page and read their action / object / actor cells",
-        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. ⚠️ There is no Action dropdown on this console: use the prebuilt filtered views (Recent / Writes / Auth / Config) or the generic Filter Records → Where → Add filter builder to constrain action",
-        "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels. Since 17.6.0 no delete row is served to the page (#21194), so the drawer is checked on an update row",
+        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The sys_audit_log object list (the nav entry) offers the prebuilt filtered views (Recent / Writes / Auth / Config) and the generic Filter Records → Where → Add filter builder instead. Either is a valid server-side narrowing",
+        "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels — the update event is the shape that carries both",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
         "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
       ],
       "acceptance": [
         {
-          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete→action 'delete' with object_name showcase_task + record_id is WRITTEN but, since 17.6.0, NOT served to a non-system reader (administrators included): the ledger serves only rows about records the reader can read, and a deleted record is readable by nobody (30c530e5, #21194)",
+          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete -> action 'delete' (showcase_task + record_id) is served to a reader holding view_all_audit_log (platform admins by default, #21296) and withheld from a non-holder who cannot read the deleted record (#21194).",
           "oracle": "api",
-          "verify": "GET /api/v1/data/sys_audit_log returns the login and config_change rows with action/actor(user_id)/object_name/record_id matching what each op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts), and returns NO row for $filter action='delete' even to the admin who deleted; the delete row's existence and attribution are proven from the store itself (the audit table in the telemetry database, read under system context or with the server stopped) — a delete row SERVED on the data API is the FAIL, and so is a delete row missing from the store",
-          "evidence": "the two served rows + the delete row's stored copy + the empty delete-filtered read"
+          "verify": "GET /api/v1/data/sys_audit_log as the admin returns the login, config_change AND delete rows, each with action / actor (user_id) / object_name / record_id matching what the op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts). The admin holds view_all_audit_log through ADMIN_FULL_ACCESS_CAPABILITIES, which exempts the holder from the ledger's parent-record read gate. The same $filter action='delete' read by a non-holder who cannot read the deleted record (e.g. the fresh member) returns NO row. A delete row withheld from the admin, or served to the non-holder, is the FAIL",
+          "evidence": "the admin's three served rows + the non-holder's empty delete-filtered read"
         },
         {
           "clause": "the browser renders those same rows: after a screenshot confirms the table painted, the DOM rows carry the same action/actor/object the API returned — the page shows server truth, not a recomputation",
@@ -1245,9 +1251,9 @@
           "evidence": "screenshot + the row DOM read"
         },
         {
-          "clause": "narrowing by action is server-side, not a client-side table filter — the Writes view (or an equivalent Where clause on action) constrains the result set at the server",
+          "clause": "narrowing by action is server-side, not a client-side table filter — the page's Action select (or, on the sys_audit_log object list, the Writes view or a Where clause on action) constrains the result set at the server",
           "oracle": "network",
-          "verify": "selecting the Writes view (or adding a Where clause on action) re-issues GET /api/v1/data/sys_audit_log with an action constraint in its $filter, and the table then shows only the matching events. ⛔ Do not look for an 'Action filter' dropdown — the console offers the prebuilt views plus the generic Filter Records builder, and a runner hunting the named control reads its absence as a missing capability",
+          "verify": "choosing an action in /system/audit-log's Action select re-issues GET /api/v1/data/sys_audit_log with action in its $filter (on the object list, the Writes view or a Where clause on action does the same), and the table then shows only the matching events",
           "evidence": "the filtered request + the single-row table"
         },
         {
@@ -1257,9 +1263,9 @@
           "evidence": "the drawer screenshot annotated 'before/after panels, not a diff'"
         },
         {
-          "clause": "the API twin reconciles with the page: GET /api/v1/data/sys_audit_log returns the same served events (login, config_change) with matching actor/object, and both omit the delete — a page row without a backing API row (or vice versa) is a FAIL",
+          "clause": "API and page agree row-for-row for the same principal (admin: login, config_change and delete).",
           "oracle": "api",
-          "verify": "field-by-field compare of the page's rows against the /api/v1/data/sys_audit_log bodies",
+          "verify": "field-by-field compare of the page's rows against the /api/v1/data/sys_audit_log bodies read in the same admin session — a page row without a backing API row (or vice versa) is a FAIL",
           "evidence": "API list vs page rows"
         },
         {
@@ -1291,7 +1297,8 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         },
         { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" },
-        { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" }
+        { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" },
+        { "revision": 4, "date": "2026-10-05", "change": "clauses 1, 3 and 5 and steps 5-6 re-pointed (stale after 17.6.0, #21784 VF4 + FE7). 7ebb543164 (#21296, fixes #21260, 2026-10-02) gives platform admins view_all_audit_log by default (ADMIN_FULL_ACCESS_CAPABILITIES). That exempts them from the ledger's parent-record read gate, so the admin's read serves the delete row. Revision 3 was measured on 17.6.0 and encodes only #21194. Clauses 1 and 5 use the verifier's wording: the delete row is served to a view_all_audit_log holder and withheld from a non-holder who cannot read the deleted record. FE7: revision 2's 'there is no Action dropdown' is false at the console pin, because AuditLogPage has an Action select that narrows through $filter. Clause 3 and step 5 now name it beside the object list's prebuilt views. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" }
       ]
     },
     {

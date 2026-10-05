@@ -77,7 +77,7 @@
       "title": "Flow Runs render loop/region iterations as a nested execution tree",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -86,7 +86,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route",
+          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route; its loop body wraps send_reminder in the try_catch guard_reminder (#13681 / #14394), so each iteration logs the guard as the loop-body step and send_reminder inside its try region",
           "showcase_nested_fan_out_reminders (examples/app-showcase/src/automation/flows/index.ts NestedFanOutRemindersFlow) — an autolaunched flow whose `loop` body holds a two-branch `parallel`, the only shape that exercises both index keys on one step; landed by #16356, which is why the loop { parallel } clause below no longer scores blocked(fixture). Rows are task-shaped `{id, title, owner, watcher}`: `owner` and `watcher` are the two branches' recipients and `notify` refuses an empty resolved recipient set, so a row missing either ends the sweep. Drive it over at least TWO rows — one row cannot distinguish an (iteration, branch) pair from a branch index alone"
         ]
       },
@@ -108,9 +108,9 @@
           "evidence": "run-detail API read"
         },
         {
-          "clause": "every body step carries the region tags: parentNodeId=loop_tasks, iteration in 0..2, regionKind='loop-body'",
+          "clause": "each of the three guard_reminder steps carries {parentNodeId:'loop_tasks', regionKind:'loop-body', iteration 0|1|2}, each send_reminder carries {parentNodeId:'guard_reminder', regionKind:'try'} with the same iteration, no two share an iteration; start/loop_tasks/end carry no parentNodeId.",
           "oracle": "api",
-          "verify": "assert the three send_reminder steps each carry {parentNodeId:'loop_tasks', iteration: 0|1|2, regionKind:'loop-body'} and no two share an iteration; top-level steps (start/loop_tasks/end) carry NO parentNodeId",
+          "verify": "assert the three guard_reminder (try_catch) steps each carry {parentNodeId:'loop_tasks', regionKind:'loop-body'} with iterations 0, 1 and 2, no two alike; each send_reminder carries {parentNodeId:'guard_reminder', regionKind:'try'} and the iteration of the guard it ran under (a try region has no index of its own, so the enclosing loop's iteration rides through — ExecutionStepLogSchema iteration / regionKind, the engine's innermost-identity rule #15230); top-level steps (start/loop_tasks/end) carry NO parentNodeId",
           "evidence": "step-log excerpt with the tags"
         },
         {
@@ -176,6 +176,12 @@
           "date": "2026-09-10",
           "change": "the loop { parallel } fixture landed: examples/app-showcase gains showcase_nested_fan_out_reminders, a loop whose body holds a two-branch parallel. Revision 3 wrote the clause with no flow to trigger and recorded the gap in fixtures.requires; this revision replaces that record with the flow that closes it and spells the nesting run's trigger call and row shape, so the clause is driven rather than scored blocked(fixture)",
           "ref": "#16356"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-05",
+          "change": "clause 2 and the batch-reminders fixture line re-pointed (stale, #21784 VF4). examples/app-showcase's BatchRemindersFlow wraps send_reminder in the try_catch guard_reminder (#13681 / #14394, present before 17.6.0). The engine's innermost-identity rule (service-automation engine, #15230) tags the body step with the try region, so send_reminder carries parentNodeId guard_reminder and regionKind 'try', and the guard is the loop-body step. The verifier's wording is used",
+          "ref": "#21797"
         }
       ]
     },
@@ -276,7 +282,7 @@
       "title": "Filtered roll-up summaries recompute only through their own filter",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -286,7 +292,7 @@
         "app": "showcase",
         "requires": [
           "a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)",
-          "the editor-half clause additionally needs a writable target package — obtained at runtime via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base'), not a stock fixture"
+          "the editor-half clause additionally needs a writable BASE package: a scratch base created at runtime through POST /api/v1/packages, with a parent object carrying a filtered summary field and its child object authored into it. It is not a stock fixture, and not POST /packages/:id/duplicate, which refuses the code showcase package with 422 DUPLICATE_SOURCE_NOT_A_BASE (#14451)"
         ]
       },
       "steps": [
@@ -296,7 +302,7 @@
         "PATCH one line's status approved→rejected over /api/v1/data/showcase_expense_line/:id; re-read the parent and recompute again",
         "PATCH a different line's billable true→false; re-read the parent",
         "DELETE one line; re-read the parent — a delete must move every roll-up whose filter matched the deleted row, including the unfiltered total",
-        "on a writable package: POST /packages/com.example.showcase/duplicate {targetPackageId: <scratch id>} (ADR-0070 D4 'duplicate base' — the platform's supported writable-base route) to clone the showcase base, then in Studio's visual filter editor edit the duplicated expense-report's summary field child-row filter, save, and re-read the persisted metadata over the meta API"
+        "on a writable base: POST /api/v1/packages to create a scratch base, author a parent object with a filtered summary field over a child object into it, then in Studio's visual filter editor edit that summary field's child-row filter, save, and re-read the persisted metadata over the meta API. ⛔ Not POST /packages/com.example.showcase/duplicate — it answers 422 DUPLICATE_SOURCE_NOT_A_BASE (#14451)"
       ],
       "acceptance": [
         {
@@ -324,9 +330,9 @@
           "evidence": "before/after value table"
         },
         {
-          "clause": "the child-row filter is settable via the visual editor on a writable package obtained through the platform's own duplicate-base route",
+          "clause": "the child-row filter is settable in Studio's visual filter editor on a writable base package (create a scratch base via POST /api/v1/packages and author the parent+summary there), and persists per the meta API; duplicate of the code showcase package is refused DUPLICATE_SOURCE_NOT_A_BASE (#14451).",
           "oracle": "screenshot",
-          "verify": "POST /packages/com.example.showcase/duplicate to clone the showcase base into a writable target package (ADR-0070 D4), open the duplicated parent's summary field in Studio's visual filter editor, edit its child-row filter, save, and confirm the persisted metadata via the meta API",
+          "verify": "POST /api/v1/packages creates the scratch base; author the parent with a filtered summary field and its child there; open the summary field in Studio's visual filter editor, edit its child-row filter, save, and confirm the persisted metadata via the meta API. An org overlay is NOT an alternative route: the object type declares supportsOverlay and allowOrgOverride false (DEFAULT_METADATA_TYPE_REGISTRY). The duplicate route's 422 DUPLICATE_SOURCE_NOT_A_BASE on the code showcase package is the expected refusal (requireDuplicableSource), not a blocker",
           "evidence": "editor screenshot + saved metadata read"
         }
       ],
@@ -339,7 +345,7 @@
       "source": [
         "#3358 §2 (recompute half proven; editor half explicitly left unticked)",
         "examples/app-showcase/src/data/objects/expense-report.object.ts (the six roll-up shapes and their filters)",
-        "packages/runtime/src/domains/packages.ts#packages (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "packages/runtime/src/domains/packages.ts#requireDuplicableSource (POST /packages/:id/duplicate refuses a code-package source with 422 DUPLICATE_SOURCE_NOT_A_BASE, #14451 — so the writable contrast is a scratch base created through POST /api/v1/packages)",
         "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
@@ -360,6 +366,12 @@
           "date": "2026-08-25",
           "change": "retargeted clause 5 (the visual filter-editor half) at the platform's supported runtime path per the maintainer ruling on #9788 (2026-08-19, 「接受你的所有建议」): the stock showcase does NOT boot with a writable package, so the runner instead clones the showcase base via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base') to get a writable target for the visual editor. Removed the item-level blocked.by:fixture entry and the matching fixtures.knownGaps line — the clause is runnable on every boot now, not fixture-blocked. Oracle stays screenshot: the clause specifically tests the VISUAL editor, corroborated by a meta-API read of the persisted filter",
           "ref": "#9788"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-05",
+          "change": "clause 5, step 7, the fixture line and the source re-pointed (stale, #21784 VF4). Duplicating the code showcase package is refused with DUPLICATE_SOURCE_NOT_A_BASE (requireDuplicableSource, #14451); the run proved the editor half on a scratch writable package. This supersedes the duplicate route revision 3 adopted under the #9788 ruling. The clause uses the verifier's wording, with one measured cut: the verifier also offered 'or overlay per ADR-0005', but the object type declares supportsOverlay: false and allowOrgOverride: false in DEFAULT_METADATA_TYPE_REGISTRY, so an overlay cannot carry a summary field's filter. The clause names the scratch base only",
+          "ref": "#21797"
         }
       ]
     },
@@ -368,7 +380,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -380,7 +392,8 @@
           "the showcase flow-per-node-type map (examples/app-showcase/src/automation/flows/): create_record=showcase_inbound_task_webhook · update_record+screen=showcase_reassign_wizard · get_record+decision+delete_record=showcase_inquiry_purge · script+notify=showcase_task_completed · wait=showcase_task_follow_up · subflow=showcase_task_done_notify_owner→showcase_notify_owner · map=showcase_release_signoff · connector_action=showcase_task_completed_rest_ping · loop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync · assignment=showcase_closure_signoff · approval=showcase_expense_signoff · approval_revise=showcase_budget_approval (wait_revision)"
         ],
         "knownGaps": [
-          "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored"
+          "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored",
+          "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13)"
         ]
       },
       "variants": [
@@ -420,15 +433,15 @@
       ],
       "acceptance": [
         {
-          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every variant in the matrix as an authorable node",
+          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every NON-structural variant (19 of 21; start/end are structural per FLOW_STRUCTURAL_NODE_TYPES — no executor, no descriptor)",
           "oracle": "api",
-          "verify": "the actions descriptor list contains every variant id; the palette screenshot (taken after render) shows them offered",
+          "verify": "the actions descriptor list contains every variant id except start and end; the palette screenshot (taken after render) shows them offered. start/end absent from the feed is by design, not a gap",
           "evidence": "actions API read + palette screenshot"
         },
         {
-          "clause": "per-variant: each node type appears as an executed step (status success, or the documented pause for suspending types) in at least one captured run — every variant individually verified and recorded",
+          "clause": "each non-structural variant plus `start` appears as an executed step; `end` is proven by the run reaching status completed (it logs no step).",
           "oracle": "api",
-          "verify": "for each of the 21 variants cite the run id + step whose nodeType matches; a variant with no located step is UNPROVEN for that variant, not a partial pass of the matrix",
+          "verify": "for each of the 20 step-logging variants cite the run id + step whose nodeType matches (status success, or the documented pause for suspending types), and for end cite a completed run — executeNode returns on end before any step is pushed, while start logs a success step. A variant with no located evidence is UNPROVEN for that variant, not a partial pass of the matrix",
           "evidence": "per-variant table of run id / step / status"
         },
         {
@@ -470,6 +483,7 @@
       },
       "source": [
         "packages/spec/src/automation/flow.zod.ts#FlowNodeAction (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
+        "packages/spec/src/automation/flow.zod.ts#FLOW_STRUCTURAL_NODE_TYPES (start / end: structural — no executor, no descriptor, so absent from GET /automation/actions; end logs no step)",
         "packages/spec/src/automation/control-flow.zod.ts#LOOP_NODE_TYPE (LOOP_NODE_TYPE / PARALLEL_NODE_TYPE / TRY_CATCH_NODE_TYPE, ADR-0031)",
         "packages/spec/src/automation/approval.zod.ts#APPROVAL_NODE_TYPE (APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE)",
         "examples/app-showcase/src/coverage.ts#flowNodeTypes (flowNodeTypes + FLOW_NODE_WAIVERS)",
@@ -497,6 +511,12 @@
           "date": "2026-08-11",
           "change": "recorded the #7545 ruling: the unknown-node-type clause demanded a registration-time REFUSAL the platform never promised, so run #7516 read a by-design 200 as a FAIL. The clause now asserts the real four-part late-binding contract (200 + located WARN with unknownTypes/knownTypes in meta + trigger success:false with NO_EXECUTOR + run 'failed') as pass-by-design, and the negative names silence — not the 200 — as the failure shape",
           "ref": "#7545 (ADR-0018 §M1, #4771; QA run #7516)"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-05",
+          "change": "clauses 1 and 2 re-pointed (assertion defects, #21784 VF4), plus a knownGap from FE13. spec automation/flow.zod.ts FLOW_STRUCTURAL_NODE_TYPES = ['start','end']: those have no executor and no descriptor, so they are not in GET /automation/actions, and the palette clause now covers the 19 non-structural variants. The service-automation engine's executeNode returns on end before any step push, while start logs a success step, so end is proven by the run reaching completed. The verifier's wording is used for both. FE13: showcase_fan_out_notify needs Slack egress, so parallel / http are proven on another run where egress is denied",
+          "ref": "#21797"
         }
       ],
       "enumSource": {
@@ -507,10 +527,10 @@
     },
     {
       "id": "automation.trigger-type-matrix",
-      "title": "Every flow trigger type fires and its run row records the trigger kind",
+      "title": "Every flow trigger type fires and produces a run of its bound flow; the run's trigger block records the launch event",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -539,14 +559,14 @@
         "screen: from /apps/showcase_app/showcase_task run the row action showcase_bulk_reassign, fill the dialog, submit",
         "autolaunched: POST /api/v1/automation/showcase_batch_reminders/trigger {params:{tasks:[…]}}",
         "time_relative: execute per automation.time-relative-trigger; capture only its run row here for the trigger-kind tally",
-        "for each variant, GET /api/v1/automation/<flow>/runs and record the newest run's trigger block (ExecutionLogSchema.trigger)"
+        "for each variant, GET /api/v1/automation/<flow>/runs and record the newest run's flowName and its trigger block (ExecutionLogSchema.trigger)"
       ],
       "acceptance": [
         {
-          "clause": "per-variant: each trigger kind produces a run whose run row records that trigger kind — all six individually verified",
+          "clause": "per-variant: each trigger kind produces a run row of its bound flow (flowName identifies the kind via the flow's declared type); trigger.type records the launch event (record_change runs also carry object + recordId); all six individually verified.",
           "oracle": "api",
-          "verify": "for each variant cite the run id and its trigger.type (record_change runs also carry the object + recordId of the mutation); a variant with no run row is UNPROVEN, whatever the UI showed",
-          "evidence": "per-variant table of run id + trigger block"
+          "verify": "for each variant cite the run id, its flowName and that flow's declared type (Flow.type; time_relative through the schedule flow hosting config.timeRelative), plus the run's trigger block as recorded. trigger.type is the LAUNCH EVENT (buildRunTrigger: context.event, else 'manual'; ExecutionLogSchema.trigger.type is a free string), not Flow.type, so record it and never match it against the variant name. record_change runs also carry trigger.object + trigger.recordId of the mutation. A variant with no run row is UNPROVEN, whatever the UI showed",
+          "evidence": "per-variant table of run id + flowName + declared flow type + trigger block"
         },
         {
           "clause": "record-after-write discriminates its legs: the created-urgent task and the escalated task each produce exactly one run; the no-transition save produces none",
@@ -604,6 +624,12 @@
           "date": "2026-08-07",
           "change": "initial — trigger matrix derived from the Flow.type enum and its ADR-0060 D5 conformance ledger; time_relative added as the declarative sweep the schedule runtime hosts",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-05",
+          "change": "clause 1, step 9 and the title re-pointed (assertion defect, #21784 VF4). The service-automation engine's buildRunTrigger sets trigger.type = context.event ?? 'manual': the launch event, not Flow.type, and execution.zod.ts describes trigger.type as a free string. This predates 17.6.0 (#7533). The verifier's wording is used: the kind is identified through the run's flow, and trigger.type is recorded as the launch event",
+          "ref": "#21797"
         }
       ]
     },
