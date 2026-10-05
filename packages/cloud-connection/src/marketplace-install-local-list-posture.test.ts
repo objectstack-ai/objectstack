@@ -269,7 +269,11 @@ describe('#9011 — an authenticated non-operator gets the inventory WITHOUT the
             manifestId: 'app.test.crm',
             version: '1.4.0',
             installedAt: INSTALLED.installedAt,
-            withSampleData: true,
+            // The ledger records `true`, but this manifest bundles no seed
+            // datasets, so no seed row can be in the caller's scope: the listing
+            // answers from the rows, not the record (#21775, pinned in
+            // `marketplace-install-local-purge.test.ts`).
+            withSampleData: false,
         });
 
         // ② The half it NARROWS — absent keys, not null values. `null` would be
