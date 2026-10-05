@@ -1,0 +1,35 @@
+{
+  "number": 21808,
+  "kind": "pull_request",
+  "title": "test(spec): re-point object-metric icon citation to index.tsx:299",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "protocol:ui",
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T04:00:26Z",
+  "updated_at": "2026-10-05T05:18:28Z",
+  "closed_at": "2026-10-05T05:18:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-05T05:18:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21808",
+  "body": "Fixes #21802\n\nClause-②: no\n\nBefore: `packages/spec/src/ui/component.test.ts:4146` cited `plugin-dashboard/src/index.tsx:204` for the `object-metric` `icon` input. At objectui `9dfaca6543` (the current `.objectui-sha`; same at the old pin `2e818d0b51ec`) that line is a lone closing brace.\nAfter: cites `index.tsx:299`, where the `object-metric` registration (starts `:262`) declares `{ name: 'icon', type: 'string' }`.\n\nRead evidence (read-only objectui clone at `9dfaca654311cddd81714153c4f82c241d7cdc54`): `sed -n 204p` is a closing brace; `:262` is the `'object-metric'` registration; `:299` is its icon input. (`:192` is the sibling metric registration's icon, before `:262`.)\n\nComment-only change in a test file; publishes nothing, no changeset.\n\nAcceptance notes: other anchors in the same comment (`ObjectMetricWidget.tsx:142`, `:474`, `MetricWidget.tsx:312-321`, `:373-382`) do not match at this pin (e.g. `:142` is now docblock text); they read as dated, not re-pointed here per scope.\n\nGates: `vitest run src/ui/component.test.ts` 367 passed; `check:objectui-pin-citations --verify-anchors` OK; `check:nul-bytes`, `check:cross-package-test-inputs`, `check:test-source-alias` OK.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

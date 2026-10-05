@@ -1,0 +1,37 @@
+{
+  "number": 21822,
+  "kind": "issue",
+  "title": "[finding] install-local: after a restart whose rehydrate refused a protocol-incompatible package, GET /install-local still lists it as installed (200, no \"not loaded\" marker); with PR #21820 each GET also logs a warn for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T05:07:15Z",
+  "updated_at": "2026-10-05T08:36:30Z",
+  "closed_at": "2026-10-05T08:34:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21822",
+  "body": "Filing gate: **① a product defect with reach measured (class a).**\n- **reach:** `GET /api/v1/marketplace/install-local`, once, as the installing operator, on an unwalled real boot (`bootStack` showcase + `MarketplaceInstallLocalPlugin`, `databaseFile`), after a restart whose `kernel:ready` rehydrate refused `com.example.crm`. Its ledger entry declared `engines.protocol: \"^16\"` on a protocol-17 runtime, and the boot logged `OS_PROTOCOL_INCOMPATIBLE: com.example.crm@4.0.0 is NOT loaded into this runtime`.\n- Measured by #21775's dev on PR #21820 (`c668f551be`), from its `os-dev-report` on #21775 (`out_of_scope_findings[0]`). The seat had asked for this one reading as a carrier from #21762's contract review (`5987495487`, note (c)) and its landed note (`5987844456`).\n\nFiled by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## Measured\n- **On `origin/main`** (the listing reads the ledger record; measured through the dev's ablation of #21820's listing line on the same request): `200`, `total: 1`, the entry listed with `packageId`, `versionId`, `manifestId`, `version`, `installedAt`, `installedBy` and `withSampleData: true`. Nothing in the answer says the package is not loaded.\n- **With PR #21820** (the listing derives `withSampleData` from the caller's rows): the same entry and fields, `withSampleData: false`, and each such `GET` logs one `warn`: \"com.example.crm: the installed-apps listing could not read this package's seed rows (crm_account: Object 'crm_account' not found; …), so it answers withSampleData: false for it\".\n- Only the boot's `error` line (PR #21805, #21762) says the entry is not loaded. The console's installed-apps list, which reads this endpoint, shows it as installed.\n\n## Mechanism (read on PR #21820's head)\n- Since PR #21805, the rehydrate skips an `incompatible` ledger entry (`checkProtocolCompat`) but keeps it in the ledger, so DELETE and a compatible re-install still work.\n- `handleList` serves every readable ledger entry. An unreadable one is dropped from `items` with its own warning (`warnSkippedLedgerEntries`, \"it is MISSING from the installed-apps list served to the console\", `marketplace-install-local-plugin.ts:1357` on `origin/main` `75ddcd1b41`); a protocol-refused one is not distinguished at all.\n\n## Reader who acts\nTriage grades it and decides the answer: a marker on the listed entry (for example a not-loaded state with the refusal's code), omission from `items`, or the posture as it is, documented. #21762's contract review (`5987495487`) judged that \"the listing owes a marker or omission for a ledger entry the rehydrate refused\". The per-request `warn` from PR #21820 is the same family and goes with whichever answer is chosen.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, open and closed: 「install-local listing shows package not loaded protocol incompatible rehydrate refused listed as installed」 gives 4 hits (#21775, #21777, #21762, #21585); 「installed apps list console shows app installed but not loaded error log only OS_PROTOCOL_INCOMPATIBLE marketplace」 gives 1 hit (#21762). None of them is this: #21762 added the refusal that creates the state, and #21775 is the listing's per-organization flag."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 21813,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): settle membership under the auto policy at user creation (ADR-0093 D7)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T04:36:44Z",
+  "updated_at": "2026-10-05T06:33:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21813",
+  "body": "Fixes #21791\n\nClause-②: no\n\n## What\n\nUnder the `auto` policy, membership is now settled when the user is created, per ADR-0093 D7. This follows the maintainer ruling recorded on the card. Changes are all in `@objectstack/plugin-auth`:\n\n- **Session seam (`AuthManager.composeDatabaseHooks`).** The `session.create.before` settle now runs only for the session minted in the request that creates the user. `user.create.before` stages the address in that request's better-auth endpoint context, and the store is a `WeakMap`, so nothing outlives the request. The settle still runs ahead of the deferred `user.create.after`, so a sign-up's first session keeps its organization. Membership is not decided again at a later sign-in.\n- **One-time ADR-0093 D6 backfill (new `membership-backfill-ledger.ts`).** `runOneTimeMembershipBackfill` wraps `backfillMemberships`. It records its verdict in the `sys_migration` deployment ledger (id `adr-0093-membership-backfill`, `verified_at: null`, `blocking: 0`), and every later `kernel:ready` / `app:seeded` trigger reads that record and binds nobody.\n  - These verdicts are recorded: the pass ran, or the policy was `invite-only`.\n  - These are not recorded, so a later pass still runs: no target organization, an invalid policy, no engine.\n  - The pass also runs at the moment the default organization is first created.\n  - With no ledger, or a ledger it cannot read, the pass does not run and logs a `warn`. If the record cannot be written, that is logged as an `error` with the remedy.\n- **Unchanged.** `invite-only` binds nobody. Multi-org gets no automatic binding. The creation paths (sign-up, admin create-user, import, SSO JIT) still bind under `auto`.\n\nDerived artefacts this needed: `scripts/tenant-audit-census.mjs --write` plus the six hand-written prose figures on `content/docs/permissions/tenant-audit-census.mdx`, because the ledger insert is one new engine write site (231 → 232). Also `scripts/check-engine-double-contract.mjs --write`, which records two new pinned `findOne` doubles.\n\n## Tests\n\nCode and tests measured on `f41cb3fe79`. `a641515ccf` adds only the census and ledger refresh, and every gate derived for it ran green after that commit. Head `0581a91c16` merges `origin/main`, whose 3 incoming commits do not touch these packages; the two ledger gates were re-read green on it:\n\n- `pnpm --filter @objectstack/plugin-auth typecheck`: green, including `check:test-typecheck`.\n- `pnpm --filter @objectstack/plugin-auth exec vitest run`: 120 files, 2526 passed, 10 skipped.\n- `pnpm --filter @objectstack/dogfood typecheck`: green.\n- New `membership-backfill-ledger.test.ts`, 9 cases: first pass binds and records; a recorded verdict binds nobody and does not scan; `invite-only` is recorded; no target records nothing; no ledger and an unreadable ledger do not run; a failed record is reported at `error`; a concurrent record counts as recorded.\n- `first-session-membership-ordering.test.ts` now drives the real sign-up order: `user.create.before` and `session.create.before` share one request context. A new block covers sign-ins that must not settle: no creation in the request (with a same-shape control), a creation staged in another request, a different user, no context, and a host-refused creation.\n- `auth-plugin.test.ts` and `membership-policy-setting.test.ts` doubles gain the ledger. The `app:seeded` case is split in two: the pass runs when `kernel:ready` had no target, and once recorded a later trigger binds nobody.\n- Dogfood (real showcase boot), `membership-decided-at-creation.dogfood.test.ts`. Creation binds the new user, and the first session carries the organization. Then better-auth's remove-member endpoint removes the membership, the user signs in again, the session has no active organization, and no `sys_member` row reappears.\n\nAblations, each run from the committed fix through `scripts/ablation-replace.mjs`, which verified both the mutation and the restore against the disk:\n\n1. Session gate forced open (`|| true` on the in-request check). Rebuilt plugin-auth, and `ablation-dist-preflight` showed the marker present in `dist/`. The dogfood test went **red**: `expected ORG_ID to be null`, meaning the sign-in session was stamped with the organization again. Restore leg: rebuilt, preflight `--absent` passed, tree clean against HEAD, dogfood **green**.\n2. Ledger check disabled (an always-false `Date.now()` clause ANDed in). 4 unit cases went **red** across `membership-backfill-ledger.test.ts` and `auth-plugin.test.ts`. Restored, blob equal to HEAD.\n\nGates: see the report. `check:dual-build-cjs-loads` is NOT MEASURED locally, because the prerequisite was not met: unrelated packages are unbuilt in this worktree. It is declared to CI.\n\n## Acceptance notes\n\n- **Upgrade boot.** The ledger has no record on the first boot of this version, so that boot runs the backfill one last time. After that it is one-time. Ruled reading: the one-time backfill of users who predate the policy.\n- **Raw `sys_user` inserts.** A row inserted directly through the data engine after the one-time pass is recorded never crosses user creation, so a later `app:seeded` no longer binds it. In-tree example apps create users through sign-up. ADR-0093 D6's paragraph on the `app:seeded` re-run still describes the trigger, which is kept, but not the one-time semantics. Amending the ADR's text is a governed (Tier H) edit, so it is left to the maintainer.\n- **Durability gate vocabulary.** The ledger write's failure path logs inline at `error`. `DURABILITY_CRITICAL_CALLEES` (`scripts/check-durability-degradation-log-level.mjs`) was not extended to name the new seam. That edit to the gate's own vocabulary is left as a follow-up, not made here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018zT8d8NpiQ1ExhuNd5TxY6)_\n"
+}

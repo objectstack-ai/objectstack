@@ -1,0 +1,28 @@
+{
+  "number": 21826,
+  "kind": "pull_request",
+  "title": "chore(ci): refresh the Test Core shard-timings dataset",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T05:53:40Z",
+  "updated_at": "2026-10-05T05:53:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21826",
+  "body": "Refreshes `scripts/test-shard-timings.json`, the balancing input for the Test Core\nshard split. Opened automatically by `.github/workflows/shard-timings-refresh.yml`.\nEvery byte came out of `scripts/measure-test-shard-timings.mjs`; nothing here was\nhand-edited, and no bound, timeout or matrix entry was touched.\n\n## Source\n\nMeasured across 1 accumulated run(s) of the HOURLY `schedule` run of CI on\n`main` — the full-battery run (#16467). A `push` run on `main` is affected-only and\nis not a measurement of the workspace, so no push run feeds this file.\n\nNo single green run measures the whole workspace either — turbo's cache is namespaced\nper shard and only main pushes write it, so a\npackage whose inputs have not changed is a HIT and the generator refuses hits rather\nthan recording a replay as a duration. Runs are therefore accumulated, each fenced by\nits own `--run` group, until every package the committed dataset holds is measured\nagain; a package seen in several of them gets the median of those observations.\n\n- https://github.com/objectstack-ai/objectstack/actions/runs/37262126122\n\n- Newest run in the set: `37262126122`, commit `75ddcd1b41e74823b7bb9f3fe9e159a189fa2a91` — the date this refresh carries.\n- Every run above had all six `Test Core (N/6)` jobs conclude `success` with its six\n  run-summary artifacts still retained; runs that were cancelled, failed or had lost\n  their artifacts were rejected by name in the log before any of these were used.\n\nAll 72 package weights were measured in these runs; nothing was carried.\n\n⚠️ This PR references #16173 and #16222 but does NOT carry a closing keyword for them,\nbecause a weekly lane cannot know which cards a given run ought to retire. If this is\nthe first refresh to land, retire those two by hand as part of merging it.\n\n## Measured per-shard suite time on the newest run in the set\n\n```\n1: 759s  |  2: 2100s  |  3: 844s  |  4: 647s  |  5: 802s  |  6: 796s\n```\n\n## Predicted bins, before and after\n\n```\nBEFORE  partition-test-shards: self-test OK (72 measured packages -> 72 shard items, 6 shards, max/mean 1.12x <= 1.3x, floor 1391s, bins 1391/1208/1206/1208/1208/1208s, file-level slices: none)\nAFTER   partition-test-shards: self-test OK (72 measured packages -> 72 shard items, 6 shards, max/mean 1.04x <= 1.3x, floor 1703s, bins 1703/1615/1615/1615/1617/1616s, file-level slices: none)\n```\n\n## No checks will start on this PR by themselves\n\nIt was opened with the Actions `GITHUB_TOKEN`, and GitHub's recursion guard means a\nPR opened that way triggers no workflow runs. Push any commit to the branch, or close\nand reopen the PR, to start CI.\n\nRefs #16464, #16173, #16222.\n"
+}

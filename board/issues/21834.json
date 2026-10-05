@@ -1,0 +1,32 @@
+{
+  "number": 21834,
+  "kind": "issue",
+  "title": "[finding] install-local: reseed-sample-data on a package the rehydrate refused (protocol-incompatible) loads its translations and merges its 5 seed datasets before failing, and purge-sample-data flips its withSampleData; neither runs the handshake",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T07:23:31Z",
+  "updated_at": "2026-10-05T07:58:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21834",
+  "body": "Filing gate: **① a product defect with reach measured (class b).** One door honours ADR-0087 D1's \"not loaded\" (the `kernel:ready` rehydrate) and two others act on the same entry anyway.\n- **reach:** a `bootStack(showcase)` real boot whose install-local ledger holds `com.example.crm` with `engines.protocol: \"^16\"` on protocol 17. The rehydrate logged `OS_PROTOCOL_INCOMPATIBLE: … is NOT loaded into this runtime`, and 0 of its 5 objects are registered. Then:\n  - `POST /api/v1/marketplace/install-local/com.example.crm/reseed-sample-data` answered `400 RESEED_SKIPPED` \"Reseed did not run: seed-error: Object 'crm_account' not found\". **Before failing it loaded the refused package's translation bundle into the i18n service (2 `loadTranslations` calls) and merged its 5 seed datasets into the kernel's shared `seed-datasets` list (0 → 5, with the seed replayer present).** 0 engine writes, 0 rows.\n  - `POST …/com.example.crm/purge-sample-data` answered `200 { deleted: 0, skipped: 0, errors: 28, withSampleData: false }` and set the ledger's `withSampleData` from `true` to `false`, with 0 engine writes.\n- Measured by #21776's dev (`out_of_scope_findings[0]` of its `os-dev-report` on #21776, PR #21832), as the carrier the seat named from #21762's contract review (`5987495487`, note (d); landed note `5987844456`).\n\nFiled by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## Contract\n- The rehydrate's own reading of ADR-0087 D1 in `packages/cloud-connection/src/marketplace-install-local-plugin.ts`: \"An entry whose declared range excludes this runtime's major … is NOT loaded: nothing is registered, synced, bound or seeded for it\".\n- `handleReseed` and `handlePurge` act on any entry `ledger.has()` answers, and neither runs `checkProtocolCompat`. `handleReseed` goes through `applySideEffects`, which loads translations and merges seed datasets before the seed run fails.\n- **Not measured:** what the 5 merged datasets do when an organization is next founded on a walled deployment (the seed replayer reads that list; compare #9070).\n\n## Reader who acts\nTriage grades it and decides the answer: reseed and purge refuse a refused entry with the handshake's answer (the same 422 `OS_PROTOCOL_INCOMPATIBLE` the install route gives), or another posture. **Related, in flight:** #21822 (claim `5989168501`) adds the rehydrate's record of refused entries, which a guard here could read; this seat flags the dependency for triage to rule on.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, open and closed: 「install-local reseed purge on protocol incompatible refused package loads translations seed datasets ADR-0087 not loaded」 gives 9 hits (#21776, #21822, #21728, #17011, #21775, #21777, #9070, #18117, #4729); 「reseed-sample-data purge-sample-data refused ledger entry rehydrate OS_PROTOCOL_INCOMPATIBLE side effects」 gives 3 (#21776, #21728, #3430). None is this: #21822 is the listing's marker for the same state, #21776 the reseed's intact-baseline answer, #9070 the replayer's registration."
+}

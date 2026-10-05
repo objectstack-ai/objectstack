@@ -1,0 +1,35 @@
+{
+  "number": 21809,
+  "kind": "pull_request",
+  "title": "fix(service-settings): the settings audit trail records secret-valued settings with the keyed digest",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T04:04:31Z",
+  "updated_at": "2026-10-05T05:09:02Z",
+  "closed_at": "2026-10-05T05:09:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-05T05:09:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21809",
+  "body": "Fixes #21792\n\nClause-②: no\n\n## What changes\n\nThe settings audit trail now records secret-valued settings (encrypted keys) with the platform's keyed digest (`ICryptoProvider.keyedDigest`), never the unkeyed `digest`. This follows the maintainer ruling recorded on the card. Non-secret settings are unchanged.\n\n- **`packages/services/service-settings/src/settings-service.ts`**: one private helper, `secretAuditDigest`, supplies the fingerprint for a secret-valued write on both write branches (the `sys_secret` path and the legacy inline-adapter path). Both ledgers take it: the `sys_audit_log` `config_change` row (`valueDigest`, now spelled with an `hmac-sha256:` digest inside the existing encrypted marker) and the `sys_setting_audit` row (`newHash`).\n- **No keyed digest available.** This happens when no crypto provider is wired (a host that builds the service with only a `CryptoAdapter`) or when the provider refuses. The rows then record the write with no fingerprint: `valueDigest` is the bare encrypted marker and `newHash` is null. A `warn` is logged once per key. The write itself is never refused, matching the existing rule that a ledger never fails a settings save. The unkeyed digest is never used as a fallback.\n- **`packages/spec/src/contracts/crypto-provider.ts`**: the contract text is revised as the ruling asks. `digest` is the audit fingerprint of non-secret values only. `keyedDigest` requirement 3 now says a secret's audit fingerprint comes from it and never from `digest`, and that with no keyed digest the trail records none. Comment-only: no type, export or schema change.\n- **Changeset**: `@objectstack/service-settings` patch and `@objectstack/spec` patch (the doc text ships in the `.d.ts`).\n\n## Consumers that compare these digests\n\nNo non-test code reads or compares `valueDigest` / `new_hash` / `old_hash`: `git grep` over `packages/**` returned only the writers, the object definition and comments. Equal-value detection still works for a reader, because the keyed digest is stable for equal input under one key. Three existing tests pinned the old unkeyed spelling for a secret. They were updated, not deleted: two now expect the keyed shape, and one (the legacy adapter, no provider) now expects no fingerprint.\n\n## Tests (at `f34f69594c`; test code is unchanged since `fc5c86e1c6`)\n\n- New `settings-audit-secret-digest.test.ts` (7 cases). For a secret, both ledgers carry `provider.keyedDigest(value)`, which is neither `provider.digest(value)` nor the plain SHA-256 of the value. The fingerprint is stable for equal values and distinct for different ones. A reset records null. The legacy branch with a provider records the keyed digest. The legacy branch with no provider records no fingerprint, warns once, and the write still lands. A provider that refuses still lets the write land. For a non-secret value, both ledgers keep the adapter digest of the canonical JSON, unchanged.\n- `pnpm --filter @objectstack/service-settings test`: 34 files, 612 tests passed. `typecheck` (`tsc --noEmit`, `include: [\"src\"]`, so it covers the tests) passed.\n- **Ablation, two legs, done with `scripts/ablation-replace.mjs`**. The tests import `src`, so no dist rebuild was involved. Leg 1 put back the unkeyed `digest` on the `sys_secret` branch: 2 of 7 failed (the keyed-digest case and the refusing-provider case). Leg 2 put back the adapter digest on the legacy branch: 2 of 7 failed (both legacy cases). Each leg restored to the HEAD blob (`a148f503e350`) with `git diff HEAD` empty.\n- **Derived gate families** (`dispatch-gates.mjs --commands`, 87): 85 exit 0. `check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: it needs a whole-repo build). `check:type-check-debt` was killed twice by the foreground cap. Both are NOT MEASURED and left to CI. `--ran` reconciliation: 87 accounted, 0 unrun.\n- **Lint, narrowed to the 5 touched `.ts` files**: `eslint --no-inline-config --format json` reported 5 files, 0 errors, 0 warnings. The config's TS block matches `**/*.{ts,…}`, and type-aware linting is not enabled (no `parserOptions.project`), so this diff cannot change any verdict on an untouched file.\n\n## Acceptance notes\n\n- **Optional `oldHash` (not done).** The `sys_setting_audit` writer still hard-codes `oldHash: null`. Recording the previous fingerprint of a secret would mean decrypting the prior ciphertext on every write, so it is not the small rider the dispatch allowed. It is left for a follow-up.\n- The `sys_setting_audit` object's `old_hash` / `new_hash` field descriptions in `platform-objects` still say \"SHA-256 of the … value\". That was already inexact for the default adapter, and it is outside this card's file surface. Carrier: none named.\n- Audit rows written before this release keep their old fingerprint. Rotating the data key changes every later secret fingerprint.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018zT8d8NpiQ1ExhuNd5TxY6)_\n"
+}
