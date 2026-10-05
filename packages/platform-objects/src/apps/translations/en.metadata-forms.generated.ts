@@ -60,6 +60,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Name Field",
         helpText: "Field whose value titles each record (e.g. \"name\", \"subject\"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews."
       },
+      imageField: {
+        label: "Image Field",
+        helpText: "Field whose value is each record's picture, drawn beside the title in the record page header. Must name a field of this object whose type is image or avatar; any other name is refused when the object is saved. Empty: no record picture, and no placeholder is drawn."
+      },
       isSystem: {
         label: "Is System",
         helpText: "System object (protected from deletion; defaults sharing to public)"
@@ -1767,6 +1771,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       requiresFeature: {
         label: "Requires Feature",
         helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
+      },
+      requiresMembershipReach: {
+        label: "Requires Membership Reach",
+        helpText: "The organization endpoint this action calls, so it is offered only to members whose grade reaches that endpoint. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
       },
       requiredPermissions: {
         label: "Required Permissions",

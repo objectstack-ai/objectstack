@@ -151,7 +151,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -159,7 +159,7 @@
         "app": "showcase",
         "requires": [
           "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, deviceAuthorization, oidcProvider) and the socialProviders/oidcProviders maps — each variant names which boot it needs",
-          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud NOT_SUPPORTED)"
+          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud 400 SMS_SERVICE_REQUIRED)"
         ],
         "knownGaps": [
           "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. Run these variants as blocked(dependency, objectui#4179) at the browser lane. The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
@@ -171,7 +171,7 @@
         "for each variant: boot with the method configured ON, GET /api/v1/auth/config, and record the advertisement (features.* flag, emailPassword block, socialProviders list)",
         "email+password: POST /api/v1/auth/sign-up/email (when sign-up enabled), POST /api/v1/auth/sign-in/email, GET /api/v1/auth/get-session, POST /api/v1/auth/sign-out — capture each response and the session cookie lifecycle",
         "phone+password: create a phone-carrying user with a known password, POST the phone sign-in (better-auth /sign-in/phone-number surface — 'always works' when the plugin is on per the spec), verify get-session identifies the user",
-        "phone OTP with NO SMS service configured: request /phone-number/send-otp and capture the loud NOT_SUPPORTED rejection (never a silent 200, never a hang)",
+        "phone OTP with NO SMS service configured: request /phone-number/send-otp and capture the loud 400 SMS_SERVICE_REQUIRED rejection (never a silent 200, never a hang, never a bare 500)",
         "SSO/OIDC: with an oidcProviders[] entry configured, verify the login page shows the SSO button (features.sso is refined to 'usable' — ≥1 provider); drive the authorization-code round trip or cite the pinned OIDC dogfood test per rule 6",
         "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
         "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
@@ -200,9 +200,9 @@
           "evidence": "the sign-in + session trace"
         },
         {
-          "clause": "phone OTP without a deliverable SMS service fails LOUDLY (NOT_SUPPORTED) — the capability degrades to a named error, never a silent success or a hang",
+          "clause": "phone OTP without a deliverable SMS service fails LOUDLY (400 SMS_SERVICE_REQUIRED) — the capability degrades to a named error, never a silent success, a hang or a bare 500",
           "oracle": "api",
-          "verify": "the send-otp response is a non-2xx carrying the not-supported error; features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
+          "verify": "the send-otp response is 400 with a JSON body whose code is SMS_SERVICE_REQUIRED (pinned by packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts); features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
           "evidence": "the rejection + the /auth/config read"
         },
         {
@@ -244,7 +244,7 @@
       ],
       "negative": [
         "a silent 200 on any disabled method's endpoint is a FAIL — a gate that only hides the button is not a gate",
-        "phone OTP hanging or returning 2xx with no SMS service is a FAIL (the spec's own contract is 'loudly NOT_SUPPORTED')",
+        "phone OTP hanging, returning 2xx, or answering a bare 500 with an empty body with no SMS service is a FAIL (the contract is a loud 400 SMS_SERVICE_REQUIRED)",
         "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#4179); the honest verdict is blocked",
         "features.magicLink or features.passkeys appearing in the /api/v1/auth/config payload is a FAIL — #7481 withdrew both until objectui#4179 ships the UI, so their return means the stop-advertising posture regressed",
         "a discovery document whose issuer/endpoints point at a base the server does not actually mount is a FAIL — a wrong .well-known breaks every downstream RP/relying party silently"
@@ -252,7 +252,7 @@
       "variants": [
         "email+password (POST /api/v1/auth/sign-in/email, /sign-up/email, /sign-out, /get-session)",
         "phone+password (better-auth phone-number plugin sign-in surface)",
-        "phone OTP sign-in + reset (requires SMS service; loud NOT_SUPPORTED without — #2780)",
+        "phone OTP sign-in + reset (requires SMS service; loud 400 SMS_SERVICE_REQUIRED on send-otp without — #2780)",
         "enterprise SSO / generic OIDC (oidcProviders[] via genericOAuth; login button gated on usable providers)",
         "social OAuth (socialProviders map, per-provider enabled)",
         "device authorization grant (RFC 8628 — CLI/TV login)",
@@ -274,7 +274,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-method sign-in proof with both-sides gate checks and advertisement parity, grounded in the spec's plugin config + public feature registry", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-20", "change": "scoped scan-functionality (扫描功能) sweep: the 2FA clause asserted the interrupt but cited no pin — added packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts to source and noted in the clause verify + variant row that cookie-lane completion is pinned end-to-end by that test (cite per rule 6 instead of re-deriving). Enrollment lifecycle around the gate now owned by the four new identity-auth.two-factor-* items. No restructuring", "ref": "claude/new-session-0pv25p" },
-        { "revision": 4, "date": "2026-10-05", "change": "clause 10 and step 9 re-pointed: the delete-user half only (stale, #21784 VF4). plugin-auth's auth-route-ledger books POST /api/v1/auth/delete-user with disposition 'disabled': user.deleteUser is deliberately unconfigured (auth-manager), per the maintainer ruling of 2026-08-12 on #7735, so it answers 404 to every caller. The clause dates from revision 1 (2026-08-07) and predates the ruling. The verifier's wording is used. The change-email half is unchanged", "ref": "#21797" }
+        { "revision": 4, "date": "2026-10-05", "change": "clause 10 and step 9 re-pointed: the delete-user half only (stale, #21784 VF4). plugin-auth's auth-route-ledger books POST /api/v1/auth/delete-user with disposition 'disabled': user.deleteUser is deliberately unconfigured (auth-manager), per the maintainer ruling of 2026-08-12 on #7735, so it answers 404 to every caller. The clause dates from revision 1 (2026-08-07) and predates the ruling. The verifier's wording is used. The change-email half is unchanged", "ref": "#21797" },
+        { "revision": 5, "date": "2026-10-05", "change": "clause 4, its negative, step 4, the fixtures row and the phone-OTP variant re-pointed from NOT_SUPPORTED to the shipped refusal: with no deliverable SMS service, send-otp answers 400 with code SMS_SERVICE_REQUIRED (registered for @objectstack/plugin-auth in the ADR-0112 ledger) instead of a 500 with an empty body (#21784 A4). A bare 500 is now named a FAIL. The clause verify cites the door pin", "ref": "#21793" }
       ]
     },
     {
@@ -1102,24 +1103,27 @@
       "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "at least one social/OIDC provider configured (socialProviders or oidcProviders) so link_social has a provider to dance with — stock showcase ships none, so this item is blocked(fixture) until a provider is configured",
-          "the Account 'Identity Links' surface (nav_accounts → sys_account) reachable"
+          "at least one social/OIDC provider configured (socialProviders or oidcProviders) so the link door has a provider to dance with — stock showcase ships none, so the runtime fixture below supplies one",
+          "RUNTIME FIXTURE — a local OIDC provider (proved by run #21845; a test fixture in the run's scratch dir, ⛔ never committed and never a product change): a localhost authorization-code + PKCE OpenID provider serving discovery (/.well-known/openid-configuration), authorize, token, userinfo and jwks, registered with the auth service through its public config patch from a scratch app plugin — call the auth manager's applyConfigPatch({ oidcProviders: [ { the local provider's id, discovery URL, client id/secret } ] }). The 'auth:configure' hook is NOT usable for this: it fires before a scratch app plugin can contribute. The provider must be up, and the patch applied, before the first auth request (better-auth is built lazily on that request)",
+          "the Account app's 'Linked Accounts' surface (nav_account_linked → sys_account) reachable"
+        ],
+        "knownGaps": [
+          "CLOSED for runs by the local OIDC provider in requires (#21845): stock showcase ships no social/OIDC IdP, so linking is not drivable without it — the same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop. A run states that its link clauses rest on the local provider; the provider-less clause (acceptance[3]) runs on a boot WITHOUT the fixture"
         ]
       },
-      "blocked": { "by": "fixture", "ref": "no stock showcase social/OIDC IdP — link_social needs a configured provider, same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop" },
       "steps": [
-        "as a signed-in user, open Account → Identity Links (sys_account `mine` view, filter user_id={current_user_id}); screenshot the initial link set",
-        "invoke link_social for a configured provider: the action is type:'url' — GET /api/v1/auth/sign-in/social?provider=<p>&callbackURL=<origin>/_console/apps/account/sys_account (full-page navigation, NOT XHR, so the OAuth 302 dance and link cookie work); complete the provider round-trip and land back on the Identity Links view",
+        "as a signed-in user, open the Account app → Linked Accounts (sys_account `mine` view, filter user_id={current_user_id}); screenshot the initial link set",
+        "link through the AUTHENTICATED link door: with the user's session, POST /api/v1/auth/link-social {provider: '<the local provider id>', callbackURL: '<origin>/_console/apps/account/sys_account'} — it answers the provider's authorization URL; navigate the browser to that returned URL (full-page navigation, NOT XHR, so the OAuth round-trip and its state cookie work), complete the provider round-trip and land back on Linked Accounts. ⛔ Do not link through the sign-in door (/api/v1/auth/sign-in/social): that signs in, it does not link to the current user",
         "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller) — (provider_id, account_id) is the whole account identity; there is no issuer to check, sys_account.issuer retired with better-auth 1.7.3 (packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts)",
         "unlink it: the unlink_account action → POST /api/v1/auth/unlink-account with accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
-        "both-sides / degradation: on a boot with NO provider configured, confirm link_social degrades honestly — the affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
+        "both-sides / degradation: on a boot with NO provider configured, confirm the Linked Accounts surface degrades honestly — any link affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
         "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'], writes 405)"
       ],
       "acceptance": [
@@ -1132,8 +1136,8 @@
         {
           "clause": "the link surface renders the caller's own links only (mine-view scoped) — screenshot-confirmed",
           "oracle": "screenshot",
-          "verify": "Identity Links shows the caller's provider rows; a different user's links are not present",
-          "evidence": "the Identity Links screenshot"
+          "verify": "Linked Accounts shows the caller's provider rows; a different user's links are not present",
+          "evidence": "the Linked Accounts screenshot"
         },
         {
           "clause": "unlink removes the row: unlink_account keyed on the sys_account row id deletes exactly that link from mine-view",
@@ -1142,9 +1146,9 @@
           "evidence": "the unlink response + the follow-up read"
         },
         {
-          "clause": "a provider-less boot degrades honestly: link_social is absent or names the missing provider — never a link affordance that dead-ends",
+          "clause": "a provider-less boot degrades honestly: the link affordance is absent or names the missing provider — never a link affordance that dead-ends",
           "oracle": "screenshot",
-          "verify": "with no provider configured, the Identity Links surface shows no dead link action (or an explicit unavailable state)",
+          "verify": "with no provider configured, the Linked Accounts surface shows no dead link action (or an explicit unavailable state)",
           "evidence": "the provider-less screenshot"
         },
         {
@@ -1158,17 +1162,21 @@
         "a link that appears in the UI but does not create a sys_account row (client-only) is a FAIL — the row is the durable identity link",
         "unlink that hides the row from the list but leaves the sys_account (so the provider still signs the user in) is a FAIL",
         "one user's identity links appearing in another's mine-view is an RLS FAIL",
-        "a provider-less boot offering a link_social action that navigates to a dead endpoint is a dishonest-degradation FAIL"
+        "a provider-less boot offering a link affordance that navigates to a dead endpoint is a dishonest-degradation FAIL"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
-        "packages/platform-objects/src/identity/sys-account.object.ts#user_id (link_social type:'url' → /api/v1/auth/sign-in/social?provider=&callbackURL=; unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; provider options; apiMethods ['get','list'])",
+        "packages/platform-objects/src/identity/sys-account.object.ts#user_id (unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; apiMethods ['get','list'])",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink — re-pointed #18104: linkSocial is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_accounts (nav_accounts → 'Identity Links', objectName sys_account)"
+        "packages/platform-objects/src/apps/account.app.ts#nav_account_linked (nav_account_linked → 'Linked Accounts' in the Account app, objectName sys_account — the user's surface this item drives)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_accounts (nav_accounts → 'Identity Links', objectName sys_account — the Setup app's admin entry over the same object, not the user's surface)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#applyConfigPatch (the public config patch the local-provider fixture registers through; oidcProviders)",
+        "#21845 (follow-up run: link / mine-view / unlink / read-only clauses passed against a local OIDC provider through the authenticated link door)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: social/OIDC account linking round-trip → sys_account mine-view row, unlink removal, provider-less honest degradation; blocked(fixture) pending a configured IdP (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-09-23", "change": "the 'issuer stamped' requirement is withdrawn from both the step and the first acceptance clause's verify: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so nothing stamps it and the old verify failed a healthy system. The reason is kept — the step now says (provider_id, account_id) is the whole identity and names the retirement's migration entry in packages/spec — and the verify states that an issuer-less row is the expected shape", "ref": "#19217" }
+        { "revision": 2, "date": "2026-09-23", "change": "the 'issuer stamped' requirement is withdrawn from both the step and the first acceptance clause's verify: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so nothing stamps it and the old verify failed a healthy system. The reason is kept — the step now says (provider_id, account_id) is the whole identity and names the retirement's migration entry in packages/spec — and the verify states that an issuer-less row is the expected shape", "ref": "#19217" },
+        { "revision": 3, "date": "2026-10-05", "change": "blocked lifted: run #21845 passed the link, mine-view, unlink and read-only clauses against a local authorization-code + PKCE OIDC provider registered through the auth manager's applyConfigPatch from a scratch app plugin ('auth:configure' fires too early); the provider recipe is written into fixtures.requires, not committed as code, and the missing-IdP gap is kept as a CLOSED-for-runs knownGap. Step 2 now links through the authenticated POST /api/v1/auth/link-social and navigates to the URL it returns — the old step drove the sign-in door, which signs in rather than links. The step, the provider-less clause and its negative no longer name a specific sys_account action: they describe the link affordance, so the clause indices stay stable while the action itself is handled on its own card. The user's nav label is 'Linked Accounts' in the Account app (nav_account_linked); 'Identity Links' is the Setup app's admin entry (card #21851 entry 3)", "ref": "#21845" }
       ]
     },
     {

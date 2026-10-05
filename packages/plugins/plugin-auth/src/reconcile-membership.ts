@@ -47,6 +47,7 @@
  * value is rejected loudly, never coerced to `auto`.
  */
 
+import { keysetWalk } from '@objectstack/types';
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 
 /**
@@ -269,7 +270,7 @@ export interface BackfillMembershipsResult {
   scanned: number;
   bound: number;
   skipped: number;
-  reason?: 'policy' | 'invalid-policy' | 'no-target-org' | 'engine-unavailable';
+  reason?: 'policy' | 'invalid-policy' | 'no-target-org' | 'engine-unavailable' | 'scan-incomplete';
   /**
    * Present with `reason: 'invalid-policy'` — the refusal message, naming the
    * offending value. Carried on the result, not only logged, so the diagnosis
@@ -278,14 +279,51 @@ export interface BackfillMembershipsResult {
   error?: string;
 }
 
+/** Rows per page of the backfill's keyset walks. */
+const BACKFILL_PAGE_SIZE = 500;
+
 /**
- * One-shot backfill for pre-existing member-less users (ADR-0093 D6). Run on
- * `kernel:ready` in single mode with `membershipPolicy: 'auto'` only — multi-org
- * backfill is refused by design (there is no correct guess, and a wrong org in a
- * tenant-isolated deployment is a data-exposure bug, not a convenience).
+ * Walk every row of `object` in id order (keyset pagination, no row cap).
+ * Resolves `undefined` when the walk could not see the whole table — a read
+ * failed, or the reader could not seek — because the backfill's verdict is
+ * recorded once (ADR-0093 D7) and a partial scan must not become permanent.
+ */
+async function walkAll(engine: any, object: string, pageSize: number): Promise<any[] | undefined> {
+  const walk = keysetWalk<Record<string, unknown>>(
+    async (q) => {
+      const page = await engine.find(object, { ...q }, { context: SYSTEM_CTX });
+      return Array.isArray(page) ? page : [];
+    },
+    { pageSize },
+  );
+  const rows: any[] = [];
+  try {
+    for await (const page of walk.pages()) rows.push(...page);
+  } catch {
+    return undefined;
+  }
+  return walk.truncated ? undefined : rows;
+}
+
+/**
+ * One-time backfill for pre-existing member-less users (ADR-0093 D6; one-time
+ * per ADR-0093 D7, see `membership-backfill-ledger.ts`). Single mode with
+ * `membershipPolicy: 'auto'` only — multi-org backfill is refused by design
+ * (there is no correct guess, and a wrong org in a tenant-isolated deployment
+ * is a data-exposure bug, not a convenience).
  *
- * Bounded, idempotent, failure-isolated per user. Ordered after the default-org
- * bootstrap so a target org exists.
+ * Reads both tables WHOLE through keyset pages — no row cap, because the
+ * verdict is recorded once and a capped scan would leave every user past the
+ * cap unbound for good. A scan that cannot complete binds nobody and answers
+ * `scan-incomplete`. Idempotent, failure-isolated per user. Ordered after the
+ * default-org bootstrap so a target org exists. `limit` is the page size.
+ *
+ * Calling this directly is NOT gated: every call decides membership again for
+ * every member-less user, including one whose membership was removed. Under the
+ * one-time rule, call it only through `runOneTimeMembershipBackfill`, which
+ * records the verdict and runs the pass once per deployment. The reader must be
+ * able to page by `id` (keyset); a reader that cannot answers `scan-incomplete`
+ * and binds nobody.
  */
 export async function backfillMemberships(
   engine: any,
@@ -309,9 +347,17 @@ export async function backfillMemberships(
     return { ...summary, reason: 'no-target-org' };
   }
 
-  const limit = deps.limit ?? 5000;
-  const users = await findRows(engine, 'sys_user', {}, limit);
-  const members = await findRows(engine, 'sys_member', {}, limit);
+  const pageSize = deps.limit ?? BACKFILL_PAGE_SIZE;
+  const members = await walkAll(engine, 'sys_member', pageSize);
+  const users = members ? await walkAll(engine, 'sys_user', pageSize) : undefined;
+  if (!members || !users) {
+    deps.logger?.warn?.(
+      '[membership] backfill did not run: the user or membership table could not be read in full, ' +
+        'so no user was bound and the pass is retried on the next boot',
+      { organizationId },
+    );
+    return { ...summary, reason: 'scan-incomplete' };
+  }
   const membered = new Set(members.map((m: any) => String(m?.user_id ?? '')).filter(Boolean));
 
   for (const user of users) {

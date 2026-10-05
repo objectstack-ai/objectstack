@@ -123,7 +123,7 @@ describe('TursoConfigSchema', () => {
   });
 });
 
-describe('turso is a known driver to the config registry now (#6345)', () => {
+describe('turso is a known driver to the config registry now', () => {
   it('validateDriverConfig answers `known: true` for both spellings', () => {
     expect(validateDriverConfig('turso', { url: 'libsql://x.turso.io' }))
       .toEqual({ known: true, issues: [] });
@@ -169,7 +169,7 @@ describe('TursoDriverSpec', () => {
 // never on a bare `toThrow()` — this shape IS `strictObject`, so a bare throw
 // assertion passes identically on the unrecognized-key error, which is precisely
 // the error that cannot carry a FROM → TO mapping.
-describe('TursoConfig.timeout carries its unit (#15680)', () => {
+describe('TursoConfig.timeout carries its unit', () => {
   const base = { url: 'libsql://app.turso.io' };
 
   it('REFUSES the retired `timeout` with the rename in the message', () => {
@@ -210,7 +210,7 @@ describe('TursoConfig.timeout carries its unit (#15680)', () => {
 // credential, a placeholder) would satisfy identically. The driver-local mirror
 // and the constructor are held to the same table in
 // `packages/drivers/driver-turso/src/spec/turso-config-constructor-parity.test.ts`.
-describe('TursoConfigSchema refuses what the turso driver refuses (#19977)', () => {
+describe('TursoConfigSchema refuses what the turso driver refuses', () => {
   /** The one refusal a config earns, asserted to be the only issue there is. */
   const refusal = (config: Record<string, unknown>) => {
     const result = TursoConfigSchema.safeParse(config);

@@ -118,7 +118,7 @@ describe('FILTER_TEXT_CASES against the declared semantics', () => {
     expect(referenceIds(caseLower, asciiFold)).toEqual(['4']);
   });
 
-  it('the non-string cases discriminate — a COERCING evaluator FAILS exactly them (#14079)', () => {
+  it('the non-string cases discriminate — a COERCING evaluator FAILS exactly them', () => {
     // The #14079 pin, proved non-vacuous the same way as the two above: an
     // evaluator that stringifies the stored number before matching must answer
     // a DIFFERENT row set on every case over the non-string column and the
@@ -159,7 +159,7 @@ describe('FILTER_TEXT_CASES against the declared semantics', () => {
     const contains = rowsCases.find((c) => c.name.startsWith('$contains is case-SENSITIVE — a lower-case'))!;
     expect(contains.expected).toEqual(['2']);
     const folding = FILTER_TEXT_ROWS.filter((r) => asciiFold(r.name).includes(asciiFold('acme'))).map((r) => r.id);
-    expect(folding, 'a case-folding $contains returns both — that is the answer #4706 Q2 rejected').toEqual(['1', '2']);
+    expect(folding, 'a case-folding $contains returns both — the answer ruled out when $contains was declared case-sensitive').toEqual(['1', '2']);
   });
 });
 

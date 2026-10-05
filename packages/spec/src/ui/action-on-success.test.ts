@@ -10,7 +10,7 @@ import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 const base = { name: 'copy_as_new_version', label: 'Copy as new version' };
 
-describe('ActionSchema.onSuccess (#9566/#9474)', () => {
+describe('ActionSchema.onSuccess — one closed post-success navigation key for api and script actions', () => {
   describe('accept pins', () => {
     it('accepts the full shape on a type:api action', () => {
       const r = ActionSchema.safeParse({
@@ -138,7 +138,7 @@ describe('ActionSchema.onSuccess (#9566/#9474)', () => {
     });
   });
 
-  describe('type scope — api and script only (the #4352 enforcement shape)', () => {
+  describe('type scope — api and script only, refused on any other type, never silently ignored', () => {
     it.each(['url', 'modal', 'flow', 'form'] as const)('refuses onSuccess on a type:%s action', (type) => {
       const r = ActionSchema.safeParse({
         ...base,
@@ -154,7 +154,7 @@ describe('ActionSchema.onSuccess (#9566/#9474)', () => {
     });
   });
 
-  describe('the pre-existing probes now land on prescriptions, not bare rejections (#9474)', () => {
+  describe('the spellings tried before `onSuccess` existed now land on prescriptions, not bare rejections', () => {
     it('a top-level `redirect` names the onSuccess shape', () => {
       const r = ActionSchema.safeParse({ ...base, type: 'api', target: '/t', redirect: '/x' });
       expect(r.success).toBe(false);

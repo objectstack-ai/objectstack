@@ -9,7 +9,9 @@
  * first) and `objectstack validate` share, beside the expression ledger's
  * `predicateSlotRefusal` and closing the same gap: a node's `config` is an
  * open `z.record`, so what its executor requires, or refuses, was checked by
- * nobody until the run.
+ * nobody until the run. And (#21850) **the whole config of a plugin node type
+ * whose contract the spec itself declares** — `approval`, judged against
+ * `ApprovalNodeConfigSchema` with no plugin loaded.
  *
  * Its refusal codes join the closed flow slot table
  * (`FLOW_SLOT_REFUSAL_CODES`, `flow-node-expression-paths.ts`); the
@@ -40,6 +42,11 @@ import {
 } from './builtin-node-config.zod';
 import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod';
 import { ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-config.zod';
+// [#21850] The one plugin node contract the spec declares. Read only inside
+// `getDeclaredPluginNodeConfigContracts`, like the executor contracts above.
+// `approval.zod.ts` imports nothing from `automation/` (zod, the membership-role
+// leaf, `lazySchema` and `strictObject` only), so it adds no cycle here.
+import { APPROVAL_NODE_TYPE, ApprovalNodeConfigSchema } from './approval.zod';
 
 /**
  * The executor contract a builtin node's `config` is parsed against at run
@@ -89,7 +96,11 @@ let cachedBuiltinNodeConfigContracts: ReadonlyMap<string, BuiltinNodeConfigContr
  * `connector_action`, whose inputs are FlowNode SIBLING blocks
  * (`waitEventConfig` / `connectorConfig`), not `config` — each required by
  * `flow.zod.ts` itself (`requireTypeScopedConfig`,
- * `connectorActionConfigRefusals`).
+ * `connectorActionConfigRefusals`). Nor (#21850) a PLUGIN node type, even one
+ * whose contract the spec declares: the ratchet above reads only the builtin
+ * executors' sources, so a plugin type here would fail it in both directions.
+ * Those live in {@link getDeclaredPluginNodeConfigContracts}, beside this map,
+ * and the same judge reads both.
  */
 export function getBuiltinNodeConfigContracts(): ReadonlyMap<string, BuiltinNodeConfigContract> {
   if (cachedBuiltinNodeConfigContracts === undefined) {
@@ -110,6 +121,39 @@ export function getBuiltinNodeConfigContracts(): ReadonlyMap<string, BuiltinNode
     ]);
   }
   return cachedBuiltinNodeConfigContracts;
+}
+
+let cachedDeclaredPluginNodeConfigContracts: ReadonlyMap<string, BuiltinNodeConfigContract> | undefined;
+
+/**
+ * [#21850] Every PLUGIN node type whose `config` contract the spec itself
+ * declares, keyed by `node.type` — the declared contract map. Today one:
+ * `approval`, whose executor (`plugin-approvals`, `approval-node.ts`) parses
+ * `node.config ?? {}` against `ApprovalNodeConfigSchema` before it does
+ * anything else, and fails the node on ANY issue.
+ *
+ * Judged WHOLE, unlike the builtin map's presence-only arm: every issue the
+ * contract raises is a refusal — a key it requires left out, a key it does not
+ * declare, and a value it refuses — because the executor refuses the node on
+ * every one of them, so a flow carrying one would fail at every run that
+ * reached the node. The contract is a `strictObject` whose unknown-key text
+ * carries its own did-you-mean (`timeout` → `timeoutHours`), and that text is
+ * the refusal's.
+ *
+ * ⛔ No plugin is loaded to build it, and no node type joins it whose contract
+ * the spec does not declare: a plugin node type the spec knows nothing about
+ * stays outside the build doors, judged at registration by its descriptor's
+ * own `configSchema`.
+ *
+ * Built on first use, never at module load, like the builtin map.
+ */
+function getDeclaredPluginNodeConfigContracts(): ReadonlyMap<string, BuiltinNodeConfigContract> {
+  if (cachedDeclaredPluginNodeConfigContracts === undefined) {
+    cachedDeclaredPluginNodeConfigContracts = new Map<string, BuiltinNodeConfigContract>([
+      [APPROVAL_NODE_TYPE, { schema: ApprovalNodeConfigSchema }],
+    ]);
+  }
+  return cachedDeclaredPluginNodeConfigContracts;
 }
 
 /** A plain object (not an array, not `null`). */
@@ -242,6 +286,36 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
 }
 
 /**
+ * [#21850] The refusal for a key a WHOLE-judged contract does not declare, or a
+ * value it refuses, where the author wrote it — the contract's own sentence,
+ * inside one that names the node type and the key. `prescribe` adds the closing
+ * instruction for a plain value finding; an unknown key's text (with its
+ * did-you-mean) and a rule's text already say what to write.
+ */
+function nodeConfigRefusedByContractMessage(
+  nodeType: string,
+  key: string,
+  contractMessage: string,
+  prescribe: boolean,
+): string {
+  const reason = contractMessage.trim();
+  return (
+    `This \`${nodeType}\` node's config is refused at \`${key}\` by the ${nodeType} contract: `
+    + `${/[.!?]$/.test(reason) ? reason : `${reason}.`} Its executor parses the config against that contract `
+    + 'before it does anything else and refuses the node on any finding, so every run that reached this node '
+    + 'would fail there; the config is metadata, and re-running changes nothing.'
+    + (prescribe ? ` Write a value the ${nodeType} contract accepts at \`${key}\`.` : '')
+  );
+}
+
+/** The keys an `unrecognized_keys` issue names (Zod carries them beside its `path`). */
+function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[] {
+  if (issue.code !== 'unrecognized_keys') return [];
+  const keys = (issue as { readonly keys?: unknown }).keys;
+  return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === 'string') : [];
+}
+
+/**
  * Every reason a node's `config` is refused on SHAPE or PRESENCE, and (#21654)
  * a write node's static TARGET in the stored-metadata family — the ONE judge
  * `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and
@@ -275,6 +349,21 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
  * `registerFlow` and `objectstack validate`, which convert first; a direct
  * `FlowSchema.parse` of a pre-conversion spelling meets the refusal, exactly
  * as it meets every other tombstone.
+ *
+ * ## A declared plugin contract — judged whole (#21850)
+ *
+ * For a type in {@link getDeclaredPluginNodeConfigContracts} (`approval`) the
+ * same parse is made, and EVERY issue is kept, because that executor refuses
+ * the node on every issue: the two codes above for a key left out, and
+ *
+ *  - a key the contract does not declare, or a value it refuses, where the
+ *    author wrote it → `node-config-refused-by-contract`, anchored at the key
+ *    (`escalation.bogusKey`, one refusal per unknown key; `escalation.
+ *    timeoutHours` for `0.5` under its `min(1)`), whose message names the node
+ *    type and the key around the contract's own sentence — for an unknown key,
+ *    its did-you-mean (`timeout` → `timeoutHours`).
+ *
+ * The builtin arm stays presence-only: nothing here widens what it judges.
  *
  * ## The decision branch shape
  *
@@ -322,8 +411,12 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   }
   const writeTarget = storedMetadataWriteTargetRefusal(nodeType, config);
   if (writeTarget) out.push(writeTarget);
-  const contract = getBuiltinNodeConfigContracts().get(nodeType);
+  const builtin = getBuiltinNodeConfigContracts().get(nodeType);
+  // [#21850] A declared plugin contract is judged WHOLE: see the docblock.
+  const declared = builtin ? undefined : getDeclaredPluginNodeConfigContracts().get(nodeType);
+  const contract = builtin ?? declared;
   if (!contract) return out;
+  const whole = declared !== undefined;
   const authored = config ?? {};
   if (!isRecord(authored)) return out;
   if (contract.parsedWhen && !contract.parsedWhen(authored)) return out;
@@ -331,13 +424,42 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   if (result.success) return out;
   const seen = new Set<string>();
   for (const issue of result.error?.issues ?? []) {
+    if (whole) {
+      // An unknown key's issue sits on the object that holds it (the config
+      // itself for a top-level key, so its `path` is empty): anchor one
+      // refusal at each key the author wrote, with the contract's sentence.
+      for (const unknownKey of unrecognizedKeysOf(issue)) {
+        const key = ledgerPathOf([...issue.path, unknownKey]);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          code: 'node-config-refused-by-contract',
+          params: { nodeType, key },
+          message: nodeConfigRefusedByContractMessage(nodeType, key, issue.message, false),
+          source: '',
+          path: key,
+        });
+      }
+      if (issue.code === 'unrecognized_keys') continue;
+    }
     if (issue.path.length === 0) continue;
     if (insideRegion(nodeType, issue.path)) continue;
     if (insideValueSlot(nodeType, issue.path)) continue;
-    if (!absentAt(authored, issue.path)) continue;
+    const absent = absentAt(authored, issue.path);
+    if (!absent && !whole) continue;
     const key = ledgerPathOf(issue.path);
     if (seen.has(key)) continue;
     seen.add(key);
+    if (!absent) {
+      out.push({
+        code: 'node-config-refused-by-contract',
+        params: { nodeType, key },
+        message: nodeConfigRefusedByContractMessage(nodeType, key, issue.message, issue.code !== 'custom'),
+        source: '',
+        path: key,
+      });
+      continue;
+    }
     out.push(
       issue.code === 'custom'
         ? { code: 'node-config-key-required-by-rule', params: { nodeType, key }, message: issue.message, source: '', path: key }

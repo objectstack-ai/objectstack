@@ -70,7 +70,10 @@
  * cloud round-trips. An entry whose `engines.protocol` excludes this runtime's
  * major is not loaded: it is reported at `error`, naming the replay command,
  * and the boot continues (ADR-0087 D1, #21762). The GET listing marks it as
- * not loaded for as long as that ledger entry stands (#21822).
+ * not loaded for as long as that ledger entry stands (#21822). The reseed and
+ * purge doors run the handshake on the entry themselves and refuse such an
+ * entry with the install route's `OS_PROTOCOL_INCOMPATIBLE` (422) before any
+ * side effect; DELETE and a compatible re-install still act on it (#21834).
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -101,12 +104,14 @@ import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
 // answer both package-install doors give its refusal. Imported from the
 // producer, never restated: `POST /api/v1/packages` answers through the same
-// helper, so the two doors cannot drift apart on the wire.
+// helper, so the two doors cannot drift apart on the wire. [#21834] The
+// sample-data doors answer a refused ledger entry through it too.
 import {
     assertProtocolCompat,
     checkProtocolCompat,
     isProtocolIncompatibleError,
     protocolIncompatibleAnswer,
+    ProtocolIncompatibleError,
     type ProtocolIncompatibleDiagnostic,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
@@ -1937,6 +1942,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * ADR-0123 D2 / D4's answer ({@link noActiveOrganizationRefusal}); the
      * reseed's other declines (no seed datasets, no data engine or metadata
      * service, a seed run that threw) stay `400 RESEED_SKIPPED`.
+     *
+     * [#21834] An entry whose declared protocol range excludes this runtime is
+     * refused first, with the install route's `422 OS_PROTOCOL_INCOMPATIBLE`
+     * ({@link refuseProtocolIncompatibleEntry}): ahead of the side effects,
+     * because both of those answers are decided after them.
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
@@ -1955,6 +1965,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!entry) {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'reseed sample data');
         }
+        // [#21834] ADR-0087 D1: the entry is judged before `applySideEffects`
+        // loads its translations and merges its seed datasets.
+        const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
+        if (incompatible) return incompatible;
 
         const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c, door: 'reseed' });
         // [ADR-0123 D2 / D4] A walled session with no active organization: the
@@ -2056,6 +2070,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `skipped` counts seed records no row in scope carries (already deleted);
      * `errors` counts records that could not be purged — refused by the engine,
      * or not identifiable — each reason logged.
+     *
+     * [#21834] An entry whose declared protocol range excludes this runtime is
+     * refused first, with the install route's `422 OS_PROTOCOL_INCOMPATIBLE`
+     * ({@link refuseProtocolIncompatibleEntry}): no row is deleted and the
+     * ledger's `withSampleData` / `sampleDataPurged` are not rewritten.
      */
     private handlePurge = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Purging sample data');
@@ -2074,6 +2093,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!entry) {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'purge sample data');
         }
+        // [#21834] ADR-0087 D1: the entry is judged before any row is matched,
+        // deleted, or the ledger is written.
+        const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
+        if (incompatible) return incompatible;
 
         const datasets = seedDatasetsOf(entry.manifest);
 
@@ -2138,6 +2161,43 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             success: true,
             data: { manifestId, deleted, skipped, errors, withSampleData: false },
         }, 200);
+    };
+
+    /**
+     * [#21834] ADR-0087 D1's handshake on the two sample-data doors: the answer
+     * reseed and purge give a ledger entry whose declared protocol range
+     * excludes this runtime, or `undefined` for an entry they may act on.
+     *
+     * The rehydrate does not load such an entry: nothing is registered, synced,
+     * bound or seeded for it. The two doors used to act on it anyway. The reseed
+     * loaded its translations into the i18n service and merged its seed datasets
+     * into the shared `seed-datasets` list before its seed run failed on objects
+     * nobody registered; the purge rewrote the ledger's `withSampleData` with no
+     * row deleted.
+     *
+     * The answer is the install route's for the same manifest: `422
+     * OS_PROTOCOL_INCOMPATIBLE`, the error's own message, and the diagnostic's
+     * five fields in `error.details`, from the producer's one shaping helper
+     * (`protocolIncompatibleAnswer`). Each door asks this right after it has
+     * read the entry, before any side effect.
+     *
+     * Judged with `checkProtocolCompat` on the entry itself, as the rehydrate
+     * judges it, and NOT read from {@link refusedAtRehydrate}: an entry another
+     * runtime wrote to a shared ledger after this boot was never rehydrated
+     * here, and the doors refuse it all the same. Only a positive
+     * incompatibility is refused. An absent or unrecognised range is admitted,
+     * with no warning, so a loadable entry is answered exactly as before.
+     * DELETE and a compatible re-install do not ask this: they are how an
+     * operator gets out of the refused state.
+     */
+    private refuseProtocolIncompatibleEntry = (c: any, entry: InstalledEntry): Response | undefined => {
+        const compat = checkProtocolCompat(entry.manifest);
+        if (compat.status !== 'incompatible') return undefined;
+        const refusal = protocolIncompatibleAnswer(new ProtocolIncompatibleError(compat.diagnostic));
+        return c.json({
+            success: false,
+            error: { code: refusal.code, message: refusal.message, details: refusal.details },
+        }, refusal.status);
     };
 
     /**

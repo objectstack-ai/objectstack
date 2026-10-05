@@ -141,6 +141,9 @@ export const actionForm = defineForm({
         // names, so an inline list would only restate them and could drift from
         // the registry the parse step resolves against.
         { field: 'requiresFeature', helpText: 'Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key.' },
+        // The grade twin of the row above, and its enum derives the same way:
+        // every member IS a row of the reach table the parse step lowers from.
+        { field: 'requiresMembershipReach', helpText: 'The organization endpoint this action calls, so it is offered only to members whose grade reaches that endpoint. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key.' },
         // #19332 G1b — the RBAC gate, beside the feature gate. `string[]`, so the
         // `app.form.ts` `requiredPermissions` face (`string-tags`).
         { field: 'requiredPermissions', widget: 'string-tags', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them.' },

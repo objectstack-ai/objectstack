@@ -7,11 +7,10 @@
 // `os lint` computes i18n coverage AND runs the authoring-rule registry (which
 // includes `lintLivenessProperties`) in a single pass over the same stack. The
 // `flow` coverage bucket, new in #11615, harvested `flows.<f>.label`,
-// `flows.<f>.screens.<n>.title` and the per-field `label`/`placeholder`. The
-// `flows` row of `@objectstack/spec/liveness/translation.json` is
-// `status: planned` + `authorWarn: true` — only part of the group is read: the
-// console's screen-flow runner reads `screens`, but the flow's own `label` is
-// read by nothing yet (#20318).
+// `flows.<f>.screens.<n>.title` and the per-field `label`/`placeholder`. While
+// the `flows` row of `@objectstack/spec/liveness/translation.json` was
+// `status: planned` + `authorWarn: true` (the console's screen-flow runner read
+// `screens` but not yet the flow's own `label`), the two rules collided.
 //
 // Measured on one stack before the fix:
 //
@@ -24,25 +23,30 @@
 // restored. Under `--i18n-strict` the demand side is an ERROR, so a project
 // could be forced to author keys it is then warned for.
 //
-// ⛔ The warn side is NOT the bug and is not softened here. The flow's own
-// `label` is read by nothing yet (#20318), so a translated flow label really is
-// stored and never shown — the failure mode `validationMessages` was removed in
-// 17.0.0 for. The warn is group-level, so it still covers the whole group. The
-// demand is the premature half, and it is what is gated.
+// The fix gated the DEMAND on the ledger and left the warn alone: a group the
+// ledger warns on is left out of the coverage walk and the extract skeleton.
 //
-// ## What is pinned
+// ## What is pinned, now that the row is `live`
 //
-// The gate is group-general and read from the ledger rather than switched on
-// `flows` by name, so (a) it self-activates when the row flips to `live` with
-// the objectui runner, and (b) any FUTURE group that acquires a warn is covered
-// on the day it is marked rather than re-opening this collision one group at a
-// time. Both properties are pinned below, and so is the census the finding
-// asked for: `flows` is the only warned translation group today.
+// The runner names the flow by `flows.<f>.label` too, so the row is `live`,
+// carries no `authorWarn`, and no translation group is warned. The gate is
+// group-general and read from the ledger rather than switched on `flows` by
+// name, so it let the group back in on that day with no edit to the walker,
+// and any FUTURE group that acquires a warn is gated on the day it is marked.
+// Pinned below against the REAL shipped ledger — deliberately, so this file goes
+// red the day the ledger moves again and someone has to look at both halves:
 //
-// The post-flip behaviour of the bucket itself lives in
-// `i18n-flow-screen-coverage.test.ts`, which simulates a `live` row. This file
-// runs against the REAL shipped ledger — deliberately, so it goes red the day
-// the row moves and someone has to look at both halves together.
+//   - the census: no translation group is warned, as an equality;
+//   - the walk with the ledger's own set is the ungated walk, `flows.*` included,
+//     and `os lint` reports the untranslated wizard;
+//   - the collision cannot recur: omitting the keys draws demand and no warning,
+//     and authoring them draws neither;
+//   - the extract skeleton carries the group.
+//
+// The GATED behaviour itself, which no shipped row exercises any more, is held
+// by the injected-set pin at the bottom ("gates whatever the ledger names"),
+// the planted fixture the census cannot be. The bucket's own key face lives in
+// `i18n-flow-screen-coverage.test.ts`.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -51,7 +55,7 @@ import {
   extractTranslations,
 } from '../src/utils/i18n-extract.js';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
-import { lintLivenessProperties } from '@objectstack/lint';
+import { authorWarnedProperties, lintLivenessProperties } from '@objectstack/lint';
 
 const leadConversion = {
   name: 'lead_conversion',
@@ -114,45 +118,57 @@ const flowDemands = (config: any) =>
 const flowWarnings = (config: any) =>
   lintLivenessProperties(config).filter((f) => f.message.includes('`flows`'));
 
-/** The ledger row is `planned`, so the whole surface is walked but not emitted. */
+/** An injected empty set: the walk as the gate runs it when the ledger warns on no group. */
 const UNGATED = { warnedGroups: new Set<string>() };
 
 describe('the liveness gate on the i18n coverage walk', () => {
-  it('names `flows` — and nothing else — as a warned translation group', () => {
-    // The census #11624 asked for: is any OTHER `planned` + `authorWarn` group
-    // in the coverage walker's reach? Today, no. This is an equality, not a
-    // `toContain`, so the day a second group acquires a warn this goes red and
-    // the collision is considered before it ships rather than after.
-    expect([...authorWarnedTranslationGroups()]).toEqual(['flows']);
+  it('names no translation group as warned — `flows` is live', () => {
+    // The census, after the flip. An equality, not a `not.toContain`, so the
+    // day any translation group acquires a warn this goes red and the collision
+    // is considered before it ships rather than after.
+    expect([...authorWarnedTranslationGroups()]).toEqual([]);
   });
 
-  it('can say no: the live groups the walker also harvests are absent from that set', () => {
+  it('can say no and yes: the reader under the census still answers for a type with a warned row', () => {
     // A zero-hit result only counts once the same instrument returns a positive
-    // on a term known present, so the assertion above supplies the positive and
-    // this one the negatives — every other top-level group the walker emits.
+    // on a term known present. The census above is now the zero, so the positive
+    // comes from the ledger reader it wraps, on the one planned + authorWarn row
+    // still in tree; the negatives are the groups the walker emits.
+    expect(authorWarnedProperties('object').has('externalSharingModel')).toBe(true);
     const warned = authorWarnedTranslationGroups();
-    for (const live of ['objects', 'apps', 'pages', 'dashboards', 'globalActions', 'metadataForms']) {
+    for (const live of ['objects', 'apps', 'pages', 'dashboards', 'globalActions', 'metadataForms', 'flows']) {
       expect(warned.has(live)).toBe(false);
     }
   });
 
-  it('emits no `flows.*` key while the row is `planned` — and still walks everything else', () => {
-    const roots = new Set(collectExpectedEntries(app(false)).map((e) => e.path[0]));
+  it("walks `flows.*` with the ledger's own set — the same walk as an ungated one", () => {
+    const keys = (opts?: { warnedGroups: ReadonlySet<string> }) =>
+      collectExpectedEntries(app(false), opts).map((e) => e.path.join('.')).sort();
+    expect(keys()).toEqual(keys(UNGATED));
 
-    expect(roots.has('flows')).toBe(false);
-    // Not an empty-walk artifact: the same call still harvests the live groups.
+    const roots = new Set(collectExpectedEntries(app(false)).map((e) => e.path[0]));
+    expect(roots.has('flows')).toBe(true);
+    // Not a flows-only walk: the same call still harvests the other groups.
     expect(roots.has('objects')).toBe(true);
     expect(roots.has('metadataForms')).toBe(true);
   });
 
-  it('reports no `i18n/missing-flow`, on a tree that still reports its object gaps', () => {
+  it('reports the untranslated wizard as `i18n/missing-flow`, on a tree that still reports its object gaps', () => {
     const untranslatedObject = {
       ...app(false),
       translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' } } } }],
     };
 
-    expect(flowDemands(app(false))).toEqual([]);
-    // The report is live — the same run still speaks about the live groups.
+    expect(flowDemands(app(false)).map((i) => `${i.locale} ${i.key}`).sort()).toEqual([
+      'zh-CN flows.lead_conversion.label',
+      'zh-CN flows.lead_conversion.screens.conversion_details.fields.create_opportunity.label',
+      'zh-CN flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label',
+      'zh-CN flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder',
+      'zh-CN flows.lead_conversion.screens.conversion_details.title',
+    ]);
+    // The translated wizard draws none, so the demand is the wizard's own gap.
+    expect(flowDemands(app(true))).toEqual([]);
+    // The report is live — the same run still speaks about the other groups.
     expect(
       computeI18nCoverage(untranslatedObject).issues.some(
         (i) => i.source === 'field' && i.locale === 'zh-CN',
@@ -161,27 +177,32 @@ describe('the liveness gate on the i18n coverage walk', () => {
   });
 
   it('never lets both rules speak about the same keys — the collision itself', () => {
-    // Omitting was the branch that drew `i18n/missing-flow`; authoring is the
-    // branch that draws the liveness warning. Neither branch may now produce
-    // BOTH, and the demand side is silent on both.
-    expect(flowDemands(app(false))).toEqual([]);
+    // Omitting the keys draws the demand and no warning; authoring them draws
+    // neither. A branch producing BOTH is the collision this file exists for,
+    // and the second branch is the move the author lacked while the row warned.
+    expect(flowDemands(app(false)).length).toBeGreaterThan(0);
     expect(flowWarnings(app(false))).toEqual([]);
 
     expect(flowDemands(app(true))).toEqual([]);
-    // ⛔ The warning is true and stays: the flow's own `label` is read by
-    // nothing yet, so its translated copy is stored and never shown. Its rule
-    // id says `planned`, i.e. "keep it", not "remove it".
-    const warned = flowWarnings(app(true));
-    expect(warned.length).toBeGreaterThan(0);
-    for (const f of warned) expect(f.rule).toBe('liveness-planned-property');
+    expect(flowWarnings(app(true))).toEqual([]);
+
+    // Not a lint that stopped loading ledgers: the same rule over the same
+    // translated app, plus the one warned object row in tree, raises that row.
+    const witnessed = lintLivenessProperties({
+      ...app(true),
+      objects: [...app(true).objects, { name: 'crm_widget', externalSharingModel: 'read' }],
+    });
+    expect(witnessed.some((f) => f.message.includes('externalSharingModel'))).toBe(true);
+    expect(witnessed.some((f) => f.message.includes('`flows`'))).toBe(false);
   });
 
-  it('does not scaffold a skeleton whose every filled-in key would be warned', () => {
+  it('scaffolds the `flows` group into the extract skeleton — no key of it is warned', () => {
     const { bundles } = extractTranslations(app(false), { locales: ['en', 'zh-CN'] });
 
-    expect((bundles.en as any).flows).toBeUndefined();
-    // `os i18n extract` is the other door into the same trap, so it is gated by
-    // the same read — but only for the warned group.
+    expect((bundles.en as any).flows?.lead_conversion?.label).toBe('Convert Lead');
+    expect((bundles.en as any).flows?.lead_conversion?.screens?.conversion_details?.title).toBe('Conversion Details');
+    // `os i18n extract` is the other door through the same gate, so it reads
+    // the same set; the other groups are scaffolded as before.
     expect((bundles.en as any).objects.crm_lead.label).toBe('Lead');
   });
 

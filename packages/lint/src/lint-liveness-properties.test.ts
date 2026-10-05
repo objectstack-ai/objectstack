@@ -38,6 +38,32 @@ import {
 
 const objStack = (obj: Record<string, unknown>) => ({ objects: [{ name: 'widget', ...obj }] });
 const paths = (findings: { message: string }[]) => findings.map((f) => f.message);
+
+/**
+ * The shipped `translation` ledger warns on no group since `flows` went `live`
+ * (both halves read by the console's screen-flow runner), so every pin below
+ * that needs a WARNED translation group plants one: a copy of the shipped
+ * ledger directory whose `translation.json` gains a single synthetic
+ * `planned` + `authorWarn` group row, read through the same
+ * `lintLivenessPropertiesFromLedgerDir` seam the synthetic `field` ledger
+ * further down uses. What those pins hold is the locale-keyed WALK and the
+ * planned verdict's wording, not any shipped verdict; the shipped `flows` row
+ * is pinned SILENT on the real ledger beside them.
+ */
+const SYNTH_WARNED_GROUP = 'synthWarnedGroup';
+const SYNTH_WARNED_GROUP_HINT = 'synthetic — this group row exists only in a test ledger directory';
+const synthWarnedGroup = { probe: { label: '探针' } };
+const plantedTranslationLedgerDir = () => ledgerDirWith((dir) => {
+  const ledger = JSON.parse(readFileSync(join(dir, 'translation.json'), 'utf8'));
+  ledger.props[SYNTH_WARNED_GROUP] = {
+    status: 'planned',
+    authorWarn: true,
+    authorHint: SYNTH_WARNED_GROUP_HINT,
+  };
+  writeLedger(dir, 'translation', ledger);
+});
+const lintWithPlantedGroup = (stack: Record<string, unknown>) =>
+  lintLivenessPropertiesFromLedgerDir(plantedTranslationLedgerDir(), stack);
 /** The rule id of the finding about `path`, or `undefined` when the rule said nothing about it. */
 const ruleOf = (findings: { message: string; rule: string }[], path: string) =>
   findings.find((f) => f.message.includes(`sets \`${path}\``))?.rule;
@@ -616,7 +642,9 @@ describe('lintLivenessProperties', () => {
   // (That enumeration is dated to its own commit and has since lost a member:
   // `field.relatedListFilter` left the warned set in #19187 when objectui#4664
   // reached the pin. The claim it supports — every warned entry is TOP-LEVEL, so
-  // no dotted subject is left — is unchanged by a top-level row leaving.)
+  // no dotted subject is left — is unchanged by a top-level row leaving.
+  // `translation.flows` has left it too, by the same route: it went `live` once
+  // the runner reading the flow's own `label` reached the pin.)
   // Filed as **#10262**, which also carries the recommendation not to play this
   // round a third time (test the WALKER against a synthetic warn map, and leave
   // the ledger-driven coupling to the assertions that are genuinely about the
@@ -820,40 +848,49 @@ describe('lintLivenessProperties', () => {
   // BROKEN walk, so it would have been green from the day the bug shipped and
   // pinned nothing.
   describe('translation bundles are locale-keyed (#11288)', () => {
-    /** `flows` is the one `authorWarn` row on the shipped `translation` ledger. */
-    const flowsGroup = { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } };
+    /**
+     * A `flows` group as an author writes it. `flows` is `live` on the shipped
+     * ledger, so it is authored below only where the pin is SILENCE; the walk
+     * pins author the planted {@link SYNTH_WARNED_GROUP} instead.
+     */
+    const flowsGroup = { lead_conversion: { label: '线索转化', screens: { screen_1: { title: '转化详情' } } } };
 
     it('warns on a warned group authored under a locale entry', () => {
-      const findings = lintLivenessProperties({
-        translations: [{ 'zh-CN': { flows: flowsGroup } }],
+      const findings = lintWithPlantedGroup({
+        translations: [{ 'zh-CN': { [SYNTH_WARNED_GROUP]: synthWarnedGroup } }],
       });
-      expect(paths(findings).some((m) => m.includes('`flows`'))).toBe(true);
+      expect(paths(findings).some((m) => m.includes(`\`${SYNTH_WARNED_GROUP}\``))).toBe(true);
       expect(findings.map((f) => f.where)).toEqual(["translation bundle #0 · locale 'zh-CN'"]);
-      expect(findings[0]?.hint).toContain('screen-flow runner');
+      expect(findings[0]?.hint).toBe(SYNTH_WARNED_GROUP_HINT);
     });
 
     // The walk has two levels and both can stop early. Authored on the SECOND
     // locale of the SECOND bundle, so neither an outer nor an inner walk that
     // visits only index 0 can pass this.
     it('reaches every locale of every bundle, not just the first of each', () => {
-      const findings = lintLivenessProperties({
+      const findings = lintWithPlantedGroup({
         translations: [
           { en: { messages: { 'common.save': 'Save' } } },
           {
             ja: { messages: { 'common.save': '保存' } },
-            'zh-CN': { flows: flowsGroup },
+            'zh-CN': { [SYNTH_WARNED_GROUP]: synthWarnedGroup },
           },
         ],
       });
       expect(findings.map((f) => f.where)).toEqual(["translation bundle #1 · locale 'zh-CN'"]);
     });
 
+    // `flows` is among the live groups authored here: the shipped row went
+    // `live` once the runner read the flow's own `label` as well as `screens`,
+    // so a half-reverted flip (the row `live` again but still opted in to a
+    // warning, or `planned` again) surfaces as a finding on this bundle.
     it('stays silent on a bundle that authors only live groups', () => {
       const findings = lintLivenessProperties({
         translations: [{
           'zh-CN': {
             objects: { crm_lead: { label: '线索' } },
             messages: { 'common.save': '保存' },
+            flows: flowsGroup,
           },
         }],
       });
@@ -869,7 +906,7 @@ describe('lintLivenessProperties', () => {
     it('the translation silence is a real verdict, not a lint that stopped loading ledgers', () => {
       const findings = lintLivenessProperties({
         objects: [{ name: 'widget', externalSharingModel: 'read' }],
-        translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' } } } }],
+        translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' } }, flows: flowsGroup } }],
       });
       const messages = findings.map((f) => f.message);
       expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
@@ -882,14 +919,17 @@ describe('lintLivenessProperties', () => {
     // (`packages/spec/src/kernel/metadata-type-schemas.ts:158`), not this
     // collection. It warns on the broken walk and must not here:
     // `stack.translations` is `z.record(LocaleSchema, TranslationDataSchema)`, so
-    // this object would have to mean a locale named `flows` whose value is
-    // `TranslationData` — a parse error two tiers before this advisory ever runs.
+    // this object would have to mean a locale named after the group, whose value
+    // is `TranslationData` — a parse error two tiers before this advisory runs.
     // Runtime-authored items reach this lint through no door at all: no stack
     // collection carries them, and the rule is `surfaces: CLI_ONLY`, so it does
     // not run at the runtime publish gate either.
+    // Driven against the planted ledger, where the same group authored under a
+    // locale DOES warn (the first pin of this block): on the shipped ledger no
+    // translation group warns, so a silence there would pin nothing.
     it('does not treat a runtime `TranslationItem` shape as a bundle', () => {
-      const findings = lintLivenessProperties({
-        translations: [{ name: 'zh_cn', locale: 'zh-CN', flows: flowsGroup }],
+      const findings = lintWithPlantedGroup({
+        translations: [{ name: 'zh_cn', locale: 'zh-CN', [SYNTH_WARNED_GROUP]: synthWarnedGroup }],
       });
       expect(findings).toEqual([]);
     });
@@ -897,8 +937,8 @@ describe('lintLivenessProperties', () => {
     // "Advisory only — returns findings, never throws" is the function's own
     // contract, and a bundle walk adds two levels that can be malformed.
     it('never throws on a malformed bundle, and keeps walking past it', () => {
-      const findings = lintLivenessProperties({
-        translations: [null, { 'zh-CN': null }, { en: { flows: flowsGroup } }],
+      const findings = lintWithPlantedGroup({
+        translations: [null, { 'zh-CN': null }, { en: { [SYNTH_WARNED_GROUP]: synthWarnedGroup } }],
       });
       // The bundle is the third list item the author wrote and is reported as
       // `#1`: since #15636 this walk reads through `recordsOf`, which drops the
@@ -1098,8 +1138,10 @@ describe('the array fan-out, against a synthetic warn map (#10262)', () => {
 // the `dead` branch, so the finding's MESSAGE told the author to remove
 // something the ledger's own `authorHint`/`note` on the SAME finding said to
 // keep. `field.relatedListFilter`, `object.externalSharingModel` and
-// `translation.flows` are the three shipped rows this hit — two of them still,
-// the third only until #19187 flipped `field.relatedListFilter` `live`.
+// `translation.flows` are the three shipped rows this hit. Only
+// `object.externalSharingModel` still does: `field.relatedListFilter` and
+// `translation.flows` have both gone `live`, each once its reader reached the
+// `.objectui-sha` pin.
 //
 // The real ledgers currently have PLANNED rows and EXPERIMENTAL rows, but — as
 // this file's other comments document at length (#2377, #3896, #4509) — no
@@ -1114,20 +1156,39 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
   const oneEntry = (entry: Record<string, unknown>) => new Map([['gizmo', entry]]);
 
   // ── REAL LEDGER: the three rows the card captured ──────────────────────
-  it('REAL LEDGER: translation.flows (planned) — planned rule id, non-contradictory message, hint preserved', () => {
+  //
+  // `translation.flows` no longer has a planned REAL LEDGER case: it went
+  // `live` once the console's screen-flow runner read the flow's own `label`
+  // as well as `screens`, so it warns about nothing and can pin no verdict.
+  // What its case held is split in two below and nothing is dropped: the
+  // shipped row's SILENCE on the real ledger, and the planned verdict's wording
+  // WITH an authorHint (rule id, non-contradictory message, hint shown) on a
+  // planted translation group, the one shape no shipped row carries any more.
+  it('REAL LEDGER: translation.flows is `live` — authoring it warns nothing, in a call that still warns', () => {
     const findings = lintLivenessProperties({
+      objects: [{ name: 'widget', externalSharingModel: 'read' }],
       translations: [{
-        'zh-CN': { flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } } },
+        'zh-CN': { flows: { lead_conversion: { label: '线索转化', screens: { screen_1: { title: '转化详情' } } } } },
       }],
+    });
+    // Anti-vacuity: the same call, the same ledger load, still raises the one
+    // planned row in tree, so the silence is a reading and not an unloaded lint.
+    expect(findings.map((f) => f.message).filter((m) => m.includes('externalSharingModel'))).toHaveLength(1);
+    expect(findings.filter((f) => f.where.startsWith('translation bundle'))).toEqual([]);
+  });
+
+  it('PLANTED: a planned + authorWarn translation group with an authorHint — planned rule id, non-contradictory message, hint preserved', () => {
+    const findings = lintWithPlantedGroup({
+      translations: [{ 'zh-CN': { [SYNTH_WARNED_GROUP]: synthWarnedGroup } }],
     });
     expect(findings).toHaveLength(1);
     const [f] = findings;
     expect(f.rule).toBe('liveness-planned-property');
     expect(f.message).not.toContain('dead');
     expect(f.message).toContain('is planned');
-    // The card's own captured hint — unchanged by this fix, just no longer
-    // contradicted by the message sitting next to it.
-    expect(f.hint).toContain('screen-flow runner');
+    // The row's own authorHint, shown as written and not contradicted by the
+    // message sitting next to it.
+    expect(f.hint).toBe(SYNTH_WARNED_GROUP_HINT);
   });
 
   // ⚠️ The third of the card's rows, `field.relatedListFilter`, no longer has a
@@ -1135,8 +1196,8 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
   // the `.objectui-sha` pin, so it warns about nothing and can pin no verdict.
   // Its silence is pinned in the `field related-list filter (#19187)` block
   // above, where a half-reverted flip surfaces. The PLANNED branch stays a
-  // contract test on the two rows that are still planned — `translation.flows`
-  // just above and `object.externalSharingModel` just below.
+  // contract test on the one row that is still planned,
+  // `object.externalSharingModel` just below.
 
   it('REAL LEDGER: object.externalSharingModel (planned, no authorHint) — planned rule id, the planned DEFAULT hint, never its ledger note', () => {
     const findings = lintLivenessProperties({ objects: [{ name: 'widget', externalSharingModel: 'read' }] });
@@ -1343,30 +1404,54 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
 // The walker now asks THIS function which groups are warned instead of reading
 // the same JSON a second time. These pins hold the two readings equal.
 describe('authorWarnedProperties', () => {
-  it('reports the `flows` translation group as warned (the row the CLI gate reads)', () => {
-    expect(authorWarnedProperties('translation').has('flows')).toBe(true);
+  it('reports no translation group as warned now that `flows` is live (the set the CLI gate reads)', () => {
+    // `flows` was the one warned group, and it went `live` once the runner read
+    // both its halves. An equality, so the day a translation group acquires a
+    // warn this goes red and the CLI's coverage gate is looked at with it.
+    expect([...authorWarnedProperties('translation')]).toEqual([]);
+    // The positive the empty answer needs, from the same reader in the same
+    // process: the one planned + authorWarn row still in tree.
+    expect(authorWarnedProperties('object').has('externalSharingModel')).toBe(true);
   });
 
   it('can say no — a live group in the same ledger is absent', () => {
-    // The negative half of the instrument: `objects` is `live` and sits in the
-    // same file as the positive above, so a set that swallowed everything or
-    // returned everything would fail one of the two.
+    // The negative half of the instrument, beside the positive above (a warned
+    // `object` row): a set that swallowed everything or returned everything
+    // would fail one of the two.
     const warned = authorWarnedProperties('translation');
     expect(warned.has('objects')).toBe(false);
     expect(warned.has('pages')).toBe(false);
+    expect(warned.has('flows')).toBe(false);
   });
 
-  it('agrees with the rule itself on every path it names — the anti-drift pin', () => {
+  it('agrees with the rule itself on every translation group — the anti-drift pin', () => {
     // The whole point of exporting this is that the demand side and the warn
-    // side cannot disagree. So: authoring each warned top-level group in a
-    // locale bundle must actually produce a finding naming that group. A path
-    // this set reports but the rule stays silent on is the drift that reopens
-    // the collision from the other end.
-    for (const path of authorWarnedProperties('translation')) {
-      if (path.includes('.')) continue; // container rows only — see getNested
-      const findings = lintLivenessProperties({
-        translations: [{ 'zh-CN': { [path]: { probe: { label: 'x' } } } }],
-      });
+    // side cannot disagree. With no translation group warned, a loop over the
+    // exported set would assert nothing, so this asks over the WHOLE domain:
+    // every top-level row the shipped `translation` ledger governs is authored
+    // in one locale entry, and the groups the rule names must be exactly the
+    // groups this set names, in both directions.
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'translation.json'), 'utf8'));
+    const groups = Object.keys(ledger.props);
+    expect(groups).toContain('flows');
+    expect(groups.length).toBeGreaterThanOrEqual(10);
+    const findings = lintLivenessProperties({
+      translations: [{ 'zh-CN': Object.fromEntries(groups.map((g) => [g, { probe: { label: 'x' } }])) }],
+    });
+    const named = groups.filter((g) => findings.some((f) => f.message.includes(`sets \`${g}\``)));
+    const exported = [...authorWarnedProperties('translation')].filter((p) => !p.includes('.'));
+    expect(named.sort()).toEqual(exported.sort());
+  });
+
+  it('agrees with the rule itself on every object path it names — the same pin over a non-empty set', () => {
+    // The direction the translation pin above cannot exercise today ("a path
+    // this set reports but the rule stays silent on"), held on the type that
+    // still has a warned row. `true` is authored because the rule warns on a
+    // boolean only when it is true and on anything else when present.
+    const warned = [...authorWarnedProperties('object')].filter((p) => !p.includes('.'));
+    expect(warned.length).toBeGreaterThan(0);
+    for (const path of warned) {
+      const findings = lintLivenessProperties({ objects: [{ name: 'widget', [path]: true }] });
       expect(findings.map((f) => f.message).join('\n')).toContain(`sets \`${path}\``);
     }
   });

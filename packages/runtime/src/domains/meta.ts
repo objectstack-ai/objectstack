@@ -24,6 +24,7 @@ import {
     ObjectSchemaMaskEvaluationError,
     isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
+    relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
     // [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide
@@ -391,7 +392,8 @@ async function maskObjectSchema(
         if (error instanceof ObjectSchemaMaskEvaluationError) return { ok: false };
         throw error;
     }
-    return projectMetaObjectSchema(posture, document);
+    // [#21884] Related to the fetched document: its `objectOverride` params name other objects.
+    return projectMetaObjectSchema(await relateObjectSchemaMaskPosture(posture, document), document);
 }
 
 /**

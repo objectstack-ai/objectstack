@@ -5580,6 +5580,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'and the semantic entry tells the author to re-declare the count they meant.',
   },
   {
+    id: 'flow-approval-node-config-contract-refused',
+    order: 84,
+    text:
+      'It also judges an `approval` flow node\'s `config` at parse against the contract the spec '
+      + 'declares for it, `ApprovalNodeConfigSchema`, WHOLE. The approval executor fails the node on any '
+      + 'issue of that contract, while `objectstack validate` and `objectstack compile` exited 0 on an '
+      + 'undeclared `escalation.bogusKey` or a `timeoutHours: 0.5` and compile copied it into the '
+      + 'artifact. The approval node now joins a declared contract map beside the builtin executor '
+      + 'contracts, read by the one judge `registerFlow` and `objectstack validate` share, with no plugin '
+      + 'loaded: an undeclared key or a refused value is refused at `nodes.N.config.<key>` in the '
+      + 'contract\'s own words, its did-you-mean included, and a key left out as before. The builtin arm '
+      + 'stays presence-only. No key is removed, so there is no tombstone, and no D2 conversion exists: '
+      + 'the platform cannot know what the author meant. Its D3 record is the semantic entry '
+      + '`flow-approval-node-config-contract-refused`.',
+  },
+  {
     id: 'flow-decision-edge-branching-first-match',
     order: 45,
     text:
@@ -6180,6 +6196,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'translation items as a lossless delete of what is served, retired from the load path so '
       + 'authors are refused at parse; its D3 record is the semantic entry '
       + '`translation-widget-sub-caption-retired`.',
+  },
+  {
+    id: 'ui-action-group-menu-member-params-array-only',
+    order: 83,
+    text:
+      'It then closes the one static-values spelling those members still accepted and the containers drop: an '
+      + '`action:group` or `action:menu` member\'s `params` takes the input list, an `ActionParam[]` array, only, '
+      + 'unless the member\'s `type` is `api`, whose object `params` keeps its request-payload window. `params` '
+      + 'carries one shape and no second value-bag key is declared, so an object `params` on any other member, which '
+      + 'parsed and then reached no action, is refused at `actions.N.params` with the prescription to author an action '
+      + 'with static parameter values as its own `action:button` node. Read by the component-props gate (advisory); a '
+      + 'stored page still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-action-group-menu-member-params-array-only`.',
   },
   {
     id: 'ui-action-group-menu-members-typed',
@@ -13044,6 +13073,72 @@ const step18: MigrationStep = {
         + 'the media-column move (the column step of `objectstack migrate files-to-references '
         + '--apply`).',
     },
+    // #21850 — the D3 entry for the build doors judging an `approval` node's config
+    // against the contract the spec declares for it (`ApprovalNodeConfigSchema`),
+    // whole: the declared contract map in `flow-node-config-refusals.ts`, read by
+    // the one judge `flowNodeConfigRefusals`. It narrows a flow's accept set; no key
+    // is removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There
+    // is no D2 conversion either: the platform cannot know the approvers, the key
+    // or the value the author meant, and the runtime never ran such a node.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-approval-node-config-contract-refused',
+      surface:
+        'an approval flow node whose config the approval node contract (ApprovalNodeConfigSchema) refuses — '
+        + 'a key it does not declare (escalation.bogusKey, a top-level key such as steps or onApprove, an '
+        + 'alias such as escalation.timeout), a value it refuses (escalation.timeoutHours below 1, an '
+        + 'unknown behavior or escalation.action, an empty approvers list, a fallbackApprovers list under any '
+        + 'policy but fallback), or a key it requires left out (approvers; escalation.timeoutHours inside an '
+        + 'escalation block). Reachable wherever a flow is authored or stored: defineStack({ flows }) sources, '
+        + 'defineFlow(), an exported stack passed to objectstack validate or objectstack compile, a flow saved '
+        + 'from the Studio flow designer, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the shape the approval contract declares, written on the node\'s `config`: `approvers` with at least '
+        + 'one approver, and inside an `escalation` block a `timeoutHours` of at least 1 (wall-clock hours; '
+        + '`timeoutHours: 1` is the shortest SLA the contract accepts). An undeclared key is renamed to the key '
+        + 'the refusal\'s did-you-mean names (`timeout` → `timeoutHours`, `mode` → `behavior`, `quorum` → '
+        + '`minApprovals`) or deleted; a process-level key (`steps`, `entryCriteria`, `onApprove`, `onReject`, '
+        + '`rejectionBehavior`) moves onto the flow graph as the refusal\'s guidance says. To turn an SLA off, '
+        + 'delete the whole `escalation` block — an `escalation: { enabled: false }` with no `timeoutHours` '
+        + 'is refused like any block missing it',
+      reason:
+        'An approval node\'s executor (`plugin-approvals`) parses `node.config` against '
+        + '`ApprovalNodeConfigSchema` before it does anything else and fails the node on ANY issue. '
+        + 'Registration already refused an undeclared key, against the descriptor\'s published `configSchema`, '
+        + 'but a refused value (`timeoutHours: 0.5`) registered and then failed every run that reached the node '
+        + '— the config is metadata, and no rerun could succeed. The build doors asked about neither: '
+        + '`FlowSchema.parse` judged only the builtin node types\' '
+        + 'executor contracts, and only for a key left out, so `objectstack validate` and `objectstack compile` '
+        + 'exited 0 on an `escalation.bogusKey` or a `timeoutHours: 0.5` and compile copied it into the '
+        + 'artifact. The contract is the spec\'s own, so the build can judge it with no plugin loaded: the '
+        + 'approval node joins a declared contract map beside the builtin executor contracts, read by the one '
+        + 'judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and '
+        + '`objectstack validate` share (`flowNodeConfigRefusals`), and is judged WHOLE — every issue the '
+        + 'contract raises is refused, because the executor refuses on every one. An undeclared key or a '
+        + 'refused value is `node-config-refused-by-contract`, anchored at the key, in the contract\'s own '
+        + 'sentence (its did-you-mean included); a key left out keeps `node-config-key-missing` or '
+        + '`node-config-key-required-by-rule`. The builtin arm is unchanged and stays presence-only. '
+        + 'A plugin node type whose contract the spec does not declare stays outside the build doors, as '
+        + 'before. ⚠️ No D2 conversion: the platform cannot know the approvers, the key or the value the '
+        + 'author meant, and no value it could write would keep what the flow did. ⚠️ Where such a node '
+        + 'already sits the whole flow is refused: registered from the metadata registry or `sys_metadata` '
+        + 'at boot it is skipped with a `warn` naming it, its trigger not armed, while the flows beside it '
+        + 'register; a `defineStack({ flows })` source throws `StackSchemaInvalidError` for the whole stack; '
+        + 'an artifact file is refused whole at load. ADR-0087, ADR-0019.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.escalation.bogusKey`, `nodes.N.config.escalation.'
+        + 'timeoutHours`, `nodes.N.config.approvers`), `objectstack validate` prints the same path, and '
+        + '`validateStackExpressions` phrases it as `node \'gate\' (approval) config.escalation.bogusKey`. '
+        + 'For each hit write what the contract accepts, per the replacement. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm each '
+        + 'flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
+        + 'registers byte-identically to before.',
+    },
     // The absent half of the decision-branch predicate rule. A SEPARATE entry from
     // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
     // run a blank predicate made (it evaluated `false`, so `'false'` runs the same
@@ -16828,6 +16923,43 @@ const step18: MigrationStep = {
         + 'row, no lockfile pin. ⛔ Do not repair one by widening the check back — the grammar '
         + 'is the contract now, on nine carriers at once.',
     },
+    // A write-door answer, not an authorable key: there is no D2 conversion and
+    // nothing for `objectstack migrate meta` to rewrite. The sibling of
+    // `18.by-id-write-unreadable-row-not-found`, for the predicate door. The entry
+    // carries the changed answer to the one reader the ledger serves here — the
+    // upgrade guide — because a caller that branched on the old answer has no
+    // schema error to find it by. No backticks in `surface`: the upgrade guide
+    // renders it inside a code span and a table cell.
+    {
+      id: 'predicate-write-unreadable-row-not-matched',
+      surface:
+        'the data write doors — a predicate-scoped (multi) update or delete, on every object and for '
+        + 'every principal',
+      replacement:
+        'read a predicate update or delete as reaching only the rows the caller can read: the result '
+        + 'counts those rows alone, a predicate that reaches only hidden rows succeeds with zero rows, '
+        + 'and a predicate whose readable match exceeds one write\'s row ceiling is refused with 400 '
+        + '`INVALID_FILTER` — narrow it and write in batches',
+      reason:
+        'A WRITE-DOOR ANSWER, made one with the read door\'s, on the predicate door as on the by-id '
+        + 'door. The rows a predicate update or delete matched came from its write scope alone, so a '
+        + 'row the caller cannot read was matched whenever that scope reached it: a per-row gate then '
+        + 'refused the write with a 403, or the row was written and counted. Either answer told a '
+        + 'hidden row apart from no row. The write middleware now asks the read door which rows the '
+        + 'caller\'s own predicate returns — a read in the caller\'s context that every data '
+        + 'middleware\'s visibility applies to — and narrows the matched set to them, so a row the '
+        + 'caller cannot read is not written, not counted and not refused. A read the read door '
+        + 'refuses keeps the write\'s previous answer, and a readable match larger than one predicate '
+        + 'write\'s row ceiling is refused rather than cut off. A caller who can read a matched row but '
+        + 'may not write it keeps its answer. Writes the platform issues under the caller\'s context — '
+        + 'a cascade, a hook\'s own write, the referential clear of a lookup — keep their previous '
+        + 'answer, and by-id writes are unchanged.',
+      acceptanceCriteria:
+        'Every caller that issues a predicate update or delete reads its count as the rows it can see '
+        + 'and no longer reads a 403 there as proof a hidden row matched; an operator who needs a user '
+        + 'to change rows grants that user read access to them first; a predicate whose readable match '
+        + 'exceeds the row ceiling is narrowed and written in batches.',
+    },
     // #20289 (family `qa-runner`, verdict ENFORCE; the `requires` key ruled B) — the
     // D3 entry of the family (one D3 entry per retirement family). Registered key:
     // `qa/TestScenario:requires.plugins`. No D2 conversion: a QA suite is a loose
@@ -19413,6 +19545,49 @@ const step18: MigrationStep = {
         + 'datasource whether it is a remote database, an embedded replica on a local file, or a '
         + 'local file, and rewrite it to that spelling. Done when every turso datasource parses, the '
         + 'driver builds from it, and a replica datasource reports a file: url beside its syncUrl.',
+    },
+    // #21855 — the rows' value ratchet for one member: an `action:group` /
+    // `action:menu` member's `params` takes the array form (`ActionParam[]`) only,
+    // unless the member's `type` is `api`, whose object `params` keeps the
+    // inline-action payload window (#5777) until 18. The maintainer's ruling A on
+    // objectui#10289 keeps `params` to one shape and declares no other value-bag
+    // key, and #21704's fork 5 A refused the member's `properties.params`, so a
+    // member has no static-values spelling and the container drops a non-array
+    // `params` on any other type at run time. D3 only: page-component `properties`
+    // is not parsed on the metadata save or load path, so a stored page is never
+    // refused; there is no D2 conversion, because the only home for static values
+    // is a different node (an `action:button`), which no rewrite can build in the
+    // author's place; and the census found no writer to respell.
+    {
+      id: 'ui-action-group-menu-member-params-array-only',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span.
+      surface: 'page action:group and action:menu components — a member of properties.actions whose type is not api, '
+        + 'and whose params is not an array',
+      replacement: 'Write `params` as the list of inputs to collect from the user, an `ActionParam[]` array. To run an '
+        + 'action with static parameter values, author it as its own `action:button` node, whose `params` object carries '
+        + 'them; for a `type: \'api\'` member\'s request body write `bodyExtra`. A member that needs neither drops the key.',
+      reason: 'An `action:group` or `action:menu` runs each member itself and forwards an array `params` as the input '
+        + 'list. It forwards any other `params` value only for a `type: \'api\'` member, as its request payload; for '
+        + 'every other `type`, an absent one included, it drops the value, with a development-build warning only. The '
+        + 'member declared `params` as any value, so an object `params` on such a member passed the component-props '
+        + 'gate and then had no effect: no error and no static values. `params` carries one shape, the input list, and '
+        + 'no second value-bag key is declared; a member\'s `properties.params` is already refused, so static parameter '
+        + 'values are not part of the inline action vocabulary at all, and the action that needs them is its own '
+        + '`action:button` node. The member now refuses a non-array `params` on a non-`api` type at the gate, at '
+        + '`actions.N.params`, with that prescription. The `api` member\'s object `params` is unchanged. It is read '
+        + 'where every page component\'s props are: the component-props gate reports the refusal as an advisory '
+        + '`component-props-invalid` finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a '
+        + 'stored page still saves and loads, because a page component\'s `properties` is not parsed on the metadata '
+        + 'save or load path. No conversion is registered: the static values belong on a different node, and the '
+        + 'census found no writer. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `action:group` and `action:menu` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` finding at `properties.actions.N.params`. Each member whose action needs static '
+        + 'parameter values is now its own `action:button` node, and pressing it hands the handler those values. '
+        + 'Census at the time of the change: no `action:group` / `action:menu` member authors a non-array `params` on a '
+        + 'non-`api` type in this repository, in objectui (at the pinned commit and on its main branch) or in the hotcrm '
+        + 'application, outside objectui\'s own tests asserting that the container drops it; the cloud repository was not '
+        + 'reachable.',
     },
     // #21464 — each member of the `action:group` / `action:menu` page blocks'
     // `actions` was an open record: the container draws and runs the member itself,

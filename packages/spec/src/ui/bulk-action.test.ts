@@ -17,7 +17,7 @@ const ok = (input: unknown) => {
   return r.data;
 };
 
-describe('BulkActionDefSchema (#4457)', () => {
+describe('BulkActionDefSchema — the def shape is typed, not `z.any()`', () => {
   describe('— the shapes real views author today keep parsing', () => {
     // Lifted verbatim from `examples/app-showcase/src/ui/views/project.view.ts`
     // and `task.view.ts`. Typing a key that was `z.record(z.any())` is only
@@ -239,7 +239,7 @@ describe('BulkActionDefSchema (#4457)', () => {
     });
   });
 
-  describe('— `requiredPermissions` is declarable on every def form (ADR-0066 D4, #6257)', () => {
+  describe('— `requiredPermissions` is declarable on every def form (ADR-0066 D4)', () => {
     // The renderer filtered on this key from objectui#3492 on, while the schema
     // rejected every attempt to write it — `enforced ≠ declarable`. The forms
     // below are the ones that USED to have no legal spelling: a data-plane def
@@ -314,7 +314,7 @@ describe('BulkActionDefSchema (#4457)', () => {
   // Keep the pair together: a `dependsOn` assertion alone would go green again
   // the day someone re-opens the shape.
   // ─────────────────────────────────────────────────────────────────────────
-  describe('— the shape is closed, so its accept means something (#18177)', () => {
+  describe('— the shape is closed, so its accept means something', () => {
     const NONSENSE = 'zzz_nonsense_key_that_no_producer_emits_8755';
 
     it('CONTROL (negative): the nonsense key the card measured is now refused by name', () => {
@@ -402,7 +402,7 @@ describe('BulkActionDefSchema (#4457)', () => {
     });
   });
 
-  describe('— the close carries the author across, it does not just say no (#18177)', () => {
+  describe('— the close carries the author across, it does not just say no', () => {
     const paramIssues = (param: Record<string, unknown>): string =>
       reject({ name: 'd', operation: 'update', params: [{ name: 'p', type: 'text', ...param }] }).join('\n');
 

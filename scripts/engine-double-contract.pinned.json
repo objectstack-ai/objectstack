@@ -2,6 +2,11 @@
   "$comment": "GENERATED — the RETAINED ledger of check-engine-double-contract.mjs (#9680). Regenerate with `node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one (file, verb) whose engine double routes through the producer's dispatch predicate. This is the OPPOSITE polarity to engine-double-contract.baseline.json: that ledger records DEBT and may only shrink, this one records COVERAGE and may only grow. A row that disappears is a pinned double that left the population — the blind spot #9680 measured, where deleting a double's delete() member took 319 pinned to 318 with the gate green. Read a removal in this file's diff as a coverage loss and check it was intended.",
   "entries": [
     {
+      "file": "packages/cloud-connection/src/marketplace-install-local-sample-data-not-loaded.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/core/src/security/resolve-user-grants-cache.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1382,6 +1387,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.scoped-list-fallback.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2687,6 +2702,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-plugin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-settings-refusal-isolation.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2767,6 +2787,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/membership-backfill-ledger.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/membership-policy-setting.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2798,6 +2823,21 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/organization-metadata-decode.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2879,6 +2919,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/sys-session-ttl-sweep.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/user-created-in-request.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -3249,7 +3294,7 @@
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.test.ts",
       "verb": "findOne",
-      "pinned": 6
+      "pinned": 7
     },
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.test.ts",
@@ -3300,6 +3345,11 @@
       "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
       "verb": "update",
       "pinned": 2
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/tenant-layer0-verdict-on-operation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",

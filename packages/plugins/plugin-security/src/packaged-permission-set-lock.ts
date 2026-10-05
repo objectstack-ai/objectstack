@@ -87,6 +87,8 @@
  * direction that cannot be undone (an overlay, once minted, wins forever).
  */
 
+import { isTenantAuthored } from '@objectstack/metadata-core';
+
 /**
  * ⛔ This module imports NOTHING from the rest of the plugin, and that is
  * structural rather than stylistic: `permission-set-projection.ts` imports
@@ -146,7 +148,24 @@ export type LayeredProbe =
   | { status: 'read'; envelope: unknown }
   | { status: 'failed'; reason: string };
 
-/** Is this registry/layer item a real shipped artifact for `name`? */
+/**
+ * Is this registry/layer item a real shipped artifact for `name`?
+ *
+ * [#21789] A package id on the item does not answer that by itself. The
+ * registry holds stored rows as well as artifacts: the metadata layer hydrates
+ * env-wide `sys_metadata` rows into it, and the list read (`getMetaItems`)
+ * stamps the row's `package_id` column onto the body as `_packageId` on the
+ * way. A set saved into a writable runtime package therefore carries a package
+ * id just as a code-shipped one does, and reading "has a package id" as
+ * "shipped by code" locked it after the first list read. What tells the two apart is the
+ * provenance the hydrator writes on every stored row (ADR-0010
+ * `_provenance: 'org'`), read through `isTenantAuthored`: the exclusion
+ * `isCodeArtifactBody` and `SchemaRegistry.getArtifactItem` already apply, so
+ * this is the platform's one answer, not a second one. A stored row of a name a
+ * code package ships is hydrated wearing the artifact's envelope
+ * (`_provenance: 'package'`), and the artifact itself is in the same list, so a
+ * code-shipped set stays locked.
+ */
 function declaredPackageIdOf(item: any, name: string): string | null {
   if (!item || typeof item !== 'object') return null;
   if (item.name !== name) return null;
@@ -155,6 +174,9 @@ function declaredPackageIdOf(item: any, name: string): string | null {
   // set look packaged on the next pass, which is a lock that latches on the
   // wrong evidence.
   if (item[ENV_PROJECTION_MARKER]) return null;
+  // A stored (tenant-authored) row is never a shipped artifact, whatever
+  // package it is bound to. See the doc comment.
+  if (isTenantAuthored(item)) return null;
   const packageId = item._packageId ?? item.packageId;
   if (typeof packageId !== 'string' || packageId === '') return null;
   if (packageId === RUNTIME_SHADOW_PACKAGE_ID) return null;

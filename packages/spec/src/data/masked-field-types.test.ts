@@ -21,7 +21,7 @@ const MANAGED_BY_BUCKETS: readonly string[] = (
   ObjectSchema.shape.managedBy as unknown as { unwrap(): { options: readonly string[] } }
 ).unwrap().options;
 
-describe('MASKED_ON_READ_FIELD_TYPES — the declaration (ADR-0100 / #20141)', () => {
+describe('MASKED_ON_READ_FIELD_TYPES — the declaration (ADR-0100)', () => {
   it('declares exactly `secret` (always) and `password` (exempt on better-auth objects)', () => {
     expect(JSON.parse(JSON.stringify(MASKED_ON_READ_FIELD_TYPES))).toEqual({
       secret: { exemptManagedBy: [] },

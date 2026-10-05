@@ -41,7 +41,7 @@ const union = (...sets: ReadonlySet<string>[]) => new Set(sets.flatMap((s) => [.
 const cls = (c: string): CrossFieldColumnVerdict => ({ kind: 'class', class: c } as CrossFieldColumnVerdict);
 const none = (r: string): CrossFieldColumnVerdict => ({ kind: 'no-class', reason: r } as CrossFieldColumnVerdict);
 
-describe('[#20347] the class table', () => {
+describe('the class table — one classification, read by every judge', () => {
   it('classifies every FieldType member exactly once — rows pairwise disjoint, union exactly FieldType', () => {
     const seen = new Map<string, string>();
     for (const row of CROSS_FIELD_COMPARISON_TYPE_CLASSES) {
@@ -107,7 +107,7 @@ describe('[#20347] the class table', () => {
   });
 });
 
-describe('[#20347] crossFieldColumnVerdict — one declared column', () => {
+describe('crossFieldColumnVerdict — one declared column', () => {
   it('answers each FieldType member its row\'s verdict when declared single-valued', () => {
     for (const row of CROSS_FIELD_COMPARISON_TYPE_CLASSES) {
       for (const type of row.types) {
@@ -140,7 +140,7 @@ describe('[#20347] crossFieldColumnVerdict — one declared column', () => {
   });
 });
 
-describe('[#20347] crossFieldComparisonVerdict — the measured cells', () => {
+describe('crossFieldComparisonVerdict — the measured cells', () => {
   it('text vs number is cross-class, in both orders', () => {
     expect(crossFieldComparisonVerdict({ type: 'text' }, { type: 'number' }))
       .toEqual({ verdict: 'cross-class', left: 'text', right: 'numeric' });
@@ -183,7 +183,7 @@ describe('[#20347] crossFieldComparisonVerdict — the measured cells', () => {
   });
 });
 
-describe('[#20347] crossFieldComparisonVerdict — every pair of declared columns', () => {
+describe('crossFieldComparisonVerdict — every pair of declared columns', () => {
   // Every FieldType member single-valued, plus every multi-capable member
   // flagged `multiple: true`.
   const columns = [

@@ -107,9 +107,10 @@
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
  *   flows.<flow>.screens.<node_id>.fields.<field>.label
  *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
- *     ^ gated: `flows` is `planned` + `authorWarn` in the liveness ledger, so
- *       these are walked only once the row goes `live` (#11624 — see
- *       `authorWarnedTranslationGroups`)
+ *   flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText
+ *     ^ walked because the ledger's `flows` row is `live` and warns no
+ *       author; a group the ledger does warn on is left out of the walk
+ *       (see `authorWarnedTranslationGroups`)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -1067,8 +1068,9 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
 }
 
 /**
- * Translation groups the shipped liveness ledger warns an author for authoring
- * — today exactly `flows` (`status: planned`, `authorWarn: true`).
+ * Translation groups the shipped liveness ledger warns an author for authoring.
+ * Today the set is empty: `flows`, the one group ever warned, is `live` now
+ * that both its halves are read, so nothing is gated.
  *
  * ## Why the walk surface is gated on this at all (#11624)
  *
@@ -1083,20 +1085,20 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
  * `i18n/missing-*` family. Under `--i18n-strict` the demand side is an error,
  * so a project could be *forced* to author keys it is then warned for.
  *
- * ⛔ The warn side is not the bug and must not be softened. Only part of the
- * group is read: the console's screen-flow runner reads `screens`, but the
- * flow's own `label` is read by nothing yet (#20318), so a translated flow
- * label really is stored and never shown. The warn is group-level, so it still
- * covers the whole group. The demand is the half that is premature.
+ * ⛔ The warn side was not the bug, and it was not softened. While the
+ * console's screen-flow runner read only `screens`, a translated flow `label`
+ * really was stored and never shown, and the group-level warn said so. The
+ * demand was the premature half, and it is the half this gate holds back.
+ * The runner now names the flow by `flows.<flow>.label` too, so the row is
+ * `live` and the warn and the gate are gone together.
  *
  * ## Shape
  *
  * Group-general, not `flows`-specific, and read from the ledger rather than a
- * switch of our own: the day the row flips to `live` (dropping its
- * `authorWarn`; for `flows` that waits on #20318), the bucket turns itself back
- * on with no edit here — and any FUTURE group that acquires a warn is covered on
- * the day it is marked, rather than re-opening this collision one group at a
- * time.
+ * switch of our own: when the `flows` row flipped to `live` and dropped its
+ * `authorWarn`, the bucket turned itself back on with no edit here — and any
+ * FUTURE group that acquires a warn is covered on the day it is marked, rather
+ * than re-opening this collision one group at a time.
  *
  * The join is on the group (`path[0]`) and stops there deliberately: for
  * file-authored bundles the warn side only ever fires at that depth. Its
@@ -1823,12 +1825,25 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     if (!flowName) continue;
     const scope: EntryScope = { flowName };
 
+    const nodes: any[] = collectFlowNodesDeep(flow.nodes);
+
     // `flows.<flow>.label` — `lookupFlowLabel`'s key. `Flow.label` is required
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
-    pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
-
-    const nodes: any[] = collectFlowNodesDeep(flow.nodes);
+    //
+    // Demanded only for a flow with a `screen` node, at any depth of the same
+    // node universe the screens walk below reads. The predicate mirrors the one
+    // reader of the key: the console's `FlowRunner` names the flow by it, in
+    // its header and its completion toast, and the runner opens only on a run
+    // paused at a screen. A flow that can never pause there (record-triggered,
+    // scheduled, an API flow with no screen) has no surface that shows its
+    // translated label, so demanding one would ask an author for a string that
+    // is stored and never read. When a reader of a non-screen flow's label
+    // lands (a run-result toast, say), this predicate widens in the same change
+    // as that reader.
+    if (nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE)) {
+      pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
+    }
     for (const node of nodes) {
       if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;

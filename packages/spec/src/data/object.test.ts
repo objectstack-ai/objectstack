@@ -102,7 +102,7 @@ describe('ObjectCapabilities', () => {
     expect(message).not.toContain('Did you mean');
   });
 
-  it('emission order: which key is wrong → the fix → the history, last (#5955)', () => {
+  it('emission order: which key is wrong → the fix → the history, last', () => {
     const message = capabilityRejection({ trash: false, searchible: true });
     const preamble = 'Unrecognized key(s) on `enable`:';
     const fix = 'os migrate meta --from 16';
@@ -185,11 +185,11 @@ describe('LifecycleSchema (ADR-0057)', () => {
   // declared, so a triple whose ttl diverges from the age bound leaves
   // `retention.maxAge` declared but enforced by nothing — refused at parse
   // time unless the ttl restates the age bound (same clock, same window).
-  describe('retention + ttl + archive triple (#10527)', () => {
+  describe('retention + ttl + archive triple — refused unless the ttl restates the age bound', () => {
     const messagesOf = (result: ReturnType<typeof LifecycleSchema.safeParse>) =>
       result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
 
-    it('still accepts the #10347-ruled ttl + archive pair (no retention)', () => {
+    it('still accepts the ttl + archive pair, whose ttl cutoff picks the rows to archive (no retention)', () => {
       const result = LifecycleSchema.safeParse({
         class: 'audit',
         ttl: { field: 'expires_at', expireAfter: '90d' },
@@ -261,7 +261,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
     }
   });
 
-  it('accepts retention.onlyWhen with scalar and $in predicates (#2834 mixed tables)', () => {
+  it('accepts retention.onlyWhen with scalar and $in predicates (mixed tables, where only terminal rows age out)', () => {
     const result = LifecycleSchema.safeParse({
       class: 'telemetry',
       retention: {
@@ -286,7 +286,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
     }
   });
 
-  it('accepts ttl.onlyWhen with the canonical null predicate — the #10165 acceptance shape', () => {
+  it('accepts ttl.onlyWhen with the canonical null predicate — so rows whose value is absent are spared', () => {
     // The exact declaration this card unblocks (#7826 writes it on sys_session).
     const result = LifecycleSchema.safeParse({
       class: 'transient',
@@ -295,7 +295,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts the null predicate on retention.onlyWhen too — one shared value union (#10165)', () => {
+  it('accepts the null predicate on retention.onlyWhen too — one shared value union', () => {
     // The two blocks are declared mirrors; the union is one schema on purpose,
     // so the absence member cannot exist on one side and not the other.
     const result = LifecycleSchema.safeParse({
@@ -332,7 +332,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
     }
   });
 
-  it('rejects ttl.onlyWhen combined with rotation storage (shard DROPs ignore filters) — #10165', () => {
+  it('rejects ttl.onlyWhen combined with rotation storage (shard DROPs ignore filters)', () => {
     const result = LifecycleSchema.safeParse({
       class: 'telemetry',
       ttl: { field: 'created_at', expireAfter: '14d', onlyWhen: { status: 'done' } },
@@ -341,7 +341,7 @@ describe('LifecycleSchema (ADR-0057)', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects ttl.onlyWhen combined with archive (archive takes over; the ttl sweep never runs) — #10165', () => {
+  it('rejects ttl.onlyWhen combined with archive (archive takes over; the ttl sweep never runs)', () => {
     const result = LifecycleSchema.safeParse({
       class: 'audit',
       ttl: { field: 'expires_at', expireAfter: '90d', onlyWhen: { revoked_at: { $null: true } } },
@@ -429,7 +429,7 @@ describe('IndexSchema', () => {
  * class). The tombstone is what makes the removal audible, so these tests pin
  * the PRESCRIPTION, not merely the rejection.
  */
-describe('IndexSchema retired keys (#5248 / #4943)', () => {
+describe('IndexSchema retired keys', () => {
   it('REJECTS `type`, with the fix and the reason in the message', () => {
     expect(() => IndexSchema.parse({ fields: ['tags'], type: 'gin' }))
       .toThrow(/`indexes\[\]\.type` was removed.*no driver ever read it.*Delete the key/s);
@@ -1098,7 +1098,7 @@ describe('ObjectSchema.create()', () => {
   // Before, the registry read it via `(schema as any).ownership` while
   // ObjectSchema.create() rejected it as an unknown key; these lock the two ends
   // together.
-  describe('ownership record-model field (#3175)', () => {
+  describe('ownership record-model field — declared, so the opt-out the registry reads can be authored', () => {
     it('accepts the record-ownership opt-out values the registry reads', () => {
       for (const ownership of ['user', 'business_unit', 'org', 'none'] as const) {
         const obj = ObjectSchema.create({ name: 'catalog', ownership, fields: { title: { type: 'text' } } });
@@ -1159,7 +1159,7 @@ describe('ObjectSchema.create()', () => {
     // column stays provisioned-but-inert, so an object declaring this tier gets
     // the COLUMN today and no value in it. Do not read acceptance here as a
     // decision on any of them.
-    it('accepts `business_unit` and resolves it to D1s row — owner_id withheld, unit anchor injected (#4611 → #5678)', () => {
+    it('accepts `business_unit` and resolves it to D1s row — owner_id withheld, unit anchor injected', () => {
       const obj = ObjectSchema.create({
         name: 'inventory_item',
         ownership: 'business_unit',
@@ -1177,7 +1177,7 @@ describe('ObjectSchema.create()', () => {
       expect(plan.names.has('owning_business_unit_id')).toBe(true);
     });
 
-    it('still rejects a fifth value, and the rejection enumerates all four legal values (#4611 → #5678)', () => {
+    it('still rejects a fifth value, and the rejection enumerates all four legal values', () => {
       let message = '';
       try {
         ObjectSchema.create({
@@ -1201,7 +1201,7 @@ describe('ObjectSchema.create()', () => {
 
   // ADR-0032 "no silent failure" for metadata shape (issue #1535): unknown
   // top-level keys used to be stripped silently, shipping dead metadata.
-  describe('unknown-key rejection (#1535)', () => {
+  describe('unknown-key rejection', () => {
     it('rejects object-level `workflows` with guidance toward hooks/record_change', () => {
       expect(() => ObjectSchema.create({
         name: 'demo',
@@ -1234,7 +1234,7 @@ describe('ObjectSchema.create()', () => {
     // key.toLowerCase())`), so a declared key's capitals were never charged to
     // the author here. Pinning it means the two suggesters cannot drift apart
     // again — this is the property #4990 fixed in the other one.
-    it('suggestKey judges a typo identically in either case (#4990 note 1)', () => {
+    it('suggestKey judges a typo identically in either case', () => {
       const bullet = (key: string): string => {
         try {
           ObjectSchema.create({
@@ -1277,7 +1277,7 @@ describe('ObjectSchema.create()', () => {
       expect(message).toContain('retired in 11.9.1');
     });
 
-    it('tombstone: dead metadata keys removed in 16.0 (#2377) carry upgrade guidance', () => {
+    it('tombstone: dead metadata keys removed in 16.0 carry upgrade guidance', () => {
       const cases: Array<[string, unknown, string]> = [
         ['versioning', { enabled: true }, 'trackHistory'],
         ['softDelete', { enabled: true }, 'hard deletes'],
@@ -1367,7 +1367,7 @@ describe('ObjectSchema.create()', () => {
   //    removed, the directive goes unused and `check:test-typecheck` fails;
   //  - the `.toThrow` is the RUNTIME pin — the strict parse stays the
   //    enforcement of record, unchanged, for non-literal (dynamic) configs.
-  describe('excess-key rejection on nested action-param literals (#12615)', () => {
+  describe('excess-key rejection on nested action-param literals', () => {
     it('a typo\'d param key is refused at compile time AND still refused by the load-time strict parse', () => {
       expect(() => ObjectSchema.create({
         name: 'demo',
@@ -1435,7 +1435,7 @@ describe('ObjectSchema.create()', () => {
 // (#9138 — commit 75b7c240a, maintainer ruling Direction 2 / ADR-0055)
 // ============================================================================
 
-describe('ObjectSchema.create() forces a required master_detail under controlled_by_parent (#9138)', () => {
+describe('ObjectSchema.create() forces a required master_detail under controlled_by_parent', () => {
   it('forces required: true when `required` is omitted on the master reference', () => {
     const obj = ObjectSchema.create({
       name: 'cbp_line',
@@ -1660,7 +1660,7 @@ describe('ObjectSchema semantic roles (ADR-0085)', () => {
     expect(ObjectSchema.safeParse({ name: 'lead', fields: {}, stageField: 3 }).success).toBe(false);
   });
 
-  it('accepts highlightFields; the retired compactLayout alias no longer parses through (framework#2536)', () => {
+  it('accepts highlightFields; the retired compactLayout alias no longer parses through', () => {
     const direct = ObjectSchema.parse({
       name: 'account', fields: {}, highlightFields: ['name', 'industry'],
     });
@@ -1710,7 +1710,7 @@ describe('ObjectSchema semantic roles (ADR-0085)', () => {
   });
 });
 
-describe('ObjectSchema editMode (#11408 — declared by maintainer ruling, #10144 family)', () => {
+describe('ObjectSchema editMode (declared by maintainer ruling: the renderer reads it, so the spec declares it)', () => {
   it('accepts both enum values through the strict parse and carries them on the output', () => {
     // Full parse green (not merely "no unrecognized_keys"): the ruling adopts
     // the key as authored surface, so a legal document must parse end to end.
@@ -1915,8 +1915,8 @@ describe('ADR-0066 — object access posture (D2) + requiredPermissions (D3)', (
   });
 });
 
-describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () => {
-  it('accepts the two live knobs and materializes NO tenantField default (#5315)', () => {
+describe('TenancyConfigSchema — strategy/crossTenantAccess removal', () => {
+  it('accepts the two live knobs and materializes NO tenantField default', () => {
     // An undeclared tenant column stays undeclared. The old `.default('tenant_id')`
     // invented a column name the platform does not use and no consumer could act
     // on — the effective column is resolved by the driver, which falls back to
@@ -1932,7 +1932,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
       .toEqual({ enabled: false, tenantField: 'workspace_id' });
   });
 
-  it('rejects the retired stamp-only `organizationField` with its prescription (#19054)', () => {
+  it('rejects the retired stamp-only `organizationField` with its prescription', () => {
     // The shape this used to accept, verbatim — the one declaration the whole
     // protocol ever carried (`sys_api_key`, commit 7901b2dd2). The block is `.strict()`,
     // so the key is REFUSED with the guidance row rather than stripped: a
@@ -1954,7 +1954,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
     expect(message).toContain('os migrate meta --from 17');
   });
 
-  it('the surviving shape is exactly `enabled` + `tenantField` (#19054)', () => {
+  it('the surviving shape is exactly `enabled` + `tenantField`', () => {
     // The positive half of the retirement: what the credential table declares
     // now parses, and carries no residue of the removed key.
     const result = TenancyConfigSchema.parse({ enabled: false });
@@ -1983,7 +1983,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
     expect(message).toContain('externalSharingModel');
   });
 
-  it('rejects arbitrary unknown tenancy keys instead of silently stripping them (#1535)', () => {
+  it('rejects arbitrary unknown tenancy keys instead of silently stripping them', () => {
     // Truly arbitrary — no tombstone, no near-declared-key. Rejected with the
     // surface named; there is nothing more the message can honestly offer.
     const result = TenancyConfigSchema.safeParse({ enabled: true, zzNotAKey: 1 });
@@ -1992,7 +1992,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
       .toContain('Unrecognized key(s) on `tenancy`: `zzNotAKey`');
   });
 
-  it('a near-miss of a live key gets the template rename, not a dead-end verdict (#6619)', () => {
+  it('a near-miss of a live key gets the template rename, not a dead-end verdict', () => {
     // While the map was hand-written, `tenantfield` was answered with
     // "`tenantfield` is not a `tenancy` key." — a verdict that names the
     // problem and never the fix. The fold onto `strictObject` brought the
@@ -2037,7 +2037,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
  * ORDER pins, not presence checks. Every `toContain` in the block above stays
  * green under either order — that is exactly why they cannot carry this fact.
  */
-describe('tenancy unknown-key message order — bullets before the explainer (#6416 / #6619)', () => {
+describe('tenancy unknown-key message order — bullets before the explainer', () => {
   const EXPLAINER =
     'The two supported tenancy modes are: database-per-tenant = environment-level ' +
     'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
@@ -2101,7 +2101,7 @@ describe('tenancy unknown-key message order — bullets before the explainer (#6
   });
 });
 
-describe('isTenancyDisabled — platform-global posture predicate (#3249, ADR-0066)', () => {
+describe('isTenancyDisabled — platform-global posture predicate (ADR-0066)', () => {
   it('is true only for an explicit tenancy.enabled === false', () => {
     expect(isTenancyDisabled({ name: 'sys_license', tenancy: { enabled: false } })).toBe(true);
     expect(isTenancyDisabled({ name: 'task', tenancy: { enabled: true } })).toBe(false);
@@ -2132,7 +2132,7 @@ describe('isTenancyDisabled — platform-global posture predicate (#3249, ADR-00
  * which those tests can only observe indirectly: fail-CLOSED, with the three
  * unreadable cases collapsing to ONE answer.
  */
-describe('isPublicSharingEnabled — standing share-link policy predicate (#14935, #14637)', () => {
+describe('isPublicSharingEnabled — the one canonical standing share-link policy predicate', () => {
   it('is true only for an explicit publicSharing.enabled === true', () => {
     expect(isPublicSharingEnabled({ name: 'article', publicSharing: { enabled: true } })).toBe(true);
     expect(isPublicSharingEnabled({ name: 'article', publicSharing: { enabled: false } })).toBe(false);
@@ -2188,7 +2188,7 @@ describe('isPublicSharingEnabled — standing share-link policy predicate (#1493
   });
 });
 
-describe('userActions row predicates + resolveCrudAffordances (objectui#2614)', () => {
+describe('userActions row predicates + resolveCrudAffordances', () => {
   it('accepts the plain boolean form unchanged (back-compat)', () => {
     const obj = ObjectSchema.parse({
       name: 'invoice',
@@ -2271,7 +2271,7 @@ describe('userActions row predicates + resolveCrudAffordances (objectui#2614)', 
 // Same union, same schema piece — only the binding differs (per toolbar rather
 // than per row), which the schema's docblock states rather than inventing a
 // second dialect.
-describe('userActions.create / .import toolbar predicates (#7692)', () => {
+describe('userActions.create / .import toolbar predicates', () => {
   it('keeps parsing the plain boolean form for create and import (back-compat)', () => {
     const obj = ObjectSchema.parse({
       name: 'invoice',
@@ -2427,7 +2427,7 @@ describe('ObjectSchema.create() password-field author warning (ADR-0100)', () =>
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('does NOT warn when the field affirms intent with ackPlaintextMasking (#3420)', () => {
+  it('does NOT warn when the field affirms intent with ackPlaintextMasking', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ObjectSchema.create({
       name: 'adr0100_acked_pw',
@@ -2467,7 +2467,7 @@ describe('ObjectSchema.create() password-field author warning (ADR-0100)', () =>
   // says the read mask applies. If `MASKED_ON_READ_FIELD_TYPES.password
   // .exemptManagedBy` changes, this stays green only because the warning follows;
   // a warning that hard-codes its own bucket goes red here.
-  describe('[#20141] the exemption is read from MASKED_ON_READ_FIELD_TYPES', () => {
+  describe('the exemption is read from MASKED_ON_READ_FIELD_TYPES', () => {
     const buckets = (
       ObjectSchema.shape.managedBy as unknown as { unwrap(): { options: readonly string[] } }
     ).unwrap().options;
@@ -2502,7 +2502,7 @@ describe('ObjectSchema.create() password-field author warning (ADR-0100)', () =>
 // NOTE: the strip warning dedups per distinct legacy combination for the
 // process lifetime, so each test below uses a distinct combination.
 // ---------------------------------------------------------------------------
-describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
+describe('apiMethods legacy-value strip (ObjectCapabilities)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('strips a legacy value and keeps the declared primitives', () => {
@@ -2568,7 +2568,7 @@ describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
  * These are the pin tests for that contract. Every one of them fails on the
  * pre-fix tree.
  */
-describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
+describe('managedBy: retiring the overloaded `system` bucket', () => {
   const object = (managedBy: string, extra: Record<string, unknown> = {}) => ({
     name: 'sys_thing',
     label: 'Thing',
@@ -2630,7 +2630,7 @@ describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
    * about import" is the safe one, which is the shape that matters most for
    * model-authored object metadata.
    */
-  describe('`system-data` makes CSV import opt-IN (#4671)', () => {
+  describe('`system-data` makes CSV import opt-IN', () => {
     it('does not grant import by bucket default', () => {
       expect(resolveCrudAffordances({ managedBy: 'system-data' } as never).import).toBe(false);
     });
@@ -2720,7 +2720,7 @@ describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
  * letting `constructor`/`prototype` through some other path, breaks these
  * without anyone reading zod's changelog first.
  */
-describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusal (#17852)', () => {
+describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusal', () => {
   // `JSON.parse` is what makes `__proto__` land as an OWN enumerable key
   // (an object literal's `{ __proto__: ... }` sets the actual prototype
   // instead) — the exact shape the original defect report measured and the

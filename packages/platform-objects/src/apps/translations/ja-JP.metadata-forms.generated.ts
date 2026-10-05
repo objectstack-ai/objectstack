@@ -60,6 +60,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "レコードタイトル項目",
         helpText: "各レコードのタイトルに使う項目（例: \"name\"、\"subject\"）。ADR-0079 の正規ポインタで、レコード表示・ObjectQL 検索・関連レコードのプレビューが参照します。"
       },
+      imageField: {
+        label: "レコード画像項目",
+        helpText: "各レコードの画像に使う項目で、レコードページのヘッダーでタイトルの横に表示されます。このオブジェクトの image 型または avatar 型の項目を指定してください。それ以外の名前はオブジェクトの保存時に拒否されます。空欄の場合、レコード画像は表示されず、プレースホルダーも描画されません。"
+      },
       isSystem: {
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
@@ -1767,6 +1771,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiresFeature: {
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
+      },
+      requiresMembershipReach: {
+        label: "必要なメンバーシップ到達先",
+        helpText: "このアクションが呼び出す組織エンドポイント。メンバーシップのグレードがそのエンドポイントに到達できるメンバーにだけ表示されます。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
       },
       requiredPermissions: {
         label: "必要な権限",

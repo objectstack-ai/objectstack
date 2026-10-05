@@ -79,14 +79,14 @@ describe('the declaration surface and the enforcement surface', () => {
       'FieldOperatorsSchema declares an operator FILTER_OPERATORS does not enforce, and nothing '
         + 'records the staging. That is legal but never silent: an operator in FILTER_OPERATORS '
         + 'with no backend arm makes driver-memory accept it and silently DROP the predicate '
-        + '(measured, #5701 — a dropped predicate WIDENS, which on an RLS read scope is #3948), '
+        + '(measured when $icontains was staged — a dropped predicate WIDENS, which on an RLS read scope is an unauthorized read), '
         + 'so declaring ahead of the arms is the correct staging. To stage one: declare it in '
         + 'FieldOperatorsSchema, add it to the array THIS assertion compares against, and note on '
         + 'FILTER_OPERATORS which issue implements it. To clear one: implement it on EVERY face '
         + 'in ONE PR — spec word list, driver-memory (query path, analytics face), driver-sql, '
         + 'driver-turso (remote transport), driver-mongodb, service-analytics (3 compilers), '
         + 'objectql `having`, formula — '
-        + 'then empty this list. #6520 is the worked example of the clearing direction.',
+        + 'then empty this list. Admitting $icontains with an arm on every JS face, in one PR, is the worked example of the clearing direction.',
     ).toEqual(STAGED_AHEAD_OF_BACKENDS);
   });
 
@@ -118,7 +118,7 @@ describe('the declaration surface and the enforcement surface', () => {
 describe('RETIRED_FILTER_OPERATORS', () => {
   const entries = Object.entries(RETIRED_FILTER_OPERATORS);
 
-  it('covers the operators #4706 retired', () => {
+  it('covers the operators retired when `$icontains` replaced `$regex`', () => {
     expect(Object.keys(RETIRED_FILTER_OPERATORS).sort()).toEqual(['$options', '$regex']);
   });
 

@@ -356,3 +356,140 @@ describe('discardPermissionSetOverlay — pin 6: a refused resync is never audit
     expect(warn.some((l) => l.m.includes('RESYNC WRITE WAS REFUSED'))).toBe(true);
   });
 });
+
+
+/* ------------------------------------------------------------------------- *
+ *  [#21860] eligibility is the lock's classifier, not "an item carries a
+ *  package id"
+ *
+ *  The registry holds stored rows as well as artifacts, and the metadata list
+ *  read stamps a stored row's `package_id` column onto its body as
+ *  `_packageId`. A set saved into a WRITABLE RUNTIME package is therefore
+ *  registered as `{ _packageId: <the package>, _provenance: 'org' }` after the
+ *  first list read, and this action read the package id as "package-declared":
+ *  it answered 200 and deleted the set's only `sys_metadata` row. The bodies
+ *  below are the ones the hydrator registers for each shape (an org's own set
+ *  and a clone carry the tenant marker and no package id).
+ *
+ *  Every refusal asserts the envelope (`code` + `status`) AND that no row
+ *  moved: both tables are counted before and after, and the stored rows are
+ *  compared whole.
+ * ------------------------------------------------------------------------- */
+
+const RUNTIME_PACKAGE = 'com.dogfood.runtime_pkg';
+
+interface EnvShape {
+  label: string;
+  /** The body the registry holds for the set, as the hydrator registers it. */
+  registered: Record<string, any>;
+  /** The stored definition's `package_id` column (the runtime package, or none). */
+  packageId: string | null;
+}
+
+const envObjects = { obj_a: { allowRead: true } };
+
+const ENV_SHAPES: EnvShape[] = [
+  {
+    label: 'a set saved into a writable runtime package (after a list read stamped its package id)',
+    registered: { name: 'rt_pkg_set', label: 'Runtime package set', objects: envObjects, _packageId: RUNTIME_PACKAGE, _provenance: 'org' },
+    packageId: RUNTIME_PACKAGE,
+  },
+  {
+    label: "an org's own set",
+    registered: { name: 'org_owned_set', label: 'Org-owned set', objects: envObjects, _provenance: 'org' },
+    packageId: null,
+  },
+  {
+    label: 'a "Clone to customize" clone',
+    registered: { name: 'contributor_clone', label: 'Contributor (clone)', objects: envObjects, _provenance: 'org' },
+    packageId: null,
+  },
+  {
+    // The runtime shadow the lock module documents for a definition that lives
+    // only in `sys_metadata`: its package id is the `'sys_metadata'` sentinel,
+    // which the classifier excludes and a bare "has a package id" read accepts.
+    label: "a runtime shadow carrying the 'sys_metadata' sentinel package id",
+    registered: { name: 'runtime_only_set', label: 'Runtime-only set', objects: envObjects, _packageId: 'sys_metadata', _provenance: 'org' },
+    packageId: null,
+  },
+];
+
+/** The set's record and its one stored definition — the only copy of it there is. */
+function seedEnvShape(ql: ReturnType<typeof makeQl>, shape: EnvShape): string {
+  const name = shape.registered.name;
+  const id = `ps_${name}`;
+  ql.permRows.push({
+    id, name, managed_by: 'admin', package_id: shape.packageId,
+    object_permissions: JSON.stringify(envObjects),
+  });
+  ql.metaRows.push({
+    id: `meta_${name}`, type: 'permission', name, state: 'active', organization_id: null,
+    package_id: shape.packageId,
+    metadata: JSON.stringify({ name, label: shape.registered.label, objects: envObjects }),
+  });
+  return id;
+}
+
+const snapshot = (ql: ReturnType<typeof makeQl>) => ({
+  permissionSets: ql.permRows.length,
+  metadataRows: ql.metaRows.length,
+  rows: structuredClone({ perm: ql.permRows, meta: ql.metaRows }),
+});
+
+/** The shipped artifact of the control, with the envelope a code package's item carries. */
+const shippedArtifact = () => declaredSet({ _provenance: 'package' });
+
+describe('[#21860] discardPermissionSetOverlay — eligibility is the lock classifier\'s verdict', () => {
+  for (const shape of ENV_SHAPES) {
+    it(`refuses ${shape.label} with 403 PERMISSION_DENIED, and every row is intact`, async () => {
+      // A code-shipped set sits beside it, so "some package ships something"
+      // is true of the registry: the verdict must be about THIS name.
+      const ql = makeQl([shippedArtifact(), shape.registered]);
+      const id = seedEnvShape(ql, shape);
+      const before = snapshot(ql);
+
+      await expect(discardPermissionSetOverlay(deps(ql), tenantAdminCtx, id))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+
+      const after = snapshot(ql);
+      expect({ permissionSets: after.permissionSets, metadataRows: after.metadataRows })
+        .toEqual({ permissionSets: before.permissionSets, metadataRows: before.metadataRows });
+      expect(after.rows).toEqual(before.rows);
+    });
+  }
+
+  it('refuses when the classifier cannot answer (the registry read throws), with every row intact', async () => {
+    const shape = ENV_SHAPES[0];
+    const ql = makeQl([shape.registered]);
+    ql.registry.listItems = () => { throw new Error('registry offline'); };
+    const id = seedEnvShape(ql, shape);
+    const before = snapshot(ql);
+
+    await expect(discardPermissionSetOverlay(deps(ql), tenantAdminCtx, id))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+
+    expect(snapshot(ql)).toEqual(before);
+  });
+
+  it('control: a code-shipped set\'s overlay is still discarded and the row healed to the artifact — beside a legacy overlay wearing the artifact\'s envelope in the registry', async () => {
+    const artifact = shippedArtifact(); // ships 3 objects
+    // A stored overlay of a name a code package ships is hydrated wearing the
+    // artifact's envelope (`_provenance: 'package'`), next to the artifact.
+    const hydratedOverlay = { name: artifact.name, objects: { obj_a: {} }, _packageId: artifact._packageId, _provenance: 'package' };
+    const ql = makeQl([artifact, hydratedOverlay]);
+    ql.permRows.push({
+      id: 'ps_1', name: artifact.name, managed_by: 'package', package_id: artifact._packageId,
+      ...permissionSetRowFields(artifact),
+      object_permissions: JSON.stringify({ obj_a: { allowRead: true } }),
+    });
+    ql.metaRows.push(overlayRow({ obj_a: {} }));
+
+    const result = await discardPermissionSetOverlay(deps(ql), tenantAdminCtx, 'ps_1');
+
+    expect(result.overlaysDiscarded).toBe(1);
+    expect(ql.metaRows).toHaveLength(0);
+    expect(ql.permRows).toHaveLength(1);
+    expect(result.healedObjectGrantCount).toBe(3);
+    expect(Object.keys(JSON.parse(result.permissionSet.object_permissions)).sort()).toEqual(['obj_a', 'obj_b', 'obj_c']);
+  });
+});

@@ -2482,6 +2482,18 @@ export class AutomationServicePlugin implements Plugin {
      * flows down, so a transient empty/failed read at boot can't unbind the flows
      * the boot pull already registered. registerFlow is idempotent, so re-binding
      * a flow the boot pull already registered is harmless.
+     *
+     * [#21848] …except where this bind REFUSES the flow: then the registration
+     * the boot pull made is withdrawn, so a flow refused at load is not left
+     * registered, whichever of the two boot steps refused it. The two can
+     * disagree because the node-type vocabulary grows between them — a plugin
+     * registers its node executor, and with it the descriptor `configSchema`
+     * registration checks that node's config keys against, from its own
+     * `start()`, after the boot pull, so the pull registered such a flow
+     * unjudged and armed it. Leaving that registration in place behind this
+     * refusal's warning kept the flow `active` and bound to its trigger.
+     * Only the refused name is withdrawn; a failed or empty READ still tears
+     * nothing down (the early returns above).
      */
     private async syncFlowsFromProtocol(ctx: PluginContext): Promise<void> {
         if (!this.engine) return;
@@ -2502,6 +2514,12 @@ export class AutomationServicePlugin implements Plugin {
                     flow: entry.name,
                     ...describeThrownForLog(err),
                 });
+                // [#21848] The boot pull's registration of this flow does not
+                // outlive this refusal — see the docblock.
+                if ((await this.engine.getFlow(entry.name)) !== null) {
+                    this.engine.withdrawFlow(entry.name);
+                    this.syncedFlowNames.delete(entry.name);
+                }
             }
         }
         if (bound > 0) {

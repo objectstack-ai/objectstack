@@ -1236,13 +1236,14 @@ const appTranslationDataShape = () => ({
    * ruling on #7646).
    *
    * The runner half was a separate, downstream change, and it has landed
-   * client-side for the per-screen copy. objectui's `FlowRunner` reads
+   * client-side for both halves of the group. objectui's `FlowRunner` reads
    * `screens`: each screen's `title`, and each field's copy over
-   * `FLOW_SCREEN_FIELD_COPY_KEYS` (`label`, `placeholder`, `inlineHelpText`),
-   * measured at the `.objectui-sha` pin `31971ff1e`. The flow's own
-   * `label` is read by nothing yet. See the `flows` rows in
-   * `liveness/translation.json`: `screens` is `live`, `label` stays `planned`,
-   * and the group's author warning names the unread half.
+   * `FLOW_SCREEN_FIELD_COPY_KEYS` (`label`, `placeholder`, `inlineHelpText`).
+   * It reads `label` through `translateFlow` to name the flow in its header
+   * and in the completion toast, falling back to the label the engine serves
+   * as `AutomationResult.flowLabel` and then to the flow's API name. Both were
+   * measured at the `.objectui-sha` pin `0abd4f9f8`. See the `flows` rows in
+   * `liveness/translation.json`: the group and both its children are `live`.
    */
   flows: z.record(z.string(), strictObject({
     surface: 'this flow translation',

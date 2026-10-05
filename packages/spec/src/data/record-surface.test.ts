@@ -56,12 +56,12 @@ describe('deriveRecordSurface (ADR-0085 §5)', () => {
   });
 });
 
-describe('deriveRecordFlowSurface (#2604)', () => {
+describe('deriveRecordFlowSurface — viewing a record may route, a create or edit task is always an overlay', () => {
   const TASK_FLOWS: RecordFlow[] = ['create', 'edit', 'child-create', 'child-edit'];
   const heavy = objWithFields(RECORD_SURFACE_PAGE_THRESHOLD);
   const light = objWithFields(RECORD_SURFACE_PAGE_THRESHOLD - 1);
 
-  it("view keeps the #2578 behavior verbatim: heavy → route('page'), light → overlay('drawer')", () => {
+  it("view keeps the field-count detail surface verbatim: heavy → route('page'), light → overlay('drawer')", () => {
     expect(deriveRecordFlowSurface(heavy, 'view')).toEqual({
       container: 'route', surface: 'page', size: 'auto',
     });

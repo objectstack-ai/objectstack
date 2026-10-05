@@ -60,6 +60,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Campo de título",
         helpText: "Campo cuyo valor titula cada registro (p. ej. \"name\", \"subject\"). Puntero canónico de ADR-0079: lo leen la presentación del registro, la búsqueda de ObjectQL y las vistas previas de registros relacionados."
       },
+      imageField: {
+        label: "Campo de imagen",
+        helpText: "Campo cuyo valor es la imagen de cada registro, mostrada junto al título en el encabezado de la página del registro. Debe nombrar un campo de este objeto de tipo image o avatar; cualquier otro nombre se rechaza al guardar el objeto. Vacío: sin imagen del registro y sin marcador de posición."
+      },
       isSystem: {
         label: "Integrado del sistema",
         helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
@@ -1767,6 +1771,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiresFeature: {
         label: "Requiere función",
         helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
+      },
+      requiresMembershipReach: {
+        label: "Requiere alcance de membresía",
+        helpText: "El endpoint de la organización al que llama esta acción, de modo que solo se ofrece a los miembros cuyo grado alcanza ese endpoint. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
       },
       requiredPermissions: {
         label: "Permisos requeridos",

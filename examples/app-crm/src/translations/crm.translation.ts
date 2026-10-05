@@ -210,6 +210,18 @@ export const CrmTranslationBundle = defineTranslationBundle({
         },
       },
     },
+    // The lead-conversion wizard: the flow's name in the runner header and
+    // completion toast, and each screen's heading.
+    flows: {
+      crm_convert_lead_wizard: {
+        label: '将线索转化为客户和商机',
+        screens: {
+          screen_already_converted: { title: '已转化' },
+          screen_account: { title: '第 1 步，共 2 步 · 客户' },
+          screen_opportunity: { title: '第 2 步，共 2 步 · 商机' },
+        },
+      },
+    },
     messages: {
       'crm.lead.convert.success': '线索已成功转化为商机。',
       'crm.lead.convert.error': '线索转化失败，请重试。',

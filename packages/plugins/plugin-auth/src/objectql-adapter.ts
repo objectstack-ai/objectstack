@@ -736,7 +736,22 @@ export const withSystemReadContext = withSystemContext;
  * @param dataEngine - ObjectQL data engine instance
  * @returns better-auth AdapterFactory
  */
-export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
+export interface ObjectQLAdapterFactoryOptions {
+  /**
+   * Called after every successful `create`, with the protocol object name and
+   * the row the engine returned, before `create` resolves — so it runs inside
+   * the better-auth endpoint call that wrote the row, ahead of any later write
+   * of that call. Awaited; a throw is swallowed (bookkeeping must never fail a
+   * write that landed). The AuthManager uses it to know which user the current
+   * request created without reading the row back (ADR-0093 D7).
+   */
+  onRecordCreated?: (objectName: string, row: Record<string, unknown>) => void | Promise<void>;
+}
+
+export function createObjectQLAdapterFactory(
+  rawDataEngine: IDataEngine,
+  factoryOptions: ObjectQLAdapterFactoryOptions = {},
+) {
   const dataEngine = withSystemContext(rawDataEngine);
   // [#8009] The OIDC `clientSecret` seam needs the engine's PRIVILEGED secret
   // dereference, which `withSystemContext` deliberately does not carry (it
@@ -867,6 +882,13 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // why the seam is here and what adoption does to the role.
         const adopted = await adoptExistingMembership(dataEngine as any, objectName, row);
         const result = adopted ?? (await dataEngine.insert(objectName, row));
+        if (factoryOptions.onRecordCreated && result && typeof result === 'object') {
+          try {
+            await factoryOptions.onRecordCreated(objectName, result as Record<string, unknown>);
+          } catch {
+            // Bookkeeping only — the row landed and the write stands.
+          }
+        }
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },

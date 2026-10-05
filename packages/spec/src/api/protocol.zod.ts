@@ -623,8 +623,9 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  *   channel the REST layer deliberately never reads.
  *
  * `writeFace` IS declared, and the distinction with `source` is the point:
- * both are server-stated, but `writeFace` is sent by two doors and the
- * duplicate-package internal call — three real producers on this parameter
+ * both are server-stated, but `writeFace` is sent by three doors (the two
+ * metadata write doors and the external-table import) and the
+ * duplicate-package internal call — four real producers on this parameter
  * — and the implementation branches its refusal envelopes on it. See the
  * member's own doc for why declaring it does not make it client-authorable.
  */
@@ -691,7 +692,7 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'overlay (no package stamp); it also scopes which row the unpinned '
     + 'parent-version resolution reads.',
   ),
-  writeFace: z.enum(['package-duplicate', 'meta-envelope', 'meta-dispatch']).optional().describe(
+  writeFace: z.enum(['package-duplicate', 'meta-envelope', 'meta-dispatch', 'external-import']).optional().describe(
     'Which write door a refusal is being rendered FOR — stated by the '
     + 'SERVER, never by a remote caller: every door builds this request '
     + 'field by field and never spreads a request body into it, so there is '
@@ -699,8 +700,9 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'wire body is simply never read. Two refusals branch on it, for '
     + 'different questions: the 409 destructive-change remedy names the '
     + 'acknowledgement mechanism that actually exists on the refusing door '
-    + '(`?force=true` on the REST doors; the dispatcher and the '
-    + 'duplicate-package door have none), and the 422 invalid-metadata '
+    + '(`?force=true` on the REST doors; the dispatcher, the '
+    + 'duplicate-package door and the external-table import have none), '
+    + 'and the 422 invalid-metadata '
     + 'message adapts to whether a structured `issues[]` channel reaches '
     + 'the consumer beside it. Absent = the conservative default wording.',
   ),

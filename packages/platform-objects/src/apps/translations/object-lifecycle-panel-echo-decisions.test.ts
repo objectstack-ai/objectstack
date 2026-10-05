@@ -1167,7 +1167,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 659 since #21320: the agent form's `lifecycle` row left with its key
       // (the conversation state machine was retired — nothing ever read it),
       // taking its label — authored in all three locales — out of the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(659);
+      // 660 since #21765: the object form offers `imageField` beside
+      // `nameField` — one new row label, authored in all three locales.
+      // 661 since the action form offers `requiresMembershipReach` beside
+      // `requiresFeature` — one new row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(661);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

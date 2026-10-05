@@ -29,7 +29,7 @@ const zoo = (reference?: string) => ({
 
 const firstSentence = (message: string): string => message.split(/\.\s/)[0];
 
-describe('[#14892] a `tree` field\'s `reference` must name the declaring object', () => {
+describe('a `tree` field\'s `reference` must name the declaring object', () => {
   it('accepts a self-reference through the object schema, and through create()', () => {
     const parsed = ObjectSchema.safeParse(zoo('showcase_field_zoo'));
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);

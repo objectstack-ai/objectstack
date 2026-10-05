@@ -148,7 +148,7 @@ describe('every view filter operator has an AST lowering', () => {
   });
 });
 
-describe('[#8934] icontains joins both remaining vocabularies', () => {
+describe('icontains joins both remaining vocabularies', () => {
   // `$icontains` was executable on every driver and evaluation face
   // (#5702/#6520) while being AUTHORABLE from exactly one of the three filter
   // dialects. This block pins the closing of that gap: the view vocabulary and
@@ -190,7 +190,7 @@ describe('[#8934] icontains joins both remaining vocabularies', () => {
     expect(icontains).not.toEqual(ilike);
   });
 
-  it('does NOT collapse onto contains — case sensitivity is contract (#5701)', () => {
+  it('does NOT collapse onto contains — case sensitivity is contract', () => {
     const icontains = parseFilterAST(['name', 'icontains', 'Acme']);
     const contains = parseFilterAST(['name', 'contains', 'Acme']);
     expect(icontains).not.toEqual(contains);
