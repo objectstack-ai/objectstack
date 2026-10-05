@@ -36,6 +36,13 @@
  * such a position: it is declared on the child's own `master_detail` field and
  * names the child's own columns, so it is scrubbed against this object.
  *
+ * An action param's `field` under `objectOverride` is the one such position
+ * that is still JUDGED rather than kept: it is a field of the object the
+ * override names, so it is read against the caller's readable set on THAT
+ * object ({@link MaskScope.related}), and the action is dropped when the field
+ * is not in it — or when that set could not be determined (fail closed). It is
+ * not a reference to this object's fields (see {@link actionParamReadsDenied}).
+ *
  * ## Fail-safe by construction
  *
  * A key neither table classifies is treated as an expression: it is served
@@ -68,7 +75,12 @@
  * - An action param whose `name` equals a denied field drops the action,
  *   although a param name is a request-body key rather than a field. It is
  *   kept a reference on purpose: it defaults to the param's `field`, and the
- *   body key it names is commonly the field the action writes.
+ *   body key it names is commonly the field the action writes. Under
+ *   `objectOverride` a `name` that restates `field` is that field — a field of
+ *   the other object, judged there; an explicit `name` that differs from
+ *   `field` is a body key whose owner nothing here can verify, so it keeps
+ *   this reading. So does `field` itself when `defaultFromRow` seeds the
+ *   param from THIS object's row, which reads it here too.
  * - A name, pointer or field-keyed key is matched on its root segment as
  *   well as whole, so a dotted path through a denied lookup (`owner.city`
  *   with `owner` denied) is a reference to it.
@@ -91,7 +103,28 @@
 /** A scrubber's answer meaning "delete this key / drop this entry". */
 const REMOVE: unique symbol = Symbol('remove');
 type Scrubbed = unknown | typeof REMOVE;
-type Scrub = (value: unknown, denied: ReadonlySet<string>) => Scrubbed;
+
+/**
+ * What a scrub needs beyond THIS object's denied set: the document's own object
+ * name, and the caller's readable field set on each OTHER object an action
+ * param reads through `objectOverride`. Only the action-param reading consults
+ * it; every other scrub ignores it.
+ */
+export interface MaskScope {
+    /** The served document's `name` — an `objectOverride` naming it is this object. */
+    readonly objectName?: string;
+    /**
+     * The caller's readable fields on another object, by name. `undefined`, or
+     * an object missing from the map, means the set could not be determined —
+     * a param reading that object then drops its action (fail closed).
+     */
+    readonly related: ReadonlyMap<string, ReadonlySet<string> | undefined>;
+}
+
+/** No related object resolved: every `objectOverride` read fails closed. */
+const NO_RELATED: MaskScope = { related: new Map() };
+
+type Scrub = (value: unknown, denied: ReadonlySet<string>, scope?: MaskScope) => Scrubbed;
 
 const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/g;
 
@@ -304,12 +337,12 @@ const names: Scrub = nameList();
 
 /** An array whose elements are scrubbed one by one; `REMOVE` drops the element. */
 function arrayOf(element: Scrub): Scrub {
-    return (value, denied) => {
+    return (value, denied, scope) => {
         if (!Array.isArray(value)) return unclassified(value, denied);
         let changed = false;
         const out: unknown[] = [];
         for (const entry of value) {
-            const next = element(entry, denied);
+            const next = element(entry, denied, scope);
             if (next !== entry) changed = true;
             if (next !== REMOVE) out.push(next);
         }
@@ -328,9 +361,9 @@ const ruleEntries: Scrub = arrayOf((entry, denied) => (mentionsDenied(entry, den
 
 /** An object block scrubbed key by key; an unclassified key goes the {@link unclassified} way. */
 function block(table: Readonly<Record<string, Scrub>>): Scrub {
-    return (value, denied) => {
+    return (value, denied, scope) => {
         if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
-        return scrubRecord(value as Record<string, unknown>, table, denied);
+        return scrubRecord(value as Record<string, unknown>, table, denied, scope);
     };
 }
 
@@ -341,7 +374,7 @@ function block(table: Readonly<Record<string, Scrub>>): Scrub {
  * (`listViews`), where a key spelling a denied field discloses it.
  */
 function recordOf(entry: Scrub, keyIsName = false): Scrub {
-    return (value, denied) => {
+    return (value, denied, scope) => {
         if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
         let changed = false;
         const out: Record<string, unknown> = {};
@@ -350,7 +383,7 @@ function recordOf(entry: Scrub, keyIsName = false): Scrub {
                 changed = true;
                 continue;
             }
-            const next = entry(inner, denied);
+            const next = entry(inner, denied, scope);
             if (next !== inner) changed = true;
             if (next !== REMOVE) out[key] = next;
         }
@@ -359,32 +392,115 @@ function recordOf(entry: Scrub, keyIsName = false): Scrub {
     };
 }
 
+/** Does a presentation entry's `key` read a denied field? */
+type EntryRead = (value: unknown, denied: ReadonlySet<string>, scope: MaskScope) => boolean;
+
+/** The default reading of a non-list key: every non-prose mention, as {@link mentionsDenied} reads it. */
+const readsAsThisObject = (key: string): EntryRead => (value, denied) => (
+    // Read as `{ [key]: value }` so the key's own kind applies: prose and
+    // vocabulary keys are skipped, `filter` / `patch` are field-keyed.
+    mentionsDenied({ [key]: value }, denied, 'skip', 'classified')
+);
+
 /**
  * A presentation entry (list view, action): its column-style name lists are
  * filtered, and any OTHER non-prose mention of a denied field — a filter, a
  * sort, a visibility predicate, a param — drops the entry, because serving it
- * without that part would silently change what it does.
+ * without that part would silently change what it does. `reads` overrides how
+ * one key is read; every other key is read as this object's
+ * ({@link readsAsThisObject}).
  */
-function presentationEntry(lists: Readonly<Record<string, Scrub>>): Scrub {
-    return (value, denied) => {
+function presentationEntry(
+    lists: Readonly<Record<string, Scrub>>,
+    reads: Readonly<Record<string, EntryRead>> = {},
+): Scrub {
+    return (value, denied, scope = NO_RELATED) => {
         if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
         const rec = value as Record<string, unknown>;
         let changed = false;
         const out: Record<string, unknown> = {};
         for (const [key, inner] of Object.entries(rec)) {
             if (Object.prototype.hasOwnProperty.call(lists, key)) {
-                const next = lists[key]!(inner, denied);
+                const next = lists[key]!(inner, denied, scope);
                 if (next !== inner) changed = true;
                 if (next !== REMOVE) out[key] = next;
                 continue;
             }
-            // Read as `{ [key]: inner }` so the key's own kind applies: prose and
-            // vocabulary keys are skipped, `filter` / `patch` are field-keyed.
-            if (mentionsDenied({ [key]: inner }, denied, 'skip', 'classified')) return REMOVE;
+            const read = Object.prototype.hasOwnProperty.call(reads, key) ? reads[key]! : readsAsThisObject(key);
+            if (read(inner, denied, scope)) return REMOVE;
             out[key] = inner;
         }
         return changed ? out : value;
     };
+}
+
+/**
+ * [#21884] Does one action param read a field the caller is denied?
+ *
+ * A param with no `objectOverride` (or one naming this object) is read as every
+ * other key of an action is: any non-prose mention of a denied field of THIS
+ * object, `field` and `name` included.
+ *
+ * With `objectOverride` naming ANOTHER object, its `field` is a field of that
+ * object. It is judged against the caller's readable set THERE
+ * ({@link MaskScope.related}) and is not a reference to this object's fields: a
+ * field absent from that set, or a set that could not be determined, drops the
+ * action — the ADR-0106 rule, applied to the object the field belongs to. The
+ * override's value is an object name, never a field. Everything else on the
+ * param is still read against this object — `visible`, `options[].visibleWhen`,
+ * `defaultValue`, an explicit `name` that differs from `field` (a body key whose
+ * owner cannot be verified here) — and so is `field` (with a `name` restating
+ * it) when `defaultFromRow` seeds it from this object's row, which is a second
+ * read of a field of this object.
+ */
+export function actionParamReadsDenied(param: unknown, denied: ReadonlySet<string>, scope: MaskScope): boolean {
+    const asThisObject = (value: unknown): boolean => mentionsDenied({ params: [value] }, denied, 'skip', 'classified');
+    if (!param || typeof param !== 'object' || Array.isArray(param)) return asThisObject(param);
+    const rec = param as Record<string, unknown>;
+    const other = rec.objectOverride;
+    if (typeof other !== 'string' || other === scope.objectName) return asThisObject(rec);
+
+    const rest: Record<string, unknown> = { ...rec };
+    delete rest.objectOverride;
+    if (typeof rec.field === 'string') {
+        if (!scope.related.get(other)?.has(rec.field)) return true;
+        if (rec.defaultFromRow !== true) {
+            delete rest.field;
+            if (rest.name === rec.field) delete rest.name;
+        }
+    }
+    return asThisObject(rest);
+}
+
+/** An action's `params`: the action reads a denied field when any one param does. */
+const actionParams: EntryRead = (value, denied, scope) => (
+    Array.isArray(value)
+        ? value.some((param) => actionParamReadsDenied(param, denied, scope))
+        : readsAsThisObject('params')(value, denied, scope)
+);
+
+/**
+ * [#21884] Every `(object, field)` the document's action params read through an
+ * `objectOverride` naming ANOTHER object — the reads {@link actionParamReadsDenied}
+ * judges against {@link MaskScope.related}. In document order, duplicates kept.
+ */
+export function objectOverrideReads(document: unknown): Array<{ object: string; field: string }> {
+    if (!document || typeof document !== 'object' || Array.isArray(document)) return [];
+    const rec = document as Record<string, unknown>;
+    const reads: Array<{ object: string; field: string }> = [];
+    if (!Array.isArray(rec.actions)) return reads;
+    for (const action of rec.actions) {
+        const params = action && typeof action === 'object' ? (action as Record<string, unknown>).params : undefined;
+        if (!Array.isArray(params)) continue;
+        for (const param of params) {
+            if (!param || typeof param !== 'object' || Array.isArray(param)) continue;
+            const { objectOverride, field } = param as Record<string, unknown>;
+            if (typeof objectOverride === 'string' && objectOverride !== rec.name && typeof field === 'string') {
+                reads.push({ object: objectOverride, field });
+            }
+        }
+    }
+    return reads;
 }
 
 /** Apply `table` to every key of `rec`; same reference when nothing changed. */
@@ -392,12 +508,13 @@ function scrubRecord(
     rec: Record<string, unknown>,
     table: Readonly<Record<string, Scrub>>,
     denied: ReadonlySet<string>,
+    scope?: MaskScope,
 ): Record<string, unknown> {
     let changed = false;
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(rec)) {
         const scrub = Object.prototype.hasOwnProperty.call(table, key) ? table[key]! : unclassified;
-        const next = scrub(inner, denied);
+        const next = scrub(inner, denied, scope);
         if (next !== inner) changed = true;
         if (next !== REMOVE) out[key] = next;
     }
@@ -612,7 +729,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Presentation entries.
     // A view KEYED by a denied field's name goes too: the key is shown to the caller.
     listViews: recordOf(presentationEntry(LIST_VIEW_NAME_LISTS), true),
-    actions: arrayOf(presentationEntry({})),
+    // An action's `params` are read one by one: a param's `field` under
+    // `objectOverride` belongs to the object it names (see `actionParamReadsDenied`).
+    actions: arrayOf(presentationEntry({}, { params: actionParams })),
     ...PROTECTION_ENVELOPE,
 };
 
@@ -620,14 +739,24 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
  * Remove every reference to a `denied` field from an object document whose
  * `fields` map has ALREADY been projected (so every field left in it is
  * readable). Returns the same reference when nothing referenced a denied field.
+ *
+ * [#21884] `related` is the caller's readable set on each OTHER object an
+ * action param reads through `objectOverride` (see {@link MaskScope.related});
+ * a read of an object it does not resolve drops its action. So a document with
+ * such a read is walked even when nothing of THIS object is denied.
  */
 export function maskDeniedFieldReferences(
     document: Record<string, unknown>,
     denied: ReadonlySet<string>,
+    related: MaskScope['related'] = NO_RELATED.related,
 ): Record<string, unknown> {
-    if (denied.size === 0) return document;
+    if (denied.size === 0 && objectOverrideReads(document).length === 0) return document;
+    const scope: MaskScope = {
+        ...(typeof document.name === 'string' ? { objectName: document.name } : {}),
+        related,
+    };
     const { fields, ...rest } = document;
-    const scrubbedRest = scrubRecord(rest, OBJECT_REFERENCE_POSITIONS, denied);
+    const scrubbedRest = scrubRecord(rest, OBJECT_REFERENCE_POSITIONS, denied, scope);
 
     let scrubbedFields = fields;
     if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
