@@ -56,6 +56,15 @@ import {
 const SENTINEL = 'INTERNAL-SENTINEL-7823-NEVER-SERIALIZED';
 /** The value that MUST appear wherever a record was promised (falsifiability). */
 const CONTROL = 'CONTROL-VALUE-7823-RECORD-FLOWED';
+/**
+ * Credential-class stored values (a `password` field's plaintext and a
+ * `secret` field's handle ref) — masked on read by the engine, and owed the
+ * same mask on every write response by the shared helper.
+ */
+const CREDENTIAL_SENTINELS = ['PASSWORD-SENTINEL-NEVER-SERIALIZED', 'secret:HANDLE-SENTINEL-NEVER-SERIALIZED'];
+/** Every stored value no write response may carry. */
+const NEVER_SERIALIZED = [SENTINEL, ...CREDENTIAL_SENTINELS];
+const leaks = (wire: string) => NEVER_SERIALIZED.filter((v) => wire.includes(v));
 
 const VAULT_SCHEMA = {
   name: 'vault',
@@ -63,6 +72,8 @@ const VAULT_SCHEMA = {
     id: { name: 'id', type: 'text' },
     name: { name: 'name', type: 'text' },
     vault_secret: { name: 'vault_secret', type: 'text', internal: true },
+    vault_password: { name: 'vault_password', type: 'password' },
+    vault_token: { name: 'vault_token', type: 'secret' },
   },
   enable: { clone: true },
 };
@@ -82,6 +93,8 @@ function makeSentinelEngine() {
     id,
     name: (data as any)?.name ?? CONTROL,
     vault_secret: SENTINEL,
+    vault_password: CREDENTIAL_SENTINELS[0],
+    vault_token: CREDENTIAL_SENTINELS[1],
   });
   let nextId = 1;
   const handle = { id: 'trx-1' };
@@ -241,7 +254,7 @@ const RECIPES: Record<string, Recipe> = {
   runAtomicBatchData: { coveredVia: 'batchData' },
 };
 
-describe('#7823 tripwire: every generic data ingress strips `internal: true` from its write response', () => {
+describe('#7823 tripwire: every generic data ingress strips `internal: true` and masks credential-class fields in its write response', () => {
   const enumerated = enumerateDataMethods(ObjectStackProtocolImplementation.prototype);
 
   it('the enumeration is real: it sees the three ruling-named ingresses', () => {
@@ -276,12 +289,12 @@ describe('#7823 tripwire: every generic data ingress strips `internal: true` fro
   for (const name of enumerated) {
     const recipe = RECIPES[name];
     if (!recipe || 'coveredVia' in recipe) continue;
-    it(`${name}: response never carries the internal sentinel${recipe.expectRecord ? ', and really returned a record' : ''}`, async () => {
+    it(`${name}: response never carries the internal or credential sentinels${recipe.expectRecord ? ', and really returned a record' : ''}`, async () => {
       for (const invoke of recipe.invocations) {
         const p = new ObjectStackProtocolImplementation(makeSentinelEngine());
         const response = await invoke(p);
         const wire = JSON.stringify(response ?? null);
-        expect(wire.includes(SENTINEL), `${name} leaked an internal field: ${wire}`).toBe(false);
+        expect(leaks(wire), `${name} leaked an internal or credential-class field: ${wire}`).toEqual([]);
         if (recipe.expectRecord) {
           expect(wire.includes(CONTROL), `${name} returned no record at all — the probe is blind: ${wire}`).toBe(true);
         }
@@ -305,12 +318,12 @@ describe('#7823 tripwire: every generic data ingress strips `internal: true` fro
 
     const p = new LeakyProtocol(makeSentinelEngine());
     const wire = JSON.stringify(await p.leakyData({ object: 'vault', id: 'row-1', data: { name: 'x' } }));
-    expect(wire.includes(SENTINEL)).toBe(true); // half 2: the scan detects the leak
+    expect(leaks(wire)).toEqual(NEVER_SERIALIZED); // half 2: the scan detects every leak
 
     // And the helper is exactly what closes it — same response, one call.
     const fixed = await p.leakyData({ object: 'vault', id: 'row-1', data: { name: 'x' } });
     omitInternalFieldsFromWriteResponse(VAULT_SCHEMA, (fixed as any).record);
-    expect(JSON.stringify(fixed).includes(SENTINEL)).toBe(false);
+    expect(leaks(JSON.stringify(fixed))).toEqual([]);
   });
 
   it('the collector agrees with the engine rule: strict `internal === true` only', () => {
