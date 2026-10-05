@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createTenancyService, resolveDefaultOrgId } from './tenancy-service.js';
-import { backfillMemberships } from './reconcile-membership.js';
+import { backfillMemberships, reconcileMembership } from './reconcile-membership.js';
 
 function makeEngine(orgs: Array<{ id: string; slug?: string }>) {
   return {
@@ -542,5 +542,69 @@ describe('single-posture organization census (#17010)', () => {
     // … and THAT is the boot moment the census is taken in.
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error.mock.calls[0]![0]).toContain(SINGLE_POSTURE_MANY_ORGANIZATIONS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The default organization id is checked when a user is BOUND, not trusted from
+// a process-long cache. Under the `auto` membership policy membership is decided
+// once, at creation (ADR-0093 D7), so a user bound to an organization that no
+// longer exists is never repaired. The default organization can be deleted and
+// recreated under a new id inside one process: the single-org bootstrap
+// recreates a missing `slug='default'` organization on the next `sys_user`
+// write, which is the very sign-up that then binds.
+// ---------------------------------------------------------------------------
+describe('defaultOrgId is revalidated when a user is bound', () => {
+  /**
+   * `sys_organization` + `sys_member` over arrays. `find` honours every `where`
+   * key as an equality, so an existence read by `id` answers for that id and
+   * nothing else.
+   */
+  function makeStore(orgs: Array<{ id: string; slug?: string }>) {
+    const members: Array<{ id: string; organization_id: string; user_id: string }> = [];
+    const tables: Record<string, Array<Record<string, unknown>>> = {
+      sys_organization: orgs,
+      sys_member: members,
+    };
+    const engine = {
+      find: vi.fn(async (object: string, query: any) => {
+        const where: Record<string, unknown> = query?.where ?? {};
+        const rows = (tables[object] ?? []).filter((row) =>
+          Object.entries(where).every(([k, v]) => row[k] === v),
+        );
+        return rows.slice(0, query?.limit ?? rows.length);
+      }),
+      insert: vi.fn(async (object: string, row: any) => {
+        (tables[object] ??= []).push(row);
+        return row;
+      }),
+    };
+    return { engine, orgs, members };
+  }
+
+  const singleOrg = (engine: unknown) =>
+    createTenancyService({ requested: 'single', probeIsolation: () => false, getEngine: () => engine });
+
+  it('a user created after the default organization is deleted and recreated binds to the NEW id', async () => {
+    const store = makeStore([{ id: 'org_old', slug: 'default' }]);
+    const tenancy = singleOrg(store.engine);
+    const bind = (userId: string) =>
+      reconcileMembership(store.engine, userId, {
+        policy: 'auto',
+        resolveTargetOrg: () => tenancy.defaultOrgId(),
+      });
+
+    // The first user resolves (and memoizes) the default organization.
+    expect(await bind('usr_first')).toEqual({ outcome: 'bound', organizationId: 'org_old' });
+
+    // Same process: the default organization is deleted, then recreated by the
+    // bootstrap under a new id.
+    store.orgs.splice(0, store.orgs.length);
+    store.orgs.push({ id: 'org_new', slug: 'default' });
+
+    expect(await bind('usr_second')).toEqual({ outcome: 'bound', organizationId: 'org_new' });
+    expect(store.members.find((m) => m.user_id === 'usr_second')?.organization_id).toBe('org_new');
+    // The memo now names the organization that exists.
+    expect(await tenancy.defaultOrgId()).toBe('org_new');
   });
 });
