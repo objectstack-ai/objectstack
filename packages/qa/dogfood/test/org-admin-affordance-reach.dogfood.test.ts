@@ -108,7 +108,6 @@ async function waitForMembership(ql: any, userId: string): Promise<any> {
   throw new Error(`no sys_member row appeared for ${userId}`);
 }
 
-// @proof: org-admin-affordance-reach
 describe('org-admin affordances follow the membership grade (served metadata × served session)', () => {
   let stack: VerifyStack;
   let ql: any;
