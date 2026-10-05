@@ -167,8 +167,12 @@ describe('dogfood: install-local reseed over an intact baseline, then after a pu
 });
 
 describe('dogfood: install-local reseed of a package with no seed record for this runtime', () => {
-  /** Every seed environment except the one vitest runs in (`NODE_ENV=test`). */
-  const ELSEWHERE = ['prod', 'dev'];
+  /**
+   * Every seed environment except this runtime's: `bootStack` forces
+   * `NODE_ENV=development` (`packages/verify/src/harness.ts`), which the seed
+   * loader reads as `dev`.
+   */
+  const ELSEWHERE = ['prod', 'test'];
   let stack: VerifyStack;
   let storageDir: string;
   let ql: IObjectQLEngine;
@@ -197,10 +201,10 @@ describe('dogfood: install-local reseed of a package with no seed record for thi
   });
 
   it('PRECONDITION: the package declares its 28 records, every dataset for another environment', () => {
-    expect(process.env.NODE_ENV).toBe('test');
+    expect(process.env.NODE_ENV).toBe('development');
     const data = body.manifest.data as Dataset[];
     expect(data.reduce((n, d) => n + d.records.length, 0)).toBe(SEED_TOTAL);
-    expect(data.every((d) => !d.env?.includes('test'))).toBe(true);
+    expect(data.every((d) => !d.env?.includes('dev'))).toBe(true);
     expect(install.status, JSON.stringify(install.body)).toBe(200);
     expect(install.body?.data?.seeded).toMatchObject({ mode: 'inline', inserted: 0, updated: 0, skipped: 0, errors: 0 });
   });
