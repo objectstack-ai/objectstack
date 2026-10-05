@@ -144,17 +144,19 @@ async function boot(orgContext: boolean, email: string): Promise<Booted> {
   return { stack, rootDir, ql, adminId, userId, token };
 }
 
+type CallerContext = Awaited<ReturnType<typeof resolveAuthzContext>>;
+
 /** The context the REST door resolves for this caller's bearer token. */
-async function callerContext(b: Booted): Promise<Record<string, unknown>> {
+async function callerContext(b: Booted): Promise<CallerContext> {
   const authService: any = await b.stack.kernel.getServiceAsync('auth');
   let api: any = authService?.api;
   if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
   const headers = new Headers({ authorization: `Bearer ${b.token}` });
-  return (await resolveAuthzContext({
+  return resolveAuthzContext({
     ql: b.ql,
     headers,
     getSession: async (h: any) => api?.getSession?.({ headers: h }),
-  })) as Record<string, unknown>;
+  });
 }
 
 async function uploadFile(stack: VerifyStack, token: string): Promise<string> {
@@ -307,7 +309,7 @@ const OBJECTS: ObjectName[] = ['sys_attachment', 'sys_comment', 'pw_ledger'];
 const VERBS = ['update', 'delete'] as const;
 
 describe('predicate write door: a row the caller cannot read is not matched', () => {
-  const classes: Record<'outside' | 'inside', { b?: Booted; ctx?: Record<string, unknown>; foreign?: Awaited<ReturnType<typeof seedForeign>> }> = {
+  const classes: Record<'outside' | 'inside', { b?: Booted; ctx?: CallerContext; foreign?: Awaited<ReturnType<typeof seedForeign>> }> = {
     outside: {},
     inside: {},
   };
@@ -355,7 +357,7 @@ describe('predicate write door: a row the caller cannot read is not matched', ()
     for (const object of OBJECTS) {
       for (const verb of VERBS) {
         it(`${who} · ${object} · ${verb}: hidden rows are not matched; visible rows are; readers keep their answer`, async () => {
-          const { b, ctx, foreign } = classes[who] as { b: Booted; ctx: Record<string, unknown>; foreign: Awaited<ReturnType<typeof seedForeign>> };
+          const { b, ctx, foreign } = classes[who] as { b: Booted; ctx: CallerContext; foreign: Awaited<ReturnType<typeof seedForeign>> };
           const own = (await seedOwn(b, `${who}-${object}-${verb}`))[object];
           const { hidden, readable } = foreign[object];
           const write = (ids: string[]) =>
