@@ -40,8 +40,8 @@
  * race for the request that creates the user and for nothing else: a
  * member-less user who signs in later — for instance one whose membership was
  * removed — must not be bound again. The cases below therefore drive the real
- * sign-up order (`user.create.before` and `session.create.before` sharing one
- * request context) for every settle they expect, and the last block pins the
+ * sign-up order (the user row created and the session minted in one request
+ * context) for every settle they expect, and the last block pins the
  * sign-ins that must NOT settle.
  */
 
@@ -122,19 +122,24 @@ function hooksFor(opts: ManagerOpts): any {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (manager as any).composeDatabaseHooks(opts.databaseHooks);
+  const hooks = (manager as any).composeDatabaseHooks(opts.databaseHooks);
+  // What the adapter's `create` does for a `sys_user` row inside the creating
+  // request (`onRecordCreated`; the real wiring is pinned in
+  // `user-created-in-request.test.ts`).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  hooks.__stageCreated = (request: unknown, userId: string) => (manager as any).stageUserCreatedInRequest(request, userId);
+  return hooks;
 }
 
 /**
- * Drive the sign-up order better-auth runs: `user.create.before` and the
- * session's `session.create.before` share ONE endpoint context (the request),
- * and `user.create.after` is deferred past both. Returns the session hook's
- * result.
+ * Drive the sign-up order better-auth runs: the user row is created and the
+ * session minted inside ONE endpoint context (the request), and
+ * `user.create.after` is deferred past both. Returns the session hook's result.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function firstSessionOfCreation(hooks: any, session: Record<string, unknown> = { userId: USER }): Promise<any> {
   const request = {};
-  await hooks.user.create.before({ email: USER_EMAIL, name: 'First Session' }, request);
+  hooks.__stageCreated(request, USER);
   return hooks.session.create.before(session, request);
 }
 
@@ -222,11 +227,11 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       const engine = makeEngine();
       const hooks = hooksFor({ engine, membershipPolicy: 'invite-only', defaultOrgId: DEFAULT_ORG });
       await firstSessionOfCreation(hooks);
-      // The two owner-preferred lookups of the ORIGINAL selection, the one
-      // read that recognises the user being created, and nothing more:
-      // `invite-only` is refused by the reconciler before it touches the
-      // store, and the re-read never runs because nothing was bound.
-      expect(engine.findOne).toHaveBeenCalledTimes(3);
+      // The two owner-preferred lookups of the ORIGINAL selection, and nothing
+      // more: recognising the user being created reads nothing, `invite-only`
+      // is refused by the reconciler before it touches the store, and the
+      // re-read never runs because nothing was bound.
+      expect(engine.findOne).toHaveBeenCalledTimes(2);
       expect(engine.find).not.toHaveBeenCalled();
     });
   });
@@ -331,7 +336,7 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
     it('a creation staged in ANOTHER request does not reach this sign-in', async () => {
       const engine = makeEngine();
       const hooks = hooksFor({ engine, defaultOrgId: DEFAULT_ORG });
-      await hooks.user.create.before({ email: USER_EMAIL }, {});
+      hooks.__stageCreated({}, USER);
       const result = await hooks.session.create.before({ userId: USER }, {});
       expect(result?.data?.activeOrganizationId).toBeUndefined();
       expect(engine.insert).not.toHaveBeenCalled();
@@ -345,25 +350,25 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       expect(engine.insert).not.toHaveBeenCalled();
     });
 
+    it('email verification required: the creation seam binds with no session, and the later sign-in finds it', async () => {
+      // A deployment that requires verification mints no session at sign-up;
+      // the membership is still decided at creation, by `user.create.after`.
+      const engine = makeEngine();
+      const hooks = hooksFor({ engine, defaultOrgId: DEFAULT_ORG });
+      await hooks.user.create.after({ id: USER });
+      expect(engine.rows).toEqual([expect.objectContaining({ organization_id: DEFAULT_ORG, user_id: USER })]);
+      // The first sign-in after verification is a different request: it
+      // decides nothing, and resolves the membership creation wrote.
+      const result = await hooks.session.create.before({ userId: USER }, {});
+      expect(result?.data?.activeOrganizationId).toBe(DEFAULT_ORG);
+      expect(engine.insert).toHaveBeenCalledTimes(1);
+    });
+
     it('a session minted with no request context settles nothing', async () => {
       const engine = makeEngine();
       const hooks = hooksFor({ engine, defaultOrgId: DEFAULT_ORG });
-      await hooks.user.create.before({ email: USER_EMAIL }, undefined);
+      hooks.__stageCreated(undefined, USER);
       const result = await hooks.session.create.before({ userId: USER }, undefined);
-      expect(result?.data?.activeOrganizationId).toBeUndefined();
-      expect(engine.insert).not.toHaveBeenCalled();
-    });
-
-    it('a creation the HOST refuses is not staged', async () => {
-      const engine = makeEngine();
-      const hooks = hooksFor({
-        engine,
-        defaultOrgId: DEFAULT_ORG,
-        databaseHooks: { user: { create: { before: vi.fn(async () => false) } } },
-      });
-      const request = {};
-      expect(await hooks.user.create.before({ email: USER_EMAIL }, request)).toBe(false);
-      const result = await hooks.session.create.before({ userId: USER }, request);
       expect(result?.data?.activeOrganizationId).toBeUndefined();
       expect(engine.insert).not.toHaveBeenCalled();
     });

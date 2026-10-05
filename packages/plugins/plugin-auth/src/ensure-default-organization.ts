@@ -150,6 +150,14 @@ export interface EnsureDefaultOrganizationOptions {
     userId: string,
     options: { logger?: BootstrapLogger },
   ) => Promise<Array<{ count: number }>>;
+  /**
+   * ADR-0093 D7 — bind the admin ONLY on the call that creates the default
+   * organization. The caller sets it when it cannot tell from its own record
+   * whether the owner bind was already decided (no readable deployment
+   * ledger): binding to an organization that already exists could then put
+   * back a membership that was removed. Default `false`.
+   */
+  bindOnlyOnCreate?: boolean;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -284,7 +292,7 @@ export interface EnsureDefaultOrganizationResult {
   /** Whether a sys_member row was inserted binding the admin to the default org. */
   memberCreated: boolean;
   /** Human-readable reason when the helper short-circuited. */
-  reason?: 'no_admin' | 'admin_already_in_org' | 'org_insert_failed' | 'member_insert_failed';
+  reason?: 'no_admin' | 'admin_already_in_org' | 'org_insert_failed' | 'member_insert_failed' | 'owner_bind_decided';
   /** Count of the default org's seeded rows re-owned to the platform admin. */
   ownershipClaimed?: number;
 }
@@ -369,6 +377,11 @@ export async function ensureDefaultOrganization(
   const existingDefault = await tryFind(ql, 'sys_organization', { slug: 'default' }, 1);
   if (existingDefault.length > 0 && existingDefault[0].id) {
     defaultOrgId = String(existingDefault[0].id);
+    if (options.bindOnlyOnCreate) {
+      // The organization predates this call, so whether its owner was bound
+      // was decided earlier — never re-decided here (ADR-0093 D7).
+      return { defaultOrgCreated: false, defaultOrgId, memberCreated: false, reason: 'owner_bind_decided' };
+    }
   } else {
     const newOrgId = genId('org');
     const orgRow = await tryInsert(ql, 'sys_organization', {

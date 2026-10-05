@@ -17,6 +17,7 @@ import {
 const ORG = 'org_default';
 
 interface Tables {
+  sys_organization: Array<{ id: string }>;
   sys_user: Array<{ id: string }>;
   sys_member: Array<{ id?: string; organization_id: string; user_id: string; role?: string }>;
   sys_migration: Array<Record<string, unknown>>;
@@ -24,6 +25,7 @@ interface Tables {
 
 function makeEngine(seed: Partial<Tables> = {}, opts: { ledger?: boolean } = {}) {
   const tables: Tables = {
+    sys_organization: [...(seed.sys_organization ?? [])],
     sys_user: [...(seed.sys_user ?? [])],
     sys_member: [...(seed.sys_member ?? [])],
     sys_migration: [...(seed.sys_migration ?? [])],
@@ -33,7 +35,14 @@ function makeEngine(seed: Partial<Tables> = {}, opts: { ledger?: boolean } = {})
     getObject: vi.fn((name: string) =>
       name === 'sys_migration' && opts.ledger === false ? undefined : { name },
     ),
-    find: vi.fn(async (object: string) => [...((tables as any)[object] ?? [])]),
+    // Honours the keyset walk's seek (`id > cursor`), order and page size.
+    find: vi.fn(async (object: string, q: any) => {
+      const gt = q?.where?.id?.$gt;
+      const rows = [...((tables as any)[object] ?? [])]
+        .filter((r: any) => gt === undefined || String(r.id) > String(gt))
+        .sort((a: any, b: any) => (String(a.id) < String(b.id) ? -1 : 1));
+      return rows.slice(0, q?.limit ?? rows.length);
+    }),
     findOne: vi.fn(async (object: string, q: any) => {
       assertEngineFindOnePredicate(object, q);
       return ((tables as any)[object] ?? []).find((r: any) => r.id === q?.where?.id) ?? null;
@@ -104,7 +113,49 @@ describe('one-time membership backfill (ADR-0093 D6 + D7)', () => {
     expect(engine.tables.sys_member).toHaveLength(0);
   });
 
-  it('no target organization (multi-org, or before the default org exists): undecided, nothing recorded', async () => {
+  it('no target organization while organizations exist (multi-org): the refusal is recorded', async () => {
+    const engine = makeEngine({ sys_user: [{ id: 'u_a' }], sys_organization: [{ id: 'org_a' }, { id: 'org_b' }] });
+    const res = await runOneTimeMembershipBackfill(
+      engine,
+      { policy: 'auto', resolveTargetOrg: async () => null },
+      logger(),
+    );
+    expect(res.status).toBe('ran');
+    expect(res.backfill?.reason).toBe('no-target-org');
+    expect(engine.tables.sys_member).toHaveLength(0);
+    expect(engine.tables.sys_migration).toHaveLength(1);
+    // A later pass that now has a target binds nobody.
+    expect((await runOneTimeMembershipBackfill(engine, auto, logger())).status).toBe('already-run');
+    expect(engine.tables.sys_member).toHaveLength(0);
+  });
+
+  it('scans past one page: every member-less user is bound, members are not', async () => {
+    const users = Array.from({ length: 7 }, (_, i) => ({ id: `u_${i}` }));
+    const engine = makeEngine({
+      sys_user: users,
+      sys_member: [{ id: 'm_1', organization_id: ORG, user_id: 'u_5', role: 'member' }],
+    });
+    const res = await runOneTimeMembershipBackfill(engine, { ...auto, limit: 2 }, logger());
+    expect(res.status).toBe('ran');
+    expect(res.backfill).toMatchObject({ scanned: 7, bound: 6, skipped: 1 });
+    expect(engine.tables.sys_member.map((m) => m.user_id).sort()).toEqual(users.map((u) => u.id).sort());
+  });
+
+  it('a scan that cannot read a table in full binds nobody and records nothing', async () => {
+    const engine = makeEngine({ sys_user: Array.from({ length: 5 }, (_, i) => ({ id: `u_${i}` })) });
+    const realFind = engine.find.getMockImplementation()!;
+    engine.find.mockImplementation(async (object: string, q: any) => {
+      if (object === 'sys_user' && q?.where?.id?.$gt !== undefined) throw new Error('page 2 failed');
+      return realFind(object, q);
+    });
+    const res = await runOneTimeMembershipBackfill(engine, { ...auto, limit: 2 }, logger());
+    expect(res.status).toBe('undecided');
+    expect(res.backfill?.reason).toBe('scan-incomplete');
+    expect(engine.tables.sys_member).toHaveLength(0);
+    expect(engine.tables.sys_migration).toHaveLength(0);
+  });
+
+  it('no target organization and no organization at all (fresh install): undecided, nothing recorded', async () => {
     const engine = makeEngine({ sys_user: [{ id: 'u_a' }] });
     const res = await runOneTimeMembershipBackfill(
       engine,
@@ -146,7 +197,7 @@ describe('one-time membership backfill (ADR-0093 D6 + D7)', () => {
     const res = await runOneTimeMembershipBackfill(engine, auto, log);
     expect(res.status).toBe('ran-unrecorded');
     expect(log.error).toHaveBeenCalledTimes(1);
-    expect(String(log.error.mock.calls[0]![0])).toContain('will run it AGAIN');
+    expect(String(log.error.mock.calls[0]![0])).toContain('will decide it AGAIN');
   });
 
   it('a record written first by a concurrent pass counts as recorded', async () => {

@@ -54,7 +54,13 @@ import {
   MEMBERSHIP_POLICIES,
   type MembershipPolicy,
 } from './reconcile-membership.js';
-import { runOneTimeMembershipBackfill } from './membership-backfill-ledger.js';
+import {
+  buildLedgerDecisionRecord,
+  DEFAULT_ORG_OWNER_BIND_MIGRATION_ID,
+  readLedgerDecision,
+  recordLedgerDecision,
+  runOneTimeMembershipBackfill,
+} from './membership-backfill-ledger.js';
 import {
   registerIdentityWriteGuard,
   registerManagedUpdateWhitelist,
@@ -1149,11 +1155,44 @@ export class AuthPlugin implements Plugin {
     // whose membership was already decided at their creation.
     let runBackfillOnDefaultOrg: ((source: string) => Promise<void>) | undefined;
     if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
+      // ADR-0093 D7 — the platform admin's owner bind is decided ONCE, by the
+      // bootstrap that first resolves it, and recorded in the `sys_migration`
+      // ledger; after that this hook binds nobody, so a later removal of the
+      // admin's membership stands. Without a readable ledger the bind happens
+      // only on the call that CREATES the default organization (fresh
+      // installs keep working; an existing organization is never re-bound).
+      let ownerBindDecided = false;
       const runEnsure = async () => {
         try {
           const ql = ctx.getService<IDataEngine>('objectql');
           if (!ql) return;
-          const res = await ensureDefaultOrganization(ql, { logger: ctx.logger });
+          if (ownerBindDecided) return;
+          const reading = await readLedgerDecision(ql, DEFAULT_ORG_OWNER_BIND_MIGRATION_ID);
+          if (reading === 'recorded') {
+            ownerBindDecided = true;
+            return;
+          }
+          const res = await ensureDefaultOrganization(ql, {
+            logger: ctx.logger,
+            bindOnlyOnCreate: reading !== 'absent',
+          });
+          // Decided: the admin was bound now, or already held a membership.
+          // `no_admin` and the two failed writes leave it open for the next pass.
+          if (reading === 'absent' && (res.memberCreated || res.reason === 'admin_already_in_org')) {
+            ownerBindDecided = await recordLedgerDecision(
+              ql,
+              buildLedgerDecisionRecord(
+                DEFAULT_ORG_OWNER_BIND_MIGRATION_ID,
+                {
+                  outcome: res.memberCreated ? 'bound' : 'admin-already-member',
+                  ...(res.defaultOrgId ? { organizationId: res.defaultOrgId } : {}),
+                },
+                new Date().toISOString(),
+              ),
+              'default organization owner bind',
+              ctx.logger,
+            );
+          }
           if (res.defaultOrgCreated) {
             ctx.logger.info(
               `[auth] created Default Organization ${res.defaultOrgId} for the platform admin (single-org)`,

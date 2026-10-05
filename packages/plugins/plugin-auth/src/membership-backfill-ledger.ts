@@ -45,12 +45,18 @@
  * again:
  *  - the pass ran (policy `auto`, a default organization to bind to);
  *  - the policy was `invite-only`: users created under it were deliberately
- *    left unbound, so a later switch to `auto` must not sweep them in.
+ *    left unbound, so a later switch to `auto` must not sweep them in;
+ *  - no unambiguous target organization while organizations DO exist
+ *    (multi-org, where the backfill is refused by design).
  *
  * Not recorded — nothing was decided yet, so a later pass still gets its turn:
- *  - no unambiguous target organization (single mode before the default
- *    organization exists; multi-org, where the backfill is refused by design);
+ *  - no target organization and no organization at all (a fresh install
+ *    before its default organization exists);
+ *  - a scan that could not read the user or membership table in full;
  *  - an off-vocabulary policy value, or no usable engine.
+ *
+ * The same ledger also records the one-time default-organization owner bind
+ * ({@link DEFAULT_ORG_OWNER_BIND_MIGRATION_ID}), through the same helpers.
  *
  * ## Failure directions
  *
@@ -79,6 +85,13 @@ import {
  */
 export const MEMBERSHIP_BACKFILL_MIGRATION_ID = 'adr-0093-membership-backfill';
 
+/**
+ * Ledger row id of the one-time default-organization owner bind: the platform
+ * admin is bound as owner of the default organization once, when the
+ * bootstrap first decides it, and never again automatically (ADR-0093 D7).
+ */
+export const DEFAULT_ORG_OWNER_BIND_MIGRATION_ID = 'adr-0093-default-org-owner-bind';
+
 /** The engine surface the ledger needs, duck-typed. */
 export interface MembershipBackfillLedger {
   getObject(name: string): unknown;
@@ -106,11 +119,14 @@ export interface OneTimeMembershipBackfillResult {
   backfill?: BackfillMembershipsResult;
 }
 
-interface LedgerLogger {
+export interface LedgerLogger {
   info?: (msg: string, meta?: any) => void;
   warn: (msg: string, meta?: any) => void;
   error?: (msg: string, meta?: any) => void;
 }
+
+/** What the ledger says about one decision id. */
+export type LedgerDecisionReading = 'recorded' | 'absent' | 'unavailable' | 'unreadable';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -122,31 +138,137 @@ function resolveLedger(engine: unknown): MembershipBackfillLedger | undefined {
   return candidate as MembershipBackfillLedger;
 }
 
-/** Whether a backfill summary is a verdict the deployment should remember. */
-function isRecordableVerdict(result: BackfillMembershipsResult): boolean {
-  return result.reason === undefined || result.reason === 'policy';
+/**
+ * Read whether the deployment ledger records decision `id`. Never throws:
+ * `unavailable` (no ledger on this kernel) and `unreadable` (the read failed)
+ * are answers the caller must handle, never "absent".
+ */
+export async function readLedgerDecision(engine: unknown, id: string): Promise<LedgerDecisionReading> {
+  const ledger = resolveLedger(engine);
+  try {
+    if (!ledger || !ledger.getObject(DATA_MIGRATION_FLAG_OBJECT)) return 'unavailable';
+    const row = await ledger.findOne(DATA_MIGRATION_FLAG_OBJECT, { where: { id }, context: SYSTEM_CTX });
+    return row?.id === id ? 'recorded' : 'absent';
+  } catch {
+    return 'unreadable';
+  }
 }
 
-/** The ledger row for one decided pass — pure. */
+/** The ledger row for one recorded decision — pure. */
+export function buildLedgerDecisionRecord(id: string, details: Record<string, unknown>, now: string): DataMigrationFlag {
+  return {
+    id,
+    last_run_at: now,
+    applied_at: now,
+    verified_at: null,
+    blocking: 0,
+    details: JSON.stringify(details),
+  };
+}
+
+/** The ledger row for one decided backfill pass — pure. */
 export function buildMembershipBackfillRecord(
   result: BackfillMembershipsResult,
   policy: unknown,
   now: string,
 ): DataMigrationFlag {
-  return {
-    id: MEMBERSHIP_BACKFILL_MIGRATION_ID,
-    last_run_at: now,
-    applied_at: now,
-    verified_at: null,
-    blocking: 0,
-    details: JSON.stringify({
+  return buildLedgerDecisionRecord(
+    MEMBERSHIP_BACKFILL_MIGRATION_ID,
+    {
       policy: typeof policy === 'string' ? policy : String(policy),
       scanned: result.scanned,
       bound: result.bound,
       skipped: result.skipped,
       ...(result.reason ? { reason: result.reason } : {}),
-    }),
-  };
+    },
+    now,
+  );
+}
+
+/**
+ * Insert one decision row. THROWS on failure — the caller decides what a lost
+ * record means. Named in `DURABILITY_CRITICAL_CALLEES`
+ * (`scripts/check-durability-degradation-log-level.mjs`): a lost record leaves
+ * every log line clean while the next boot decides again.
+ */
+async function persistLedgerDecisionRow(ledger: MembershipBackfillLedger, flag: DataMigrationFlag): Promise<void> {
+  const now = flag.last_run_at;
+  await ledger.insert(
+    DATA_MIGRATION_FLAG_OBJECT,
+    { ...flag, created_at: now, updated_at: now },
+    { context: SYSTEM_CTX },
+  );
+}
+
+/**
+ * Record decision `flag` in the ledger. Never throws. A concurrent writer that
+ * landed the same id first counts as recorded; any other failure is reported
+ * at `error` (nothing else looks wrong, and the next boot decides again).
+ */
+export async function recordLedgerDecision(
+  engine: unknown,
+  flag: DataMigrationFlag,
+  what: string,
+  logger?: LedgerLogger,
+): Promise<boolean> {
+  const ledger = resolveLedger(engine);
+  if (!ledger) return false;
+  try {
+    await persistLedgerDecisionRow(ledger, flag);
+    logger?.info?.(
+      `[auth] ${what} recorded in ${DATA_MIGRATION_FLAG_OBJECT} (id '${flag.id}') — later boots will not decide it again`,
+      { id: flag.id, details: flag.details },
+    );
+    return true;
+  } catch (e: unknown) {
+    if ((await readLedgerDecision(engine, flag.id)) === 'recorded') return true;
+    // Inline, at `error`: the decision was acted on and every line reads
+    // clean, while the record that stops the next boot from deciding again is
+    // absent.
+    const detail = e instanceof Error ? e.message : String(e);
+    const message =
+      `[auth] ${what} was carried out, but recording it in ${DATA_MIGRATION_FLAG_OBJECT} failed (${detail}). ` +
+      `The next boot will decide it AGAIN, re-deciding membership for users whose membership was already ` +
+      `decided. Fix: make ${DATA_MIGRATION_FLAG_OBJECT} writable on this deployment (it is provisioned by ` +
+      `PlatformObjectsPlugin) and verify with SELECT * FROM ${DATA_MIGRATION_FLAG_OBJECT} WHERE id = '${flag.id}'.`;
+    if (logger?.error) logger.error(message, { error: detail });
+    else logger?.warn?.(message, { error: detail });
+    return false;
+  }
+}
+
+/** Whether any organization exists — `undefined` when that cannot be read. */
+async function anyOrganizationExists(engine: any): Promise<boolean | undefined> {
+  try {
+    if (typeof engine?.count === 'function') {
+      const n = await engine.count('sys_organization', { where: {}, context: SYSTEM_CTX });
+      if (typeof n === 'number') return n > 0;
+    }
+    if (typeof engine?.find !== 'function') return undefined;
+    const rows = await engine.find(
+      'sys_organization',
+      { where: {}, orderBy: [{ field: 'id', order: 'asc' }], limit: 1 },
+      { context: SYSTEM_CTX },
+    );
+    return Array.isArray(rows) ? rows.length > 0 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a backfill summary is a verdict the deployment should remember.
+ *
+ * `no-target-org` is deferred ONLY while the deployment holds no organization
+ * at all (a fresh install before its default organization exists). With
+ * organizations present and still no unambiguous target — multi-org, where
+ * the backfill is refused by design — the refusal IS the decision, and it is
+ * recorded so a later pass cannot reverse it.
+ */
+async function isRecordableVerdict(engine: unknown, result: BackfillMembershipsResult): Promise<boolean> {
+  if (result.reason === undefined || result.reason === 'policy') return true;
+  if (result.reason === 'no-target-org') return (await anyOrganizationExists(engine)) === true;
+  return false;
 }
 
 /**
@@ -159,80 +281,33 @@ export async function runOneTimeMembershipBackfill(
   deps: ReconcileMembershipDeps & { limit?: number },
   logger?: LedgerLogger,
 ): Promise<OneTimeMembershipBackfillResult> {
-  const ledger = resolveLedger(engine);
-  if (!ledger || !ledger.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
+  const reading = await readLedgerDecision(engine, MEMBERSHIP_BACKFILL_MIGRATION_ID);
+  if (reading === 'unavailable') {
     logger?.warn?.(
       `[auth] membership backfill did NOT run: the deployment ledger (${DATA_MIGRATION_FLAG_OBJECT}) is not ` +
         `available on this kernel, so a pass could not be recorded and would repeat on every boot, ` +
-        `re-adding members an administrator removed. Pre-existing users without a membership stay ` +
-        `unbound until an administrator adds them. Compose PlatformObjectsPlugin (it provisions the ledger) ` +
-        `to let the one-time backfill run.`,
+        `re-deciding membership for users whose membership was already decided. Pre-existing users without ` +
+        `a membership stay unbound until an administrator adds them. Compose PlatformObjectsPlugin (it ` +
+        `provisions the ledger) to let the one-time backfill run.`,
     );
     return { status: 'ledger-unavailable' };
   }
-
-  let existing: Record<string, unknown> | null;
-  try {
-    existing = await ledger.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-      where: { id: MEMBERSHIP_BACKFILL_MIGRATION_ID },
-      context: SYSTEM_CTX,
-    });
-  } catch (e: unknown) {
+  if (reading === 'unreadable') {
     logger?.warn?.(
       `[auth] membership backfill did NOT run: reading its record in ${DATA_MIGRATION_FLAG_OBJECT} failed, ` +
-        `and running without knowing whether it already ran could re-add members an administrator removed. ` +
-        `It is retried on the next boot.`,
-      { error: e instanceof Error ? e.message : String(e) },
+        `and running without knowing whether it already ran could re-decide membership for users whose ` +
+        `membership was already decided. It is retried on the next boot.`,
     );
     return { status: 'ledger-unreadable' };
   }
-  if (existing?.id === MEMBERSHIP_BACKFILL_MIGRATION_ID) {
-    return { status: 'already-run' };
-  }
+  if (reading === 'recorded') return { status: 'already-run' };
 
   const backfill = await backfillMemberships(engine, deps);
-  if (!isRecordableVerdict(backfill)) {
+  if (!(await isRecordableVerdict(engine, backfill))) {
     return { status: 'undecided', backfill };
   }
 
-  const now = new Date().toISOString();
-  const flag = buildMembershipBackfillRecord(backfill, deps.policy, now);
-  try {
-    await ledger.insert(
-      DATA_MIGRATION_FLAG_OBJECT,
-      { ...flag, created_at: now, updated_at: now },
-      { context: SYSTEM_CTX },
-    );
-    logger?.info?.(
-      `[auth] membership backfill recorded in ${DATA_MIGRATION_FLAG_OBJECT} (id '${MEMBERSHIP_BACKFILL_MIGRATION_ID}') ` +
-        `— later boots will not run it again`,
-      { id: MEMBERSHIP_BACKFILL_MIGRATION_ID, details: flag.details },
-    );
-    return { status: 'ran', backfill };
-  } catch (e: unknown) {
-    // A concurrent pass (another node of the same deployment) may have written
-    // the row first — the primary key refuses the second insert. That is the
-    // record landing, not failing.
-    try {
-      const raced = await ledger.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-        where: { id: MEMBERSHIP_BACKFILL_MIGRATION_ID },
-        context: SYSTEM_CTX,
-      });
-      if (raced?.id === MEMBERSHIP_BACKFILL_MIGRATION_ID) return { status: 'ran', backfill };
-    } catch {
-      // Fall through to the loud report below — the record is unconfirmed.
-    }
-    // Inline, at `error`: the pass ran and every line reads clean, while the
-    // record that stops the next boot from repeating the bulk bind is absent.
-    const detail = e instanceof Error ? e.message : String(e);
-    const message =
-      `[auth] membership backfill ran, but recording it in ${DATA_MIGRATION_FLAG_OBJECT} failed (${detail}). ` +
-      `The next boot will run it AGAIN and re-add every user without a membership to the default organization, ` +
-      `including members an administrator removed since. Fix: make ${DATA_MIGRATION_FLAG_OBJECT} writable on this ` +
-      `deployment (it is provisioned by PlatformObjectsPlugin) and verify with ` +
-      `SELECT * FROM ${DATA_MIGRATION_FLAG_OBJECT} WHERE id = '${MEMBERSHIP_BACKFILL_MIGRATION_ID}'.`;
-    if (logger?.error) logger.error(message, { error: detail });
-    else logger?.warn?.(message, { error: detail });
-    return { status: 'ran-unrecorded', backfill };
-  }
+  const flag = buildMembershipBackfillRecord(backfill, deps.policy, new Date().toISOString());
+  const recorded = await recordLedgerDecision(engine, flag, 'membership backfill', logger);
+  return { status: recorded ? 'ran' : 'ran-unrecorded', backfill };
 }

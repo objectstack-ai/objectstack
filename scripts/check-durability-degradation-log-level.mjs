@@ -401,6 +401,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         "The `sys_migration` receipt for the #8686 seed/API tenancy repair was never written — the repair itself SUCCEEDED, so the rows already carry the organization, the `__global__` counter is already gone, and every log line reads clean, while the only durable record that a boot rewrote stored data does not exist. Not retried: the repair is idempotent, so the next boot finds no split and writes no receipt either, and the one `logger.info` line that named it is gone as soon as the container is replaced. That leaves \"was my data rewritten, and when\" unanswerable from the deployment — which is the defect #9451 exists to remove, reproduced by its own fix.",
     ],
     [
+        'persistLedgerDecisionRow',
+        "A one-time membership decision (the ADR-0093 D6 backfill, or the default organization's owner bind) was carried out but its `sys_migration` record was never written. Every log line reads clean and the memberships it wrote stand, while the record that makes the decision ONE-TIME is absent, so the next boot decides it again — re-deciding membership for users whose membership was already decided at creation (ADR-0093 D7).",
+    ],
+    [
         'runWideningAlters',
         "The widening ALTER never ran — the MySQL column keeps its legacy zero-precision type (`TIMESTAMP` for a `Field.datetime`, `TIME` for a `Field.time`) while the object stays registered and served, so every subsequent write silently drops the milliseconds the canonical storage form promises are always present: a `TIMESTAMP` truncates them, and a `TIME(0)` ROUNDS a fractional literal, changing the wall clock it was asked to store. Reads come back looking clean because the value that was stored is the value that is returned, and nothing else reports the column is still un-widened (#9609).",
     ],

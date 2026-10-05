@@ -1553,13 +1553,35 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_migration.map((r: any) => r.id)).toEqual(['adr-0093-membership-backfill']);
     });
 
+    it('a restart after memberships are removed re-binds nobody — the admin included', async () => {
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      ql.tables.sys_user.push({ id: 'member_u4' });
+      ql.tables.sys_member.push({ id: 'm_u4', organization_id: 'x', user_id: 'member_u4', role: 'member' });
+      expect(ql.tables.sys_migration.map((r: any) => r.id).sort()).toEqual([
+        'adr-0093-default-org-owner-bind',
+        'adr-0093-membership-backfill',
+      ]);
+
+      // Both memberships are removed, then the process restarts.
+      ql.tables.sys_member.length = 0;
+      hookCapture = createHookCapture();
+      mockContext.hook = hookCapture.hookFn;
+      await boot();
+      await hookCapture.trigger('kernel:ready');
+      await hookCapture.trigger('app:seeded');
+
+      expect(ql.tables.sys_member).toHaveLength(0);
+      expect(ql.tables.sys_migration).toHaveLength(2);
+    });
+
     it('once the pass is recorded, a later trigger binds nobody', async () => {
       await boot();
       // Boot: default org created, admin bound as owner, the one-time pass
       // runs and records itself.
       await hookCapture.trigger('kernel:ready');
       expect(ql.tables.sys_member.map((m: any) => m.user_id)).toEqual(['admin']);
-      expect(ql.tables.sys_migration.map((r: any) => r.id)).toEqual(['adr-0093-membership-backfill']);
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-membership-backfill');
 
       // A member-less user now exists — the shape a membership removal leaves.
       ql.tables.sys_user.push({ id: 'removed_u3' });
@@ -1568,7 +1590,7 @@ describe('AuthPlugin', () => {
       await hookCapture.trigger('kernel:ready');
 
       expect(ql.tables.sys_member.find((m: any) => m.user_id === 'removed_u3')).toBeUndefined();
-      expect(ql.tables.sys_migration).toHaveLength(1);
+      expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-membership-backfill');
     });
 
     it('OS_SKIP_MEMBERSHIP_BACKFILL=1 disables the app:seeded re-run', async () => {
