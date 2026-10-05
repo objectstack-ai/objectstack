@@ -1029,7 +1029,7 @@ export class AutoEnqueuer {
             schema = (this.engine as { getSchema?: (name: string) => unknown }).getSchema?.(object);
         } catch { /* schema unavailable — nothing to project against */ }
         const out: Record<string, unknown> = { ...payload };
-        for (const key of ['after', 'changes'] as const) {
+        for (const key of ['before', 'after', 'changes'] as const) {
             const body = out[key];
             if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
             const copy = { ...(body as Record<string, unknown>) };
