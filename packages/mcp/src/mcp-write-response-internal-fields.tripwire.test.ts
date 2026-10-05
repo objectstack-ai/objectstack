@@ -52,6 +52,10 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 const SENTINEL = 'INTERNAL-SENTINEL-8497-NEVER-SERIALIZED';
 /** The value that MUST appear wherever a record was promised (falsifiability). */
 const CONTROL = 'CONTROL-VALUE-8497-RECORD-FLOWED';
+/** Credential-class stored values: a `password` plaintext and a `secret` handle ref. */
+const CREDENTIAL_SENTINELS = ['PASSWORD-SENTINEL-NEVER-SERIALIZED', 'secret:HANDLE-SENTINEL-NEVER-SERIALIZED'];
+const NEVER_SERIALIZED = [SENTINEL, ...CREDENTIAL_SENTINELS];
+const leaks = (wire: string) => NEVER_SERIALIZED.filter((v) => wire.includes(v));
 
 const VAULT = {
   name: 'vault',
@@ -60,6 +64,8 @@ const VAULT = {
     id: { name: 'id', type: 'text' },
     name: { name: 'name', type: 'text' },
     vault_secret: { name: 'vault_secret', type: 'text', internal: true },
+    vault_password: { name: 'vault_password', type: 'password' },
+    vault_token: { name: 'vault_token', type: 'secret' },
   },
   // No `apiEnabled`/`apiMethods` narrowing: the ADR-0049 exposure gate must let
   // every verb through, or a recipe would be measuring a 404 instead of a body.
@@ -78,6 +84,8 @@ function makeSentinelEngine(): IDataEngine {
     id,
     name: (data?.name as string) ?? CONTROL,
     vault_secret: SENTINEL,
+    vault_password: CREDENTIAL_SENTINELS[0],
+    vault_token: CREDENTIAL_SENTINELS[1],
   });
   return {
     find: vi.fn(async () => [storedRow()]),
@@ -157,7 +165,7 @@ const RECIPES: Record<string, Recipe> = {
   remove: { invoke: (b) => b.remove('vault', 'row-1'), writesRecords: false },
 };
 
-describe('#8497 tripwire: no MCP write response carries an `internal: true` value', () => {
+describe('#8497 tripwire: no MCP write response carries an `internal: true` value or a credential-class stored value', () => {
   it('the enumeration is real: it sees the bridge write verbs', () => {
     const faces = enumerateBridgeFaces(makeBridge());
     expect(faces).toEqual(expect.arrayContaining(['create', 'update', 'remove']));
@@ -181,10 +189,10 @@ describe('#8497 tripwire: no MCP write response carries an `internal: true` valu
   });
 
   for (const [name, recipe] of Object.entries(RECIPES)) {
-    it(`${name}: response never carries the internal sentinel${recipe.writesRecords ? ', and really returned a record' : ''}`, async () => {
+    it(`${name}: response never carries the internal or credential sentinels${recipe.writesRecords ? ', and really returned a record' : ''}`, async () => {
       const bridge = makeBridge();
       const wire = JSON.stringify((await recipe.invoke(bridge)) ?? null);
-      expect(wire.includes(SENTINEL), `${name} leaked an internal field: ${wire}`).toBe(false);
+      expect(leaks(wire), `${name} leaked an internal or credential-class field: ${wire}`).toEqual([]);
       if (recipe.writesRecords) {
         expect(
           wire.includes(CONTROL),
@@ -207,6 +215,16 @@ describe('#8497 tripwire: no MCP write response carries an `internal: true` valu
     expect(wire.includes(CONTROL)).toBe(true); // still a real record echo
   });
 
+  it('the caller cannot read their own credential write back in clear from the update echo', async () => {
+    const bridge = makeBridge();
+    const wire = JSON.stringify(await bridge.update('vault', 'row-1', {
+      name: CONTROL,
+      vault_password: 'caller-sent-password',
+    }));
+    expect(wire.includes('caller-sent-password')).toBe(false);
+    expect(wire.includes(CONTROL)).toBe(true);
+  });
+
   it('NEGATIVE CONTROL: the machinery goes red on a write mouth that skips the helper', async () => {
     // Exactly the defect this file was written after: an engine-only mouth that
     // echoes `engine.insert`'s (whole) result. Reintroduce it locally and prove
@@ -221,10 +239,10 @@ describe('#8497 tripwire: no MCP write response carries an `internal: true` valu
     };
 
     const leaked = await leaky.create('vault', { name: CONTROL });
-    expect(JSON.stringify(leaked).includes(SENTINEL)).toBe(true); // the scan bites
+    expect(leaks(JSON.stringify(leaked))).toEqual(NEVER_SERIALIZED); // the scan bites
 
     omitInternalFieldsFromWriteResponse(VAULT, (leaked as any).record);
-    expect(JSON.stringify(leaked).includes(SENTINEL)).toBe(false); // the helper closes it
+    expect(leaks(JSON.stringify(leaked))).toEqual([]); // the helper closes it
     expect(JSON.stringify(leaked).includes(CONTROL)).toBe(true); // …without eating the record
   });
 });

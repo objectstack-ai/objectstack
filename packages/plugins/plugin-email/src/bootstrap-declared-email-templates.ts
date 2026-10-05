@@ -45,9 +45,18 @@
  * boot-only bridge would leave a Studio save inert until the next restart — the
  * same bug, half-fixed. {@link upsertDeclaredEmailTemplate} is exported for the
  * live `metadata.subscribe('email_template', …)` path in EmailServicePlugin.
+ *
+ * ## What the boot sweep projects (#21785)
+ * The EFFECTIVE template — what the metadata door serves, a Studio overlay
+ * included — not the package's declaration. The live path already projects
+ * the overlay when the admin saves it, so a boot sweep reading the package
+ * layer reverted the sending row on every restart while `GET /meta` kept
+ * serving the admin's wording. See {@link readDeclared}.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { GetMetaItemsRequest, GetMetaItemsResponse } from '@objectstack/spec/api';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import {
   EmailTemplateDefinitionSchema,
   type EmailTemplateDefinition,
@@ -102,9 +111,68 @@ function uid(prefix: string): string {
 }
 
 /**
- * Read declared `email_template` items from the ObjectQL registry (where the
- * manifest decomposition parks `stack.emailTemplates`), falling back to the
- * metadata service. Both reads hand back the authoring document itself.
+ * The two kernel services the boot sweep reads the EFFECTIVE templates through
+ * (#21785). Both are optional: a host that registers no `protocol` has no
+ * metadata door, so nothing can overlay a declaration there and the registry
+ * read below is already the effective one.
+ *
+ * Module-internal: exported for EmailServicePlugin's boot wiring only and
+ * deliberately NOT re-exported from the package entry — see
+ * {@link bootstrapEffectiveEmailTemplates}.
+ */
+export interface EffectiveEmailTemplateSources {
+  /** The `protocol` service. `getMetaItems` is the layered list `GET /meta/email_template` serves. */
+  protocol?: { getMetaItems(request: GetMetaItemsRequest): Promise<GetMetaItemsResponse> };
+  /** The `tenancy` service. `defaultOrgId()` is the organization an org-less read resolves in. */
+  tenancy?: { defaultOrgId(): Promise<string | null> };
+}
+
+/** {@link readDeclared}'s answer when the effective read did not happen. */
+const EFFECTIVE_READ_FAILED = Symbol('email-template-effective-read-failed');
+
+/**
+ * Read the `email_template` items the boot sweep projects: the EFFECTIVE
+ * items, as the metadata door serves them, when a `protocol` is registered;
+ * otherwise the declared items from the ObjectQL registry (where the manifest
+ * decomposition parks `stack.emailTemplates`), falling back to the metadata
+ * service. Every read hands back the authoring document itself.
+ *
+ * ## [#21785] Why the effective read, and in which organization
+ *
+ * The registry holds the package's declaration and only the ENV-WIDE overlays
+ * boot hydration (`loadMetaFromDb`) registers. `email_template` is
+ * `allowOrgOverride: true`, so an admin saving through `PUT /meta` with an
+ * active organization — every Studio save on a `single`-posture deployment,
+ * where the Default Organization is bootstrapped — writes an ORG-SCOPED
+ * overlay, which hydration deliberately leaves out of the process-wide
+ * registry. The live path projected that overlay into the sending row at save
+ * time; this sweep then read the package layer and wrote the package wording
+ * back on every boot, while `GET /meta/email_template/:name` kept serving the
+ * admin's wording. Measured on the showcase before the fix: the env-wide
+ * overlay survived (the registry lists it after the package entry), the
+ * org-scoped one reverted.
+ *
+ * So the sweep reads what the door reads — `protocol.getMetaItems`, the
+ * layered list (org overlay over env-wide overlay over package), one item per
+ * `(name, locale)` slot — and resolves the organization the way every other
+ * org-less reader of org-overridable metadata does: `tenancy.defaultOrgId()`,
+ * as the anonymous form doors read a form (`@objectstack/rest`). That answers
+ * the Default Organization under `single` (ADR-0131: the organization IS the
+ * environment there) and `null` whenever a walled posture was requested (the
+ * tenancy contract never guesses an organization there), where the read is
+ * env-wide. The sending row stays org-agnostic: template resolution keys on
+ * `(name, locale)` only, and per-organization template rows are a capability
+ * no ruling has opened.
+ *
+ * The served items carry read decorations (`_diagnostics`) the strict schema
+ * refuses, so each is passed through the shared `stripReadDecorations` — the
+ * same treatment the plugin's single-item effective read applies.
+ *
+ * A failed effective read is NOT answered from the registry. The registry
+ * holds the package wording, so falling back would revert every overlay
+ * projection on a transient storage error — this defect again, by a second
+ * route. It answers {@link EFFECTIVE_READ_FAILED} and the sweep projects
+ * nothing; every row keeps its last projection until the next boot.
  *
  * ## [#8378] Why there is no `i?.content ?? i` here any more
  *
@@ -150,7 +218,30 @@ function uid(prefix: string): string {
  *     then died at the `filter(Boolean)` below — the template was dropped with
  *     no warning, no count, nothing (the ADR-0078 silent-loss shape).
  */
-function readDeclared(engine: any, metadataService: any, type: string): any[] {
+async function readDeclared(
+  engine: any,
+  metadataService: any,
+  type: string,
+  sources: EffectiveEmailTemplateSources | undefined,
+  logger: Logger | undefined,
+): Promise<unknown[] | typeof EFFECTIVE_READ_FAILED> {
+  const protocol = sources?.protocol;
+  if (typeof protocol?.getMetaItems === 'function') {
+    try {
+      const organizationId = typeof sources?.tenancy?.defaultOrgId === 'function'
+        ? await sources.tenancy.defaultOrgId()
+        : null;
+      const listed = await protocol.getMetaItems({ type, ...(organizationId ? { organizationId } : {}) });
+      return listed.items.filter(Boolean).map(stripReadDecorations);
+    } catch (err: any) {
+      logger?.warn?.(
+        '[email] effective email-template read failed — no declared template re-materialized this boot; '
+        + 'every sys_email_template row keeps its last projection',
+        { error: err?.message ?? String(err) },
+      );
+      return EFFECTIVE_READ_FAILED;
+    }
+  }
   try {
     const reg = engine?._registry;
     if (reg?.listItems) {
@@ -272,8 +363,13 @@ export async function deactivateDeclaredEmailTemplate(
 }
 
 /**
- * Materialize every declared email template into `sys_email_template`.
- * Idempotent and safe to run on every boot.
+ * Materialize every declared email template into `sys_email_template` from the
+ * ObjectQL registry (falling back to the metadata service). Idempotent and safe
+ * to run on every boot.
+ *
+ * The published signature, unchanged: an external caller reads the registry
+ * exactly as before — the declarations plus the env-wide overlays boot
+ * hydration registered.
  */
 export async function bootstrapDeclaredEmailTemplates(
   engine: IDataEngine,
@@ -281,8 +377,34 @@ export async function bootstrapDeclaredEmailTemplates(
   logger?: Logger,
   object = EMAIL_TEMPLATE_OBJECT,
 ): Promise<BootstrapDeclaredEmailTemplatesResult> {
-  const declared = readDeclared(engine, metadataService, 'email_template');
-  if (declared.length === 0) return { seeded: 0, skipped: 0 };
+  // [#21785] The one sweep body, with no sources. The plugin's own boot wiring
+  // calls the effective form directly. Said here, not in the docblock above:
+  // the docblock ships in the published `.d.ts`, and the module-internal name
+  // is not part of that surface.
+  return bootstrapEffectiveEmailTemplates(engine, metadataService, undefined, logger, object);
+}
+
+/**
+ * [#21785] The boot sweep EmailServicePlugin runs: materialize every
+ * `email_template` into `sys_email_template` as the metadata door serves it —
+ * an overlay of the declaration included — when `sources.protocol` is given,
+ * and from the registry otherwise (see {@link readDeclared}). The one sweep
+ * body; {@link bootstrapDeclaredEmailTemplates} is this with no sources.
+ *
+ * Module-internal: NOT re-exported from the package entry (`src/index.ts`),
+ * and the package's `exports` map names only that entry, so this function and
+ * {@link EffectiveEmailTemplateSources} add nothing to the published surface.
+ * No caller outside this package needs them.
+ */
+export async function bootstrapEffectiveEmailTemplates(
+  engine: IDataEngine,
+  metadataService: any,
+  sources: EffectiveEmailTemplateSources | undefined,
+  logger?: Logger,
+  object = EMAIL_TEMPLATE_OBJECT,
+): Promise<BootstrapDeclaredEmailTemplatesResult> {
+  const declared = await readDeclared(engine, metadataService, 'email_template', sources, logger);
+  if (declared === EFFECTIVE_READ_FAILED || declared.length === 0) return { seeded: 0, skipped: 0 };
 
   let seeded = 0;
   let skipped = 0;

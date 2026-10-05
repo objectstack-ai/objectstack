@@ -12,7 +12,7 @@
  *   1. Atomic put
  *   2. Monotonic seq per branch
  *   3. Optimistic locking (ConflictError)
- *   4. Canonical hashing (hash === hashSpec(body))
+ *   4. Canonical hashing (hash === hashSpec(body, ref.type))
  *   5. Event ordering (monotonic seq, no gaps)
  *   6. Resumability (a numeric `since` replays; a bare `watch(filter)` is
  *      owed live events only)
@@ -204,7 +204,7 @@ export function runRepositoryContractTests(
         const ref = refOf();
         const res = await repo.put(ref, spec('hello'), { parentVersion: null, actor: 'tester' });
         expect(res.version).toMatch(/^sha256:[0-9a-f]{64}$/);
-        expect(res.version).toBe(hashSpec(spec('hello')));
+        expect(res.version).toBe(hashSpec(spec('hello'), ref.type));
         expect(res.seq).toBeGreaterThan(0);
         expect(res.item.parentHash).toBeNull();
         expect(res.item.authoredBy).toBe('tester');
@@ -227,12 +227,12 @@ export function runRepositoryContractTests(
         expect(b.seq).toBeGreaterThan(a.seq);
       });
 
-      it('canonical hash invariant: item.hash === hashSpec(item.body)', async () => {
+      it('canonical hash invariant: item.hash === hashSpec(item.body, item.ref.type)', async () => {
         const repo = await factory();
         const ref = refOf();
         await repo.put(ref, { z: 1, a: 2, m: [3, 1, 2] }, { parentVersion: null, actor: 't' });
         const got = await repo.get(ref);
-        expect(got!.hash).toBe(hashSpec(got!.body));
+        expect(got!.hash).toBe(hashSpec(got!.body, got!.ref.type));
       });
 
       // ── #7856 — the version identifies the STORED BYTES ───────────
@@ -267,7 +267,7 @@ export function runRepositoryContractTests(
             const got = await repo.get(ref);
             expect(got).not.toBeNull();
             expect(got!.hash).toBe(put.version);
-            expect(got!.hash).toBe(hashSpec(got!.body));
+            expect(got!.hash).toBe(hashSpec(got!.body, got!.ref.type));
           });
 
           it(`re-putting the same spec is a no-op — ${shape.label}`, async () => {
