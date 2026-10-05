@@ -70,7 +70,6 @@ const validApprovalFlow = () => {
     const flow = brokenApprovalFlow();
     flow.nodes[1]!.config = {
         approvers: [{ type: 'expression', value: 'current.owner' }],
-        emptyApproverPolicy: 'reject',
     } as any;
     return flow;
 };

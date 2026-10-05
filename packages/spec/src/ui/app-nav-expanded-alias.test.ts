@@ -60,7 +60,7 @@ const BASE = { id: 'nav_probe', label: 'Probe' };
 const messagesOf = (r: { error?: unknown }): string =>
   JSON.stringify((r.error as { issues?: unknown })?.issues ?? []);
 
-describe('#5555 — the `expanded` aliases answer "right key, wrong variant"', () => {
+describe('the `expanded` aliases answer "right key, wrong variant"', () => {
   describe('the eight variants that do not own `expanded`', () => {
     it.each(NON_GROUP)('`%s` answers all four spellings with prose, not a dead key name', (_name, schema, payload) => {
       for (const written of EXPANDED_SPELLINGS) {

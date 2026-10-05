@@ -2,14 +2,18 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, isRowActive, buildEffectiveObjectPermissions, recordNotFoundError } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, isRowActive, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
-import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, type FieldMaskingRule } from '@objectstack/spec/data';
+// [#21829] `MAX_BULK_PER_ROW_HOOK_ROWS`: the platform's row ceiling for one
+// predicate write, which also bounds the id list a predicate write's read
+// question composes (see PREDICATE_WRITE_READABLE_ID_CAP).
+import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, type FieldMaskingRule } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
@@ -600,18 +604,87 @@ function callerHasOrganizationScope(context: any, posture: TenancyPosture): bool
  *    neither absence nor a refusal, and reporting it as either would relabel it.
  *
  * Shared by the write path (step 2.7) and `security/explain`, so the two ask
- * one question one way.
+ * one question one way. The three-way classification itself is
+ * {@link readUnlessRefused}, which the predicate write's read question asks too.
  */
 async function absentUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
-  let row: unknown;
+  const answer = await readUnlessRefused(read);
+  return !answer.refused && answer.value == null;
+}
+
+/**
+ * [#21771 / #21829] The one classification of a caller-context read that the
+ * write doors ask the read door's question with — the read's answer, or
+ * `refused`:
+ *
+ *  - an answer: whatever the read door returned (no row, a row, a row set);
+ *  - `refused`: a declared 4xx — the read itself was refused (the object's read
+ *    grant withheld, a predicate the driver will not compile). Not a hidden
+ *    row, so the write keeps the answer it has today;
+ *  - anything else is a store fault and propagates as raised (#7505): an outage
+ *    is neither an answer nor a refusal, and reporting it as either would
+ *    relabel it.
+ */
+async function readUnlessRefused<T>(
+  read: () => Promise<T>,
+): Promise<{ refused: true } | { refused: false; value: T }> {
   try {
-    row = await read();
+    return { refused: false, value: await read() };
   } catch (e) {
     const status = declaredHttpStatus(e);
-    if (status !== undefined && status < 500) return false;
+    if (status !== undefined && status < 500) return { refused: true };
     throw e;
   }
-  return row == null;
+}
+
+/**
+ * [#21829] The most rows a predicate write's read question may name: the read
+ * door's answer is composed onto the write as an id list, and this bounds it.
+ *
+ * The value is the platform's existing row ceiling for ONE predicate write,
+ * `MAX_BULK_PER_ROW_HOOK_ROWS` (`@objectstack/spec/data`), not a second
+ * literal: an object with per-row write hooks already refuses a predicate write
+ * matching more rows than that, so a narrowed write never needs a longer list.
+ * It also keeps the list well inside the bind-parameter limits of the SQL
+ * dialects the drivers serve.
+ *
+ * ABOVE IT, the write is REFUSED (`INVALID_FILTER`, 400), before anything runs
+ * — the rule the engine's own nested-relation lowering follows for the same
+ * shape (an id list read under the caller's context, `cap + 1`, refused when
+ * over). ⛔ Never a cut-off list, which would silently write fewer rows than
+ * the caller can reach; ⛔ never "do not narrow", which would hand back the
+ * existence signal to any predicate padded past the cap. The count it judges
+ * is of rows the caller CAN read, so the refusal discloses nothing the read
+ * door does not.
+ */
+const PREDICATE_WRITE_READABLE_ID_CAP = MAX_BULK_PER_ROW_HOOK_ROWS;
+
+/** [#21829] The refusal above {@link PREDICATE_WRITE_READABLE_ID_CAP}. */
+function predicateWriteReadableCapError(object: string, operation: string): Error {
+  const err = new Error(
+    `Refusing the predicate ${operation} on '${object}': its predicate matches more than ` +
+      `${PREDICATE_WRITE_READABLE_ID_CAP} records you can read, and a predicate write is narrowed to the ` +
+      `records you can read by id, at most ${PREDICATE_WRITE_READABLE_ID_CAP} per write. Nothing was written. ` +
+      `Narrow the predicate so the write matches fewer records, and write in batches.`,
+  ) as Error & { code?: string; status?: number; httpStatus?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  err.httpStatus = 400;
+  return err;
+}
+
+/**
+ * [#21829] A copy of the caller's predicate for the read question, so nothing
+ * the read pipeline does to its own query can reach the predicate the write
+ * runs with. A predicate that cannot be copied is asked as it stands — it is
+ * the same predicate either way.
+ */
+function copyOfCallerPredicate(where: unknown): unknown {
+  try {
+    return structuredClone(where);
+  } catch {
+    return where;
+  }
 }
 
 function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
@@ -1267,7 +1340,8 @@ export class SecurityPlugin implements Plugin {
    * at a door and the by-id writes the platform issues on the caller's behalf
    * under the caller's context: the engine's cascade delete of each dependent
    * row, and a hook's `ctx.api` write. Only the addressed write is asked the
-   * read question ({@link addressedByIdWriteId}). A nested one keeps today's
+   * read question ({@link addressedByIdWriteId}; [#21829] for a predicate
+   * write, {@link addressedPredicateWrite}). A nested one keeps today's
    * behaviour exactly: its target is a row the caller never named, so a
    * not-found answer would carry an id the caller never supplied and misstate
    * what happened to the write they did address.
@@ -4072,6 +4146,18 @@ export class SecurityPlugin implements Plugin {
           tenantLayer0Verdict = intersectTenantLayer0Verdicts(tenantLayer0Verdict, delLayered.tenantLayer0Verdict);
           const delCbp = await this.computeControlledByParentFilter(delegatorSets, opCtx.object, delegatorContext);
           if (delCbp) extra.push(delCbp);
+        }
+        // [#21829] The write doors' rule on the PREDICATE door: a row the
+        // caller cannot read is not matched. For the update or delete the
+        // caller addressed ({@link addressedPredicateWrite}), the matched set
+        // is narrowed to the rows the read door returns for the caller's own
+        // predicate ({@link readableRowsScopeForPredicateWrite}): readable ∩
+        // writable. Composed here, before `next()`, so it binds the engine's
+        // matched-row read, its per-row hook dispatch and the driver write
+        // alike — a hidden row is not written, not counted and not refused.
+        if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
+          const readable = await this.readableRowsScopeForPredicateWrite(opCtx);
+          if (readable) extra.push(readable);
         }
         // [#15813 / ADR-0131 D8] RECORD the Layer 0 verdict on the operation —
         // the seam ruled on #15706 (option (i)): the wall states what it
@@ -7307,6 +7393,96 @@ export class SecurityPlugin implements Plugin {
    */
   private async callerCannotReadAddressedRow(opCtx: any, id: unknown): Promise<boolean> {
     return absentUnderCallerRead(() => this.getCallerPreImage(opCtx, id));
+  }
+
+  /**
+   * [#21829] Is this the PREDICATE update or delete the caller addressed — the
+   * write whose matched set is narrowed to what the caller can read?
+   *
+   * The twin of {@link addressedByIdWriteId}, with the same exclusions, for the
+   * same reasons:
+   *
+   *  - **a nested write** ({@link engineOperationScope}): a cascade or a hook's
+   *    own predicate write, issued under the caller's context on rows the
+   *    caller never addressed, keeps today's behaviour;
+   *  - **the referential FK clear** (`__referentialFieldClear`, server-derived):
+   *    the engine's own integrity write;
+   *  - **anything the engine does not route down its predicate path.** By-id
+   *    versus predicate is the ENGINE's decision, read from its own dispatch
+   *    predicates (`resolveEngineUpdateDispatch` /
+   *    `resolveEngineDeleteDispatch`): only their `multi` verdict seeds the AST
+   *    the predicate path reads its matched rows from.
+   */
+  private addressedPredicateWrite(opCtx: any, nested: boolean, referentialFieldClear: boolean): boolean {
+    if (nested || referentialFieldClear) return false;
+    if (opCtx.operation === 'update') {
+      const data = opCtx.data;
+      if (data == null || typeof data !== 'object') return false;
+      return resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options).kind === 'multi';
+    }
+    if (opCtx.operation === 'delete') {
+      return resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
+    }
+    return false;
+  }
+
+  /**
+   * [#21829] The read door's answer for the caller's own predicate, as the
+   * scope a predicate write's matched set is narrowed to: `id IN (the rows the
+   * read returned)`.
+   *
+   * The question is asked through the engine under the caller's context —
+   * the read door itself, so every data middleware's and every kit's read
+   * visibility applies — never through a second visibility evaluator. It is
+   * asked of the caller's VERBATIM predicate (`options.where`, as step 2.9
+   * guards it), never of the composed write AST: that AST carries write scopes
+   * the read guard would judge as the caller's own filter.
+   *
+   * Three outcomes, classified by {@link readUnlessRefused}:
+   *
+   *  - an answer: the scope to compose. An empty answer composes the empty id
+   *    list, so a predicate that matches only rows the caller cannot read
+   *    matches nothing at all;
+   *  - `refused` (a declared 4xx — the read grant withheld, a predicate the
+   *    driver will not compile): `null`, and the write keeps the answer it has
+   *    today;
+   *  - a store fault propagates as raised.
+   *
+   * The id list is bounded by {@link PREDICATE_WRITE_READABLE_ID_CAP}; see
+   * there for what happens above it.
+   */
+  private async readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
+    if (typeof this.ql?.find !== 'function') {
+      // The read question cannot be asked, and a write that cannot be narrowed
+      // must not run un-narrowed. Unreachable in a real deployment — `start()`
+      // registers no security middleware at all without a query engine — but a
+      // non-conforming engine double fails closed rather than writing wide.
+      throw new Error(
+        `[Security] Cannot narrow the predicate ${opCtx.operation} on '${opCtx.object}' to the rows the ` +
+          `caller can read: no query engine is available to ask.`,
+      );
+    }
+    const callerWhere = (opCtx.options as { where?: unknown } | undefined)?.where;
+    const answer = await readUnlessRefused(() =>
+      this.ql.find(opCtx.object, {
+        ...(callerWhere != null ? { where: copyOfCallerPredicate(callerWhere) } : {}),
+        fields: ['id'],
+        limit: PREDICATE_WRITE_READABLE_ID_CAP + 1,
+        // [#7145] The caller's envelope minus the operation-private keys: the
+        // write's own stamps (`__writeScope`, …) are not inputs to a read, and
+        // a copy keeps the read's stamps off the write's context.
+        context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
+      }),
+    );
+    if (answer.refused) return null;
+    const rows: unknown[] = Array.isArray(answer.value) ? answer.value : [];
+    if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
+      throw predicateWriteReadableCapError(opCtx.object, opCtx.operation);
+    }
+    const ids = rows
+      .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
+      .filter((id) => id !== undefined && id !== null);
+    return { id: { $in: ids } };
   }
 
   private extractSingleId(opCtx: any): string | number | bigint | null {

@@ -137,8 +137,8 @@ export const SysMember = ObjectSchema.create({
       //    and `ghost` are indistinguishable HERE; the choice is `secondary`
       //    because it is what the button means, not what this surface draws.)
       //  - `icon: 'link-2'` — "attach an EXISTING record", the same icon
-      //    sys_account's `link_social` uses for attaching an existing external
-      //    identity. `user-plus` is reserved for the flows that bring a NEW
+      //    the Account app's Linked Accounts entry uses for existing external
+      //    identities. `user-plus` is reserved for the flows that bring a NEW
       //    person in.
       // The LABEL is deliberately left alone: "Add Member" and "Invite User"
       // already differ, and the four translation bundles' hand-written values

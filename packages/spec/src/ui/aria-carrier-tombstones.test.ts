@@ -50,7 +50,7 @@ import { ObjectSchema } from '../data/object.zod';
  *     "names `page.components[].aria`" mean "names a surface that exists"
  *     rather than "contains a string we also typed into the test".
  */
-describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', () => {
+describe('the `aria` tombstones name only live `AriaProps` carriers', () => {
   // One authored value of the shared shape, reused on every surface below so
   // the comparison is like-for-like.
   const ARIA = { ariaLabel: 'Total orders' } as const;

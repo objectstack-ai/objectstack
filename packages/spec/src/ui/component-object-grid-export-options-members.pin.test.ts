@@ -49,7 +49,7 @@ const grid = (exportOptions: unknown): Parsed => gridProps.safeParse({ objectNam
 const listView = (exportOptions: unknown): Parsed =>
   (ListViewSchema as unknown as Schema).safeParse({ type: 'grid', columns: ['name'], exportOptions });
 
-describe('object-grid `exportOptions` — the list view\'s export options object, by identity (#21229)', () => {
+describe('object-grid `exportOptions` — the list view\'s export options object, by identity', () => {
   it('is the very instance the list view\'s union holds as its object arm — not the union', () => {
     const arm = listViewObjectArm();
     // Non-vacuity: an identity check against `undefined` would pass for the
