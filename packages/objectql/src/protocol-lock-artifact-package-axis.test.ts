@@ -68,8 +68,11 @@ function protocolFor(arrangement: Arrangement, order: readonly string[]) {
         rows.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || (r as Record<string, unknown>)[k] === v));
     const engine = {
         registry,
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
-            return table === 'sys_metadata' ? matching(opts?.where) : [];
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+            if (table !== 'sys_metadata') return [];
+            const matched = matching(opts?.where);
+            // `check:objectql-double-limit` — the caller's bound, applied after the filter.
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
             // `check:engine-double-contract` — refuses what the real engine refuses.
