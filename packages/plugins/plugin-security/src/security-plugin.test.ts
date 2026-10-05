@@ -290,6 +290,10 @@ describe('SecurityPlugin', () => {
     const findOne = vi.fn(async (_object: string, query: any) =>
       overrides.findOneImpl ? overrides.findOneImpl(query) : null,
     );
+    // [#21829] A predicate update or delete asks the read door which matched
+    // rows the caller can read, and a `ql` that cannot answer refuses the
+    // write. This double holds no rows, so the read answers none.
+    const find = vi.fn(async (_object: string, _query: any) => [] as Record<string, unknown>[]);
     const ql = {
       registerMiddleware: (mw: any) => {
         // Capture only the FIRST middleware (the security CRUD one);
@@ -299,6 +303,7 @@ describe('SecurityPlugin', () => {
       },
       getSchema: () => baseSchema,
       findOne,
+      find,
     };
     const metadata = {
       get: async () => baseSchema,
