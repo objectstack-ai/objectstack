@@ -52,6 +52,17 @@ System-managed anchors (`owner_id`, `organization_id`, audit columns, `id`) are 
 
 Set `sharingModel: 'private'` on the object so submissions are staff-scoped after creation. The public path only ever **inserts**; it never lists.
 
+### 4. Withdraw a public form
+
+To stop taking submissions, keep the form's `publicLink` and clear a switch: `enabled: false` or `allowAnonymous: false`. Both anonymous endpoints then answer `404 FORM_NOT_FOUND`, and nothing is created.
+
+A withdrawal is a kill switch across metadata layers. If the environment-wide definition withdraws the form, an organization's copy of the same view cannot open it again: the endpoints keep answering not found, and an organization-scoped save that would leave the form open is refused with `403 NOT_OVERRIDABLE`. To publish the form again, save it environment-wide with both switches on. An organization's copy can always withdraw the form for itself.
+
+Only an explicit withdrawal closes the form:
+
+- **It closes the same form only.** A withdrawal applies to the view that carries it, at the same place in that view (`form`, the same `formViews` entry, or the view's own `config`), across its layers. A different view that uses the same public link (for example, another app's "contact us" form) is a separate form. It neither closes this one nor is closed by it.
+- **Removing is not withdrawing.** Removing the `sharing` block, clearing or changing the `publicLink`, or deleting the view at one layer does not withdraw the form at the other layers. A form that only an organization publishes stays open there. To close a form for good, keep the link and set `enabled: false` or `allowAnonymous: false`.
+
 ## Why
 
 Authorization is **derived from the declaration**, not configured separately — so the grant can't drift wider than the form. There is no standing "anonymous can write to this object" rule to misconfigure: the only thing the public can do is create one record through one whitelisted form. This is the difference from Airtable, where interfaces can't be shared publicly at all (only forms can) — here the same FormView metadata renders both internally (authed) and publicly (anonymous) through one renderer.
