@@ -1922,6 +1922,69 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
 }
 
 /**
+ * One place a stored `sys_metadata` row of an item can sit, as
+ * {@link servedOverlayRowCandidates} orders them: a scope (the organization's,
+ * or env-wide with `organizationId: null`), a spelling of the type
+ * (`'canonical'`, or `'other'`, the type's singular/plural twin, pre-#4432
+ * residue), and the package the row is bound to: the address's package, `null`
+ * for the package-less row, or `undefined` for any row (an address that names
+ * no package).
+ */
+interface ServedOverlayRowCandidate {
+    readonly scope: 'org' | 'env';
+    readonly organizationId: string | null;
+    readonly spelling: 'canonical' | 'other';
+    readonly packageId: string | null | undefined;
+}
+
+/**
+ * [#21804] Where a stored row the list read sits, beside the package it is
+ * bound to: the scope it was read from (`null` for env-wide) and the type
+ * spelling it is stored under (the row's own `type` column).
+ */
+interface StoredRowPlace {
+    readonly organizationId: string | null;
+    readonly type: string;
+}
+
+/**
+ * [#21804, ADR-0005, ADR-0048] THE served-row resolution: the order in which
+ * the stored rows of one item are tried for the CONTENT a read serves. The
+ * first candidate that holds a row is the served row.
+ *
+ *  - Scope first (ADR-0005): the organization's rows, then the env-wide rows.
+ *    Precedence, never a merge.
+ *  - Then the spelling: the canonical type, then the other spelling (the
+ *    at-rest tolerance the reads have always had, #4432).
+ *  - Then the package (ADR-0048 prefer-local): with a `packageId`, that
+ *    package's own row, then the package-less row, never another package's;
+ *    with none, any row.
+ *
+ * Both readers of stored content take this order, so they cannot pick
+ * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
+ * (`getMetaItem`, its draft-preview arm, `getMetaItemLayered`) asks the store
+ * candidate by candidate, and {@link mergePackageAwareOverlay} (the list's
+ * active and draft-preview merges) asks the rows it already read. Before
+ * #21804 the list took the LATEST of a package's row and the package-less row
+ * in row order, so in one order the list served the package-less body for a
+ * package whose by-name read served the package's own row.
+ *
+ * It decides content only. The lock is selected separately, from every row in
+ * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
+ */
+function servedOverlayRowCandidates(address: {
+    readonly organizationId: string | undefined;
+    readonly packageId: string | undefined;
+}): ServedOverlayRowCandidate[] {
+    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = address.organizationId
+        ? [{ scope: 'org', organizationId: address.organizationId }, { scope: 'env', organizationId: null }]
+        : [{ scope: 'env', organizationId: null }];
+    const packages: Array<string | null | undefined> = address.packageId ? [address.packageId, null] : [undefined];
+    return scopes.flatMap((scope) => (['canonical', 'other'] as const).flatMap((spelling) =>
+        packages.map((packageId) => ({ ...scope, spelling, packageId }))));
+}
+
+/**
  * ADR-0048 (#1828) — package-aware overlay merge for the unscoped metadata list.
  *
  * `baseItems` (the lower layer: registry artifacts, or the running result) and
@@ -1931,14 +1994,22 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
  *   • Two installed packages shipping the same `type/name` stay TWO rows —
  *     resolution is per `(package, name)`, not bare `name`, so a higher-layer
  *     row no longer collapses a same-name row from a different package.
- *   • For each package `P` that owns a row of a given name, the winner is the
- *     LATEST contribution that is either `P`'s own row or a package-less
- *     ("global", `package_id IS NULL`) row — mirroring
- *     `getMetaItem(name, packageId=P)`'s "scoped-then-global-fallback"
- *     resolution, so the list and single-item paths agree. This is also why a
- *     legacy row whose active/draft layers disagree on package attribution
- *     still collapses (a package-less active row + its `package_id`-bearing
- *     draft resolve to the one package slot, draft winning).
+ *   • For each package `P` that owns a row of a given name, the winner is
+ *     `P`'s own row or a package-less ("global", `package_id IS NULL`) row,
+ *     the higher layer winning — `getMetaItem(name, packageId=P)`'s
+ *     "scoped-then-global-fallback" resolution, so the list and single-item
+ *     paths agree. This is also why a legacy row whose active/draft layers
+ *     disagree on package attribution still collapses (a package-less active
+ *     row + its `package_id`-bearing draft resolve to the one package slot,
+ *     draft winning).
+ *   • [#21804] When `records` are stored rows the caller read (`rowsRead`,
+ *     each record's `stored` place), the winner among them is the one
+ *     {@link servedOverlayRowCandidates} picks for `P`: the organization's row
+ *     before the env-wide one, then `P`'s own before the package-less one. It
+ *     is the resolution `getMetaItem` takes, so it does not depend on the
+ *     order the store returned the rows in. Without `rowsRead` (the
+ *     MetadataService merge, whose `records` are already-resolved items),
+ *     the LATEST contribution wins, as before.
  *   • A name with NO package-owned row resolves to its latest package-less
  *     contribution — the pre-existing env-wide behaviour, unchanged.
  *
@@ -1966,20 +2037,36 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
 function mergePackageAwareOverlay(
     type: string,
     baseItems: unknown[],
-    records: Array<{ data: unknown; packageId: string | undefined }>,
+    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace }>,
     transform?: (data: any, prev: any) => any,
+    rowsRead?: { readonly organizationId: string | undefined },
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
-    const buckets = new Map<string, Array<{ pkg: string | undefined; item: any }>>();
+    // `stored` marks a contribution that is a stored row the caller read.
+    type Contribution = { pkg: string | undefined; item: any; stored?: StoredRowPlace };
+    const buckets = new Map<string, Contribution[]>();
     const order: string[] = []; // first-seen slot order → stable output
     const slotOf = (item: unknown, name: unknown): string => {
         const disc = itemDiscriminator(type, item);
         return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
     };
-    const push = (slot: string, pkg: string | undefined, item: any) => {
+    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace) => {
         let list = buckets.get(slot);
         if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
-        list.push({ pkg, item });
+        list.push(stored ? { pkg, item, stored } : { pkg, item });
+    };
+    // [#21804] The stored row the served-row resolution picks for package
+    // `real` among a slot's contributions: the first candidate of
+    // {@link servedOverlayRowCandidates} that one of the rows sits at.
+    const servedStoredRow = (list: readonly Contribution[], real: string | undefined): any => {
+        for (const candidate of servedOverlayRowCandidates({ organizationId: rowsRead?.organizationId, packageId: real })) {
+            const hit = list.find((c) => c.stored !== undefined
+                && c.stored.organizationId === candidate.organizationId
+                && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
+                && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId));
+            if (hit) return hit.item;
+        }
+        return undefined;
     };
 
     for (const raw of baseItems) {
@@ -1988,7 +2075,7 @@ function mergePackageAwareOverlay(
             push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item);
         }
     }
-    for (const { data, packageId } of records) {
+    for (const { data, packageId, stored } of records) {
         const body = data as any;
         if (!(body && typeof body === 'object' && 'name' in body)) continue;
         // The base row this record shadows at its own slot (for view-identity
@@ -2001,7 +2088,7 @@ function mergePackageAwareOverlay(
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(slot, packageId, transform ? transform(body, prev) : body);
+        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined);
     }
 
     const out: unknown[] = [];
@@ -2013,11 +2100,15 @@ function mergePackageAwareOverlay(
             continue;
         }
         for (const real of reals) {
-            // getMetaItem(name, real) resolution: latest row that is `real`'s
-            // own or package-less (global fallback).
-            let chosen: any;
-            for (const c of list) {
-                if (c.pkg === real || c.pkg === undefined) chosen = c.item;
+            // getMetaItem(name, real) resolution. [#21804] A stored row is
+            // chosen by the served-row resolution, whatever order the rows
+            // came back in; with no stored row of `real`'s own or package-less,
+            // the latest lower-layer contribution of either stands, as before.
+            let chosen: any = rowsRead ? servedStoredRow(list, real) : undefined;
+            if (chosen === undefined) {
+                for (const c of list) {
+                    if ((c.pkg === real || c.pkg === undefined) && c.stored === undefined) chosen = c.item;
+                }
             }
             if (chosen === undefined) continue;
             // A package-less body standing in for package `real` must carry
@@ -5245,13 +5336,15 @@ function isNonCanonicalStoredType(type: string): boolean {
  * [#21442] A stored `sys_metadata` row as the list read parses it: its own
  * name, its body (stored-row conversions replayed), and the package and
  * organization it is bound to (`organizationId: null` for an environment-wide
- * row).
+ * row). [#21804] `type` is the spelling the row is stored under (its own
+ * `type` column), which the served-row resolution reads.
  */
 interface StoredOverlayEntry {
     name: string;
     data: any;
     packageId: string | undefined;
     organizationId: string | null;
+    type: string;
 }
 
 /**
@@ -8779,7 +8872,14 @@ export class ObjectStackProtocolImplementation implements
                 const mergeable = overlays.filter(
                     ({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name),
                 );
-                items = mergePackageAwareOverlay(request.type, items, mergeable, (data, prev) => {
+                // [#21804] Each row travels with its place (scope and stored
+                // spelling), so the merge picks a package's slot by the
+                // served-row resolution the by-name read takes
+                // ({@link servedOverlayRowCandidates}), not by row order.
+                const placed = mergeable.map(({ data, packageId: recPkg, organizationId: recOrg, type: recType }) => ({
+                    data, packageId: recPkg, stored: { organizationId: recOrg, type: recType },
+                }));
+                items = mergePackageAwareOverlay(request.type, items, placed, (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -8797,7 +8897,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                });
+                }, { organizationId: orgId });
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -8924,7 +9024,14 @@ export class ObjectStackProtocolImplementation implements
                         if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                             (data as any)._packageId = recPkg;
                         }
-                        return { data, packageId: recPkg };
+                        // [#21804] The draft's place, as for the active rows:
+                        // a package's previewed slot is the draft the
+                        // by-name read's preview arm serves, in any row order.
+                        const stored = {
+                            organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
+                            type: String(record.type ?? request.type),
+                        };
+                        return { data, packageId: recPkg, stored };
                     });
                     // [#7774] Same bundle slot as the active merge above — a
                     // draft of one locale must preview over that locale, not
@@ -8932,7 +9039,7 @@ export class ObjectStackProtocolImplementation implements
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    });
+                    }, { organizationId: orgId });
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -9307,7 +9414,10 @@ export class ObjectStackProtocolImplementation implements
             // merged row set is env-wide rows PLUS this org's rows, and
             // the two are only distinguishable here, at the row.
             const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
-            return { name: String(record.name), data, packageId: recPkg, organizationId: recOrg };
+            return {
+                name: String(record.name), data, packageId: recPkg, organizationId: recOrg,
+                type: String(record.type ?? request.type),
+            };
         });
     }
 
@@ -9436,6 +9546,12 @@ export class ObjectStackProtocolImplementation implements
      * row first and then the package-less row, never another package's; with
      * none, any row.
      *
+     * [#21804] That order is {@link servedOverlayRowCandidates}, and this
+     * method is its store reader: one `findOne` per candidate, first hit
+     * served. The list's merge ({@link mergePackageAwareOverlay}) is its other
+     * reader, over the rows the list already read, so a package's list slot
+     * serves the row this method serves for that package.
+     *
      * `orgId` arrives already gated ({@link organizationIdForMetaRead}): an
      * organization only selects a row on a type the registry declares per-org
      * overridable, so a pre-#6190 phantom org row is never the served one.
@@ -9454,38 +9570,24 @@ export class ObjectStackProtocolImplementation implements
         state: 'active' | 'draft';
         packageId?: string;
     }): Promise<{ row: any; scope: 'org' | 'env' } | undefined> {
-        const inScope = async (oid: string | null): Promise<any | undefined> => {
-            const lookup = async (t: string): Promise<any | undefined> => {
-                const base: Record<string, unknown> = {
-                    type: t, name: args.name, state: args.state, organization_id: oid,
-                };
-                if (args.packageId) {
-                    const scoped = await this.engine.findOne('sys_metadata', {
-                        where: { ...base, package_id: args.packageId },
-                    });
-                    if (scoped) return scoped;
-                    // ADR-0048 — no package-owned row; fall back to the GLOBAL
-                    // (package-less) row only. Must NOT match a different
-                    // package's row, or a collision would serve package B's
-                    // customization for a package A read.
-                    return await this.engine.findOne('sys_metadata', {
-                        where: { ...base, package_id: null },
-                    });
-                }
-                // No package context (legacy/runtime reader) — match any.
-                return await this.engine.findOne('sys_metadata', { where: base });
+        // [#21804] The order is {@link servedOverlayRowCandidates}, the one
+        // the list's merge takes over the rows it read: per scope, the
+        // canonical spelling then the other, and within each, the package's
+        // own row then the package-less row (never another package's, or a
+        // collision would serve package B's customization for a package A
+        // read); with no package context (legacy/runtime reader), any row.
+        const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
+        for (const candidate of servedOverlayRowCandidates({ organizationId: args.orgId, packageId: args.packageId })) {
+            const type = candidate.spelling === 'canonical' ? args.type : other;
+            if (type === undefined) continue;
+            const where: Record<string, unknown> = {
+                type, name: args.name, state: args.state, organization_id: candidate.organizationId,
             };
-            const rec = await lookup(args.type);
-            if (rec) return rec;
-            const alt = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-            return alt ? await lookup(alt) : undefined;
-        };
-        if (args.orgId) {
-            const row = await inScope(args.orgId);
-            if (row) return { row, scope: 'org' };
+            if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
+            const row = await this.engine.findOne('sys_metadata', { where });
+            if (row) return { row, scope: candidate.scope };
         }
-        const row = await inScope(null);
-        return row ? { row, scope: 'env' } : undefined;
+        return undefined;
     }
 
     /**
