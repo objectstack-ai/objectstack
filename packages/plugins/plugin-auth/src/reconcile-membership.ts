@@ -317,6 +317,13 @@ async function walkAll(engine: any, object: string, pageSize: number): Promise<a
  * cap unbound for good. A scan that cannot complete binds nobody and answers
  * `scan-incomplete`. Idempotent, failure-isolated per user. Ordered after the
  * default-org bootstrap so a target org exists. `limit` is the page size.
+ *
+ * Calling this directly is NOT gated: every call decides membership again for
+ * every member-less user, including one whose membership was removed. Under the
+ * one-time rule, call it only through `runOneTimeMembershipBackfill`, which
+ * records the verdict and runs the pass once per deployment. The reader must be
+ * able to page by `id` (keyset); a reader that cannot answers `scan-incomplete`
+ * and binds nobody.
  */
 export async function backfillMemberships(
   engine: any,

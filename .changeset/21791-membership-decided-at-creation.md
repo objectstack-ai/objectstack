@@ -23,4 +23,6 @@ Clause-②: yes (widening)
   - `EnsureDefaultOrganizationResult.reason` gains `'owner_bind_decided'`.
   - `BackfillMembershipsResult.reason` gains `'scan-incomplete'`.
   - Code that switches exhaustively over those reasons sees one more member.
+- **`backfillMemberships` (exported) changed behaviour.** Its `limit` option used to cap the rows scanned (default 5000); it is now the page size of a full scan with no cap. The function now needs a reader that can page by `id`; a reader that cannot gets `scan-incomplete` and binds nobody, where it used to bind. A direct call is not gated by the one-time ledger and decides membership again on every call; call it through the one-time pass instead.
+- **Policy switch.** Once a pass under `invite-only` is recorded, switching the policy to `auto` later does not backfill the users who existed then; they get membership through invitation or member management.
 - **Deprecated, not removed.** The ungated `ensureDefaultOrganization`, both plugin-auth's helper and the `@objectstack/organizations` wrapper, is `@deprecated` in favour of `createEnsureDefaultOrganizationOnce`.
