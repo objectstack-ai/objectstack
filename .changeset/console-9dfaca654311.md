@@ -33,6 +33,48 @@ Derived from the changesets objectui declared over the range — 24 releasing of
 
 ⚠️ 4 of these carry a breaking change: 4 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, the regenerated `sdui.manifest.json` and its record
+     `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json` (objectui's `packages/sdui-parser/src` is
+     byte-identical across the range) and the re-measured pin citations in `packages/spec/src`,
+     which carry their own `@objectstack/spec` patch changeset. It adds, removes or renames no
+     ObjectStack-authorable key: no Zod schema, no spec declaration and no stored
+     `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+     rewrite, and this body carries no FROM/TO prescription of its own.
+     The range carries five declared-breaking objectui changes: four changesets carry the
+     author's breaking annotation, and a fifth commit's subject carries `!` (objectui#8347,
+     `b403bb36f`, whose changeset states `Clause-②: yes (narrowing)` without the word). Each
+     is objectui's own package surface, with its upstream record, and each is answered here:
+     (1) objectui#11615 (`9dfaca654`): `ObjectFormSection.fields` gains the spec's
+     `FormFieldInput` arm, which breaks TypeScript readers of that objectui type; no code in
+     this repository imports `@object-ui/types`. The default `simple` form now draws a
+     self-describing inline section entry, as the other five form types already did; no
+     example in this repository authors a `simple` `object-form` with an inline section
+     entry, and no authored document has to change.
+     (2) objectui#11266 (`9db9ff3f9`): objectui's zod and TypeScript faces judge a form
+     view's `subforms[].columns` entry by `@objectstack/spec`'s own `InlineGridColumnSchema`,
+     the closed shape this repository has enforced since objectstack#20927, so objectui's
+     validator now gives the verdict `os validate` already gave; the ObjectStack accept set
+     does not move.
+     (3) objectui#11608 (`8b14aecbd`): `PartialSchema` leaves `@object-ui/types`; nothing in
+     this repository names it.
+     (4) objectui#11610 (`2abec3a96`, objectui#11614): the `grid` widget's eight field-level
+     keys are camelCase, and the snake_case spellings are refused by name. The ObjectStack
+     runtime form field (`buildObjectFormRuntimeField`, `ui/component.zod.ts`) already refuses
+     the snake_case spellings by name, with guidance naming objectui#11610, so no document
+     this contract admits carries them. The camelCase spellings are not declared there yet:
+     until objectstack#21768 declares them, an ObjectStack-authored `grid` field takes its
+     `columns` and the widget's own defaults. That declaration widens a closed field and
+     carries its own record.
+     (5) objectui#8347 (`b403bb36f`): `BaseSchema` loses its index signature, a TypeScript
+     narrowing of objectui's node types; no code in this repository compiles against them,
+     and objectui's tolerant zod mirror keeps its accept set.
+     Where an entry mirrors an ObjectStack key, the ledger entry belongs to the
+     `packages/spec` PR that lands it, never to the pin bump.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the upstream declared-breaking entries.
+-->
 
 objectui range: `2e818d0b51ec...9dfaca654311`
