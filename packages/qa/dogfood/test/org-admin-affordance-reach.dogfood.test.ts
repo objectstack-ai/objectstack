@@ -254,7 +254,7 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     expect(shown).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site)));
   });
 
-  it('[#21884] a delegated_admin is offered Invite User on sys_user; a plain member is not — by the reach gate, not the field mask', () => {
+  it('a delegated_admin is offered Invite User on sys_user; a plain member is not — by the reach gate, not the field mask', () => {
     // `invite_user`'s `role` param names `sys_member.role` through
     // `objectOverride`. Neither grade is served `sys_user.role`, so a mask that
     // read the param as THIS object's field withheld the action from both. Both

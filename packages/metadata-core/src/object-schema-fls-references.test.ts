@@ -463,7 +463,7 @@ describe('mentionsDenied is an identifier-token test', () => {
     });
 });
 
-describe('[#21884] an action param under `objectOverride` is judged against the object it names', () => {
+describe('[ADR-0106 D1] an action param under `objectOverride` is judged against the object it names', () => {
     // The shape of `sys_user.invite_user`: `role` is a field of BOTH objects,
     // and the param names the member's — not the user's.
     const SYS_USER = {
