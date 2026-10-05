@@ -11,10 +11,11 @@
  * family. THIS file pins the concrete hook-route mounts (`RouteDefinition[]`
  * emitted via `ai:routes`, recovered here through the `__aiRoutes` cache),
  * whose 401 arm writes the FLAT family. The arm is live on the wire, not just
- * in principle: `registerAIRoutes` mounts wildcards for get/post/delete/put
- * only, so a PATCH route under `/ai/*` — a legal `RouteDefinition.method` —
- * reaches these concrete mounts unshadowed, as does any emitted path outside
- * `/ai/*`.
+ * in principle: any emitted path outside `/ai/*` reaches these concrete mounts
+ * unshadowed. A PATCH route under `/ai/*` no longer does — since #21806
+ * `registerAIRoutes` mounts its wildcard for `patch` too, and the wildcard is
+ * registered first — but the drive below calls the mounted handler directly,
+ * never through a router, so the PATCH fixture still exercises this arm.
  *
  * Until #9823 the arm wrote an inline `{ error, message }` copy of
  * `ANONYMOUS_DENY_BODY`, which is exactly why #9487's additive `code` key

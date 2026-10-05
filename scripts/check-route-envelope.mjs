@@ -528,11 +528,14 @@ const DISPATCHER_DOMAINS = {
   // here, plus one `deps.error` 501.
   'auth.ts': { handBuilt: 0 },
 
-  // Kind 2 — the `{ agents: [] }` fallback moved onto `deps.success` in #4053;
-  // what remains is the passthrough of the AI service's own result.
+  // Kinds 1 and 2 together. Kind 2 — the `{ agents: [] }` fallback moved onto
+  // `deps.success` in #4053; what remains is the passthrough of the AI
+  // service's own result. [#21806] Was 1. The route table's method-mismatch
+  // miss answers 405 and must carry `Allow:` — the same reason `mcp.ts` and
+  // `meta.ts` hand-roll theirs.
   'ai.ts': {
-    handBuilt: 1,
-    note: "passthrough of the AI service result (status and body are the service's, streaming included)",
+    handBuilt: 2,
+    note: "passthrough of the AI service result (status and body are the service's, streaming included); one 405 for a method the AI route table does not declare on a path it does, which must carry an `Allow:` header (`deps.error` takes none) and emits the declared envelope, the code derived from the status",
   },
 };
 

@@ -350,7 +350,9 @@ describe('sys_user self-service — the four pins, each attributed to a layer', 
     // with `refusedBy === 'object-gate'` — the object bit was false, so the row
     // scope never ran and this pin proved nothing about it. Now the pre-image
     // re-read HAPPENED, was scoped to the caller, and came back empty.
-    expect(r.preImageWheres).toEqual([{ $and: [{ id: PEER }, { id: ME }] }]);
+    // …and, the row being refused, the read question that keeps the 403: the
+    // member reads the peer's row, so it is not answered as a missing one.
+    expect(r.preImageWheres).toEqual([{ $and: [{ id: PEER }, { id: ME }] }, { id: PEER }]);
     expect(r.error?.name).toBe('PermissionDeniedError');
     expect(r.error?.code).toBe('PERMISSION_DENIED');
   });

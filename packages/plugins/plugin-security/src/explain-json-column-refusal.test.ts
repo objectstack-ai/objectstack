@@ -318,7 +318,10 @@ for (const [driverName, makeDriver, available] of DRIVERS) {
         for (const { id } of c.rows as Array<{ id: string }>) {
           const visible = c.visible.includes(id);
           expect((await w.explain('read', id)).record, `read ${id}`).toEqual({ recordId: id, visible, decidedBy: 'rls' });
-          expect((await w.explain('update', id)).record, `update ${id}`).toEqual({ recordId: id, visible, decidedBy: 'rls' });
+          // [#21771] A row the caller cannot read answers, on the write side,
+          // what a nonexistent id answers: the missing-record shape.
+          expect((await w.explain('update', id)).record, `update ${id}`)
+            .toEqual(visible ? { recordId: id, visible, decidedBy: 'rls' } : { recordId: id, visible: false });
         }
       });
     }

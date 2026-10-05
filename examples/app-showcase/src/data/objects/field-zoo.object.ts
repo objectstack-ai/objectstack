@@ -29,6 +29,13 @@ export const FieldZoo = ObjectSchema.create({
   pluralLabel: 'Field Zoo',
   icon: 'shapes',
   description: 'One field of every supported type — exhaustive data-layer coverage.',
+  // The record's picture: the record page header draws `f_image` beside the
+  // title. It must name an `image` or `avatar` field of this object; anything
+  // else is refused at validate/publish. Not seeded, like `showcase_task.cover`
+  // (see the note in `../seed/index.ts`): a stored image value is a managed
+  // `sys_file` id, so it comes from an upload, and a specimen without one shows
+  // no picture rather than a placeholder.
+  imageField: 'f_image',
 
   fields: {
     // ── Core text ───────────────────────────────────────────────────────

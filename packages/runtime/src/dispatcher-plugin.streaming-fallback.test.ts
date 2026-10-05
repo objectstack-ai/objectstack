@@ -176,9 +176,11 @@ describe('mountRouteOnServer write-less fallback (#9936)', () => {
                 drained.value = true;
             })(),
         }));
-        // PATCH: a legal RouteDefinition.method that only the concrete
-        // hook-route mounts serve (the /ai/* wildcards cover get/post/delete/
-        // put), so this pins the same arm that is live unshadowed on the wire.
+        // PATCH: a legal RouteDefinition.method. Since #21806 the /ai/*
+        // wildcards cover patch too, so on the wire this path is answered by
+        // the wildcard; the concrete mount's arm stays live for emitted paths
+        // outside /ai/*, and this drive calls the mounted handler directly, so
+        // it pins that arm either way.
         const ctx = makeCtx(fakeServer, [{ method: 'PATCH', path: ROUTE, auth: false, handler }]);
         const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
         await plugin.start?.(ctx);
