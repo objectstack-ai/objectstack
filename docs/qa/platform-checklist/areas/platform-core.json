@@ -2296,7 +2296,7 @@
           "evidence": "the redirect trace + the per-entry verdict table"
         },
         {
-          "clause": "the five legacy system/* URLs redirect per the #3655 map and land on rendering pages — bookmarks and the hub's own emitted URLs keep working; roles lands on sys_position (the ADR-0090 rename, one surface under two vocabularies), permissions on sys_permission_set (decision A: rules-and-assignments is layer 2)",
+          "clause": "the five legacy system/* URLs redirect per the #3655 map and land on rendering pages — bookmarks and the URLs the retired hub once emitted keep working; roles lands on sys_position (the ADR-0090 rename, one surface under two vocabularies), permissions on sys_permission_set (decision A: rules-and-assignments is layer 2)",
           "oracle": "network",
           "verify": "the navigation trace per legacy URL shows the redirect target object route; the landing renders",
           "evidence": "the five redirect traces + landings"
