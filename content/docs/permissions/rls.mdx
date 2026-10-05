@@ -88,7 +88,11 @@ object) is not narrowed, because their readable set is already unbounded.
 modify what you cannot see" is a floor, not a default the write filter
 overrides: before a single-record `update` / `delete` runs, the target row is
 re-read under the caller's **own read scope** together with the write filter,
-and a row that read cannot see is refused with `403 PERMISSION_DENIED`. On a
+and a row that read cannot see answers exactly what a missing id answers
+(`404 RECORD_NOT_FOUND`). A predicate (`multi: true`) `update` / `delete` is
+narrowed the same way: it matches only the rows the caller's read returns for
+its predicate, so a row the widener admits but the caller cannot read is not
+written and not counted. On a
 `public_read` object that read scope is every row (minus any `select`
 narrowing you authored), so an `update` widener works as written. On a
 **`private`** object — the default OWD — the read scope is the caller's own

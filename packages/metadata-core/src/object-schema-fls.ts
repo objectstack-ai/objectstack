@@ -32,8 +32,14 @@
  *
  * ```ts
  * const posture = await resolveObjectSchemaMaskPosture({ objectName, context, security, enabled });
- * const masked  = applyObjectSchemaMask(document, posture);   // fetch → mask → send
+ * const masked  = applyObjectSchemaMask(document, await relateObjectSchemaMaskPosture(posture, document));
+ * //             fetch → relate → mask → send
  * ```
+ *
+ * The relate step (#21884) asks the same caller's question about the OTHER
+ * objects the fetched document's action params read through `objectOverride` —
+ * only the document names them, so it runs after the fetch. It is a no-op for
+ * every posture but `project` and every document without such a read.
  *
  * `resolveObjectSchemaMaskPosture` is where ADR-0106 D6's three-tier failure
  * posture is decided, ONCE, so no exit can invent a fourth answer:
@@ -58,7 +64,7 @@
  * self-invalidates the stale 304.
  */
 
-import { maskDeniedFieldReferences } from './object-schema-fls-references.js';
+import { maskDeniedFieldReferences, objectOverrideReads } from './object-schema-fls-references.js';
 
 /**
  * [#6603 / ADR-0066 D1] The capabilities that let a caller **write** an object
@@ -155,7 +161,29 @@ export type ObjectSchemaMaskPosture =
     | { kind: 'passthrough'; reason: ObjectSchemaMaskPassthroughReason }
     /** ADR-0106 D6 tier 2 — `getReadableFields` could not answer. */
     | { kind: 'undetermined' }
-    | { kind: 'project'; readable: ReadonlySet<string> };
+    | {
+        kind: 'project';
+        readable: ReadonlySet<string>;
+        /**
+         * [#21884] The same caller's readable fields on each OTHER object the
+         * document's action params read through `objectOverride` — filled AFTER
+         * the fetch by {@link relateObjectSchemaMaskPosture}, because only the
+         * document says which objects those are. `undefined` for an object
+         * whose set could not be determined. An object missing from the map
+         * (or no map at all) reads the same way: a param reading it drops its
+         * action — fail closed, never served on a guess.
+         */
+        related?: ReadonlyMap<string, ReadonlySet<string> | undefined>;
+        /**
+         * [#21884] This posture's own question — same caller, same service —
+         * asked about another object: its readable fields, or `undefined` when
+         * they cannot be determined. Set by
+         * {@link resolveObjectSchemaMaskPosture}; read by
+         * {@link relateObjectSchemaMaskPosture}. A posture without it relates
+         * nothing.
+         */
+        relate?: (objectName: string) => Promise<ReadonlySet<string> | undefined>;
+    };
 
 /** A posture that serves the document unchanged and needs no fingerprint. */
 export const OBJECT_SCHEMA_MASK_NOT_APPLICABLE: ObjectSchemaMaskPosture =
@@ -323,7 +351,71 @@ export async function resolveObjectSchemaMaskPosture(input: {
         return { kind: 'undetermined' };
     }
 
-    return { kind: 'project', readable: new Set(readable) };
+    // [#21884] The same question about another object, for the action params
+    // that read one through `objectOverride`. Unlike this object's own D6
+    // tiers, an answer it cannot get WITHHOLDS what depends on it — the
+    // actions reading that object — rather than opening the document or
+    // refusing it: nothing about the other object is served on a guess, and
+    // the rest of this document does not depend on it. Said once per object.
+    const relate = async (related: string): Promise<ReadonlySet<string> | undefined> => {
+        let answer: string[] | undefined;
+        try {
+            answer = await ask(related, context);
+        } catch (error) {
+            telemetry?.warn?.(
+                '[ADR-0106] field visibility on a related object could not be evaluated — '
+                + 'the actions whose params read it through `objectOverride` are withheld',
+                { object: objectName, related, decision: 'withhold-actions', error: String(error) },
+            );
+            return undefined;
+        }
+        if (!Array.isArray(answer)) {
+            telemetry?.warn?.(
+                '[ADR-0106] field visibility on a related object undetermined — '
+                + 'the actions whose params read it through `objectOverride` are withheld',
+                { object: objectName, related, decision: 'withhold-actions' },
+            );
+            telemetry?.counter?.(OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC, { object: related });
+            return undefined;
+        }
+        return new Set(answer);
+    };
+
+    return { kind: 'project', readable: new Set(readable), relate };
+}
+
+/**
+ * [#21884] Complete a `project` posture for the document it is about to mask:
+ * resolve the caller's readable fields on every OTHER object the document's
+ * action params read through `objectOverride` (ADR-0106 D1 judges such a param
+ * against the object it names, not this one).
+ *
+ * Called by every exit AFTER its fetch and BEFORE {@link applyObjectSchemaMask}
+ * — only the document says which objects those are, so this half cannot ride
+ * the posture resolved before the fetch (D3). Any posture but `project`, and a
+ * document with no such read, comes back as given (same reference). Objects
+ * already related are not asked again, so one posture related over several
+ * documents (a layered read's layers) asks each object once. Never throws: an
+ * object it cannot resolve is related as `undefined`, which withholds the
+ * actions that read it.
+ */
+export async function relateObjectSchemaMaskPosture(
+    posture: ObjectSchemaMaskPosture,
+    ...documents: unknown[]
+): Promise<ObjectSchemaMaskPosture> {
+    if (posture.kind !== 'project') return posture;
+    const targets = new Set<string>();
+    for (const document of documents) {
+        for (const read of objectOverrideReads(document)) {
+            if (!posture.related?.has(read.object)) targets.add(read.object);
+        }
+    }
+    if (targets.size === 0) return posture;
+    const related = new Map(posture.related ?? []);
+    for (const object of targets) {
+        related.set(object, posture.relate ? await posture.relate(object) : undefined);
+    }
+    return { ...posture, related };
 }
 
 /** The result of projecting one document. */
@@ -332,7 +424,11 @@ export interface ObjectSchemaMaskResult<T> {
     document: T;
     /** Field names removed, sorted. Empty for an unrestricted caller. */
     denied: readonly string[];
-    /** {@link objectFieldVisibilityFingerprint} over {@link denied}; `''` when nothing was removed. */
+    /**
+     * {@link objectFieldVisibilityFingerprint} over {@link denied} and the
+     * `objectOverride` reads withheld (as `object.field`, #21884); `''` when
+     * nothing was removed.
+     */
     fingerprint: string;
     /**
      * True when the projection would have left the schema with **no** fields at
@@ -377,7 +473,15 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
     for (const name of Object.keys(declared)) {
         if (!posture.readable.has(name)) denied.push(name);
     }
-    if (denied.length === 0) return unchanged;
+    // [#21884] The `objectOverride` reads this caller cannot make — each one
+    // withholds its action, so the served body varies with them as surely as
+    // with `denied`, and the fingerprint must too (D3: a cohort shares 304s
+    // only when it shares the body). Qualified `object.field`, which no field
+    // name can collide with.
+    const relatedDenied = [...new Set(objectOverrideReads(rec)
+        .filter((read) => !posture.related?.get(read.object)?.has(read.field))
+        .map((read) => `${read.object}.${read.field}`))];
+    if (denied.length === 0 && relatedDenied.length === 0) return unchanged;
     denied.sort();
 
     const kept: Record<string, unknown> = {};
@@ -388,12 +492,16 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
     // D1's "whole" covers the field's references too: a validation rule over it,
     // a role pointer naming it, a readable field's formula reading it, … — see
     // `object-schema-fls-references.ts` for every position and its disposition.
-    const projected = maskDeniedFieldReferences({ ...rec, fields: kept }, new Set(denied));
+    const projected = maskDeniedFieldReferences(
+        { ...rec, fields: kept },
+        new Set(denied),
+        posture.related ?? new Map(),
+    );
 
     return {
         document: projected as unknown as T,
         denied,
-        fingerprint: objectFieldVisibilityFingerprint(denied),
+        fingerprint: objectFieldVisibilityFingerprint([...denied, ...relatedDenied]),
         emptied: Object.keys(kept).length === 0,
     };
 }
@@ -405,7 +513,9 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
  *
  * Empty denied set → empty string, which is what makes an unrestricted caller's
  * ETag byte-identical to the pre-ADR one (see
- * {@link foldVisibilityFingerprintIntoEtag}).
+ * {@link foldVisibilityFingerprintIntoEtag}). {@link applyObjectSchemaMask}
+ * hands it the `objectOverride` reads it withheld too, qualified as
+ * `object.field` (#21884), since those also change the served body.
  *
  * FNV-1a/32, hex, order-independent (the input is sorted first): two callers in
  * the same cohort must hash equal whatever order their sets were computed in.

@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { TENANT_SCOPE_FIELD_DEF } from '@objectstack/metadata-core';
+import { TENANT_SCOPE_FIELD_DEF, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { SecurityPlugin } from './security-plugin.js';
@@ -174,9 +174,14 @@ async function boot(opts: {
   const middlewares: Array<(opCtx: any, next: () => Promise<void>) => Promise<void>> = [];
   // [#15887] Only the delegated leg needs a readable store; without a seed the
   // tables are empty and `findOne` answers `null` for every object exactly as
-  // before, so the cases above are byte-identical. `find` is added ONLY under a
-  // seed — the non-delegated path never issues one, and a `ql` without `find`
-  // is what the earlier cases were measured against.
+  // before, so the cases above are byte-identical.
+  //
+  // [#21829] `find` is now present on every boot: a predicate update or delete
+  // asks the read door which matched rows the caller can read, and a `ql` that
+  // cannot answer refuses the write rather than running it un-narrowed. With no
+  // seed the tables are empty, so the read answers no rows and the write is
+  // narrowed to nothing — which changes neither the recorded verdict nor the
+  // wall these cases read off the composed predicate.
   const del = opts.delegator;
   const tables: Record<string, Record<string, unknown>[]> = del
     ? {
@@ -201,19 +206,21 @@ async function boot(opts: {
     objectql: {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       getSchema: (name: string) => SCHEMAS[name],
-      findOne: vi.fn(async (object: string, o: any) => rowsOf(object, o?.where)[0] ?? null),
-      ...(del
-        ? {
-            // The caller's bound is applied AFTER the filter and BY PRESENCE:
-            // core's grants resolution hands every one of these reads a `limit`,
-            // and a double that silently ignores it cannot report what the real
-            // engine would (`check:objectql-double-limit`).
-            find: async (object: string, o: any) => {
-              const rows = rowsOf(object, o?.where);
-              return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
-            },
-          }
-        : {}),
+      // [#21829] An engine double now that it answers `find` too, so its
+      // `findOne` refuses what the real engine refuses
+      // (`check:engine-double-contract`).
+      findOne: vi.fn(async (object: string, o: any) => {
+        assertEngineFindOnePredicate(object, o);
+        return rowsOf(object, o?.where)[0] ?? null;
+      }),
+      // The caller's bound is applied AFTER the filter and BY PRESENCE: core's
+      // grants resolution hands every one of these reads a `limit`, and a
+      // double that silently ignores it cannot report what the real engine
+      // would (`check:objectql-double-limit`).
+      find: async (object: string, o: any) => {
+        const rows = rowsOf(object, o?.where);
+        return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
+      },
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
