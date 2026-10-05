@@ -63,12 +63,19 @@
  *     which is the one question this module answers.
  *
  * For a driver the platform ships no contract for, source 1 is empty — the
- * registry is saying "nothing to check against", not "nothing to protect". The
- * canonical spellings are therefore redacted by NAME for unknown drivers too.
- * That asymmetry with the write gate (which deliberately lets an unknown
- * driver's config through untouched) is intentional: declining to REFUSE an
- * unrecognised key is a boundary choice about authoring, while serving a key
- * literally named `password` back in cleartext is a leak under any boundary.
+ * registry is saying "nothing to check against", not "nothing to protect". Such
+ * a driver's config is therefore judged by NAME: every key whose spelling is
+ * credential-shaped (`isCredentialShapedConfigKey` in `driver/common.zod.ts` —
+ * `password`, `apiKey`, `client_secret`, `secretAccessKey`, `privateKey`,
+ * `accessToken`, …, case- and separator-insensitively) is dropped at every
+ * object depth, and a credential segment inside a semicolon-delimited
+ * connection string (`Server=h;Password=p`) is stripped like a URL's userinfo
+ * password ({@link isContractlessDriver}). The write door judges the SAME
+ * predicate: since ADR-0015 §10 ("credentials never appear in metadata
+ * artefacts"), a contractless driver's config refuses the same credential
+ * material at publish (`data/datasource.zod.ts`), so this read half is what
+ * protects rows stored before that refusal existed — and rows written through
+ * a door that does not parse.
  *
  * ## URL-embedded credentials
  *
@@ -107,7 +114,9 @@ import {
   CREDENTIAL_URL_QUERY_PARAM_NAMES,
   credentialQueryParamOf,
   FORMER_CREDENTIAL_ALIASES,
+  isCredentialShapedConfigKey,
   MONGO_OPTIONS_CREDENTIAL_PATHS,
+  redactConnectionStringCredentials,
 } from './driver/common.zod';
 import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry.zod';
 
@@ -366,6 +375,28 @@ export function refusedCredentialKeys(driver: unknown): string[] {
     .map(([key]) => key);
 }
 
+/**
+ * Does the platform ship NO config contract for `driver` (a plugin-contributed
+ * driver, or a spelling no builtin claims)?
+ *
+ * For such a driver the read path adds two NAME judgments to the four sources
+ * below, both through the ONE predicate the write door's refusal also uses
+ * (`isCredentialShapedConfigKey`, `driver/common.zod.ts`): every config key at
+ * every object depth whose spelling is credential-shaped (`apiKey`,
+ * `client_secret`, `secretAccessKey`, `privateKey`, `accessToken`, …), and
+ * every credential segment inside a semicolon-delimited connection string
+ * (`Server=h;Password=p`). Without a contract nothing else can say which key is
+ * the secret, and serving one back in cleartext is a leak under any boundary.
+ * A driver WITH a contract is unaffected: its measured lists decide.
+ */
+export function isContractlessDriver(driver: unknown): boolean {
+  try {
+    return getDriverConfigSchema(driver) === undefined;
+  } catch {
+    return true;
+  }
+}
+
 /** Every config key this module hides for `driver`, canonical + alias + writable-but-secret. */
 export function redactableConfigKeys(driver: unknown): string[] {
   const derived = refusedCredentialKeys(driver);
@@ -474,7 +505,9 @@ export interface RedactedDatasourceConfig {
  * Remove every stored credential from a driver `config` for serving on a read
  * path — at EVERY object depth, not only the top level.
  *
- * Four removal sources, applied in order:
+ * Four removal sources, applied in order (and, for a driver the platform ships
+ * no contract for, two NAME judgments folded into the first two — see
+ * {@link isContractlessDriver}):
  *
  *  1. The credential-name judgment ({@link redactableConfigKeys}) at every
  *     object depth. It was top-level-only until the nested-position finding:
@@ -518,13 +551,19 @@ export function redactDatasourceConfig(
   if (!config || typeof config !== 'object') return { config: {}, redactedKeys: [], redactedPaths: [] };
 
   const hidden = new Set(redactableConfigKeys(driver));
+  const contractless = isContractlessDriver(driver);
+  const isHidden = (key: string): boolean => hidden.has(key) || (contractless && isCredentialShapedConfigKey(key));
+  const redactString = (value: string): string => {
+    const url = redactUrlCredentials(value);
+    return contractless ? redactConnectionStringCredentials(url) : url;
+  };
   const removed: (readonly string[])[] = [];
 
   const scrub = (node: Record<string, unknown>, prefix: readonly string[]): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node)) {
       const path = [...prefix, key];
-      if (hidden.has(key)) {
+      if (isHidden(key)) {
         // Dropped, not masked. A mask would round-trip back through the wizard
         // as a literal new password, and post-#8078 the canonical spellings
         // would then be REFUSED at the write door — turning an untouched
@@ -534,7 +573,7 @@ export function redactDatasourceConfig(
         continue;
       }
       if (typeof value === 'string') {
-        const redacted = redactUrlCredentials(value);
+        const redacted = redactString(value);
         if (redacted !== value) {
           out[key] = redacted;
           removed.push(path);

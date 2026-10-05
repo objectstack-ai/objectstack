@@ -4,8 +4,13 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { urlUserinfoUsername } from './driver/common.zod';
+import {
+  connectionStringCredentialKeys,
+  isCredentialShapedConfigKey,
+  urlUserinfoUsername,
+} from './driver/common.zod';
 import { resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
+import { redactUrlCredentials } from './datasource-credential-redaction';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -30,9 +35,12 @@ import { resolveDriverId, validateDriverConfig } from './driver/config-registry.
  * is prescribed toward `external.credentialsRef` rather than merely relocated.
  *
  * A driver the platform ships no contract for (a plugin's
- * `com.vendor.snowflake`) keeps an unvalidated `config`. That is the honest
+ * `com.vendor.snowflake`) keeps an unvalidated config SHAPE. That is the honest
  * boundary, not a leftover hole — see the registry's own note on why inventing
  * a verdict against a shape we do not have would be worse than the silence.
+ * What such a config does not keep is inline credential material: ADR-0015 §10
+ * holds for every driver, so credential-shaped keys and embedded credentials
+ * are refused by name (`reportContractlessInlineCredentials` below).
  */
 
 const CAPABILITIES_REMOVED_PREFIX =
@@ -469,11 +477,124 @@ const CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED =
   + 'by the URL-branch refusal, not by this one.)';
 
 /**
+ * The remedy every contractless-driver credential refusal ends on. Names the
+ * one working route a credential has into a driver the platform ships no
+ * contract for (ADR-0062 D3): the bound secret is resolved at connect and
+ * handed to the driver factory as the connection secret. Deliberately offers no
+ * environment-placeholder escape — nothing interpolates one in a stored
+ * datasource `config`, so a placeholder would be persisted and sent verbatim.
+ */
+const CONTRACTLESS_CREDENTIAL_REMEDY =
+  'Remove it from `config` and bind the secret instead: the Setup → Datasources connection '
+  + "form's secret field (or `external.credentialsRef`) encrypts it into `sys_secret`, stores "
+  + 'only an opaque handle on the datasource, and the connect path hands the decrypted value to '
+  + "this driver's factory as the connection secret. The driver receives it only if its factory "
+  + 'reads that injected secret — a driver that needs it under this key must be taught to.';
+
+/** Refusal for a credential-SPELLED key in a contractless driver's `config`. */
+const CONTRACTLESS_INLINE_CREDENTIAL_REFUSED = (path: string, driver: string): string =>
+  `\`${path}\` is spelled like a credential and is not accepted in the \`config\` of a datasource `
+  + `whose driver ('${driver}') the platform ships no config contract for: the datasource is `
+  + 'persisted whole into `sys_metadata` and its history, so an inline credential lands in '
+  + 'cleartext at rest — credentials never appear in metadata artefacts. '
+  + CONTRACTLESS_CREDENTIAL_REMEDY;
+
+/** Refusal for credential material EMBEDDED in a contractless driver's string value. */
+const CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED = (path: string, driver: string, what: string): string =>
+  `\`${path}\` carries ${what} — credential material that is not accepted in the \`config\` of a `
+  + `datasource whose driver ('${driver}') the platform ships no config contract for: the `
+  + 'datasource is persisted whole into `sys_metadata` and its history, so the embedded '
+  + 'credential lands in cleartext at rest. Strip it from the string (a URL that keeps only '
+  + '`user@host`, a connection string without the credential segment, is accepted). '
+  + CONTRACTLESS_CREDENTIAL_REMEDY;
+
+/**
+ * Refuse inline credential material in the `config` of a datasource whose
+ * driver the platform ships NO contract for (ADR-0015 §10: credentials never
+ * appear in metadata artefacts).
+ *
+ * A driver WITH a contract refuses its credential slots through the contract
+ * (`z.never()`, #8078) and is not judged here. A contractless driver has no
+ * slot to read, so the judgment is by NAME — the one predicate the read-path
+ * redactor also uses (`isCredentialShapedConfigKey`), so publish-time refusal
+ * and read-time redaction treat a position identically:
+ *
+ *  - a non-empty STRING whose key, or any enclosing object's key, is
+ *    credential-shaped (`apiKey`, `client_secret`, `auth.accessToken`,
+ *    `credentials.privateKey`) — the enclosing-key half matches the read side,
+ *    which drops a credential-shaped subtree whole;
+ *  - a string carrying a URL userinfo password or a credential query parameter
+ *    (the URL composite the read side strips), or a credential segment of a
+ *    semicolon-delimited connection string (`Server=h;Password=p`).
+ *
+ * Bounds, each the read side's own: arrays are off the walk (row-shaped seed
+ * data, not configuration); an EMPTY string carries no secret and is accepted
+ * (the `user:@host` posture, and the explicit way to clear a stored value); a
+ * non-string value under a credential-shaped name (`usePassword: true`) is not
+ * credential material.
+ *
+ * Routing the value into the secret store instead was the other option, and
+ * is not taken: for a contractless driver nothing says which key the factory
+ * reads its credential from, so moving `config.apiKey` into the single bound
+ * secret would hand the factory a secret it may never read and silently strip
+ * the key it does — the reason the credential-migration planner already
+ * refuses to re-home such a row.
+ */
+function reportContractlessInlineCredentials(
+  ctx: z.RefinementCtx,
+  driver: unknown,
+  config: unknown,
+  basePath: (string | number)[],
+): void {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+  const driverName = String(driver);
+  const walk = (node: Record<string, unknown>, prefix: string[], underCredential: boolean, depth: number): void => {
+    if (depth > 16) return;
+    for (const [key, value] of Object.entries(node)) {
+      const path = [...prefix, key];
+      const dotted = ['config', ...path].join('.');
+      const credentialNamed = underCredential || isCredentialShapedConfigKey(key);
+      if (typeof value === 'string') {
+        if (value === '') continue;
+        if (credentialNamed) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [...basePath, ...path],
+            message: CONTRACTLESS_INLINE_CREDENTIAL_REFUSED(dotted, driverName),
+          });
+          continue;
+        }
+        const segments = connectionStringCredentialKeys(value);
+        const what = redactUrlCredentials(value) !== value
+          ? 'a credential inside a URL (a userinfo password or a credential query parameter)'
+          : segments.length > 0
+            ? `a credential segment (${segments.map((k) => `\`${k}=\``).join(', ')}) inside a connection string`
+            : undefined;
+        if (what) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [...basePath, ...path],
+            message: CONTRACTLESS_EMBEDDED_CREDENTIAL_REFUSED(dotted, driverName, what),
+          });
+        }
+        continue;
+      }
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        walk(value as Record<string, unknown>, path, credentialNamed, depth + 1);
+      }
+    }
+  };
+  walk(config as Record<string, unknown>, [], false, 0);
+}
+
+/**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
  *
- * A no-op for a driver the platform ships no contract for — `known: false` is
- * the registry saying "nothing to check against", which is deliberately NOT the
- * same answer as "checked and clean".
+ * For a driver the platform ships no contract for — `known: false` is the
+ * registry saying "nothing to check against", which is deliberately NOT the
+ * same answer as "checked and clean" — the shape is left unjudged, and only
+ * inline credential material is refused
+ * ({@link reportContractlessInlineCredentials}).
  */
 function reportDriverConfigIssues(
   ctx: z.RefinementCtx,
@@ -482,7 +603,10 @@ function reportDriverConfigIssues(
   basePath: (string | number)[],
 ): void {
   const result = validateDriverConfig(driver, config);
-  if (!result.known) return;
+  if (!result.known) {
+    reportContractlessInlineCredentials(ctx, driver, config, basePath);
+    return;
+  }
   for (const issue of result.issues) {
     ctx.addIssue({
       code: 'custom',

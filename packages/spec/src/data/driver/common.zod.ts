@@ -468,6 +468,247 @@ export const CREDENTIAL_KEY_SPELLINGS: readonly string[] = [
   ...FORMER_CREDENTIAL_ALIASES,
 ];
 
+/**
+ * A key name folded for credential-shape judgment: lower-cased, with every
+ * character that is not a letter or digit removed, so `client_secret`,
+ * `Client-Secret`, `clientSecret` and an ADO segment's `Client Secret` are one
+ * spelling.
+ */
+function foldCredentialKeyName(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** {@link CREDENTIAL_KEY_SPELLINGS}, folded once. */
+const FOLDED_CREDENTIAL_KEY_SPELLINGS: ReadonlySet<string> = new Set(
+  CREDENTIAL_KEY_SPELLINGS.map(foldCredentialKeyName),
+);
+
+/**
+ * Folded substrings that make a key credential-shaped wherever they sit in it
+ * (`dbPassword`, `client_secret`, `secretAccessKey`, `sslPassphrase`,
+ * `serviceCredentials`).
+ */
+const CREDENTIAL_KEY_FRAGMENTS: readonly string[] = [
+  'password',
+  'passwd',
+  'passphrase',
+  'secret',
+  'credential',
+];
+
+/**
+ * Folded ENDINGS that make a key credential-shaped: a bearer token of any kind
+ * (`accessToken`, `refresh_token`, `sessionToken`), a `pwd` suffix, and the
+ * key-material names. The `…key` endings are an enumerated list, not a bare
+ * `key` suffix: `primaryKey`, `partitionKey`, `sortKey`, `cacheKey` and
+ * `idempotencyKey` are ordinary configuration, and `accessKey` alone is the
+ * IDENTITY half of an access-key pair (the `accessKeyId` / `secretAccessKey`
+ * split — an identifier is not credential material). `sharedAccessKey` and
+ * `accountKey` are secret halves and are listed.
+ */
+const CREDENTIAL_KEY_ENDINGS: readonly string[] = [
+  'token',
+  'pwd',
+  'apikey',
+  'privatekey',
+  'signingkey',
+  'masterkey',
+  'encryptionkey',
+  'accountkey',
+  'sharedkey',
+  'sharedaccesskey',
+  'clientkey',
+  'sessionkey',
+  'authkey',
+  'hmackey',
+  'licensekey',
+  'subscriptionkey',
+  'accesssignature',
+];
+
+/**
+ * Folded endings that name WHERE or WHAT a credential is rather than the
+ * credential itself — a reference into a secret store (`credentialsRef`,
+ * `secretArn`, `secretName`), a locator (`passwordFile`, `privateKeyPath`,
+ * `tokenUrl`, `tokenEndpoint`, `passwordEnv`), an identifier (`clientSecretId`,
+ * `accessKeyId`) or a descriptor (`tokenType`, `apiKeyHeader`, `tokenPrefix`).
+ * Such a value carries no secret, so a key ending in one is never
+ * credential-shaped, whatever else it contains.
+ */
+const CREDENTIAL_LOCATOR_ENDINGS: readonly string[] = [
+  'ref',
+  'refs',
+  'arn',
+  'id',
+  'ids',
+  'name',
+  'names',
+  'path',
+  'file',
+  'url',
+  'uri',
+  'endpoint',
+  'env',
+  'type',
+  'header',
+  'field',
+  'prefix',
+  'mode',
+];
+
+/**
+ * Is `key` spelled like a credential — judged by NAME, case- and
+ * separator-insensitively?
+ *
+ * The judgment for the one place no schema types a position: the `config` of a
+ * datasource whose driver the platform ships no contract for. There the
+ * registry has nothing to check against, so the inline-credential refusal at
+ * write (`data/datasource.zod.ts`) and the read-path redaction
+ * (`data/datasource-credential-redaction.ts`) both judge the key's spelling —
+ * through this ONE predicate, so the two doors cannot drift. A key is
+ * credential-shaped when, folded ({@link foldCredentialKeyName}):
+ *
+ *  - it is one of {@link CREDENTIAL_KEY_SPELLINGS} (`password`, `authToken`
+ *    and the former aliases), or
+ *  - it contains one of {@link CREDENTIAL_KEY_FRAGMENTS}, or
+ *  - it ends with one of {@link CREDENTIAL_KEY_ENDINGS},
+ *
+ * and it does NOT end with one of {@link CREDENTIAL_LOCATOR_ENDINGS}.
+ *
+ * ⛔ Not consulted for a driver the platform DOES ship a contract for: there
+ * the contract's own `z.never()` slots and the measured passthrough tables
+ * decide, and a name-shape guess layered over a measured list would refuse
+ * configuration a measured client reads.
+ */
+export function isCredentialShapedConfigKey(key: string): boolean {
+  if (typeof key !== 'string') return false;
+  const folded = foldCredentialKeyName(key);
+  if (folded === '') return false;
+  if (FOLDED_CREDENTIAL_KEY_SPELLINGS.has(folded)) return true;
+  if (CREDENTIAL_LOCATOR_ENDINGS.some((ending) => folded.endsWith(ending))) return false;
+  return CREDENTIAL_KEY_FRAGMENTS.some((fragment) => folded.includes(fragment))
+    || CREDENTIAL_KEY_ENDINGS.some((ending) => folded.endsWith(ending));
+}
+
+/**
+ * One segment of a semicolon-delimited connection string, with the byte range
+ * it occupies (its trailing `;` excluded).
+ */
+interface ConnectionStringSegment {
+  /** The segment's key, verbatim (untrimmed); `undefined` for a segment with no `=`. */
+  key: string | undefined;
+  /** The segment's value, trimmed and unquoted; `''` for a keyless segment. */
+  value: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Split a semicolon-delimited `key=value` connection string (the ADO.NET /
+ * ODBC / JDBC-property shape: `Server=h;User Id=u;Password=p`) into segments.
+ *
+ * A value may be quoted — `"…"` or `'…'` with the quote doubled to escape it,
+ * or `{…}` with `}}` escaping the brace — and a `;` inside a quoted value does
+ * not end the segment. Anything else runs to the next `;`.
+ */
+function connectionStringSegments(value: string): ConnectionStringSegment[] {
+  const out: ConnectionStringSegment[] = [];
+  let i = 0;
+  while (i <= value.length) {
+    const start = i;
+    while (i < value.length && value[i] !== '=' && value[i] !== ';') i += 1;
+    if (i >= value.length || value[i] === ';') {
+      out.push({ key: undefined, value: '', start, end: i });
+      i += 1;
+      continue;
+    }
+    const key = value.slice(start, i);
+    i += 1; // past '='
+    while (i < value.length && (value[i] === ' ' || value[i] === '\t')) i += 1;
+    const open = value[i];
+    const close = open === '"' || open === "'" ? open : open === '{' ? '}' : undefined;
+    let raw: string;
+    if (close) {
+      let j = i + 1;
+      let inner = '';
+      while (j < value.length) {
+        if (value[j] === close) {
+          if (value[j + 1] === close) {
+            inner += close;
+            j += 2;
+            continue;
+          }
+          j += 1;
+          break;
+        }
+        inner += value[j];
+        j += 1;
+      }
+      while (j < value.length && value[j] !== ';') j += 1;
+      raw = inner;
+      i = j;
+    } else {
+      const valueStart = i;
+      while (i < value.length && value[i] !== ';') i += 1;
+      raw = value.slice(valueStart, i).trim();
+    }
+    out.push({ key, value: raw, start, end: i });
+    i += 1;
+  }
+  return out;
+}
+
+/** `scheme://…` — a URL, judged by the URL userinfo / query-parameter rules instead. */
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.\-]*:\/\//i;
+
+/**
+ * The credential-shaped keys a semicolon-delimited connection string carries
+ * with a NON-EMPTY value (`Server=h;Password=p` → `['Password']`), in order.
+ *
+ * Judged by {@link isCredentialShapedConfigKey} on each segment's key — the
+ * same name judgment the config's own keys get — so `Pwd=`, `Password=`,
+ * `AccountKey=` and `SharedAccessKey=` are found and `User Id=` is not. A URL
+ * (`scheme://…`) is not a connection string here: its credentials are the
+ * userinfo password and the query parameters, judged by their own rules. A
+ * string with no `=` carries no segment at all.
+ */
+export function connectionStringCredentialKeys(value: string): string[] {
+  if (typeof value !== 'string' || !value.includes('=') || URL_SCHEME_RE.test(value)) return [];
+  return connectionStringSegments(value)
+    .filter((segment) => segment.key !== undefined
+      && segment.value !== ''
+      && isCredentialShapedConfigKey(segment.key))
+    .map((segment) => (segment.key as string).trim());
+}
+
+/**
+ * Strip every credential segment ({@link connectionStringCredentialKeys}) from
+ * a semicolon-delimited connection string, keeping every other segment — and
+ * the separators between them — byte-for-byte.
+ *
+ * Dropped, not masked, for the reason the inline keys are dropped: a mask would
+ * round-trip back as a literal new credential. A KEYLESS fragment that directly
+ * follows a dropped segment goes with it — `Password=ab;cd` is a password that
+ * itself contained an unquoted `;`, and leaving `cd` behind would publish part
+ * of it while looking redacted (malformed input must not decide how much leaks,
+ * the URL userinfo boundary's posture). Returns the input unchanged when there
+ * is nothing to strip, so "did this value change?" stays a usable test.
+ */
+export function redactConnectionStringCredentials(value: string): string {
+  if (connectionStringCredentialKeys(value).length === 0) return value;
+  const kept: string[] = [];
+  let dropping = false;
+  for (const segment of connectionStringSegments(value)) {
+    if (segment.key === undefined) {
+      if (!dropping) kept.push(value.slice(segment.start, segment.end));
+      continue;
+    }
+    dropping = segment.value !== '' && isCredentialShapedConfigKey(segment.key);
+    if (!dropping) kept.push(value.slice(segment.start, segment.end));
+  }
+  return kept.join(';');
+}
+
 /** The value at `path` inside a record-ish value, or `undefined` off the walk. */
 function valueAtPath(value: unknown, path: readonly string[]): unknown {
   let node: unknown = value;

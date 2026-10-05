@@ -71,6 +71,9 @@
  */
 
 import {
+  connectionStringCredentialKeys,
+  isContractlessDriver,
+  isCredentialShapedConfigKey,
   redactableConfigKeys,
   redactUrlCredentials,
   refusedCredentialKeys,
@@ -145,7 +148,18 @@ function unbindableCredentialKeys(
   bindable: ReadonlySet<string>,
 ): string[] {
   const present = new Set(stringValued(config).map(([key]) => key));
-  return redactableConfigKeys(driver)
+  const named = new Set(redactableConfigKeys(driver));
+  // A driver the platform ships no contract for is judged by NAME on the read
+  // path (`isContractlessDriver`): every credential-shaped key, and every
+  // connection string carrying a credential segment, is withheld there, so
+  // each is residue here too — never `nothing-to-migrate` for a row whose
+  // `apiKey` sits cleartext at rest.
+  if (isContractlessDriver(driver)) {
+    for (const [key, value] of stringValued(config)) {
+      if (isCredentialShapedConfigKey(key) || connectionStringCredentialKeys(value).length > 0) named.add(key);
+    }
+  }
+  return [...named]
     .filter((key) => present.has(key) && !bindable.has(key))
     .sort();
 }
