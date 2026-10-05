@@ -29,8 +29,8 @@
  *
  * ⚠ It is NOT that a directive in a `*.test.ts` here would go unevaluated —
  * this docblock used to say so, and that is FALSE on this tree. This package's
- * `typecheck` is `tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json &&
- * pnpm check:test-typecheck`, and the last leg runs
+ * `typecheck` is `tsc --noEmit && pnpm check:test-typecheck`, and the last
+ * leg runs
  * `--project tsconfig.test.json`, whose `include` is `src/**\/*` with no test
  * exclusion: 299 of this package's `src` test files are in that program,
  * measured with `tsc --listFiles` (0 in the build program — the firing control
