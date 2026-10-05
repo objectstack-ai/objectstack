@@ -57,6 +57,7 @@ import {
     isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
+    relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     type ObjectSchemaMaskPosture,
@@ -4014,6 +4015,11 @@ export class RestServer {
      * schema with no fields at all — `getReadableFields` answers `[]` only where
      * its own posture read failed closed (#3545), and D6 rules an empty-fields
      * `200` out ("silently wrong UI **and** cacheable poison").
+     *
+     * [#21884] Hand it the posture related to `document`
+     * (`relateObjectSchemaMaskPosture`) wherever the document can carry
+     * actions: an action param reading another object through `objectOverride`
+     * is judged against that object, and an unrelated posture withholds it.
      */
     private maskObjectDocument<T>(
         res: any,
@@ -6704,7 +6710,9 @@ export class RestServer {
                             let cachedDocument: any = result.data;
                             let visibilityFingerprint = '';
                             if (maskPosture.kind === 'project') {
-                                const masked = this.maskObjectDocument(res, maskPosture, req.params.name, cachedDocument);
+                                // [#21884] Related to the fetched document: its `objectOverride` params name other objects.
+                                const related = await relateObjectSchemaMaskPosture(maskPosture, cachedDocument);
+                                const masked = this.maskObjectDocument(res, related, req.params.name, cachedDocument);
                                 if (!masked) return;
                                 cachedDocument = masked.document;
                                 visibilityFingerprint = masked.fingerprint;
@@ -8585,7 +8593,8 @@ export class RestServer {
                             }
                             let served = verdict.document;
                             if (publishedMaskPosture.kind === 'project') {
-                                const masked = this.maskObjectDocument(res, publishedMaskPosture, name, served);
+                                const related = await relateObjectSchemaMaskPosture(publishedMaskPosture, served); // [#21884]
+                                const masked = this.maskObjectDocument(res, related, name, served);
                                 if (!masked) return;
                                 served = masked.document;
                             } else if (publishedMaskPosture.kind === 'undetermined') {

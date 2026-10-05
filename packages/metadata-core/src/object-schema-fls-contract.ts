@@ -34,7 +34,9 @@
  * pointers, name lists, an expression, a field-group predicate, an index,
  * list views (a column list, a filter, a view KEYED by a field's name, an
  * object-form column naming one through its nested `prefix` / `summary`),
- * actions (a visibility predicate) — and, inside the READABLE fields, a name
+ * actions (a visibility predicate, and — #21884 — a param that reads a field of
+ * ANOTHER object through `objectOverride`, which every exit must relate after
+ * its fetch and judge against THAT object) — and, inside the READABLE fields, a name
  * list, a `dependsOn`, a predicate, a formula `expression` and an inline grid
  * (`inlineColumns` by name and by computed `expr`, `inlineAmountField`) that
  * read a sibling. The inline grid sits on `name` only so that a field every
@@ -100,6 +102,12 @@ export const FLS_CONTRACT_OBJECT = {
     actions: [
         { name: 'regrade', label: 'Regrade', type: 'script', visible: 'record.salary_grade != null' },
         { name: 'rename', label: 'Rename', type: 'script', visible: 'record.name != null' },
+        // [#21884] Params reading `contact`'s fields. The security double answers
+        // the same set for every object, so `contact.name` is readable wherever
+        // `account.name` is: an exit that never relates its posture withholds
+        // `invite` (fail closed) and fails the `retained` half by name.
+        { name: 'invite', label: 'Invite', type: 'script', params: [{ field: 'name', objectOverride: 'contact' }] },
+        { name: 'escalate', label: 'Escalate', type: 'script', params: [{ field: 'bonus_formula', objectOverride: 'contact' }] },
     ],
     fields: {
         id: { type: 'text', label: 'Id' },
@@ -195,7 +203,10 @@ const RETAINED_FOR_ID_AND_NAME: readonly FlsContractRetention[] = [
             compact: { label: 'Compact', type: 'grid', columns: [{ field: 'name', width: 200 }] },
         }),
     },
-    { what: 'the action whose predicate reads a readable field', holds: (d) => sameList(d?.actions?.map((a: any) => a?.name), ['rename']) },
+    {
+        what: 'the action whose predicate reads a readable field, and the one whose `objectOverride` param reads a field readable on THAT object',
+        holds: (d) => sameList(d?.actions?.map((a: any) => a?.name), ['rename', 'invite']),
+    },
 ];
 
 /**
@@ -229,6 +240,10 @@ const RETAINED_WITH_BONUS_READABLE: readonly FlsContractRetention[] = [
             && d?.fields?.name?.inlineColumns?.[2]?.expr === 'bonus_formula * 2'
             && d?.fields?.name?.inlineAmountField === 'bonus_formula',
     },
+    {
+        what: 'both actions whose `objectOverride` params read fields readable on THAT object',
+        holds: (d) => sameList(d?.actions?.map((a: any) => a?.name), ['rename', 'invite', 'escalate']),
+    },
 ];
 
 /** An unmasked answer is the whole fixture — every reference in every position. */
@@ -241,7 +256,7 @@ const RETAINED_UNMASKED: readonly FlsContractRetention[] = [
         what: 'every inline-grid column, every list view and every action',
         holds: (d) => d?.fields?.name?.inlineColumns?.length === 4
             && Object.keys(d?.listViews ?? {}).length === 4 && d?.listViews?.compact?.columns?.length === 3
-            && d?.actions?.length === 2,
+            && d?.actions?.length === 4,
     },
 ];
 
