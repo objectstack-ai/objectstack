@@ -402,7 +402,10 @@ Honest limits worth knowing before you plan around them:
 
   **The tooling asks for these keys like any other group's.** `os lint` reports
   a missing `flows.*` key against `supportedLocales`, and `os i18n extract`
-  scaffolds the group into your bundle.
+  scaffolds the group into your bundle. A flow's own `label` is asked for only
+  when the flow has a screen node, at any depth, because the runner opens only
+  on a screen: a scheduled or record-triggered flow with no screen has no
+  surface that shows its translated label.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
   interpolation is always simple `{variable}` substitution.
 - **Runtime authoring is process-wide.** The authored layer is synced across all
