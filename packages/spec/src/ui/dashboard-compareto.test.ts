@@ -157,7 +157,7 @@ describe('compareTo — every retired spelling is rejected WITH its upgrade', ()
     expect(reject({ offset: '1y' })).toContain('previousYear');
   });
 
-  it('the words authors were measured spelling `offset` with all reach the same prescription', () => {
+  it('every word authors were measured spelling `offset` with reaches the same prescription', () => {
     // These were `aliases: { period: 'offset', … }` before the convergence —
     // i.e. an empirical claim about what authors write on this slot. The claim
     // survives; its target does not, so each now resolves to the retirement

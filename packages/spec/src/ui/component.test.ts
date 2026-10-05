@@ -4496,7 +4496,7 @@ describe('object-map / object-gantt / object-tree — key sets derived from the 
 // #19228 — the react tier's own precedence sentence was narrower than the
 // guard it names. These pins hold the structural facts the repair rests on,
 // measured first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
-describe('row caps on the object-bound blocks — a bound view fills `limit` only when it is unset', () => {
+describe('row caps on the object-bound blocks — a bound view fills `limit` only when the authored one is not a usable cap', () => {
   const timeline = ComponentPropsMap['object-timeline'];
   const kanban = ComponentPropsMap['object-kanban'];
 
