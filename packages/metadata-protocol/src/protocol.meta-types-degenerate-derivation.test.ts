@@ -251,7 +251,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(50);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
