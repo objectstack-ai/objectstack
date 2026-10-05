@@ -471,23 +471,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
-      link_social: {
-        label: "ソーシャルアカウント連携",
-        params: {
-          provider: {
-            label: "プロバイダー",
-            options: {
-              google: "Google",
-              github: "GitHub",
-              microsoft: "Microsoft",
-              apple: "Apple",
-              facebook: "Facebook",
-              gitlab: "GitLab",
-              discord: "Discord"
-            }
-          }
-        }
-      },
       unlink_account: {
         label: "連携解除",
         description: "このID連携を解除しますか？ユーザーが再度連携するまで、このプロバイダーでサインインできなくなります。",
