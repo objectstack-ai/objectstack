@@ -559,16 +559,23 @@ export async function relayMissProbe({ route, send, pace }) {
   const src = `${TARGET_OWNER}/objectstack`;
   const to = `${TARGET_OWNER}/objectui`;
   const plan = planFrom(parseArgs(['--repo', src, '--issue', '7', '--to', to]), { env: {} });
+  const card = (repo, number) => ({ number, node_id: `I_${number}`, title: 'relay-miss probe', html_url: `https://github.test/${repo}/issues/${number}`, repository_url: `${API}/repos/${repo}`, labels: [] });
+  // The card MOVES when the mutation lands, so the direct leg reads back the way a real transfer does.
+  let moved = false;
   const answers = {
-    [`GET /repos/${src}/issues/7`]: { status: 200, json: { number: 7, node_id: 'I_7', title: 'relay-miss probe', html_url: `https://github.test/${src}/issues/7`, repository_url: `${API}/repos/${src}`, labels: [] } },
-    [`GET /repos/${to}`]: { status: 200, json: { node_id: 'R_to', full_name: to } },
-    'POST /graphql': { status: 200, json: { data: { transferIssue: { issue: { number: 31, url: `https://github.test/${to}/issues/31`, repository: { nameWithOwner: to } } } } } },
+    [`GET /repos/${src}/issues/7`]: () => ({ status: 200, json: moved ? card(to, 31) : card(src, 7) }),
+    [`GET /repos/${to}`]: () => ({ status: 200, json: { node_id: 'R_to', full_name: to } }),
+    'POST /graphql': () => {
+      moved = true;
+      return { status: 200, json: { data: { transferIssue: { issue: { number: 31, url: `https://github.test/${to}/issues/31`, repository: { nameWithOwner: to } } } } } };
+    },
+    [`GET /repos/${to}/issues/31`]: () => (moved ? { status: 200, json: card(to, 31) } : { status: 404, json: { message: 'Not Found' } }),
   };
   const calls = [];
   const fetch = async (url, init = {}) => {
     const call = `${init.method ?? 'GET'} ${new URL(url).pathname}`;
     calls.push(call);
-    const a = answers[call] ?? { status: 404, json: { message: 'Not Found' } };
+    const a = answers[call]?.() ?? { status: 404, json: { message: 'Not Found' } };
     return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
   };
   const r = await transferIssue(plan, { fetch, token: 'probe-token', pace, route, send, sleep: async () => {}, now: () => 0 });
