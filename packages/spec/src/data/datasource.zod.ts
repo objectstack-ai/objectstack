@@ -511,6 +511,13 @@ const CONTRACTLESS_TOO_DEEP_REFUSED = (path: string, driver: string): string =>
   + 'cannot be judged, and it is not accepted unjudged. Flatten the configuration. '
   + CONTRACTLESS_CREDENTIAL_REMEDY;
 
+/** Refusal for a `Map` or `Set`, whose entries the credential walk does not read. */
+const CONTRACTLESS_OPAQUE_REFUSED = (path: string, driver: string): string =>
+  `\`${path}\` is a Map or a Set, whose entries the credential check of a datasource whose driver `
+  + `('${driver}') the platform ships no config contract for does not read, so whether it holds `
+  + 'credential material cannot be judged, and it is not accepted unjudged. Use a plain object or array. '
+  + CONTRACTLESS_CREDENTIAL_REMEDY;
+
 /**
  * An environment placeholder in the one grammar a value may be replaced by
  * (`${API_KEY}`: an upper-case environment name in `${…}`, the shell/compose
@@ -534,12 +541,15 @@ const ENV_NAME_PLACEHOLDER_RE = /\$\{[A-Z_][A-Z0-9_]*\}/g;
  * The judgment is ONE walk (`findContractlessCredentials`,
  * `driver/contractless-credentials.ts`) that the read-path redactor reads too,
  * so every position refused here is a position withheld there: a value under
- * a credential-shaped key (strings, numbers, arrays of them), the non-descriptor
- * leaves of a credential-shaped object, the `value` of a `{ name, value }`
- * pair naming a credential, a string with an embedded credential (URL
- * userinfo or query parameter, a URL `;key=value` tail, a semicolon or libpq
- * connection string, scheme-less `user:password@host`), array elements
- * included, and a subtree too deep to judge.
+ * a credential-shaped key (strings, numbers, bytes, arrays of them), the
+ * non-descriptor leaves of a credential-shaped object, the `value` of a
+ * `{ name, value }` pair naming a credential, a header tuple's or raw-headers
+ * list's value, a string with an embedded credential (URL userinfo, a
+ * token-shaped URL username, a URL query or fragment parameter, a URL
+ * `;key=value` tail, a semicolon, libpq or form-encoded string, a
+ * `Name: value` header line, scheme-less `user:password@host`, a JSON-encoded
+ * value), array elements included, and a subtree too deep to judge or a
+ * `Map` / `Set` it cannot read.
  *
  * Accepted: an EMPTY string (the `user:@host` posture, and the explicit way to
  * clear a stored value), a boolean, and a value made only of environment
@@ -566,6 +576,8 @@ function reportContractlessInlineCredentials(
     let message: string;
     if (finding.kind === 'depth') {
       message = CONTRACTLESS_TOO_DEEP_REFUSED(dotted, driverName);
+    } else if (finding.kind === 'opaque') {
+      message = CONTRACTLESS_OPAQUE_REFUSED(dotted, driverName);
     } else if (finding.kind === 'named') {
       if (typeof finding.value === 'string' && finding.value.replace(ENV_NAME_PLACEHOLDER_RE, '').trim() === '') continue;
       message = CONTRACTLESS_INLINE_CREDENTIAL_REFUSED(dotted, driverName);

@@ -202,50 +202,88 @@ function elementWithIdentity(
  *    the first identified element beneath it.
  *
  * An array hop that reaches neither — an element with no `id` and no
- * identified element below it on the path, or an `id` shared with a sibling —
- * resolves to nothing, and the path is skipped.
+ * identified element below it on the path (a datasource's `servers.<i>` or
+ * `headers.<i>`), or an element that is itself an array (a header tuple,
+ * `headers.<i>.<j>`) — is resolved by its SERVED PROJECTION (`{ served,
+ * index }`): the element exactly as the read path served it, every
+ * non-credential sibling of the withheld value included. In a body whose
+ * array equals the served array it is the same index; otherwise it is the one
+ * element equal to that projection, which must be unique in the served array
+ * and in the body — so a reorder, or a sibling deleted before it, still
+ * carries the value onto its own element, while an element that changed (a
+ * renamed header, an edited sibling field), is gone, or cannot be told apart
+ * from another receives nothing. Same rule as the datasource admin service's
+ * `restoreRedactedConfig`.
+ *
+ * An `id` shared with a sibling resolves to nothing, and the path is skipped.
  */
 type PathHop =
     | { readonly key: string }
     | { readonly elementId: string }
-    | { readonly anchor: readonly PathHop[] };
+    | { readonly anchor: readonly PathHop[] }
+    | { readonly served: readonly unknown[]; readonly index: number };
 
 /**
  * Resolve every CONTAINER hop of `segments` (all but the last, which names the
- * redacted key itself) against `stored`. `undefined` when the stored body does
- * not reach that far, or an array hop has no identity — which the caller reads
- * as "nothing at rest to carry".
+ * redacted key itself) against `stored`, walking `served` (the read path's
+ * projection of `stored`, whose arrays keep their indices) alongside for the
+ * projection hops. `undefined` when the stored body does not reach that far,
+ * or an `id` is shared — which the caller reads as "nothing at rest to carry".
  */
-function resolveHops(stored: unknown, segments: readonly string[]): PathHop[] | undefined {
-    // First pass: key hops and `id` hops; `null` marks an element with no `id`.
+function resolveHops(stored: unknown, served: unknown, segments: readonly string[]): PathHop[] | undefined {
+    // First pass: key hops, `id` hops and projection hops; `null` marks an
+    // id-less record element, anchored or projected in the second pass.
     const found: Array<PathHop | null> = [];
+    const projections: Array<{ served: readonly unknown[]; index: number } | undefined> = [];
     let node: unknown = stored;
+    let servedNode: unknown = served;
     for (let i = 0; i < segments.length - 1; i += 1) {
         const segment = segments[i] as string;
         if (Array.isArray(node)) {
             if (!/^(0|[1-9][0-9]*)$/.test(segment)) return undefined;
-            const element = node[Number(segment)];
-            if (!isPlainRecord(element)) return undefined;
-            const elementId = identityOf(element);
-            if (elementId !== undefined && !elementWithIdentity(node, elementId)) return undefined;
-            found.push(elementId === undefined ? null : { elementId });
+            const index = Number(segment);
+            const element = node[index];
+            const projection = Array.isArray(servedNode) && index < servedNode.length
+                ? { served: servedNode as readonly unknown[], index }
+                : undefined;
+            if (isPlainRecord(element)) {
+                const elementId = identityOf(element);
+                if (elementId !== undefined && !elementWithIdentity(node, elementId)) return undefined;
+                found.push(elementId === undefined ? null : { elementId });
+                projections.push(projection);
+            } else if (Array.isArray(element) && projection) {
+                found.push(projection);
+                projections.push(projection);
+            } else {
+                return undefined;
+            }
             node = element;
+            servedNode = Array.isArray(servedNode) ? servedNode[index] : undefined;
             continue;
         }
         if (!isPlainRecord(node)) return undefined;
         found.push({ key: segment });
+        projections.push(undefined);
         node = node[segment];
+        servedNode = isPlainRecord(servedNode) ? servedNode[segment] : undefined;
     }
     // Second pass, from the end: anchor each id-less element on the first
     // identified element below it. The anchor may itself cross an id-less
     // element (a branch inside a branch), whose own anchor is already built.
+    // An id-less element with no identified element below it is resolved by
+    // its served projection.
     const hops: PathHop[] = new Array(found.length);
     let nextIdentified = -1;
     for (let i = found.length - 1; i >= 0; i -= 1) {
         const hop = found[i];
         if (hop === null) {
-            if (nextIdentified < 0) return undefined;
-            hops[i] = { anchor: hops.slice(i + 1, nextIdentified + 1) };
+            if (nextIdentified >= 0) {
+                hops[i] = { anchor: hops.slice(i + 1, nextIdentified + 1) };
+                continue;
+            }
+            const projection = projections[i];
+            if (!projection) return undefined;
+            hops[i] = projection;
             continue;
         }
         hops[i] = hop as PathHop;
@@ -266,6 +304,10 @@ function stepInto(node: unknown, hop: PathHop): { segment: string; next: unknown
         return isPlainRecord(node) ? { segment: hop.key, next: node[hop.key] } : undefined;
     }
     if (!Array.isArray(node)) return undefined;
+    if ('served' in hop) {
+        const index = projectedIndex(hop.served, node, hop.index);
+        return index === undefined ? undefined : { segment: String(index), next: node[index] };
+    }
     let index: number | undefined;
     for (let i = 0; i < node.length; i += 1) {
         const hit = 'elementId' in hop
@@ -279,6 +321,27 @@ function stepInto(node: unknown, hop: PathHop): { segment: string; next: unknown
 }
 
 /**
+ * The index in `array` of the element the read path served at `index` of
+ * `served`, by its projection: the same index when the arrays are equal, else
+ * the one element equal to the served one when it is unique on both sides.
+ */
+function projectedIndex(served: readonly unknown[], array: readonly unknown[], index: number): number | undefined {
+    if (sameValue(served, array)) return index;
+    const element = served[index];
+    if (served.filter((candidate) => sameValue(candidate, element)).length !== 1) return undefined;
+    let found: number | undefined;
+    for (let i = 0; i < array.length; i += 1) {
+        if (!sameValue(array[i], element)) continue;
+        if (found !== undefined) return undefined;
+        found = i;
+    }
+    return found;
+}
+
+/** A container a redacted key sits in: a plain object, or an array whose ELEMENT was withheld. */
+type Container = Record<string, unknown> | unknown[];
+
+/**
  * Walk `hops` in `root`: the plain object that OWNS the redacted key, and the
  * concrete segments (a key, or an array index in THIS body) that reach it.
  *
@@ -290,7 +353,7 @@ function stepInto(node: unknown, hop: PathHop): { segment: string; next: unknown
  * grafting `config.password` back onto it would MINT a config that holds
  * nothing but a credential.
  */
-function locate(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Record<string, unknown> } | undefined {
+function locate(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Container } | undefined {
     const at: string[] = [];
     let node: unknown = root;
     for (const hop of hops) {
@@ -299,11 +362,11 @@ function locate(root: unknown, hops: readonly PathHop[]): { at: string[]; contai
         at.push(step.segment);
         node = step.next;
     }
-    return isPlainRecord(node) ? { at, container: node } : undefined;
+    return isPlainRecord(node) || Array.isArray(node) ? { at, container: node } : undefined;
 }
 
 /** {@link locate}, container only. */
-function containerAt(root: unknown, hops: readonly PathHop[]): Record<string, unknown> | undefined {
+function containerAt(root: unknown, hops: readonly PathHop[]): Container | undefined {
     return locate(root, hops)?.container;
 }
 
@@ -340,10 +403,13 @@ function valueAt(root: unknown, at: readonly string[]): unknown {
  * An owner whose array is not held under a key — an array directly inside
  * another array — has no key to scope by, and is not relocated.
  *
- * A path with no identified element — every datasource path, whose redactor
- * never crosses an array — has no owner to find, and is unaffected.
+ * A path with no identified element — every datasource path, whose
+ * contractless-driver redactor crosses arrays of id-less elements
+ * (`config.servers.<i>.password`) but never an `id` — has no owner to find,
+ * and is unaffected: its array hops are resolved by projection instead
+ * ({@link resolveHops}).
  */
-function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Record<string, unknown> } | undefined {
+function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Container } | undefined {
     let owner = -1;
     for (let i = hops.length - 1; i >= 0; i -= 1) {
         if ('elementId' in (hops[i] as PathHop)) {
@@ -394,7 +460,14 @@ function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; 
  * not mutate it in place.
  */
 function withValueAt(root: unknown, at: readonly string[], key: string, value: unknown): unknown {
-    if (at.length === 0) return { ...(root as Record<string, unknown>), [key]: value };
+    if (at.length === 0) {
+        if (Array.isArray(root)) {
+            const next = root.slice();
+            next[Number(key)] = value;
+            return next;
+        }
+        return { ...(root as Record<string, unknown>), [key]: value };
+    }
     const [head, ...rest] = at as [string, ...string[]];
     if (Array.isArray(root)) {
         const next = root.slice();
@@ -403,6 +476,22 @@ function withValueAt(root: unknown, at: readonly string[], key: string, value: u
     }
     const record = root as Record<string, unknown>;
     return { ...record, [head]: withValueAt(record[head], rest, key, value) };
+}
+
+/** The value `segments` names in `root` (an array entered at an index segment), or `undefined` off the walk. */
+function valueAtSegments(root: unknown, segments: readonly string[]): unknown {
+    let node: unknown = root;
+    for (const segment of segments) {
+        if (Array.isArray(node)) {
+            if (!/^(0|[1-9][0-9]*)$/.test(segment)) return undefined;
+            node = node[Number(segment)];
+        } else if (isPlainRecord(node)) {
+            node = node[segment];
+        } else {
+            return undefined;
+        }
+    }
+    return node;
 }
 
 /** Structural equality for the values a redactor hides (scalars in practice; general by construction). */
@@ -445,8 +534,13 @@ function sameValue(a: unknown, b: unknown): boolean {
  * that reorders the array still carries the value onto the element it came
  * from — see {@link resolveHops}. An element with no `id` is walked by the
  * identified element below it on the same path (a `parallel` branch, by the
- * node inside it that holds the credential, #20590); one with neither, or an
- * `id` shared with a sibling, is never carried into.
+ * node inside it that holds the credential, #20590); one with neither — or an
+ * element that is itself an array — is walked by its SERVED PROJECTION: the
+ * same index in an array left exactly as served, else the one element equal
+ * to the served one, unique on both sides, and otherwise nothing is carried
+ * into it. An `id` shared with a sibling is never carried into. A withheld
+ * value that is itself an array element is carried only into an array left
+ * exactly as served.
  *
  * ⛔ A carried value never lands where the read would SERVE it (#20590). The
  * array hop follows an identity, while a redactor chooses what to withhold by
@@ -538,11 +632,12 @@ function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out:
         // {@link resolveHops}).
         const segments = path.split('.');
         const key = segments[segments.length - 1] as string;
-        const hops = resolveHops(stored, segments);
+        const hops = resolveHops(stored, served.item, segments);
         if (!hops) continue;
 
-        const storedParent = containerAt(stored, hops);
-        const storedValue = storedParent?.[key];
+        // The stored value sits at the redactor's own path into the stored
+        // body — its indices ARE the stored body's, so it is read by them.
+        const storedValue = valueAtSegments(stored, segments);
         if (storedValue === undefined) continue;
 
         // Where the container sits in the incoming body: along the stored
@@ -552,7 +647,13 @@ function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out:
         if (!target) continue;
 
         const servedParent = containerAt(served.item, hops);
-        if (!sameValue(target.container[key], servedParent?.[key])) continue;
+        if (Array.isArray(target.container)) {
+            // The withheld value is itself an array ELEMENT (a header tuple's
+            // value): carried only into an array left exactly as served.
+            if (!/^(0|[1-9][0-9]*)$/.test(key) || !sameValue(target.container, servedParent)) continue;
+        } else if (!sameValue(target.container[key], (servedParent as Record<string, unknown> | undefined)?.[key])) {
+            continue;
+        }
 
         grafts.push({ at: target.at, key, value: storedValue });
     }

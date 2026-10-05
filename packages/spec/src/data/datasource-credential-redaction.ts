@@ -115,7 +115,7 @@ import {
   FORMER_CREDENTIAL_ALIASES,
   MONGO_OPTIONS_CREDENTIAL_PATHS,
 } from './driver/common.zod';
-import { findContractlessCredentials, redactEmbeddedCredentials } from './driver/contractless-credentials';
+import { withholdContractlessCredentials } from './driver/contractless-credentials';
 import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry.zod';
 
 // The canonical spellings and former aliases MOVED to `driver/common.zod.ts`
@@ -613,56 +613,14 @@ export function redactDatasourceConfig(
 /**
  * The read half of the contractless-driver judgment: every position
  * `findContractlessCredentials` (`driver/contractless-credentials.ts`) reports
- * — the SAME walk the write door refuses by — is withheld. A value under a
- * credential position, or a subtree too deep to judge, is dropped (an array
- * element is spliced from the end of its array, or nulled when siblings follow
- * it); a string with an embedded credential is
- * rewritten without it (`redactEmbeddedCredentials`). Every position is
+ * — the SAME walk the write door refuses by — is withheld, through
+ * `withholdContractlessCredentials` in that module. Every position is
  * reported, array indices included, so the write-path inverses can restore
  * exactly what was withheld. Pure: the input is never mutated.
  */
 function redactContractlessConfig(config: Record<string, unknown>): RedactedDatasourceConfig {
-  const findings = findContractlessCredentials(config);
-  if (findings.length === 0) return { config, redactedKeys: [], redactedPaths: [] };
-  const out = structuredClone(config) as Record<string, unknown>;
-  // Rewrites first, then drops deepest-first and, inside one array, highest
-  // index first — so a drop never shifts a position still to be visited.
-  const parentOf = (path: readonly string[]): unknown => {
-    let node: unknown = out;
-    for (const segment of path.slice(0, -1)) {
-      if (!node || typeof node !== 'object') return undefined;
-      node = (node as Record<string, unknown>)[segment];
-    }
-    return node;
-  };
-  for (const finding of findings) {
-    if (finding.kind !== 'embedded') continue;
-    const parent = parentOf(finding.path) as Record<string, unknown> | undefined;
-    const leaf = finding.path[finding.path.length - 1] as string;
-    if (parent && typeof parent[leaf] === 'string') parent[leaf] = redactEmbeddedCredentials(parent[leaf] as string);
-  }
-  const drops = findings
-    .filter((finding) => finding.kind !== 'embedded')
-    .sort((a, b) => {
-      if (a.path.length !== b.path.length) return b.path.length - a.path.length;
-      return Number(b.path[b.path.length - 1]) - Number(a.path[a.path.length - 1]) || 0;
-    });
-  for (const finding of drops) {
-    const parent = parentOf(finding.path);
-    const leaf = finding.path[finding.path.length - 1] as string;
-    // An array element is spliced only from the END of its array, so no
-    // sibling shifts and the write-path inverse restores each withheld
-    // element at its own index; one with siblings after it is nulled instead.
-    if (Array.isArray(parent)) {
-      if (Number(leaf) === parent.length - 1) parent.splice(Number(leaf), 1);
-      else parent[Number(leaf)] = null;
-    }
-    else if (parent && typeof parent === 'object') delete (parent as Record<string, unknown>)[leaf];
-  }
-  const removed = findings
-    .map((finding) => finding.path)
-    .sort((a, b) => (a.join('.') < b.join('.') ? -1 : a.join('.') > b.join('.') ? 1 : 0));
-  return { config: out, redactedKeys: removed.map((path) => path.join('.')), redactedPaths: removed };
+  const { config: out, paths } = withholdContractlessCredentials(config);
+  return { config: out, redactedKeys: paths.map((path) => path.join('.')), redactedPaths: paths };
 }
 
 /**

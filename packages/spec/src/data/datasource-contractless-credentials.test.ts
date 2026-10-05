@@ -19,6 +19,7 @@ import {
   findContractlessCredentials,
   getDriverConfigSchema,
   isCredentialShapedConfigKey,
+  looksLikeSecretValue,
   redactEmbeddedCredentials,
 } from './driver/index';
 import { isContractlessDriver, redactDatasourceConfig } from './datasource-credential-redaction';
@@ -184,7 +185,8 @@ describe('write door: DatasourceSchema refuses inline credentials for a driver w
     }
   });
 
-  it.each(CREDENTIAL_SHAPED)('refuses a non-empty %s, at its own path', (key) => {
+  // A bare `key` is narrowed by its value (pinned in its own block below).
+  it.each(CREDENTIAL_SHAPED.filter((key) => key !== 'key'))('refuses a non-empty %s, at its own path', (key) => {
     expect(refusals({ host: 'h', [key]: 'cleartext-value' })).toEqual([`config.${key}`]);
   });
 
@@ -410,5 +412,269 @@ describe('read door: redactDatasourceConfig for a driver with no shipped contrac
     expect(mongo.config).toEqual({ url: 'mongodb://h/db', options: { apiKey: 'k' } });
     const pg = redactDatasourceConfig('postgres', { host: 'h', applicationName: 'a=b;Password=c' });
     expect(pg.config).toEqual({ host: 'h', applicationName: 'a=b;Password=c' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 3: bounded judgment, lenient parses, header shapes, key names,
+// embedded shapes, context, bytes, and the bare `key`.
+// ---------------------------------------------------------------------------
+
+/** Wall-clock milliseconds one call takes. */
+function elapsed(run: () => unknown): number {
+  const started = performance.now();
+  run();
+  return performance.now() - started;
+}
+
+describe('the judgment is linear and bounded: an over-long key is judged conservatively', () => {
+  const CAPITALS = 'A'.repeat(100_000);
+
+  it('a 100 KB run of capitals is judged fast — as a key, a segment key, a pair label, a header name', () => {
+    expect(elapsed(() => isCredentialShapedConfigKey(CAPITALS))).toBeLessThan(2000);
+    expect(elapsed(() => findContractlessCredentials({ [CAPITALS]: 'x', [`${CAPITALS}b`]: 'y' }))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf(`${CAPITALS}=v`))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf(`${CAPITALS}: v`))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf(`https://h/x?${CAPITALS}=v`))).toBeLessThan(2000);
+  });
+
+  it('a long libpq string is parsed in one pass', () => {
+    expect(elapsed(() => embeddedCredentialOf('k=v '.repeat(50_000)))).toBeLessThan(2000);
+    expect(elapsed(() => embeddedCredentialOf('x '.repeat(50_000)))).toBeLessThan(2000);
+  });
+
+  it('a key longer than 256 characters is credential-shaped unread; one within the cap is judged by its words', () => {
+    expect(isCredentialShapedConfigKey('A'.repeat(257))).toBe(true);
+    expect(isCredentialShapedConfigKey('host'.repeat(70))).toBe(true);
+    expect(isCredentialShapedConfigKey('A'.repeat(256))).toBe(false);
+    expect(isCredentialShapedConfigKey(CAPITALS)).toBe(true);
+    expect(refusals({ [CAPITALS]: 'x' })).toEqual([`config.${CAPITALS}`]);
+    // A connection-string segment key, too.
+    expect(embeddedCredentialOf(`${'X'.repeat(300)}=v`)).toBeDefined();
+    expect(embeddedCredentialOf(`${'X'.repeat(200)}=v`)).toBeUndefined();
+  });
+});
+
+describe('libpq keyword/value pairs are found leniently', () => {
+  it.each([
+    ['a stray token', 'host=h stray password=p'],
+    ['a stray quoted token', "host=h 'quoted stray' password=p"],
+    ['a leading word', 'note password=p'],
+    ['spaces around `=`', 'host = h password = p'],
+    ['an unclosed quote', "host=h password='a b"],
+  ])('finds the credential beside %s', (_label, value) => {
+    expect(embeddedCredentialOf(value)).toBeDefined();
+    expect(connectionStringCredentialKeys(value)).toContain('password');
+    expect(redactEmbeddedCredentials(value)).not.toMatch(/password/);
+  });
+
+  it('keeps everything else, the stray token included', () => {
+    expect(redactEmbeddedCredentials('host=h stray password=p dbname=d')).toBe('host=h stray dbname=d');
+    expect(redactEmbeddedCredentials('password=p host=h')).toBe('host=h');
+  });
+
+  it.each([
+    ['no credential keyword', 'host=h stray dbname=d'],
+    ['a credential word as a VALUE', 'mode=password'],
+    ['a descriptor keyword', 'mode=ro passwordless=1'],
+    ['an empty value', 'host=h password='],
+  ])('finds nothing with %s', (_label, value) => {
+    expect(embeddedCredentialOf(value)).toBeUndefined();
+  });
+});
+
+describe('header shapes', () => {
+  it('a `Name: value` header line naming a credential is found and loses its value', () => {
+    expect(embeddedCredentialOf('Authorization: Bearer t')).toBeDefined();
+    expect(embeddedCredentialOf('X-Api-Key:k')).toBeDefined();
+    expect(redactEmbeddedCredentials('Accept: json\r\nAuthorization: Bearer t')).toBe('Accept: json\r\nAuthorization:');
+    expect(refusals({ headers: ['Authorization: Bearer t', 'Accept: json'] })).toEqual(['config.headers.0']);
+  });
+
+  it('a header line naming no credential, or with no value, is not', () => {
+    expect(embeddedCredentialOf('Content-Type: application/json')).toBeUndefined();
+    expect(embeddedCredentialOf('Authorization:')).toBeUndefined();
+    expect(embeddedCredentialOf('note: see the runbook')).toBeUndefined();
+  });
+
+  it('a flat raw-headers list under a header-ish key: each credential name\'s value', () => {
+    expect(refusals({ headers: ['Authorization', 'Bearer t', 'Accept', 'json', 'Cookie', 'sid=1'] })).toEqual([
+      'config.headers.1',
+      'config.headers.5',
+    ]);
+    expect(refusals({ rawHeaders: ['Accept', 'token', 'X-Kind', 'v'] })).toEqual([]);
+  });
+
+  it('a flat list under a key that is not header-ish is plain data', () => {
+    expect(refusals({ tags: ['token', 'profile'], scopes: ['password', 'email'] })).toEqual([]);
+  });
+
+  it('a tuple directly under a header-ish key, and a tuple longer than two', () => {
+    expect(refusals({ header: ['Authorization', 'Bearer t'] })).toEqual(['config.header.1']);
+    expect(refusals({ list: [['Authorization', 'Bearer', 't']] }).sort()).toEqual(['config.list.0.1', 'config.list.0.2']);
+    expect(refusals({ list: [['Accept', 'json', 'xml']] })).toEqual([]);
+  });
+
+  it('every label key of a pair is judged — `{ key: \'Authorization\', value }` holds its secret in `value`', () => {
+    expect(
+      refusals({
+        headers: [
+          { key: 'Authorization', value: 'Bearer t' },
+          { name: 'h1', key: 'X-Api-Key', value: 'k' },
+          { header: 'Accept', name: 'Cookie', value: 'sid=1' },
+          { key: 'Accept', value: 'json' },
+        ],
+      }).sort(),
+    ).toEqual(['config.headers.0.value', 'config.headers.1.value', 'config.headers.2.value']);
+  });
+
+  it('a pair label is still judged for an embedded credential', () => {
+    expect(refusals({ list: [{ name: 'https://u:p@h/x', value: 'v' }] })).toEqual(['config.list.0.name']);
+  });
+});
+
+describe('key names: TLS key material, `privkey`, trailing qualifiers, normalisation', () => {
+  it.each([
+    'sslKey', 'tlsKey', 'ssl_key', 'SSL-Key', 'sslkey', 'tlskey', 'privkey', 'sslPrivkey', 'privateKeyData',
+    'tokenString', 'tokenStr', 'authData', 'encryptionKeyHex', 'pwdHash', 'apiKeyRaw', 'secretContent', 'basicauth',
+    'bearerauth',
+    // full-width `password`, read as `password` after NFKC
+    'ｐａｓｓｗｏｒｄ',
+    // a key holding non-ASCII letters (Cyrillic), or a zero-width character inside a word
+    'пароль',
+    'pass​word',
+  ])('%j is credential-shaped', (key) => {
+    expect(isCredentialShapedConfigKey(key)).toBe(true);
+    expect(refusals({ [key]: 'cleartext-value' })).toEqual([`config.${key}`]);
+  });
+
+  it.each(['sslMode', 'tlsVersion', 'sslCert', 'rawData', 'userData', 'contentType', 'metadata', 'dataSource', 'hashAlgorithm', 'oauth', 'keyspace'])(
+    '%j is not credential-shaped',
+    (key) => {
+      expect(isCredentialShapedConfigKey(key)).toBe(false);
+    },
+  );
+});
+
+describe('embedded credentials: token usernames, signatures, JSON, form encoding, fragments', () => {
+  const TOKEN = 'ghp_16C7e42F292c6912E7710c838347Ae178B4a';
+
+  it.each([
+    ['a token-shaped URL username with no password', `https://${TOKEN}@github.com/o/r.git`, 'https://github.com/o/r.git'],
+    ['a token-shaped username with an empty password', `https://${TOKEN}:@github.com/o/r.git`, 'https://github.com/o/r.git'],
+    ['a `sig` query parameter', 'https://a.blob.core.windows.net/c?sv=2020&sig=abc%3D', 'https://a.blob.core.windows.net/c?sv=2020'],
+    ['an `X-Amz-Signature` query parameter', 'https://b.s3.amazonaws.com/k?X-Amz-Date=1&X-Amz-Signature=abc', 'https://b.s3.amazonaws.com/k?X-Amz-Date=1'],
+    ['a JSON-encoded object', '{"apiKey":"k","host":"h"}', '{"host":"h"}'],
+    ['a JSON-encoded header list', '[{"name":"Authorization","value":"Bearer t"}]', '[{"name":"Authorization"}]'],
+    ['a JSON-encoded connection string', '{"dsn":"postgres://u:p@h/db"}', '{"dsn":"postgres://u@h/db"}'],
+    ['a form-encoded string', 'a=b&pass=c', 'a=b'],
+    ['a form-encoded string with a leading `?`', '?client_secret=s&grant_type=x', '?grant_type=x'],
+    ['a `#password=` fragment', 'https://h/x#password=p', 'https://h/x'],
+    ['an implicit-grant fragment', 'https://h/cb#access_token=t&state=s', 'https://h/cb#state=s'],
+  ])('finds and strips %s', (_label, value, expected) => {
+    expect(embeddedCredentialOf(value)).toBeDefined();
+    const out = redactEmbeddedCredentials(value);
+    expect(out).toBe(expected);
+    expect(embeddedCredentialOf(out)).toBeUndefined();
+  });
+
+  it.each([
+    ['a plain URL username', 'https://deploy@github.com/o/r.git'],
+    ['an email-shaped URL username', 'https://ops%40example.com@h/x'],
+    ['an ordinary query', 'https://h/x?signal=1&design=2'],
+    ['a JSON object with no credential', '{"host":"h","port":5432}'],
+    ['a JSON-looking string that does not parse', '{not json, password=p'],
+    ['a form-encoded string with no credential', 'a=b&c=d'],
+    ['a fragment that is an anchor', 'https://h/docs#section-2'],
+  ])('finds nothing in %s', (_label, value) => {
+    // (The JSON-looking string that does not parse is judged by the other readings.)
+    if (value.startsWith('{not')) {
+      expect(embeddedCredentialOf(value)).toBeDefined();
+      return;
+    }
+    expect(embeddedCredentialOf(value)).toBeUndefined();
+    expect(redactEmbeddedCredentials(value)).toBe(value);
+  });
+
+  it('the write and read doors agree on a JSON-encoded config value', () => {
+    const stored = { options: '{"auth":{"user":"u","password":"p"},"timeoutMs":5}' };
+    expect(refusals(stored)).toEqual(['config.options']);
+    const { config } = redactDatasourceConfig(DRIVER, stored);
+    expect(JSON.parse((config as { options: string }).options)).toEqual({ auth: { user: 'u' }, timeoutMs: 5 });
+    expect(refusals(config)).toEqual([]);
+  });
+
+  it('a JSON-encoded value nested past the walk depth is not accepted unjudged', () => {
+    let nested = '"x"';
+    for (let i = 0; i < 20; i += 1) nested = JSON.stringify({ n: JSON.parse(nested) });
+    expect(embeddedCredentialOf(nested)).toBeDefined();
+    expect(embeddedCredentialOf(redactEmbeddedCredentials(nested))).toBeUndefined();
+  });
+});
+
+describe('a descriptor key does not reset the credential context for an object below it', () => {
+  it('an object under a descriptor key inside a credential-shaped object is still judged as credential material', () => {
+    expect(refusals({ auth: { source: { value: 'abc' } } })).toEqual(['config.auth.source.value']);
+    expect(refusals({ credentials: { provider: { kind: 'gcp', blob: 'xyz' } } })).toEqual([
+      'config.credentials.provider.blob',
+    ]);
+  });
+
+  it('the descriptor exemption still holds for a leaf — and for a list of leaves', () => {
+    expect(refusals({ auth: { scopes: ['read', 'write'], type: 'oauth', provider: 'google' } })).toEqual([]);
+  });
+});
+
+describe('bytes and opaque containers', () => {
+  it('bytes under a credential-shaped key are ONE finding, withheld whole', () => {
+    expect(refusals({ apiKey: Buffer.from('secret-bytes') })).toEqual(['config.apiKey']);
+    const { config, redactedKeys } = redactDatasourceConfig(DRIVER, { host: 'h', privateKey: new Uint8Array([1, 2, 3]) });
+    expect(config).toEqual({ host: 'h' });
+    expect(redactedKeys).toEqual(['privateKey']);
+    expect(refusals({ tokens: [new Uint8Array([1])] })).toEqual(['config.tokens']);
+  });
+
+  it('bytes elsewhere are judged by their text, as one value', () => {
+    expect(refusals({ blob: new Uint8Array([1, 2, 3]) })).toEqual([]);
+    expect(refusals({ blob: Buffer.from('https://u:p@h/x') })).toEqual(['config.blob']);
+    expect(redactDatasourceConfig(DRIVER, { blob: Buffer.from('https://u:p@h/x') }).config).toEqual({});
+  });
+
+  it('a Map or a Set is not accepted unjudged, and is withheld whole', () => {
+    const result = DatasourceSchema.safeParse({ name: 'w', driver: DRIVER, config: { opts: new Map([['a', 1]]) } });
+    expect(result.success).toBe(false);
+    expect(result.success ? '' : result.error.issues[0]?.message).toContain('Map or a Set');
+    expect(refusals({ list: [new Set(['x'])] })).toEqual(['config.list.0']);
+    expect(redactDatasourceConfig(DRIVER, { host: 'h', opts: new Map([['password', 'p']]) }).config).toEqual({ host: 'h' });
+  });
+});
+
+describe('a bare `key` is credential material only where it can be key material', () => {
+  it('`{ key: \'email\' }` and other names are accepted', () => {
+    expect(
+      refusals({ key: 'email', sort: { key: 'created_at', order: 'asc' }, keys: ['email', 'name'], index: { key: 42 } }),
+    ).toEqual([]);
+  });
+
+  it('a value that looks like a secret, or a credential-shaped or header-ish holder, makes it one', () => {
+    expect(refusals({ key: 'sk_live_51HxQ2bL9aZ0rT7yU' })).toEqual(['config.key']);
+    expect(refusals({ keys: ['email', 'a3f9c2d17b4e8a6f0c5d9e2b1a7f4c3e'] })).toEqual(['config.keys']);
+    expect(refusals({ headers: { key: 'abc' } })).toEqual(['config.headers.key']);
+    expect(refusals({ apiKey: { key: 'abc' } })).toEqual(['config.apiKey.key']);
+    expect(refusals({ auth: { key: 'abc' } })).toEqual(['config.auth.key']);
+  });
+
+  it('elsewhere `key` keeps its full judgment: a query parameter, a connection-string segment', () => {
+    expect(isCredentialShapedConfigKey('key')).toBe(true);
+    expect(embeddedCredentialOf('https://maps.example.com/api?key=abc')).toBeDefined();
+  });
+
+  it('the secret-looking predicate', () => {
+    for (const secret of ['sk_live_51HxQ2bL9aZ0rT7yU', 'AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY', 'a3f9c2d17b4e8a6f0c5d9e2b1a7f4c3e']) {
+      expect(looksLikeSecretValue(secret), secret).toBe(true);
+    }
+    for (const name of ['email', 'customer_email_2', 'orders.created_at', 'AKIA1234567890', 'two words here please']) {
+      expect(looksLikeSecretValue(name), name).toBe(false);
+    }
   });
 });

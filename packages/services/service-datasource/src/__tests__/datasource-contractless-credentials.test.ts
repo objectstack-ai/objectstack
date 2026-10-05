@@ -180,6 +180,87 @@ describe('the edit round trip on a legacy row', () => {
   });
 });
 
+describe('a withheld array value is carried only onto the element it came from', () => {
+  const STORED = {
+    servers: [{ host: 'a', password: 'p-a' }, { host: 'b', password: 'p-b' }],
+    headers: [{ name: 'Authorization', value: 'Bearer h-1' }, { name: 'Accept', value: 'application/json' }],
+    tuples: [['Accept', 'json'], ['Authorization', 'Bearer t-1']],
+  };
+  /** What getDatasource serves for STORED. */
+  const SERVED = {
+    servers: [{ host: 'a' }, { host: 'b' }],
+    headers: [{ name: 'Authorization' }, { name: 'Accept', value: 'application/json' }],
+    tuples: [['Accept', 'json'], ['Authorization']],
+  };
+  const restore = (patch: Record<string, unknown>) => restoreRedactedConfig(DRIVER, patch, STORED) as Record<string, unknown>;
+
+  it('control: the served config round-trips to the stored one', () => {
+    expect(restore(structuredClone(SERVED))).toEqual(STORED);
+  });
+
+  it('an element deleted before it: each remaining server keeps ITS OWN password', () => {
+    expect(restore({ ...structuredClone(SERVED), servers: [{ host: 'b' }] }).servers).toEqual([{ host: 'b', password: 'p-b' }]);
+  });
+
+  it('a reorder: every value follows its element', () => {
+    const out = restore({
+      servers: [{ host: 'b' }, { host: 'a' }],
+      headers: [{ name: 'Accept', value: 'application/json' }, { name: 'Authorization' }],
+      tuples: [['Authorization'], ['Accept', 'json']],
+    });
+    expect(out).toEqual({
+      servers: [{ host: 'b', password: 'p-b' }, { host: 'a', password: 'p-a' }],
+      headers: [{ name: 'Accept', value: 'application/json' }, { name: 'Authorization', value: 'Bearer h-1' }],
+      tuples: [['Authorization', 'Bearer t-1'], ['Accept', 'json']],
+    });
+  });
+
+  it('a renamed header, or an edited sibling field, receives nothing — the value is dropped', () => {
+    const out = restore({
+      servers: [{ host: 'a2' }, { host: 'b' }],
+      headers: [{ name: 'X-Other' }, { name: 'Accept', value: 'application/json' }],
+      tuples: [['Accept', 'json'], ['X-Other']],
+    });
+    expect(out).toEqual({
+      servers: [{ host: 'a2' }, { host: 'b', password: 'p-b' }],
+      headers: [{ name: 'X-Other' }, { name: 'Accept', value: 'application/json' }],
+      tuples: [['Accept', 'json'], ['X-Other']],
+    });
+    expect(JSON.stringify(out)).not.toMatch(/p-a|h-1|t-1/);
+  });
+
+  it('elements that cannot be told apart receive nothing once the array was edited; untouched, they keep their values', () => {
+    const stored = {
+      headers: [
+        { name: 'Authorization', value: 'v-1' },
+        { name: 'Authorization', value: 'v-2' },
+        { name: 'Accept', value: 'json' },
+      ],
+    };
+    const served = { headers: [{ name: 'Authorization' }, { name: 'Authorization' }, { name: 'Accept', value: 'json' }] };
+    expect(restoreRedactedConfig(DRIVER, structuredClone(served), stored)).toEqual(stored);
+    const edited = restoreRedactedConfig(DRIVER, { headers: [{ name: 'Authorization' }, { name: 'Authorization' }] }, stored);
+    expect(edited).toEqual({ headers: [{ name: 'Authorization' }, { name: 'Authorization' }] });
+  });
+
+  it('a raw-headers list: its withheld value comes back only into the untouched list', () => {
+    const stored = { headers: ['Authorization', 'Bearer r-1', 'Accept', 'json'] };
+    expect(restoreRedactedConfig(DRIVER, { headers: ['Authorization', null, 'Accept', 'json'] }, stored)).toEqual(stored);
+    expect(restoreRedactedConfig(DRIVER, { headers: ['Authorization', null, 'Accept', 'xml'] }, stored)).toEqual({
+      headers: ['Authorization', null, 'Accept', 'xml'],
+    });
+  });
+
+  it('through the service: deleting the first server keeps the second server\'s password on it', async () => {
+    const { service, records } = makeService([{ name: 'w', driver: DRIVER, origin: 'runtime', config: structuredClone(STORED) }]);
+    const read = await service.getDatasource('w');
+    const config = structuredClone(read!.config) as Record<string, unknown>;
+    config.servers = (config.servers as unknown[]).slice(1);
+    await service.updateDatasource('w', { config });
+    expect(records[0]!.config?.servers).toEqual([{ host: 'b', password: 'p-b' }]);
+  });
+});
+
 describe('planCredentialMigration names a contractless row\'s credentials as residue', () => {
   it('refuses with a remedy instead of reporting nothing-to-migrate', () => {
     const plan = planCredentialMigration({

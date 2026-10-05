@@ -579,11 +579,18 @@ describe('#20552 — carryForwardRedactedValues walks an array hop by IDENTITY',
         const out: any = carryForwardRedactedValues('flow', twins, stored);
         expect(out.nodes.every((n: any) => n.config?.secret === undefined)).toBe(true);
 
-        // A stored start node with no `id` gives the hop no identity to follow.
+        // A stored start node with no `id` is followed by its served projection
+        // instead: an untouched body carries the secret back (an unchanged
+        // GET → PUT deletes nothing), while a body in which that node CHANGED
+        // gives the hop nothing to follow — the value is dropped.
         const idless: any = storedInboundFlow();
         delete idless.nodes[1].id;
         const idlessServed = redactMetadataItem('flow', idless) as any;
-        const idlessOut: any = carryForwardRedactedValues('flow', idlessServed, idless);
+        const untouched: any = carryForwardRedactedValues('flow', structuredClone(idlessServed), idless);
+        expect(startNodeOf(untouched).config.secret).toBe(FLOW_SECRET);
+        const relabelled = structuredClone(idlessServed);
+        startNodeOf(relabelled).label = 'Relabelled';
+        const idlessOut: any = carryForwardRedactedValues('flow', relabelled, idless);
         expect(startNodeOf(idlessOut).config.secret).toBeUndefined();
     });
 });

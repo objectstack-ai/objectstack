@@ -911,6 +911,7 @@
     "likePatternToRegExp (function)",
     "likePatternToRegexSource (function)",
     "lintAuthoredRecordKeys (function)",
+    "looksLikeSecretValue (function)",
     "lowerFilterCondition (function)",
     "markFilterSubtreeProvenance (function)",
     "matchesLikePattern (function)",
@@ -981,6 +982,7 @@
     "utcInstantMs (function)",
     "validateDriverConfig (function)",
     "valueRoundTripDivergence (function)",
-    "valueSchemaFor (function)"
+    "valueSchemaFor (function)",
+    "withholdContractlessCredentials (function)"
   ]
 }

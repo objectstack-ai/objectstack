@@ -898,6 +898,7 @@
     "likePatternToRegExp": "src/data/filter.zod.ts#likePatternToRegExp (function)",
     "likePatternToRegexSource": "src/data/filter.zod.ts#likePatternToRegexSource (function)",
     "lintAuthoredRecordKeys": "src/data/authoring-key-lint.ts#lintAuthoredRecordKeys (function)",
+    "looksLikeSecretValue": "src/data/driver/contractless-credentials.ts#looksLikeSecretValue (function)",
     "lowerFilterCondition": "src/data/filter-lowering.ts#lowerFilterCondition (function)",
     "markFilterSubtreeProvenance": "src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance (function)",
     "matchesLikePattern": "src/data/filter.zod.ts#matchesLikePattern (function)",
@@ -968,6 +969,7 @@
     "utcInstantMs": "src/data/calendar-day.ts#utcInstantMs (function)",
     "validateDriverConfig": "src/data/driver/config-registry.zod.ts#validateDriverConfig (function)",
     "valueRoundTripDivergence": "src/data/value-roundtrip-conformance.ts#valueRoundTripDivergence (function)",
-    "valueSchemaFor": "src/data/field-value.zod.ts#valueSchemaFor (function)"
+    "valueSchemaFor": "src/data/field-value.zod.ts#valueSchemaFor (function)",
+    "withholdContractlessCredentials": "src/data/driver/contractless-credentials.ts#withholdContractlessCredentials (function)"
   }
 }
