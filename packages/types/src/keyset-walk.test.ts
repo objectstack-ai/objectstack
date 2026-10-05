@@ -197,7 +197,7 @@ describe('keysetWalk', () => {
       },
       { pageSize: 2 },
     );
-    expect((await collect(walk)).map((r) => r.id)).toEqual(keys);
+    expect(await collect(walk)).toEqual(keys);
     expect(walk.truncated).toBe(false);
   });
 
