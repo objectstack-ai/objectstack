@@ -102,6 +102,10 @@ import {
     // The one rule for which forms a `view` body opens to anonymous intake —
     // the same rule the anonymous form doors in `@objectstack/rest` serve by.
     anonymousFormIntakeSlugs,
+    // A withdrawal is a kill switch: the doors' layer predicate, which the
+    // org-scoped write door asks before accepting a re-opening write.
+    anonymousFormIntakeCandidates,
+    anonymousFormIntakeWithdrawnIn,
     // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
@@ -15683,7 +15687,9 @@ export class ObjectStackProtocolImplementation implements
             | undefined;
         if (typeof tenancy?.defaultOrgId !== 'function') return null;
         const doorOrganization = await tenancy.defaultOrgId();
-        if (doorOrganization === args.organizationId) return null;
+        if (doorOrganization === args.organizationId) {
+            return this.anonymousFormIntakeReopenRefusal({ ...args, type: singular, organizationId: args.organizationId });
+        }
         const proposed = anonymousFormIntakeSlugs(args.body);
         const served = anonymousFormIntakeSlugs(
             ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
@@ -15704,6 +15710,66 @@ export class ObjectStackProtocolImplementation implements
         );
         err.code = 'NOT_OVERRIDABLE';
         err.status = 403;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
+     * An organization-scoped `view` write, in the organization the anonymous
+     * form doors read, that would re-open a public form the env-wide layer
+     * withdrew. Returns the refusal, or `null` when the write is fine.
+     *
+     * A withdrawal is a kill switch: any layer that withdraws a public form's
+     * intake (or its anonymous access) closes it, and layering may only narrow
+     * intake, never re-open it. The doors enforce that at read time
+     * (`registerFormEndpoints` in `@objectstack/rest` reads the env-wide layer
+     * beneath the organization's and lets either withdraw), so such a write
+     * would be accepted and then never honoured. It is refused instead, and the
+     * author is pointed at the env-wide definition, which is the switch.
+     *
+     * Judged by the doors' own predicate ({@link anonymousFormIntakeWithdrawnIn})
+     * over the env-wide `view` list, and only for a slug this write opens that
+     * the organization's current definition does not: an edit that leaves the
+     * organization's intake as it is (or withdraws it) is never refused here.
+     */
+    private async anonymousFormIntakeReopenRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string;
+        body: unknown;
+    }): Promise<Error | null> {
+        if (!args.body || typeof args.body !== 'object') return null;
+        const body = { ...(args.body as Record<string, unknown>), name: args.name };
+        const proposed = anonymousFormIntakeCandidates(body);
+        if (proposed.length === 0) return null;
+        const current = new Set(anonymousFormIntakeSlugs(
+            ((await this.getMetaItem({ type: args.type, name: args.name, organizationId: args.organizationId })) as any)
+                ?.item,
+        ));
+        const opening = proposed.filter((c) => !current.has(c.slug));
+        if (opening.length === 0) return null;
+        const envWide: any = await this.getMetaItems({ type: args.type });
+        const layer: unknown[] = Array.isArray(envWide?.items) ? envWide.items : [];
+        const reopened = [...new Set(
+            opening.filter((c) => anonymousFormIntakeWithdrawnIn(layer, body, c)).map((c) => c.slug),
+        )].sort();
+        if (reopened.length === 0) return null;
+        const list = reopened.map((s) => `'/forms/${s}'`).join(', ');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot re-open public form ${list} for anonymous intake `
+            + `in organization '${args.organizationId}': the env-wide definition withdraws it. A withdrawal is `
+            + `a kill switch, so an organization overlay may narrow a public form's intake but never re-open it, `
+            + `and the anonymous form doors would keep answering it as not found. To publish it again, save the `
+            + `form env-wide (retry with no active organization) with sharing enabled and anonymous access `
+            + `allowed. An organization-scoped edit that keeps this form withdrawn is still accepted. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        // The sentence an end user is shown (the producer-declared channel).
+        err.userMessage = `This public form was withdrawn for the whole environment, so it cannot be re-opened `
+            + `for one organization. Publish it again from the environment-wide form definition.`;
         err.organizationId = args.organizationId;
         err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
         return err;

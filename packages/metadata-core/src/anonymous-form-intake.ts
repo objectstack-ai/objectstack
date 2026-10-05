@@ -22,6 +22,10 @@
  *
  * Clearing either switch withdraws the form from every anonymous door.
  *
+ * A withdrawal is a kill switch: any metadata layer the doors read that
+ * withdraws a form closes it, and layering may only narrow intake, never
+ * re-open it ({@link anonymousFormIntakeWithdrawnIn}).
+ *
  * The candidates are the three shapes a view carries a form in: the nested
  * `form`, every `formViews` entry, and the flattened `config` of a
  * `viewKind: 'form'` item.
@@ -239,4 +243,97 @@ export function anonymousFormIntakeUnavailableMessage(slug: string, u: Anonymous
         + `submission carries no organization, and an insert without one into a walled object is refused. `
         + anonymousFormIntakeUnavailableRemedy(u)
     );
+}
+
+/**
+ * Where a form sits in a `view` body, independent of its content: the nested
+ * `form`, one `formViews` entry, or the flattened `config`. Two bodies of the
+ * same view (one per metadata layer) carry "the same form" at the same slot.
+ */
+function anonymousFormSlot(view: Record<string, any>, candidate: AnonymousFormIntakeCandidate): string {
+    if (candidate.form === view.form) return 'form';
+    if (candidate.key !== undefined && view.formViews?.[candidate.key] === candidate.form) {
+        return `formViews:${candidate.key}`;
+    }
+    return 'config';
+}
+
+/** The `sharing` a `view` body carries at a slot (see {@link anonymousFormSlot}), if any. */
+function anonymousFormSharingAtSlot(view: Record<string, any>, slot: string): unknown {
+    if (slot === 'form') return view.form?.sharing;
+    if (slot.startsWith('formViews:')) return view.formViews?.[slot.slice('formViews:'.length)]?.sharing;
+    return view.viewKind === 'form' ? view.config?.sharing : undefined;
+}
+
+/** Every form `sharing` a `view` body carries, in scan order (open or not). */
+function anonymousFormSharings(view: unknown): unknown[] {
+    if (!view || typeof view !== 'object') return [];
+    const v = view as Record<string, any>;
+    const out: unknown[] = [];
+    if (v.form && typeof v.form === 'object') out.push(v.form.sharing);
+    if (v.formViews && typeof v.formViews === 'object') {
+        for (const fv of Object.values(v.formViews)) {
+            if (fv && typeof fv === 'object') out.push((fv as Record<string, unknown>).sharing);
+        }
+    }
+    if (v.viewKind === 'form' && v.config && typeof v.config === 'object') out.push(v.config.sharing);
+    return out;
+}
+
+/**
+ * The slugs a `view` body WITHDRAWS: a form `sharing` names the slug in its
+ * `publicLink` but does not open it (`enabled` or `allowAnonymous` is not
+ * `true`). Sorted and de-duplicated.
+ */
+export function anonymousFormWithdrawnSlugs(view: unknown): string[] {
+    const withdrawn = new Set<string>();
+    for (const sharing of anonymousFormSharings(view)) {
+        if (!sharing || typeof sharing !== 'object') continue;
+        const publicLink = (sharing as Record<string, unknown>).publicLink;
+        if (typeof publicLink !== 'string' || !publicLink) continue;
+        if (anonymousFormIntakeSlug(sharing) !== null) continue;
+        withdrawn.add(publicFormSlug(publicLink));
+    }
+    return [...withdrawn].sort();
+}
+
+/**
+ * Does one metadata layer — the full `view` list one read answers — withdraw
+ * an open form candidate? A WITHDRAWAL IS A KILL SWITCH: layering may only
+ * narrow anonymous intake, never re-open it, so the anonymous form doors serve
+ * a candidate only when no layer they read withdraws it (and the
+ * organization-scoped write door refuses a write that would re-open one).
+ *
+ * The layer withdraws it when either holds:
+ *
+ * - some view in the layer names the candidate's slug in a `sharing` it does
+ *   not open ({@link anonymousFormWithdrawnSlugs}) — the slug is withdrawn,
+ *   whichever view withdrew it;
+ * - the layer's own body of the same view (by `name`) switches the form at the
+ *   same slot off: `sharing.enabled === false` or `sharing.allowAnonymous ===
+ *   false`, whatever its `publicLink` says.
+ *
+ * A layer with no body of the view and no word on the slug withdraws nothing,
+ * so a form published only in an organization stays open there.
+ */
+export function anonymousFormIntakeWithdrawnIn(
+    layer: ReadonlyArray<unknown>,
+    view: unknown,
+    candidate: AnonymousFormIntakeCandidate,
+): boolean {
+    if (!view || typeof view !== 'object') return false;
+    const v = view as Record<string, any>;
+    const slot = anonymousFormSlot(v, candidate);
+    const name = typeof v.name === 'string' && v.name ? v.name : undefined;
+    for (const other of layer) {
+        if (!other || typeof other !== 'object') continue;
+        if (anonymousFormWithdrawnSlugs(other).includes(candidate.slug)) return true;
+        const o = other as Record<string, any>;
+        if (name === undefined || o.name !== name) continue;
+        const sharing = anonymousFormSharingAtSlot(o, slot);
+        if (!sharing || typeof sharing !== 'object') continue;
+        const s = sharing as Record<string, unknown>;
+        if (s.enabled === false || s.allowAnonymous === false) return true;
+    }
+    return false;
 }
