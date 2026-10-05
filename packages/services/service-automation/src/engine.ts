@@ -229,12 +229,6 @@ import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // `../guard-refusal.js` and package-external contracts, so nothing it pulls in
 // reaches back here.
 import { interpolateText } from './builtin/template.js';
-// [#21848] A node's config contract (`NodeExecutor.configContract`) is the
-// structural `safeParse` view the builtin executors already parse through, and
-// the registration-time refusal spells its paths the way that execute-time
-// refusal does. Safe in this direction for the same reason as the line above:
-// `parse-config.ts` imports only `../guard-refusal.js`.
-import { formatIssuePath, type NodeConfigContract } from './builtin/parse-config.js';
 
 /**
  * Does this `decision` take EVERY out-edge whose condition holds (#15429)?
@@ -266,27 +260,6 @@ export interface NodeExecutor {
      * one so their node appears in the palette and validates as a legal flow node.
      */
     readonly descriptor?: ActionDescriptor;
-
-    /**
-     * The contract this executor parses `node.config` against before it does
-     * anything else, when it parses one — declared here so registration judges
-     * the config by the SAME schema the run would (#21848). Pass the very
-     * object `execute()` parses, never a copy or a second, hand-written check.
-     *
-     * {@link AutomationEngine.registerFlow} parses every node of this type
-     * with it and refuses the flow on any finding, naming the flow, the node
-     * and the config path: an executor that fails the node on a finding would
-     * fail every run that reached the node, and the config is metadata, so no
-     * run can get past it until the flow changes. Absent ⇒ the node's config is
-     * judged at registration on its key NAMES alone (the descriptor's
-     * `configSchema`), exactly as before this member existed.
-     *
-     * Declare it only where the executor parses its stored config as written.
-     * One that reads the config only after transforming it (interpolating
-     * `{token}`s into typed slots first, say) would see a different value than
-     * registration does, and must not declare it.
-     */
-    readonly configContract?: NodeConfigContract<unknown>;
 
     /**
      * Execute a node
@@ -4411,14 +4384,6 @@ export class AutomationEngine implements IAutomationService {
         // safe, and for the deliberate exemptions (`assignment`, schemaless
         // types, keyValue maps).
         this.validateNodeConfigKeys(name, parsed);
-
-        // #21848 — and the VALUES: every node whose executor declares the
-        // contract it parses its config against is parsed with that contract
-        // here, so a value the run would refuse (an approval escalation's
-        // `timeoutHours: 0.5` under its `>= 1`) refuses the flow instead of
-        // failing every run that reaches the node. After the key check, so an
-        // undeclared key keeps its own refusal and prescriptions.
-        this.validateNodeConfigValues(name, parsed);
 
         // #15429 — parse every `decision` node's config against the spec's
         // `DecisionConfigSchema` and refuse the flow on an invalid `mode`, with
@@ -10351,74 +10316,6 @@ export class AutomationEngine implements IAutomationService {
                 `declare it on the node type's descriptor configSchema instead: the built-in node types were ` +
                 `reconciled so every key their executors read is declared, and a read-but-undeclared key is ` +
                 `exactly the drift that reconciliation removed.`,
-            );
-        }
-    }
-
-    /**
-     * REJECT a node `config` VALUE its own executor would refuse (#21848) —
-     * the value half of {@link validateNodeConfigKeys}, which judges names.
-     *
-     * Before this pass registration read a node's config against the
-     * descriptor's JSON-Schema `configSchema` for its key NAMES only, and the
-     * values were first parsed when a run reached the node. So a value the
-     * contract refuses registered and loaded `active`: an approval node whose
-     * `escalation.timeoutHours` was `0.5` (the contract says `>= 1`) let every
-     * matching record be created, then failed every run at the node — no
-     * approval request opened, the record stood without the gate it was meant
-     * to pass, and the user who saved it saw nothing.
-     *
-     * **The executor's own contract is the one judge.** A node type whose
-     * executor declares {@link NodeExecutor.configContract} — the very object
-     * its `execute()` parses — has every node's `config ?? {}` parsed with it
-     * here, as the run would parse it, and every finding refuses the flow.
-     * ⛔ No second, hand-written value check, and no judging against the
-     * descriptor's JSON Schema, which is the form's projection of the contract
-     * and drops what JSON Schema cannot say (a `superRefine` rule).
-     *
-     * **Absent ⇒ unchanged.** A node type whose executor declares no contract
-     * — the builtins, which parse theirs inside `execute()` (#20316 judges
-     * only their required keys' presence at the flow parse), the schemaless
-     * ones, and any type whose executor is not registered yet — is judged on
-     * key names alone, exactly as before. "Not registered yet" is a boot fact:
-     * a plugin registers its executor from its own `start()`, after the boot
-     * flow pull, so the boot pull cannot judge its nodes; the `kernel:ready`
-     * cold-boot bind re-registers every flow once those executors exist, and
-     * a flow it refuses is withdrawn there (`AutomationServicePlugin`), the
-     * same end as a flow the boot pull refuses.
-     *
-     * The refusal mirrors the key-name one — the flow, then one line per
-     * finding naming the node, its type and the config path in the spelling
-     * the execute-time refusal uses (`config.escalation.timeoutHours`), with the
-     * contract's own sentence — and, like it, every `registerFlow` caller
-     * already handles the throw: the boot pull and the syncs skip the flow
-     * loudly, the `/automation` write doors answer `400 VALIDATION_FAILED`.
-     */
-    private validateNodeConfigValues(flowName: string, flow: FlowParsed): void {
-        const violations: string[] = [];
-        for (const graph of collectFlowGraphs(flow)) {
-            for (const node of graph.nodes) {
-                const contract = this.nodeExecutors.get(node.type)?.configContract;
-                if (!contract) continue;
-                const verdict = contract.safeParse(node.config ?? {});
-                if (verdict.success) continue;
-                const issues = verdict.error?.issues ?? [];
-                const found = issues.length > 0
-                    ? issues.map((issue) => `${formatIssuePath(issue.path)}: ${issue.message}`)
-                    : ['config: refused by the contract, which named no issue'];
-                for (const finding of found) {
-                    const line = `node '${node.id}' (${node.type}): ${finding}`;
-                    violations.push(graph.scope ? `${graph.scope} · ${line}` : line);
-                }
-            }
-        }
-        if (violations.length > 0) {
-            throw new Error(
-                `Flow '${flowName}' rejected: ${violations.length} config value(s) the node's own contract refuses.\n` +
-                violations.map((v) => `  - ${v}`).join('\n') +
-                `\nThe node's executor parses its config against this same contract before it does anything ` +
-                `else and fails the node on any finding, so every run that reached the node would fail there. ` +
-                `The config is metadata, so re-registering changes nothing — correct the value at the path above.`,
             );
         }
     }

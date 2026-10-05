@@ -36,13 +36,6 @@ export interface ApprovalAutomationSurface {
   registerNodeExecutor(executor: {
     type: string;
     descriptor?: unknown;
-    /**
-     * #21848: the contract `execute` parses `node.config` against — the engine
-     * parses every node of this type with it when a flow registers, so a value
-     * the run would refuse refuses the flow instead. Mirrors
-     * `NodeExecutor.configContract`.
-     */
-    configContract?: { safeParse(value: unknown): unknown };
     execute(node: any, variables: Map<string, unknown>, context: any): Promise<{
       success: boolean;
       output?: Record<string, unknown>;
@@ -136,13 +129,6 @@ export function registerApprovalNode(
       // rather than a hardcoded client form — the engine owns the shape.
       configSchema: getApprovalNodeConfigJsonSchema(),
     }),
-    // #21848: the SAME schema `execute` parses below, declared so the engine
-    // parses every approval node's config with it when a flow registers. The
-    // JSON Schema above is the form's projection and settles key names only;
-    // a value this refuses (`escalation.timeoutHours: 0.5` under its `>= 1`)
-    // used to register and load `active`, then fail every run at this node
-    // with no approval request opened.
-    configContract: ApprovalNodeConfigSchema,
     async execute(node, variables, context) {
       const parsed = ApprovalNodeConfigSchema.safeParse(node.config ?? {});
       if (!parsed.success) {

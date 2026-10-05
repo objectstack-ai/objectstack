@@ -2487,13 +2487,13 @@ export class AutomationServicePlugin implements Plugin {
      * the boot pull made is withdrawn, so a flow refused at load is not left
      * registered, whichever of the two boot steps refused it. The two can
      * disagree because the node-type vocabulary grows between them — a plugin
-     * registers its node executor (and the config contract registration
-     * judges that node by) from its own `start()`, after the boot pull, so the
-     * pull registered such a flow unjudged and armed it. Leaving that
-     * registration in place behind this refusal's warning kept the flow
-     * `active` and bound: every run then failed at the node the refusal
-     * located. Only the refused name is withdrawn; a failed or empty READ
-     * still tears nothing down (the early returns above).
+     * registers its node executor, and with it the descriptor `configSchema`
+     * registration checks that node's config keys against, from its own
+     * `start()`, after the boot pull, so the pull registered such a flow
+     * unjudged and armed it. Leaving that registration in place behind this
+     * refusal's warning kept the flow `active` and bound to its trigger.
+     * Only the refused name is withdrawn; a failed or empty READ still tears
+     * nothing down (the early returns above).
      */
     private async syncFlowsFromProtocol(ctx: PluginContext): Promise<void> {
         if (!this.engine) return;
