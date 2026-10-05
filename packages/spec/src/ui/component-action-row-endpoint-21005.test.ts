@@ -38,7 +38,7 @@ const ROWS = [
   ['action:icon', ActionIconPropsSchema, { icon: 'play' }],
 ] as const;
 
-describe('[#21005] the action rows refuse `endpoint` with ActionSchema\'s own rename', () => {
+describe('the action rows refuse `endpoint` with ActionSchema\'s own rename', () => {
   it.each(ROWS)('`%s` refuses `endpoint` — the same `endpoint` → `target` clause ActionSchema prints', (type, schema, rest) => {
     const issue = unknownKeyIssue(schema.safeParse({ ...rest, actionType: 'api', endpoint: '/api/v1/x' }));
     expect(issue.keys).toEqual(['endpoint']);

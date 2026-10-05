@@ -493,7 +493,7 @@ describe('§4 each narrowing is registered as the ADR-0087 D3 entry step 18 carr
 // §5 the grid widget's camelCase keys (#21768)
 // ───────────────────────────────────────────────────────────────────────────
 
-describe('§5 the grid widget\'s eight field-level keys, camelCase since objectstack-ai/objectui#11610', () => {
+describe('§5 the grid widget\'s eight field-level keys, camelCase since objectui renamed them', () => {
   // The rename, as objectui's `GRID_FIELD_RETIRED_KEYS` pairs it (`types/src/field-types.ts:1159` at the
   // `.objectui-sha` pin `9dfaca654311`), with each key's value type as `GridFieldMetadata` declares it.
   const GRID_KEYS = [

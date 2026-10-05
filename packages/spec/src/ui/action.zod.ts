@@ -1033,8 +1033,6 @@ const actionObject = () => strictObject({
    * - `${param.X}` — value collected from the action's params dialog.
    * - `${ctx.X}` — values from the action context: `ctx.origin`
    *   (window.origin), `ctx.recordId`, `ctx.user.id`, `ctx.org.id`, etc.
-   * Used by redirect-style actions like `link_social`, where the target is
-   * e.g. `/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account`.
    * Renderers MUST `encodeURIComponent` interpolated values before
    * substituting them into URL query positions.
    */
