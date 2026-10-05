@@ -151,7 +151,12 @@ function loggedText(logger: ReturnType<typeof makeLogger>): string {
 }
 
 async function boot(
-  opts: { refuseHashWrites?: boolean; serviceOptions?: Partial<ConstructorParameters<typeof ShareLinkService>[0]> } = {},
+  opts: {
+    refuseHashWrites?: boolean;
+    /** An engine whose `sys_share_link` reads do NOT strip the hash column. */
+    leakyReads?: boolean;
+    serviceOptions?: Partial<ConstructorParameters<typeof ShareLinkService>[0]>;
+  } = {},
 ) {
   const engine = new ObjectQL();
   engines.push(engine);
@@ -174,11 +179,23 @@ async function boot(
   );
 
   // The engine the service is handed: the real one, optionally refusing any
-  // write of the password hash column (the upgrade write).
-  const served: any = opts.refuseHashWrites
+  // write of the password hash column (the upgrade write), or optionally
+  // handing the hash column back on every `sys_share_link` read (an engine
+  // without the `internal` strip — the case the service's own exit projection
+  // exists for).
+  const served: any = opts.refuseHashWrites || opts.leakyReads
     ? new Proxy(engine as any, {
         get(target, prop, receiver) {
-          if (prop === 'update') {
+          if (prop === 'find' && opts.leakyReads) {
+            return async (object: string, q: unknown) => {
+              const rows = await target.find(object, q);
+              if (object !== 'sys_share_link' || !Array.isArray(rows)) return rows;
+              return Promise.all(
+                rows.map(async (r: Row) => ({ ...r, password_hash: await storedHash(target, String(r.id)) })),
+              );
+            };
+          }
+          if (prop === 'update' && opts.refuseHashWrites) {
             return async (object: string, data: Row, o: unknown) => {
               if (object === 'sys_share_link' && 'password_hash' in (data ?? {})) {
                 const err: any = new Error('storage refused the write');
@@ -272,6 +289,25 @@ describe('[#21839] the stored hash never leaves the server', () => {
     });
     expect(viaRoute.status).toBe(200);
     expectNoHash(viaRoute.body, stored, 'GET resolve route');
+  });
+
+  it('the list and the redemption result carry no hash even from an engine that does not strip it', async () => {
+    const { engine, service } = await boot({ leakyReads: true });
+    const minted = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: PASSWORD }, CREATOR);
+    const stored = (await storedHash(engine, minted.id))!;
+
+    // Control: the wired engine really hands the hash back, so the absence
+    // below is the service's projection and not the engine's strip.
+    const raw = await (service as unknown as { engine: SharingEngine }).engine.find('sys_share_link', {
+      where: { id: minted.id },
+      context: { isSystem: true },
+    } as never);
+    expect((raw as Row[])[0]?.password_hash, 'the leaky engine returns the hash').toBe(stored);
+
+    expectNoHash(await service.listLinks({ createdBy: CREATOR.userId }, CREATOR), stored, 'service listLinks');
+    const resolved = await service.resolveToken(minted.token, { providedPassword: PASSWORD });
+    expect(resolved, 'the password still verifies through the leaky read').not.toBeNull();
+    expectNoHash(resolved, stored, 'service resolveToken');
   });
 });
 
