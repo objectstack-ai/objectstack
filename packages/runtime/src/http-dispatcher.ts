@@ -1461,10 +1461,15 @@ export class HttpDispatcher {
             const ql = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
             if (!ql) return null; // No QL — cannot enforce; fail open.
 
+            // The membership read carries the explicit system opt-in. This
+            // gate is the one asking the question — the caller's user id is
+            // the `where`, not the reader — so the read runs as the platform,
+            // never as a context with no principal and no opt-in (the
+            // security middleware's principal-less hand-off, ADR-0096).
             let rows = await ql.find('sys_environment_member', {
                 where: { environment_id: environmentId, user_id: userId },
                 limit: 1,
-            } as any);
+            } as any, { context: { isSystem: true } });
             if (rows && (rows as any).value) rows = (rows as any).value;
             const isMember = Array.isArray(rows) && rows.length > 0;
 

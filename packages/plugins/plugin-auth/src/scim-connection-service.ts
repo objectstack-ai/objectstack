@@ -107,8 +107,22 @@ export type ScimScope = (typeof SCIM_ALL_SCOPES)[number];
 /** Minimal engine surface the service needs (matches IDataEngine usage here). */
 interface CredentialEngine {
   insert(object: string, row: Record<string, unknown>): Promise<Record<string, unknown>>;
-  findOne(object: string, query: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+  findOne(
+    object: string,
+    query: { where: Record<string, unknown> },
+    options?: { context?: { isSystem?: boolean } },
+  ): Promise<Record<string, unknown> | null>;
 }
+
+/**
+ * The credential probe's execution context: the explicit system opt-in. The
+ * verifier runs BEFORE any caller is known — the bearer it is verifying is the
+ * only identity on the request — so there is no principal to carry, and the
+ * read must say so rather than reach the engine with no principal and no
+ * opt-in (the security middleware's principal-less hand-off, ADR-0096). The
+ * digest equality in the `where` is the whole of what the probe may match.
+ */
+const CREDENTIAL_PROBE_CONTEXT = { context: { isSystem: true } } as const;
 
 /**
  * One-way digest of a SCIM bearer: HMAC-SHA-256(secret, "scim-credential-v1:" + token),
@@ -196,7 +210,7 @@ export async function verifyScimBearerToken(
   const digest = digestScimBearerToken(secret, token);
   let row: Record<string, unknown> | null;
   try {
-    row = await engine.findOne(SCIM_CREDENTIAL_OBJECT, { where: { token_digest: digest } });
+    row = await engine.findOne(SCIM_CREDENTIAL_OBJECT, { where: { token_digest: digest } }, CREDENTIAL_PROBE_CONTEXT);
   } catch {
     // A storage fault reads as "cannot verify", never as "verified".
     return null;
