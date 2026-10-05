@@ -10431,7 +10431,16 @@ export class ObjectStackProtocolImplementation implements
             : overlay !== null && !this.isShippedFlowName(request.type, request.name)
                 ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
                 : code;
-        const effective: unknown | null = this.governServedObject(request.type, effectiveBase);
+        // [#21761] `effective` is what {@link getMetaItem} would return, and
+        // that read's body carries the `overlay` layer's lock family when that
+        // layer binds (the strictest row in scope, which need not be the row
+        // `overlay` reports). So this one does too. `code` and `overlay` stay
+        // the layers as shipped and as stored.
+        const lockArtifact = this.lookupArtifactItem(request.type, request.name, request.packageId);
+        const effective: unknown | null = withOverlayLockFamily(
+            this.governServedObject(request.type, effectiveBase),
+            { artifact: lockArtifact, overlay: overlayLockLayer },
+        );
 
         const _diagnostics =
             effective !== null && effective !== undefined
@@ -10442,15 +10451,15 @@ export class ObjectStackProtocolImplementation implements
         // can render the correct affordances without a second round trip.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
         // [#21738] The lock is the one item-lock resolution's — the
-        // `getMetaItem` call over this read's artifact lookup and the served
-        // row's stored body — never `code ?? overlay`, which took the code
+        // `getMetaItem` call over this read's artifact lookup and [#21761] the
+        // rows in scope for its address — never `code ?? overlay`, which took the code
         // layer's (absent) lock over a stored row's `_lock`. A row-less name a
         // stored container expands contributes no `overlay` layer: the
         // container's row is not this name's row, and the `_lock` gate does not
         // read it. The provenance fields still come from the layer the
         // response reports first.
         const itemLock = resolveItemLock({
-            artifact: this.lookupArtifactItem(request.type, request.name, request.packageId),
+            artifact: lockArtifact,
             overlay: overlayLockLayer,
         });
         // [#21670] …joined with the locked-packaged-base verdict the write

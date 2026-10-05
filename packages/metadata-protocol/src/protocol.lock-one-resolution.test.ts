@@ -644,6 +644,7 @@ async function readsAndDoor(protocol: ObjectStackProtocolImplementation, name: s
         reads: { lock: read.lock, editable: read.editable, deletable: read.deletable },
         servedLabel: read.byName.item?.label,
         bodyLock: read.byName.item?._lock,
+        effectiveLock: read.layered.effective?._lock,
         save: await door(protocol, 'view', 'save', undefined, name, packageId),
         delete: await door(protocol, 'view', 'delete', undefined, name, packageId),
     };
@@ -658,8 +659,10 @@ describe('[#21761] pin 4 — arrangement 1: a package-less \'none\' row and the 
                 expect(got.reads).toEqual({ lock: 'full', editable: false, deletable: false });
                 expect(got.save).toEqual(ITEM_LOCKED);
                 expect(got.delete).toEqual(ITEM_LOCKED);
-                // The served body states the lock the envelope reports.
+                // The served body states the lock the envelope reports, and
+                // the layered read's `effective` (what getMetaItem returns) too.
                 expect(got.bodyLock).toBe('full');
+                expect(got.effectiveLock).toBe('full');
                 // Content stays prefer-local (ADR-0048): a request naming the
                 // package is served the package's own row.
                 if (packageId) expect(got.servedLabel).toBe('package row');
@@ -681,6 +684,7 @@ describe('[#21761] pin 5 — arrangement 2: the package\'s \'none\' row and a pa
                 expect(got.save).toEqual(ITEM_LOCKED);
                 expect(got.delete).toEqual(ITEM_LOCKED);
                 expect(got.bodyLock).toBe('full');
+                expect(got.effectiveLock).toBe('full');
                 // The served CONTENT is still the package's own row, and its
                 // envelope reports the binding row's prose.
                 if (packageId) expect(got.servedLabel).toBe('package row');
