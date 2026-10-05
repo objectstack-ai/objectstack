@@ -1091,6 +1091,47 @@ export function createPermissionSetWriteThrough(
     }
   };
 
+  /**
+   * [#21861] The `saveMetaItem` argument that writes an update back into the
+   * stored row it edits: `{ packageId }` when that row is bound to a package,
+   * nothing when it is not.
+   *
+   * A `sys_metadata` row is keyed `(org, type, name, package_id)`, and a save
+   * that names no package targets the package-less row. So an update leg that
+   * named none, for a set whose only row is bound to a writable runtime
+   * package (`PUT /meta/permission/:name?package=`), minted a second,
+   * package-less row carrying the edit beside the untouched package-bound one:
+   * two active rows for one name.
+   *
+   * The row is the one the update merges its patch into — the `overlay` layer
+   * of `envelope`, which {@link effectiveBodyForRow} takes as the base — and its
+   * binding is read from the metadata door's own single-item read, which serves
+   * that row by the same served-row resolution the layered read uses and states
+   * the row's `package_id` on it as `_packageId`. ⛔ Never from the patch, the
+   * projected record (the projector writes no binding onto an admin row), or a
+   * registry item: those are copies, and the row is the fact.
+   *
+   * No `overlay` layer means no stored row, so there is nothing to fork and the
+   * save stays package-less, exactly as before. Every target reaching this read
+   * has already passed the lock (verdict `org`), so a code-shipped set never
+   * gets here. A read that fails is not caught: guessing the binding would
+   * choose which row the save lands in.
+   */
+  const storedRowPackageArg = async (
+    protocol: any,
+    name: string,
+    envelope: unknown,
+  ): Promise<{ packageId?: string }> => {
+    const overlay = (envelope as { overlay?: unknown } | null | undefined)?.overlay;
+    if (overlay === null || overlay === undefined) return {};
+    // A protocol with no single-item read (minimal embeddings, unit-test stubs)
+    // keys no row by package either.
+    if (typeof protocol.getMetaItem !== 'function') return {};
+    const served = await protocol.getMetaItem({ type: 'permission', name });
+    const packageId = served?.item?._packageId;
+    return typeof packageId === 'string' && packageId !== '' ? { packageId } : {};
+  };
+
   const projectAndFetch = async (protocol: any, name: string): Promise<any> => {
     // The awaited projector inside saveMetaItem/deleteMetaItem normally did
     // this already — re-running is an idempotent upsert, and covers the
@@ -1368,10 +1409,13 @@ export function createPermissionSetWriteThrough(
       const rowState = pickRowStateColumns(patch);
       const results: any[] = [];
       for (const row of targets) {
-        const base = await effectiveBodyForRow(protocol, ql, row, layeredByName.get(String(row.name)));
+        const envelope = layeredByName.get(String(row.name));
+        const base = await effectiveBodyForRow(protocol, ql, row, envelope);
         const body = mergeRowPatchIntoBody(base, patch);
         body.name = row.name;
-        await protocol.saveMetaItem({ type: 'permission', name: row.name, item: body, ...actorArg });
+        // [#21861] Into the row the base came from — see `storedRowPackageArg`.
+        const packageArg = await storedRowPackageArg(protocol, String(row.name), envelope);
+        await protocol.saveMetaItem({ type: 'permission', name: row.name, item: body, ...packageArg, ...actorArg });
         // Row state rides along on the same patch but lands on the record, not
         // in the definition (the projector above never touches these columns).
         if (rowState) await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...rowState });
