@@ -1761,5 +1761,43 @@ describe('each package\'s copy of a view container expands into its own package\
                 }
             }
         });
+
+        // The condition on the hydration line above: the by-name read that
+        // names NO package is the generic reader of a hydrated bare entry. For
+        // a name two packages ship, after one of them stores a copy, it answers
+        // on both kernels, never an absence; both kernels answer the same body;
+        // and that body is one the env-wide list serves under the name. Which
+        // package's body it is stays ADR-0048's ambiguous case (two packages
+        // ship one name): it is the copy's, the last expansion of the name, as
+        // the read naming no package selects (servedViewExpansion).
+        describe('(h) a name two packages ship: the by-name read naming no package answers on both kernels, with the same body', () => {
+            const ORDERS = [[OTHER, COPYING], [COPYING, OTHER]] as const;
+            for (const m of MEMBERS) {
+                for (const owner of [OTHER, undefined] as const) {
+                    for (const order of ORDERS) {
+                        const ownership = owner ? 'another package owns the object' : 'no code package owns the object';
+                        it(`${m.member}; ${ownership}; ${order[0]} registered first`, async () => {
+                            const [name] = loaderNames(m.body('x', true, SLUG));
+                            const answers: unknown[] = [];
+                            for (const [kernel, environmentId] of KERNELS) {
+                                const shipped = order.map((pkg): [string, Record<string, unknown>] =>
+                                    [pkg, { object: 'task', ...m.body(SHIPPED_TITLE(pkg), true, pkg === COPYING ? SLUG : OTHER_SLUG) }]);
+                                const { protocol } = harness(shipped, environmentId, owner);
+                                const placement = PLACEMENTS.find((q) => q.m === m && q.owner === owner && q.ships);
+                                if (!placement) throw new Error(`no placement for ${ownership}, ${m.member}`);
+                                await saveCopyOf(protocol, placement, false);
+                                const item = (await protocol.getMetaItem({ type: 'view', name })).item;
+                                expect(item, `${kernel}: the read naming no package answers ${name}`).toBeTruthy();
+                                const envWide: any = await protocol.getMetaItems({ type: 'view' });
+                                const listed = (envWide.items as any[]).filter((v) => v?.name === name).map(titleOf);
+                                expect(listed, `${kernel}: a body the env-wide list serves under ${name}`).toContain(titleOf(item));
+                                answers.push(titleOf(item));
+                            }
+                            expect(answers[1], 'the unscoped kernel answers what the environment-scoped kernel answers').toBe(answers[0]);
+                        });
+                    }
+                }
+            }
+        });
     });
 });
