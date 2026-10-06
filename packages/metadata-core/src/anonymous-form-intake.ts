@@ -291,6 +291,12 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
     return out;
 }
 
+/** The package a served `view` body is bound to (`_packageId`), or `undefined` when none. */
+function anonymousFormPackageOf(view: Record<string, unknown>): string | undefined {
+    const p = view._packageId;
+    return typeof p === 'string' && p ? p : undefined;
+}
+
 /**
  * Does one metadata layer withdraw an open form candidate? A WITHDRAWAL IS A
  * KILL SWITCH: layering may only narrow anonymous intake, never re-open it, so
@@ -317,7 +323,12 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
  * the same container).
  *
  * Another row that publishes or withdraws the same slug is a different form
- * and closes nothing. A layer with no body of the row, or whose body has no
+ * and closes nothing. That includes another package's row of the same name
+ * (ADR-0048 keys a row by its package too): when the layer body and the
+ * candidate's `view` are both bound to a package (`_packageId`) and the
+ * packages differ, the layer body closes nothing. A body bound to no package
+ * is the package-less definition, which stands in for every package's row of
+ * that name, so it is compared whatever the other side's package is. A layer with no body of the row, or whose body has no
  * explicit withdrawal, withdraws nothing, so a form published only in an
  * organization stays open there.
  */
@@ -331,9 +342,12 @@ export function anonymousFormIntakeWithdrawnIn(
     const name = typeof v.name === 'string' && v.name ? v.name : undefined;
     if (name === undefined) return false;
     const slot = anonymousFormSlot(v, candidate);
+    const pkg = anonymousFormPackageOf(v);
     for (const other of layer) {
         if (!other || typeof other !== 'object') continue;
         if ((other as Record<string, unknown>).name !== name) continue;
+        const otherPkg = anonymousFormPackageOf(other as Record<string, unknown>);
+        if (pkg !== undefined && otherPkg !== undefined && pkg !== otherPkg) continue;
         for (const w of anonymousFormExplicitWithdrawals(other)) {
             if (w.slot === slot || w.slug === candidate.slug) return true;
         }

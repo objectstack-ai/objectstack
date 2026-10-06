@@ -98,6 +98,8 @@ interface Setup {
   envWideViews?: unknown[];
   /** Extra views every read answers alongside the form view. */
   extraViews?: unknown[];
+  /** Replaces the organization read's whole view list (the env-wide read is unchanged). */
+  orgViews?: unknown[];
 }
 
 function build(setup: Setup) {
@@ -105,6 +107,7 @@ function build(setup: Setup) {
   const getMetaItems = vi.fn(async (req: { type: string; organizationId?: string }) => {
     if (req.type === 'view') {
       if (req.organizationId !== ORG && setup.envWideViews) return setup.envWideViews;
+      if (req.organizationId === ORG && setup.orgViews) return setup.orgViews;
       const effective = req.organizationId === ORG && setup.inOrg !== undefined ? setup.inOrg : setup.envWide;
       return [formView(effective, setup.sharing), ...(setup.extraViews ?? [])];
     }
@@ -268,6 +271,28 @@ describe('a public form withdrawal is a kill switch: layering only narrows intak
     const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [cleared] });
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);
+  });
+
+  // ADR-0048: the package is part of the row. The list reads serve one item
+  // per package for a name, each carrying its `_packageId`.
+  it('another package\'s withdrawal of the same view name does not close this package\'s form', async () => {
+    const openA = { ...formView(true), _packageId: 'pkg_a' };
+    const s = build({
+      envWide: true, inOrg: true, tenancy: 'org',
+      orgViews: [openA],
+      envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(false), _packageId: 'pkg_b' }],
+    });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
+  });
+
+  it('the same package\'s withdrawal of the view name closes its form, beside another package\'s open one', async () => {
+    const openA = { ...formView(true), _packageId: 'pkg_a' };
+    await expectClosed(build({
+      envWide: true, inOrg: true, tenancy: 'org',
+      orgViews: [openA],
+      envWideViews: [{ ...formView(false), _packageId: 'pkg_a' }, { ...formView(true), _packageId: 'pkg_b' }],
+    }));
   });
 
   it('another view withdrawing the same slug env-wide does not close this view\'s form', async () => {

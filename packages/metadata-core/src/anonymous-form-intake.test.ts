@@ -217,6 +217,34 @@ describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same 
         )).toBe(false);
     });
 
+    describe('the package is part of the row (ADR-0048)', () => {
+        const bound = (body: Record<string, unknown>, pkg: string) => ({ ...body, _packageId: pkg });
+        const withdrawn = view({ ...OPEN, enabled: false });
+
+        it('another package\'s withdrawal of the same name closes nothing', () => {
+            const openA = bound(openView, 'pkg_a');
+            const [c] = anonymousFormIntakeCandidates(openA);
+            expect(anonymousFormIntakeWithdrawnIn([bound(withdrawn, 'pkg_b')], openA, c)).toBe(false);
+        });
+
+        it('the same package\'s withdrawal of the same name closes it', () => {
+            const openA = bound(openView, 'pkg_a');
+            const [c] = anonymousFormIntakeCandidates(openA);
+            expect(anonymousFormIntakeWithdrawnIn([bound(withdrawn, 'pkg_a')], openA, c)).toBe(true);
+            // Beside another package's open body of that name: still closed.
+            expect(anonymousFormIntakeWithdrawnIn([bound(openView, 'pkg_b'), bound(withdrawn, 'pkg_a')], openA, c))
+                .toBe(true);
+        });
+
+        it('a body bound to no package stands in for every package\'s row of the name, on either side', () => {
+            const openA = bound(openView, 'pkg_a');
+            const [c] = anonymousFormIntakeCandidates(openA);
+            expect(anonymousFormIntakeWithdrawnIn([withdrawn], openA, c)).toBe(true);
+            expect(anonymousFormIntakeWithdrawnIn([bound(withdrawn, 'pkg_b')], openView, candidate)).toBe(true);
+            expect(anonymousFormIntakeWithdrawnIn([withdrawn], openView, candidate)).toBe(true);
+        });
+    });
+
     it('not a withdrawal: no body of the row, no sharing, the link cleared', () => {
         expect(anonymousFormIntakeWithdrawnIn([openView], openView, candidate)).toBe(false);
         expect(anonymousFormIntakeWithdrawnIn([], openView, candidate)).toBe(false);
