@@ -195,7 +195,7 @@ describe('SpecifierSchema — layout-only specifiers', () => {
   });
 });
 
-describe('SpecifierValueDomainSchema — the closed standard-domain vocabulary (#5933)', () => {
+describe('SpecifierValueDomainSchema — the closed standard-domain vocabulary', () => {
   it('accepts exactly the three domains with measured authoring pull', () => {
     for (const d of ['iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2']) {
       expect(() => SpecifierValueDomainSchema.parse(d)).not.toThrow();
@@ -227,7 +227,7 @@ describe('SpecifierValueDomainSchema — the closed standard-domain vocabulary (
   });
 });
 
-describe('Specifier.valueDomain (#5933)', () => {
+describe('Specifier.valueDomain — a declared standard domain is the boundary, `options` a UI list', () => {
   it('SURVIVES the parse — a dropped key is the defect this closes', () => {
     // #5712's dev measured the current shape by smuggling a `format` key in:
     // Zod stripped it and `parse()` returned `undefined`, so the manifest had
@@ -243,7 +243,7 @@ describe('Specifier.valueDomain (#5933)', () => {
     expect(parsed.valueDomain).toBe('iana_time_zone');
   });
 
-  it('is optional — an undeclared specifier keeps #5131 exhaustive-options semantics', () => {
+  it('is optional — an undeclared specifier keeps exhaustive-options semantics, enforced at save', () => {
     const parsed = SpecifierSchema.parse({
       type: 'select',
       key: 'provider',
@@ -303,7 +303,7 @@ describe('Specifier.valueDomain (#5933)', () => {
   });
 });
 
-describe('`visible` — the settings visibility grammar (#7327)', () => {
+describe('`visible` — the settings visibility grammar, narrowed to what the save-time evaluator runs', () => {
   const withVisible = (visible: unknown) =>
     SpecifierSchema.safeParse({ type: 'text', key: 'smtp_host', label: 'Host', visible });
   const firstMessage = (visible: unknown): string => {
@@ -335,7 +335,7 @@ describe('`visible` — the settings visibility grammar (#7327)', () => {
     expect(withVisible({ dialect: 'cel', source: "${data.provider === 'smtp'}" }).success).toBe(true);
   });
 
-  it('REFUSES an `ast`-only envelope — #15811 moved this slot onto the evaluated rule', () => {
+  it('REFUSES an `ast`-only envelope — an evaluated slot requires a non-blank `source`', () => {
     // It used to pass: the AST is opaque at this layer and the grammar walk had
     // nothing to read, so the slot admitted an envelope `evaluateVisibility`
     // could never run and the refusal arrived at the tenant's next save. Since

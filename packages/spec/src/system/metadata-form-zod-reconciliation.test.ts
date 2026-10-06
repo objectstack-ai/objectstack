@@ -253,21 +253,21 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: 'fieldGroups',
     key: 'defaultExpanded',
-    why: "`[DEPRECATED → collapse]` alias (ADR-0085), deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'expanded', `false` → 'collapsed'), this repeater offers the canonical `collapse` select, and a second control beside it would teach the retired spelling",
+    why: "`[DEPRECATED → collapse]` alias (ADR-0085), deliberately not offered to new authors (ruling record 5861442317): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'expanded', `false` → 'collapsed'), this repeater offers the canonical `collapse` select, and a second control beside it would teach the retired spelling",
   },
   {
     kind: 'omit',
     type: 'object',
     path: 'fieldGroups',
     key: 'collapsible',
-    why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), one half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps the pair onto `collapse` only when `collapse` is absent, this repeater offers the canonical `collapse` select, and the pair can spell the contradictions the enum replaced",
+    why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), one half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317): the parse maps the pair onto `collapse` only when `collapse` is absent, this repeater offers the canonical `collapse` select, and the pair can spell the contradictions the enum replaced",
   },
   {
     kind: 'omit',
     type: 'object',
     path: 'fieldGroups',
     key: 'collapsed',
-    why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), the other half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'collapsed' on its own), and this repeater offers the canonical `collapse` select",
+    why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), the other half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'collapsed' on its own), and this repeater offers the canonical `collapse` select",
   },
   // ── The `inlineColumns` repeater (ruling record 5861442317, #19332) ──
   //
@@ -280,7 +280,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'subset',
     type: 'field',
     path: 'inlineColumns',
-    why: "a curated inline-grid column (ruling record 5861442317, #19332): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
+    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
   },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
@@ -423,35 +423,35 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'actions',
-    why: "authored through its own editor — the `action` type (ruling record 5861442317, #19332): each element is that type's own node, the schema `getMetadataTypeSchema('action')` answers and `action.form.ts` edits, and the key's own describe says the list is `auto-populated from top-level actions via objectName`, so an inline editor here would be a second, poorer copy of the action form",
+    why: "authored through its own editor — the `action` type (ruling record 5861442317): each element is that type's own node, the schema `getMetadataTypeSchema('action')` answers and `action.form.ts` edits, and the key's own describe says the list is `auto-populated from top-level actions via objectName`, so an inline editor here would be a second, poorer copy of the action form",
   },
   {
     kind: 'omit',
     type: 'object',
     path: ROOT_PATH,
     key: 'listViews',
-    why: "authored through its own editor — the `view` type (ruling record 5861442317, #19332; per-arm view forms under the #19330 ruling, letter A): each value is the very node the `view` container declares under the same key (`ObjectListViewSchema`), which is where the example apps and HotCRM write their list views (`defineView({ listViews })`), so an inline editor here would be a second list-view editor beside the view type's",
+    why: "authored through its own editor — the `view` type (ruling record 5861442317; per-arm view forms, ruled: one registered form per view kind): each value is the very node the `view` container declares under the same key (`ObjectListViewSchema`), which is where the example apps and HotCRM write their list views (`defineView({ listViews })`), so an inline editor here would be a second list-view editor beside the view type's",
   },
   {
     kind: 'omit',
     type: 'page',
     path: ROOT_PATH,
     key: 'slots',
-    why: 'authored through its own editor — the page designer (ruling record 5861442317, #19332): the Studio page designer writes `slots.NAME` one slot at a time from its block inspector, and each slot holds a component tree (a `PageComponentSchema` or an array of them) that the designer composes block by block, so an inline editor here would be a second, poorer designer',
+    why: 'authored through its own editor — the page designer (ruling record 5861442317): the Studio page designer writes `slots.NAME` one slot at a time from its block inspector, and each slot holds a component tree (a `PageComponentSchema` or an array of them) that the designer composes block by block, so an inline editor here would be a second, poorer designer',
   },
   {
     kind: 'omit',
     type: 'object',
     path: ROOT_PATH,
     key: 'external',
-    why: 'authored through its own editor — the import flow (ruling record 5861442317, #19332): the external-datasource import, which the Studio import dialog and `os datasource introspect` both reach through `POST /datasources/:name/external/tables/:remote/draft`, drafts the binding from the remote table it read, so the binding comes from the remote table rather than from a name typed into this form',
+    why: 'authored through its own editor — the import flow (ruling record 5861442317): the external-datasource import, which the Studio import dialog and `os datasource introspect` both reach through `POST /datasources/:name/external/tables/:remote/draft`, drafts the binding from the remote table it read, so the binding comes from the remote table rather than from a name typed into this form',
   },
   {
     kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
     key: 'picklist',
-    why: "authored through its own editor — the object designer's shared-picklist picker (ruling record 5861442317, #19332; the picker placed there by ruling record 5755653853, #18164 batch #209 item 1 A): the key is enforced, liveness verdict `live` (the server resolves the named picklist onto the served field's `options` and judges a write against that set), and its offer was decided as that picker in the object designer's select-field editor, so a text row in this form would be a second, weaker entry beside it, where an author types a list name instead of picking one",
+    why: "authored through its own editor — the object designer's shared-picklist picker (ruling record 5861442317; the picker placed there by ruling record 5755653853): the key is enforced, liveness verdict `live` (the server resolves the named picklist onto the served field's `options` and judges a write against that set), and its offer was decided as that picker in the object designer's select-field editor, so a text row in this form would be a second, weaker entry beside it, where an author types a list name instead of picking one",
   },
 
   // Code-declared platform configuration (ruling record 5861442317, #19332):
@@ -467,28 +467,28 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'tenancy',
-    why: 'code-declared platform configuration (ruling record 5861442317, #19332): an isolation switch, where `enabled: false` takes the object out of organization scoping (the `isTenancyDisabled` opt-out the SQL driver honours and the security plugin reads), written only by platform objects declared in code (`sys_api_key`, `sys_sso_provider`), so a form row would put organization isolation one click away',
+    why: 'code-declared platform configuration (ruling record 5861442317): an isolation switch, where `enabled: false` takes the object out of organization scoping (the `isTenancyDisabled` opt-out the SQL driver honours and the security plugin reads), written only by platform objects declared in code (`sys_api_key`, `sys_sso_provider`), so a form row would put organization isolation one click away',
   },
   {
     kind: 'omit',
     type: 'object',
     path: ROOT_PATH,
     key: 'systemFields',
-    why: "code-declared platform configuration (ruling record 5861442317, #19332): an isolation switch, where `{ tenant: false }` withholds `organization_id` and reads as the tenancy opt-out on the object's security posture, and `false` withholds every injected column, the audit family included (`resolveInjectedSystemColumns`), written only by a platform object declared in code (`sys_metadata_activation`, `{ tenant: false }`), so a form row would put both one click away",
+    why: "code-declared platform configuration (ruling record 5861442317): an isolation switch, where `{ tenant: false }` withholds `organization_id` and reads as the tenancy opt-out on the object's security posture, and `false` withholds every injected column, the audit family included (`resolveInjectedSystemColumns`), written only by a platform object declared in code (`sys_metadata_activation`, `{ tenant: false }`), so a form row would put both one click away",
   },
   {
     kind: 'omit',
     type: 'app',
     path: ROOT_PATH,
     key: 'contextSelectors',
-    why: 'code-declared platform configuration (ruling record 5861442317, #19332): scope dropdowns, each fetching its options from a REST endpoint through a key mapping (`optionsSource`), written only by an app declared in code (the Studio app, `studio.app.ts`), so offering one needs a designed control for an endpoint mapping, a form-face addition rather than a reconciliation',
+    why: 'code-declared platform configuration (ruling record 5861442317): scope dropdowns, each fetching its options from a REST endpoint through a key mapping (`optionsSource`), written only by an app declared in code (the Studio app, `studio.app.ts`), so offering one needs a designed control for an endpoint mapping, a form-face addition rather than a reconciliation',
   },
   {
     kind: 'omit',
     type: 'action',
     path: ROOT_PATH,
     key: 'resultDialog',
-    why: 'code-declared platform configuration (ruling record 5861442317, #19332): the one-shot reveal of what an API action returns (a TOTP URI, backup codes, a freshly minted OAuth client secret), written only by the actions of identity platform objects declared in code (`sys_user`, `sys_two_factor`, `sys_oauth_application`, `sys_sso_provider`), so offering it needs a designed control for its `fields` list, a form-face addition rather than a reconciliation',
+    why: 'code-declared platform configuration (ruling record 5861442317): the one-shot reveal of what an API action returns (a TOTP URI, backup codes, a freshly minted OAuth client secret), written only by the actions of identity platform objects declared in code (`sys_user`, `sys_two_factor`, `sys_oauth_application`, `sys_sso_provider`), so offering it needs a designed control for its `fields` list, a form-face addition rather than a reconciliation',
   },
 
   // No registered widget spells this union (ruling record 5861442317,
@@ -504,21 +504,21 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'stageField',
-    why: 'no registered widget spells this union (ruling record 5861442317, #19332): a field name or `false` (the status field is non-linear, so the stage heuristics are suppressed), and `false` cannot be an option value while a union renders only its first arm on create, so a control would offer the name and never reach `false`',
+    why: 'no registered widget spells this union (ruling record 5861442317): a field name or `false` (the status field is non-linear, so the stage heuristics are suppressed), and `false` cannot be an option value while a union renders only its first arm on create, so a control would offer the name and never reach `false`',
   },
   {
     kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
     key: 'inlineEdit',
-    why: "no registered widget spells this union (ruling record 5861442317, #19332): `true` / `false` or `'grid'` / `'form'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never reaches `'grid'` or `'form'`",
+    why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'grid'` / `'form'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never reaches `'grid'` or `'form'`",
   },
   {
     kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
     key: 'relatedList',
-    why: "no registered widget spells this union (ruling record 5861442317, #19332): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never promotes the list to its own tab (`'primary'`)",
+    why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never promotes the list to its own tab (`'primary'`)",
   },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no
@@ -877,13 +877,13 @@ function reconcileRoot(type: string, form: any, root: unknown, ledger: Ledger): 
  * type, and a union-rooted one cannot slip into the direction unexcused.
  */
 const TOP_LEVEL_DEFERRED: Readonly<Record<string, string>> = {
-  view: "union-rooted: its four arms declare mutually exclusive keys, so the one registered view form cannot offer them all. It is reconciled per arm, each arm against its own registered form (the #19330 ruling, letter A); until the first arm form exists, the top-level direction covers the object-rooted types only",
+  view: "union-rooted: its four arms declare mutually exclusive keys, so the one registered view form cannot offer them all. It is reconciled per arm, each arm against its own registered form, as ruled; until the first arm form exists, the top-level direction covers the object-rooted types only",
 };
 
 /** The types the top-level zod-only direction judges. */
 const TOP_LEVEL_TYPES = TYPES.filter((type) => !(type in TOP_LEVEL_DEFERRED));
 
-describe('metadata form ↔ Zod reconciliation (#3786)', () => {
+describe('metadata form ↔ Zod reconciliation — a hand-written form held to its schema by a gate', () => {
   it('the registry is non-empty and every form resolves a schema', () => {
     // Without this the per-type assertions below would pass over an empty set —
     // the failure mode a reconciliation test must not have.
@@ -1045,7 +1045,7 @@ describe('metadata form ↔ Zod reconciliation (#3786)', () => {
 // filters nothing and still reports green.
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('retiredKey tombstones are not authoring surface (#5280)', () => {
+describe('retiredKey tombstones are not authoring surface', () => {
   const probe = z.object({
     gone: retiredKey('`Probe.gone` was removed in @objectstack/spec 17.0.0. Delete the key.'),
     live: z.string().optional(),
@@ -1107,7 +1107,7 @@ describe('retiredKey tombstones are not authoring surface (#5280)', () => {
 // control).
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('the nested walk reaches every depth (#14327)', () => {
+describe('the nested walk reaches every depth', () => {
   it('the live registry has hand-written lists below depth one, and the walk reaches them', () => {
     const deep = TYPES.flatMap((type) =>
       nestedLists(METADATA_FORM_REGISTRY[type])
@@ -1497,7 +1497,7 @@ function unspellableArmValuesOf(type: string, key: string): unknown[] | undefine
   return values;
 }
 
-describe('the three ruled root reasons admit only the keys ruled into them (#19332)', () => {
+describe('the three ruled root reasons admit only the keys ruled into them', () => {
   const rootRows = LEDGER.filter((e): e is OmitEntry => e.kind === 'omit' && e.path === ROOT_PATH);
   const rowsOf = (reason: string) => rootRows.filter((e) => e.why.startsWith(reason));
   const label = (e: OmitEntry) => `${e.type}.${e.key}`;

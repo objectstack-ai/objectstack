@@ -710,7 +710,7 @@ describe('QuotaEnforcementResultSchema', () => {
 // reference-page reader could not tell 300 seconds from 300 milliseconds.
 // Renamed with the unit in the key; the old spellings are retiredKey
 // tombstones (the nested objects are not strict).
-describe('tenant idleTimeout / sessionTimeout → *Seconds (#14478, #14519)', () => {
+describe('tenant idleTimeout / sessionTimeout → *Seconds', () => {
   it('REFUSES `connectionPool.idleTimeout` with a rename naming `idleTimeoutSeconds`', () => {
     const result = DatabaseLevelIsolationStrategySchema.safeParse({
       strategy: 'isolated_db',
@@ -747,7 +747,7 @@ describe('tenant idleTimeout / sessionTimeout → *Seconds (#14478, #14519)', ()
     expect(TenantSecurityPolicySchema.parse({ accessControl: {} }).accessControl?.sessionTimeoutSeconds).toBe(3600);
   });
 
-  it('publishes the unit in the describe — the text the reference pages render (#14519)', () => {
+  it('publishes the unit in the describe — the text the reference pages render', () => {
     const pool = DatabaseLevelIsolationStrategySchema.shape.connectionPool.unwrap().shape.idleTimeoutSeconds;
     const access = TenantSecurityPolicySchema.shape.accessControl.unwrap().shape.sessionTimeoutSeconds;
     expect(pool.description).toBe('Idle pool timeout in seconds');
@@ -760,7 +760,7 @@ describe('tenant idleTimeout / sessionTimeout → *Seconds (#14478, #14519)', ()
 // so the reference-page reader could not tell 3600 seconds from 3600
 // milliseconds. Renamed with the unit in the key; the old spelling is a
 // retiredKey tombstone (the nested `performance` object is not strict).
-describe('tenant schemaCacheTTL → schemaCacheTtlSeconds (#15939, #14478)', () => {
+describe('tenant schemaCacheTTL → schemaCacheTtlSeconds', () => {
   it('REFUSES `performance.schemaCacheTTL` with a rename naming `schemaCacheTtlSeconds`', () => {
     const result = SchemaLevelIsolationStrategySchema.safeParse({
       strategy: 'isolated_schema',
