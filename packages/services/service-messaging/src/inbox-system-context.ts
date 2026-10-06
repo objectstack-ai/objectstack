@@ -8,7 +8,8 @@
  * `countUnreadTotal`'s total), `readReceiptStates`
  * (`sys_notification_receipt`), and mark-read / mark-all-read:
  * `unreadNotificationIds`, `upsertReadReceipt` (its read, its update and its
- * insert) and `notificationOrganization`.
+ * insert), `inboxMessageNames` (the delivery check's `sys_inbox_message` read)
+ * and `notificationOrganization`.
  *
  * Before this, each of those calls reached the data engine with no context at
  * all — no principal and no opt-in — and passed the security middleware only
