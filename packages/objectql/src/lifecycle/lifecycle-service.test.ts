@@ -1634,6 +1634,55 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
     expect(stores.archivedFrom('sys_audit_log')).toEqual(['audit-200d']);
   });
+
+  /* ---------------- [#21918] a federated object has no tenant partition ---------------- */
+
+  it('[#21918] archives a federated object in ONE global pass, never filtering on its injected organization_id', async () => {
+    // `ttl` on a column the author declared, beside `archive`: a federated
+    // object's `created_at` is the registry's injection too, so the due field
+    // is the author's here. Its `organization_id` is the injection, and the
+    // remote does not have it: the hot read refuses any filter naming it.
+    const FEDERATED_ARCHIVE_OBJ = {
+      name: 'ext_event_log',
+      datasource: 'remote_ds',
+      external: { remoteName: 'event_log' },
+      fields: { expires_at: { name: 'expires_at', label: 'Expires At', type: 'datetime' } },
+      lifecycle: {
+        class: 'audit',
+        ttl: { field: 'expires_at', expireAfter: '90d' },
+        archive: { after: '90d', to: 'archive', keep: '7y' },
+      },
+    } as unknown as LifecycleObjectLike;
+    const stores = governedStores({
+      ext_event_log: [
+        { id: 'ev-200d', expires_at: at(-200 * DAY) },
+        { id: 'ev-2d', expires_at: at(-2 * DAY) },
+      ],
+    });
+    const hotFind = stores.hot.find;
+    stores.hot.find = async (object: string, query: any) => {
+      if (JSON.stringify(query?.where ?? {}).includes('organization_id')) {
+        throw Object.assign(new Error(`unknown column organization_id on ${object}`), { code: 'INVALID_FILTER', status: 400 });
+      }
+      return hotFind(object, query);
+    };
+    const { engine } = captureEngine([FEDERATED_ARCHIVE_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+      findImpl: (object) => (object === 'sys_organization' ? [{ id: 'org_reg' }] : []),
+    });
+    const settings = fakeSettings(
+      {},
+      { org_reg: { retention_overrides: { ext_event_log: { expireAfter: '2y' } } } },
+    );
+
+    const report = await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(report.errors).toEqual([]);
+    expect(stores.readsFor('ext_event_log')).toEqual([{ expires_at: { $lt: isoCutoff('90d') } }]);
+    expect(stores.archivedFrom('ext_event_log')).toEqual(['ev-200d']);
+    expect(stores.remaining('ext_event_log')).toEqual(['ev-2d']);
+  });
 });
 
 describe('LifecycleService.sweep — space reclaim', () => {
@@ -1866,6 +1915,88 @@ describe('LifecycleService.sweep — governance (P4)', () => {
     const report = await service(engine, { getSettings: () => settings }).sweep();
 
     expect(report.alerts).toEqual([{ type: 'quota-exceeded', object: 'sys_job_run', rowCount: 50, quota: 10 }]);
+  });
+
+  // [#21918] A tenant partition is a predicate on the row's `organization_id`.
+  // On a federated (ADR-0015 `external`) object that column is the registry's
+  // injection, which the remote does not provision, so a partitioned pass is
+  // refused by the driver as an unknown column. The spec accepts a `lifecycle`
+  // block beside `external`, so an operator's tenant-scoped override reaches it.
+  describe('[#21918] a federated object\'s injected organization_id is not a tenant partition', () => {
+    const FEDERATED_TTL_OBJ = {
+      name: 'ext_event',
+      datasource: 'remote_ds',
+      external: { remoteName: 'events' },
+      fields: { expires_at: { name: 'expires_at', label: 'Expires At', type: 'datetime' } },
+      lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '1d' } },
+    } as unknown as LifecycleObjectLike;
+    /** The same declaration with no `external` binding: the platform provisions its storage. */
+    const LOCAL_TTL_OBJ = {
+      name: 'ext_event',
+      fields: { expires_at: { name: 'expires_at', label: 'Expires At', type: 'datetime' } },
+      lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '1d' } },
+    } as unknown as LifecycleObjectLike;
+    const FEDERATED_DECLARED_TENANT_OBJ = {
+      ...FEDERATED_TTL_OBJ,
+      fields: {
+        ...(FEDERATED_TTL_OBJ as any).fields,
+        organization_id: { name: 'organization_id', label: 'Remote Org', type: 'lookup', reference: 'sys_organization' },
+      },
+    } as unknown as LifecycleObjectLike;
+
+    /** The refusal the SQL driver answers for a filter on a column the remote does not have. */
+    const unknownColumn = Object.assign(
+      new Error("A filter on object 'ext_event' names a column the database could not resolve (organization_id)."),
+      { code: 'INVALID_FILTER', status: 400 },
+    );
+
+    function sweepWithTenantOverride(obj: LifecycleObjectLike, remoteLacksTenantColumn: boolean) {
+      const { engine, deletes, finds } = captureEngine([obj], {
+        findImpl: (object, options) => {
+          if (object === 'sys_organization') return [{ id: 'org_reg' }];
+          if (remoteLacksTenantColumn && JSON.stringify(options?.where ?? {}).includes('organization_id')) {
+            throw unknownColumn;
+          }
+          return [{ id: 'ev_row' }];
+        },
+      });
+      const settings = fakeSettings(
+        {},
+        { org_reg: { retention_overrides: { ext_event: { expireAfter: '2y' } } } },
+      );
+      return service(engine, { getSettings: () => settings })
+        .sweep()
+        .then((report) => ({ report, deletes, reads: finds.filter((f) => f.object === 'ext_event') }));
+    }
+
+    it('reaps a federated object in ONE global pass, never filtering on its injected organization_id', async () => {
+      const { report, deletes, reads } = await sweepWithTenantOverride(FEDERATED_TTL_OBJ, true);
+
+      expect(report.errors).toEqual([]);
+      expect(reads.map((r) => r.where)).toEqual([{ expires_at: { $lt: isoCutoff('1d') } }]);
+      expect(deletes.map((d) => d.where)).toEqual([{ id: 'ev_row' }]);
+    });
+
+    it('CONTROL: the same declaration on a LOCAL object keeps its per-tenant partition', async () => {
+      const { report, reads } = await sweepWithTenantOverride(LOCAL_TTL_OBJ, false);
+
+      expect(report.errors).toEqual([]);
+      expect(reads.map((r) => r.where)).toEqual([
+        { expires_at: { $lt: isoCutoff('2y') }, organization_id: 'org_reg' },
+        {
+          expires_at: { $lt: isoCutoff('1d') },
+          $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+        },
+      ]);
+    });
+
+    it('CONTROL: an organization_id the AUTHOR declared on a federated object keeps its partition', async () => {
+      const { report, reads } = await sweepWithTenantOverride(FEDERATED_DECLARED_TENANT_OBJ, false);
+
+      expect(report.errors).toEqual([]);
+      expect(reads[0]?.where).toEqual({ expires_at: { $lt: isoCutoff('2y') }, organization_id: 'org_reg' });
+      expect(reads).toHaveLength(2);
+    });
   });
 });
 

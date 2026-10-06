@@ -29,9 +29,17 @@
  *     as one transaction, while an author-declared federated lookup still
  *     makes the plan cross-datasource.
  *
+ * [#21918] The same four, for every OTHER anchor the registry injects into a
+ * federated object and the object does not provision, read from the
+ * registry's provenance rather than from a column name: `owning_business_unit_id`
+ * on a business-unit delete, and `owner_id` / `created_by` / `updated_by` on a
+ * user delete. Their blocks are at the foot of this file, and the predicate's
+ * own pin is `federated-object.test.ts`.
+ *
  * The seed rows are written straight into the stub's store, so no write path
- * other than the delete under test runs. The door pin is
- * `packages/qa/dogfood/test/organization-delete-federated-fixture.dogfood.test.ts`.
+ * other than the delete under test runs. The door pins are
+ * `packages/qa/dogfood/test/organization-delete-federated-fixture.dogfood.test.ts`
+ * and `packages/qa/dogfood/test/business-unit-and-user-delete-federated-fixture.dogfood.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -44,12 +52,26 @@ const PACKAGE_ID = 'test-21910';
 
 type Row = Record<string, unknown>;
 
+/** Every field name a `where` filters on, at any depth, as `object.field`. */
+function filteredColumns(object: string, where: unknown, out: string[] = []): string[] {
+  if (Array.isArray(where)) {
+    for (const w of where) filteredColumns(object, w, out);
+  } else if (where && typeof where === 'object') {
+    for (const [k, v] of Object.entries(where)) {
+      if (k.startsWith('$')) filteredColumns(object, v, out);
+      else out.push(`${object}.${k}`);
+    }
+  }
+  return out;
+}
+
 /**
- * A stub driver that records every read into a shared log and can be told to
- * refuse reads of one object with an exact error object. Its `find` applies
- * the caller's `limit` after the filter, by presence.
+ * A stub driver that records every read into a shared log, with the columns
+ * each read filters on, and can be told to refuse reads of one object with an
+ * exact error object. Its `find` applies the caller's `limit` after the
+ * filter, by presence.
  */
-function makeDriver(name: string, log: { reads: string[]; begun: number }) {
+function makeDriver(name: string, log: { reads: string[]; probes: string[]; begun: number }) {
   const tables: Record<string, Row[]> = {};
   const failReads = new Map<string, unknown>();
   const rowsOf = (o: string): Row[] => (tables[o] ??= []);
@@ -69,6 +91,7 @@ function makeDriver(name: string, log: { reads: string[]; begun: number }) {
     registerExternalObject() {},
     async find(o: string, ast: any) {
       log.reads.push(o);
+      log.probes.push(...filteredColumns(o, ast?.where));
       const failure = failReads.get(o);
       if (failure !== undefined) throw failure;
       const hit = (tables[o] ?? []).filter((r) => matches(r, ast?.where));
@@ -176,7 +199,7 @@ function unknownColumnRefusal(object: string, column: string) {
 }
 
 async function makeEngine(objects: any[]) {
-  const log = { reads: [] as string[], begun: 0 };
+  const log = { reads: [] as string[], probes: [] as string[], begun: 0 };
   const warnings: string[] = [];
   const logger = {
     debug() {}, info() {}, error() {},
@@ -266,5 +289,166 @@ describe('[#21910] the cascade atomicity plan agrees with the scan about who tak
     expect(log.reads).toContain('ext_order');
     expect(log.begun).toBe(0);
     expect(warnings.filter((w) => w.includes(NOT_ATOMIC))).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#21918] Every other injected anchor of a federated object, read from the
+// registry's provenance: `owning_business_unit_id` (ADR-0117 D1) on a business
+// unit delete, and the owner and audit lookups `owner_id` / `created_by` /
+// `updated_by` on a user delete. #21910's predicate named `organization_id`
+// alone, so on the showcase with its federated fixture a business-unit delete
+// answered 400 (`INVALID_FILTER` on `showcase_ext_customer.owning_business_unit_id`)
+// and a user delete answered 500 (on `created_by`). The door pins are
+// `packages/qa/dogfood/test/business-unit-and-user-delete-federated-fixture.dogfood.test.ts`.
+// ---------------------------------------------------------------------------
+
+/** The business-unit object a federated object's injected `owning_business_unit_id` names. */
+const BUSINESS_UNIT = {
+  name: 'sys_business_unit',
+  label: 'Business Unit',
+  fields: { name: { name: 'name', label: 'Name', type: 'text' as const } },
+};
+
+/** The user object a federated object's injected `owner_id` / `created_by` / `updated_by` name. */
+const USER = {
+  name: 'sys_user',
+  label: 'User',
+  fields: { name: { name: 'name', label: 'Name', type: 'text' as const } },
+};
+
+/**
+ * Federated, with two lookups the AUTHOR declared on the anchors' targets: an
+ * `owner_id` of its own (it maps a real remote column) and `unit_ref`.
+ */
+const FEDERATED_AUTHOR_ANCHORS = {
+  name: 'ext_assignment',
+  label: 'External Assignment',
+  datasource: REMOTE,
+  external: { remoteName: 'assignments' },
+  fields: {
+    title: { name: 'title', label: 'Title', type: 'text' as const },
+    owner_id: { name: 'owner_id', label: 'Remote Owner', type: 'lookup' as const, reference: 'sys_user' },
+    unit_ref: { name: 'unit_ref', label: 'Unit', type: 'lookup' as const, reference: 'sys_business_unit' },
+  },
+};
+
+const UNIT_ID = 'bu_21918';
+const USER_ID = 'usr_21918';
+
+async function makeAnchorEngine(objects: any[]) {
+  const made = await makeEngine([ORGANIZATION, BUSINESS_UNIT, USER, ...objects]);
+  made.local.seed('sys_business_unit', { id: UNIT_ID, name: 'Doomed Unit' });
+  made.local.seed('sys_user', { id: USER_ID, name: 'Doomed User' });
+  return made;
+}
+
+/** The columns a delete's scan probed on one object, deduplicated and sorted. */
+const probedOn = (log: { probes: string[] }, object: string): string[] =>
+  [...new Set(log.probes.filter((p) => p.startsWith(`${object}.`)))].sort();
+
+describe('[#21918] the cascade scan skips every injected anchor a federated object does not provision', () => {
+  it('a business-unit delete never probes a federated object on its injected owning_business_unit_id, and lands', async () => {
+    const { engine, local, remote, log } = await makeAnchorEngine([LOCAL, FEDERATED]);
+    // PREMISE: the registered anchor is the registry's own, and unprovisioned.
+    expect(resolveInjectedColumnProvenance(engine.getSchema('ext_customer'), 'owning_business_unit_id'))
+      .toBe('injected-unprovisioned');
+    remote.failReads.set('ext_customer', unknownColumnRefusal('ext_customer', 'owning_business_unit_id'));
+
+    log.reads.length = 0;
+    log.probes.length = 0;
+    await engine.delete('sys_business_unit', { where: { id: UNIT_ID } } as any);
+
+    expect(local.has('sys_business_unit', UNIT_ID)).toBe(false);
+    expect(log.reads).not.toContain('ext_customer');
+    // CONTROL: the scan ran, and probed the LOCAL object's injected anchor of the same name.
+    expect(probedOn(log, 'acct')).toContain('acct.owning_business_unit_id');
+  });
+
+  it('a user delete never probes a federated object on its injected owner_id, created_by or updated_by, and lands', async () => {
+    const { engine, local, remote, log } = await makeAnchorEngine([LOCAL, FEDERATED]);
+    const schema = engine.getSchema('ext_customer');
+    for (const column of ['owner_id', 'created_by', 'updated_by']) {
+      expect(resolveInjectedColumnProvenance(schema, column), column).toBe('injected-unprovisioned');
+    }
+    remote.failReads.set('ext_customer', unknownColumnRefusal('ext_customer', 'created_by'));
+
+    log.reads.length = 0;
+    log.probes.length = 0;
+    await engine.delete('sys_user', { where: { id: USER_ID } } as any);
+
+    expect(local.has('sys_user', USER_ID)).toBe(false);
+    expect(log.reads).not.toContain('ext_customer');
+    // CONTROL: the LOCAL object's injected owner and audit lookups ARE probed.
+    expect(probedOn(log, 'acct')).toEqual(
+      expect.arrayContaining(['acct.created_by', 'acct.owner_id', 'acct.updated_by']),
+    );
+  });
+
+  it('still probes lookups the AUTHOR declared on a federated object, and a business-unit probe failure propagates (#8895)', async () => {
+    const { engine, local, remote, log } = await makeAnchorEngine([FEDERATED_AUTHOR_ANCHORS]);
+    const injected = unknownColumnRefusal('ext_assignment', 'unit_ref');
+    remote.failReads.set('ext_assignment', injected);
+
+    log.probes.length = 0;
+    const err: any = await engine.delete('sys_business_unit', { where: { id: UNIT_ID } } as any).catch((e) => e);
+
+    expect(err).toBe(injected);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    // The probe that ran is the author's column, never the injected anchor beside it.
+    expect(probedOn(log, 'ext_assignment')).toEqual(['ext_assignment.unit_ref']);
+    expect(local.has('sys_business_unit', UNIT_ID)).toBe(true);
+  });
+
+  it('still probes an owner_id the AUTHOR declared on a federated object, and a user probe failure propagates (#8895)', async () => {
+    const { engine, local, remote, log } = await makeAnchorEngine([FEDERATED_AUTHOR_ANCHORS]);
+    expect(resolveInjectedColumnProvenance(engine.getSchema('ext_assignment'), 'owner_id')).toBe('author');
+    const injected = unknownColumnRefusal('ext_assignment', 'owner_id');
+    remote.failReads.set('ext_assignment', injected);
+
+    log.probes.length = 0;
+    const err: any = await engine.delete('sys_user', { where: { id: USER_ID } } as any).catch((e) => e);
+
+    expect(err).toBe(injected);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(probedOn(log, 'ext_assignment')).toEqual(['ext_assignment.owner_id']);
+    expect(local.has('sys_user', USER_ID)).toBe(true);
+  });
+});
+
+describe('[#21918] the cascade atomicity plan agrees with the scan for every injected anchor', () => {
+  it('runs a business-unit delete as one transaction when injected anchors were its only cross-datasource references', async () => {
+    const { engine, local, log, warnings } = await makeAnchorEngine([LOCAL, FEDERATED]);
+
+    await engine.delete('sys_business_unit', { where: { id: UNIT_ID } } as any);
+
+    expect(local.has('sys_business_unit', UNIT_ID)).toBe(false);
+    expect(log.begun).toBe(1);
+    expect(warnings.filter((w) => w.includes(NOT_ATOMIC))).toEqual([]);
+  });
+
+  it('runs a user delete as one transaction when injected anchors were its only cross-datasource references', async () => {
+    const { engine, local, log, warnings } = await makeAnchorEngine([LOCAL, FEDERATED]);
+
+    await engine.delete('sys_user', { where: { id: USER_ID } } as any);
+
+    expect(local.has('sys_user', USER_ID)).toBe(false);
+    expect(log.begun).toBe(1);
+    expect(warnings.filter((w) => w.includes(NOT_ATOMIC))).toEqual([]);
+  });
+
+  it('CONTROL: lookups the author declared on a federated object still make both plans cross-datasource', async () => {
+    for (const [object, id] of [['sys_business_unit', UNIT_ID], ['sys_user', USER_ID]] as const) {
+      const { engine, local, log, warnings } = await makeAnchorEngine([LOCAL, FEDERATED_AUTHOR_ANCHORS]);
+
+      await engine.delete(object, { where: { id } } as any);
+
+      expect(local.has(object, id), object).toBe(false);
+      expect(log.reads, object).toContain('ext_assignment');
+      expect(log.begun, object).toBe(0);
+      expect(warnings.filter((w) => w.includes(NOT_ATOMIC)), object).toHaveLength(1);
+    }
   });
 });
