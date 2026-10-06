@@ -49,6 +49,13 @@
 //   treatment as every other package (#16473); undeclared multi-run input is
 //   REFUSED rather than resolved by guessing.
 //
+//   ⚠ AND SEVERAL MEANS THREE PER PACKAGE, NOT THREE RUNS (#22014). A run
+//   executes a different slice of the workspace each time, so the count that
+//   matters is how many runs EXECUTED a given package. One with fewer than
+//   MINIMUM_EXECUTED_RUNS is kept and named in the dataset's `provisional` list;
+//   `--spread-out` writes every package's run count and min/median/max for the
+//   refresh PR to carry.
+//
 //   `--merge-into` is what makes a partial measurement sound. A package this
 //   pass did not measure keeps its previous weight -- but ONLY when a cache HIT
 //   witnesses that its inputs are unchanged, which is the evidence that the old
@@ -78,7 +85,8 @@
 // Usage:
 //   node scripts/measure-test-shard-timings.mjs <summary.json>... [--out <path>]
 //   node scripts/measure-test-shard-timings.mjs --run <id> <summary.json>... \
-//     --run <id> <summary.json>... [--merge-into <dataset>] [--out <path>]
+//     --run <id> <summary.json>... [--merge-into <dataset>] [--out <path>] \
+//     [--spread-out <path>]
 //   node scripts/measure-test-shard-timings.mjs --self-test
 
 import { createHash } from 'node:crypto';
@@ -116,6 +124,36 @@ export function median(values) {
   const mid = sorted.length >> 1;
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
+
+// The fewest EXECUTED runs a package's weight may rest on before it stops
+// being PROVISIONAL (#22014).
+//
+// "Median, not mean and not max" above is a promise about several samples, and
+// for a while the file kept it on paper only: the refresh lane stopped at the
+// first run that covered the workspace, so every weight in the dataset was ONE
+// observation wearing the median's name. A single run is a sample, not a
+// baseline -- measured, `@objectstack/cli` read 1033.74s and 1723.05s an hour
+// apart, and `@objectstack/spec` was recorded at 1134.86s while three executed
+// windows after it read 1573-1651s. A ceiling set at that weight plus 25% sits
+// below every one of them.
+//
+// Three, and per PACKAGE rather than per refresh, because the unit that varies
+// is the package: a scheduled run executes a different slice of the workspace
+// each hour (the rest are turbo cache HITs, which this file refuses), so "three
+// runs accumulated" can still leave `spec` with one sample if it was replayed in
+// the other two. A package is counted once per run that EXECUTED it -- a MISS
+// with exit 0, and for a file-sharded package a complete slice set from that
+// one run.
+//
+// ⛔ A weight below this is not REFUSED. It is kept and named in the dataset's
+// `provisional` list, beside `carriedOver`: the partitioner still balances on
+// it (a fresh single sample is still a measurement of code as it stands), and
+// anything that needs a BASELINE rather than a balancing input -- a per-package
+// ceiling above all -- reads `provisional` and refuses those entries. Refusing
+// the whole refresh instead would throw away every other package's measurement
+// over one under-sampled package, which is the silent-rot failure the refresh
+// lane exists to end.
+export const MINIMUM_EXECUTED_RUNS = 3;
 
 // Which file-level slice a summary's tasks were run as, or null for a whole
 // package (#16173).
@@ -370,7 +408,12 @@ export function fallbackRate(measured, fileCounts) {
   return Math.round(median(rates) * 1000) / 1000;
 }
 
-export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = null }) {
+// Every EXECUTED per-run reading of every package, before any median is taken:
+// name -> [seconds, ...], one entry per run that executed the package (#22014).
+// buildDataset() medians these into the weights; the refresh PR's spread table
+// (renderSpread below) prints them, so the two can never be computed from
+// different readings.
+export function collectSamples(perSummary) {
   const bySample = new Map();
   const cachedNames = new Set();
   const push = (name, seconds) => {
@@ -481,6 +524,54 @@ export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = n
     }
   }
   incompleteSlices.sort((a, b) => a.localeCompare(b, 'en'));
+  return { bySample, cachedNames, incompleteSlices };
+}
+
+// The packages whose weight rests on fewer than `minimumRuns` executed runs
+// (#22014). Two ways in, and both are named rather than inferred:
+//
+//   MEASURED in this pass with fewer readings than the minimum -- the ordinary
+//   case, a package the accumulated runs mostly replayed.
+//
+//   CARRIED from the prior dataset, when that dataset did not establish that
+//   the carried weight met the minimum. A carry moves a weight forward
+//   unchanged, so it moves its depth forward unchanged too: provisional there
+//   stays provisional here. A prior dataset with no `provisional` list at all
+//   predates this rule and never recorded a depth -- the one on `main` when it
+//   landed rested on a single run -- so its carried weights are provisional
+//   too. ⛔ An unrecorded depth is not evidence of meeting the bar.
+export function provisionalPackages({ bySample, carriedOver, carryProvisional, minimumRuns }) {
+  const names = [];
+  for (const [name, values] of bySample) {
+    if (values.length < minimumRuns) names.push(name);
+  }
+  if (carriedOver.length > 0) {
+    if (carryProvisional !== null && !Array.isArray(carryProvisional)) {
+      throw new Error(
+        `the prior dataset's \`provisional\` is ${JSON.stringify(carryProvisional)}, not a list of package names. ` +
+          'Refusing to guess which carried weights met the minimum.'
+      );
+    }
+    const priorShort = carryProvisional === null ? null : new Set(carryProvisional);
+    for (const name of carriedOver) {
+      if (priorShort === null || priorShort.has(name)) names.push(name);
+    }
+  }
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'en'));
+}
+
+// `carryProvisional` is the prior dataset's own `provisional` list, or null when
+// that dataset has none (see provisionalPackages above). It matters only for
+// carried packages, so a call with no `carryFrom` never reads it.
+export function buildDataset({
+  perSummary,
+  fileCounts,
+  provenance,
+  carryFrom = null,
+  carryProvisional = null,
+  minimumRuns = MINIMUM_EXECUTED_RUNS,
+}) {
+  const { bySample, cachedNames, incompleteSlices } = collectSamples(perSummary);
 
   if (bySample.size === 0) {
     throw new Error(
@@ -534,14 +625,21 @@ export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = n
   for (const name of [...measured.keys()].sort((a, b) => a.localeCompare(b, 'en'))) {
     packages[name] = measured.get(name);
   }
+  if (!Number.isInteger(minimumRuns) || minimumRuns < 1) {
+    throw new Error(`minimumRuns must be a positive integer, got ${JSON.stringify(minimumRuns)}`);
+  }
   return {
     note:
       'GENERATED by scripts/measure-test-shard-timings.mjs -- do not hand-edit. Per-package ' +
       '`turbo run test` durations in seconds, the balancing input for the Test Core shard ' +
       'split (scripts/partition-test-shards.mjs). See `provenance.refresh` to regenerate. ' +
       'Every weight is a real measurement: the ones in `carriedOver` were measured by an earlier ' +
-      'refresh and re-confirmed unchanged by a turbo cache HIT in this one.',
-    provenance,
+      'refresh and re-confirmed unchanged by a turbo cache HIT in this one. A weight is the median ' +
+      'of the executed runs that measured it; the ones in `provisional` rest on fewer than ' +
+      '`provenance.minimumRuns` of them -- fit to balance on, NOT a baseline to set a ceiling from.',
+    // The bar `provisional` was judged against travels with the list, so a
+    // reader never has to know which version of this script wrote the file.
+    provenance: { ...provenance, minimumRuns },
     secondsPerTestFileFallback: fallbackRate(measured, fileCounts),
     packages,
     skippedAsCached: [...cachedNames].sort((a, b) => a.localeCompare(b, 'en')),
@@ -554,7 +652,68 @@ export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = n
     // `provenance.measuredAt` paired with this list carries the same
     // information and needs no change in the partitioner.
     carriedOver,
+    // #22014. The same shape and the same reason as `carriedOver`: a list
+    // beside the weights, never a change to them, because the partitioner and
+    // the drift gate read `packages` as name -> number. Always present -- an
+    // empty list and an absent key must not read the same way, since an absent
+    // key is exactly how a dataset that predates this rule is recognised.
+    provisional: provisionalPackages({ bySample, carriedOver, carryProvisional, minimumRuns }),
   };
+}
+
+// The run-to-run spread of every package, as the Markdown table the refresh
+// PR's body carries (#22014). One row per package in the dataset:
+//
+//   package | runs | min | median | max | max/min
+//
+// where `runs` counts the executed runs behind the weight and the three
+// seconds columns are those runs' readings. A carried package has no reading in
+// this pass, so it says `carried` instead of inventing numbers; a provisional
+// one is marked in its own column. Rows sort by max/min, widest first, so the
+// noisiest suites are the ones a reviewer meets first.
+//
+// ⛔ Kept OUT of the dataset file. Nothing machine-reads a spread -- the
+// partitioner and the drift gate read the weights, and the one machine fact a
+// baseline needs (did this weight meet the minimum?) is `provisional` -- so the
+// numbers go where their only reader is: the PR a person reviews.
+export function renderSpread({ bySample, dataset }) {
+  const fmt = (n) => n.toFixed(2);
+  const provisional = new Set(dataset.provisional);
+  const rows = [];
+  for (const name of Object.keys(dataset.packages)) {
+    const values = bySample.get(name);
+    const flag = provisional.has(name) ? 'provisional' : '';
+    if (!values) {
+      rows.push({ ratio: -1, name, cells: [`\`${name}\``, '0', 'carried', 'carried', 'carried', '—', flag] });
+      continue;
+    }
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const ratio = lo > 0 ? hi / lo : Number.POSITIVE_INFINITY;
+    rows.push({
+      ratio,
+      name,
+      cells: [
+        `\`${name}\``,
+        String(values.length),
+        fmt(lo),
+        fmt(Math.round(median(values) * 100) / 100),
+        fmt(hi),
+        Number.isFinite(ratio) ? `${ratio.toFixed(2)}×` : '∞',
+        flag,
+      ],
+    });
+  }
+  rows.sort((a, b) => b.ratio - a.ratio || a.name.localeCompare(b.name, 'en'));
+  const minimumRuns = dataset.provenance?.minimumRuns;
+  const lines = [
+    `Each package's executed runs in this refresh (minimum ${minimumRuns}), and the spread of its readings in seconds.`,
+    '',
+    '| package | runs | min s | median s | max s | max/min | |',
+    '|---|--:|--:|--:|--:|--:|---|',
+    ...rows.map((r) => `| ${r.cells.join(' | ')} |`),
+  ];
+  return `${lines.join('\n')}\n`;
 }
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
@@ -1469,6 +1628,10 @@ function main() {
   }
   let out = DEFAULT_OUT;
   let mergeInto = null;
+  // Where the per-package run-to-run spread is written, as Markdown for the
+  // refresh PR's body (#22014). Optional, and never into the dataset itself --
+  // see renderSpread() for why.
+  let spreadOut = null;
   // Each input carries the run it belongs to (#16473). `--run <id>` opens a
   // group and every summary AFTER it belongs to that run, so one CI run's six
   // artifacts are named together the way they are fetched together. Summaries
@@ -1485,6 +1648,12 @@ function main() {
         throw new Error('--merge-into needs the path of the dataset to carry unchanged weights from');
       }
       mergeInto = path.resolve(value);
+    } else if (argv[i] === '--spread-out') {
+      const value = argv[++i];
+      if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
+        throw new Error('--spread-out needs the path to write the per-package run-to-run spread table to');
+      }
+      spreadOut = path.resolve(value);
     } else if (argv[i] === '--run') {
       const value = argv[++i];
       if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
@@ -1497,7 +1666,7 @@ function main() {
   if (inputs.length === 0) {
     console.error(
       'usage: measure-test-shard-timings.mjs [--run <id>] <run-summary.json>... ' +
-        '[--merge-into <dataset>] [--out <path>]'
+        '[--merge-into <dataset>] [--out <path>] [--spread-out <path>]'
     );
     process.exit(1);
   }
@@ -1512,6 +1681,7 @@ function main() {
   // exactly like a freshly measured one, which is what keeps that rate derived
   // from the numbers actually in the file rather than from a subset of them.
   let carryFrom = null;
+  let carryProvisional = null;
   if (mergeInto !== null) {
     const prior = JSON.parse(readFileSync(mergeInto, 'utf8'));
     if (!prior || typeof prior.packages !== 'object' || prior.packages === null) {
@@ -1521,6 +1691,10 @@ function main() {
       );
     }
     carryFrom = prior.packages;
+    // A carried weight keeps the depth it was measured at (#22014). A prior
+    // dataset with no `provisional` key never recorded one, which buildDataset
+    // reads as "not shown to meet the minimum" -- null, deliberately not [].
+    carryProvisional = Object.hasOwn(prior, 'provisional') ? prior.provisional : null;
   }
 
   const fileCounts = new Map();
@@ -1537,6 +1711,7 @@ function main() {
     perSummary,
     fileCounts,
     carryFrom,
+    carryProvisional,
     provenance: {
       measuredAt: new Date().toISOString().slice(0, 10),
       summaries: inputs.map((i) => path.basename(i.file)),
@@ -1562,11 +1737,15 @@ function main() {
         '`pnpm exec turbo run test --concurrency=4 --summarize`. ⚠ ONE RUN COVERS ONLY 2-52 of ~71 ' +
         'packages depending on cache warmth, so feed SEVERAL runs -- a `--run <id>` before each ' +
         'run\'s summaries is REQUIRED, so a sliced package is assembled per run and then medianed ' +
-        'like every other package -- and `--merge-into` to carry the cache-hit remainder. ' +
-        '`.github/workflows/shard-timings-refresh.yml` does all of this weekly.)',
+        'like every other package -- and `--merge-into` to carry the cache-hit remainder. A package ' +
+        'measured by fewer than `minimumRuns` executed runs is named in `provisional`, so feed runs until ' +
+        'that list is empty. `.github/workflows/shard-timings-refresh.yml` does all of this weekly.)',
     },
   });
   writeFileSync(out, `${JSON.stringify(dataset, null, 2)}\n`);
+  if (spreadOut !== null) {
+    writeFileSync(spreadOut, renderSpread({ bySample: collectSamples(perSummary).bySample, dataset }));
+  }
   const n = Object.keys(dataset.packages).length;
   const total = Object.values(dataset.packages).reduce((a, b) => a + b, 0);
   console.error(
@@ -1578,6 +1757,17 @@ function main() {
   // lost a slice is now ESTIMATED rather than measured, and it is the heaviest
   // package in the workspace that this can happen to. Silence here would let a
   // refresh built on five of six artifacts read like a complete one.
+  // Named, never inferred (#22014): a provisional weight balances fine and must
+  // not be read as a baseline, and the reader who needs to know is the one
+  // holding this output, not the one who opens the file next month.
+  if (dataset.provisional.length > 0) {
+    console.error(
+      `measure-test-shard-timings: ${dataset.provisional.length} package weight(s) are PROVISIONAL -- ` +
+        `measured by fewer than ${dataset.provenance.minimumRuns} executed runs (or carried from a ` +
+        `dataset that never showed they were): ${dataset.provisional.join(', ')}. Feed more runs, or ` +
+        'read them as balancing inputs only.'
+    );
+  }
   if (dataset.skippedIncompleteSlices.length > 0) {
     console.error(
       `measure-test-shard-timings: ⚠ ${dataset.skippedIncompleteSlices.length} package(s) reported an ` +
